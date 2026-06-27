@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+
+# Packaged distributions
+dist/
+
+# IDE and editor files
+.idea/
+*.iml
+.vscode/
+
+# Local agent/workspace metadata
+.agents/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

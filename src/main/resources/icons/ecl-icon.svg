@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="24" fill="#151915"/>
+  <rect x="16" y="16" width="224" height="224" rx="10" fill="#232820"/>
+  <path d="M16 16h224v32H48v160H16z" fill="#3f4a37"/>
+  <path d="M48 208h192v32H16v-32z" fill="#0e120d"/>
+  <path d="M48 48h160v32H80v48h112v32H80v48h128v32H48z" fill="#5fa64a"/>
+  <path d="M80 80h128v16H96v32H80z" fill="#8fca6a"/>
+  <path d="M80 160h112v16H96v32H80z" fill="#8fca6a"/>
+  <path d="M208 80h-32v32h-32v16h48V96h16z" fill="#2f5f2b"/>
+  <path d="M192 160h-48v16h32v32h32v-48z" fill="#2f5f2b"/>
+  <path d="M48 48h32v160H48z" fill="#78ad5a"/>
+  <path d="M80 48h128v32H80z" fill="#6fb455"/>
+  <path d="M80 128h112v32H80z" fill="#6fb455"/>
+  <path d="M80 208h128v32H80z" fill="#6fb455"/>
+  <path d="M32 32h16v16H32zM208 32h16v16h-16zM32 208h16v16H32zM208 208h16v16h-16z" fill="#eef6df" opacity=".22"/>
+</svg>
