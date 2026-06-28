@@ -7,9 +7,12 @@ import com.ecl.auth.YggdrasilAuth;
 import com.ecl.config.SettingsManager;
 import com.ecl.download.GameDownloader;
 import com.ecl.download.ModrinthDownloader;
+import com.ecl.launcher.CrashAnalyzer;
 import com.ecl.launcher.GameLauncher;
 import com.ecl.launcher.VersionManager;
 import com.ecl.util.JavaRuntimeUtil;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -24,6 +27,7 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Slider;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
@@ -38,14 +42,20 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
 import java.awt.Desktop;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 public class LauncherUI extends javafx.application.Application {
@@ -53,6 +63,7 @@ public class LauncherUI extends javafx.application.Application {
     private static final String AUTH_MICROSOFT = "微软登录 (Microsoft)";
     private static final String AUTH_YGGDRASIL = "外置登录 (Yggdrasil)";
     private static final String MODRINTH_DISCOVER_URL = "https://modrinth.com/discover/";
+    private static final int MAX_CAPTURED_GAME_LOG_CHARS = 80000;
 
     private VersionManager versionManager;
     private GameDownloader downloader;
@@ -91,6 +102,7 @@ public class LauncherUI extends javafx.application.Application {
     private String javaPath;
     private File gameDir;
     private String extraJvmArgs;
+    private final Map<ProgressBar, Timeline> progressAnimations = new HashMap<>();
 
     private static class ContentTarget {
         private final String title;
@@ -500,6 +512,62 @@ public class LauncherUI extends javafx.application.Application {
         detailLabel.setText(detail == null || detail.isBlank() ? "" : detail.trim());
     }
 
+    private void startProgressAnimation(ProgressBar progressBar) {
+        if (progressBar == null) {
+            return;
+        }
+
+        stopProgressAnimation(progressBar, false);
+        progressBar.setVisible(true);
+        progressBar.getProperties().put("pulse-step", 0);
+
+        Timeline timeline = new Timeline(new KeyFrame(Duration.millis(260), e -> advanceProgressPulse(progressBar)));
+        timeline.setCycleCount(Timeline.INDEFINITE);
+        progressAnimations.put(progressBar, timeline);
+        timeline.play();
+        advanceProgressPulse(progressBar);
+    }
+
+    private void updateProgress(ProgressBar progressBar, long downloaded, long total) {
+        if (progressBar == null) {
+            return;
+        }
+
+        progressBar.setVisible(true);
+        if (total > 0) {
+            progressBar.setProgress(clamp((double) downloaded / total, 0, 1));
+        } else {
+            progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+        }
+    }
+
+    private void stopProgressAnimation(ProgressBar progressBar, boolean hide) {
+        if (progressBar == null) {
+            return;
+        }
+
+        Timeline timeline = progressAnimations.remove(progressBar);
+        if (timeline != null) {
+            timeline.stop();
+        }
+        progressBar.getStyleClass().removeAll("progress-pulse-a", "progress-pulse-b", "progress-pulse-c");
+        progressBar.getProperties().remove("pulse-step");
+        if (hide) {
+            progressBar.setVisible(false);
+        }
+    }
+
+    private void advanceProgressPulse(ProgressBar progressBar) {
+        progressBar.getStyleClass().removeAll("progress-pulse-a", "progress-pulse-b", "progress-pulse-c");
+        int step = ((Number) progressBar.getProperties().getOrDefault("pulse-step", 0)).intValue();
+        progressBar.getStyleClass().add(switch (step) {
+            case 0 -> "progress-pulse-a";
+            case 1 -> "progress-pulse-b";
+            default -> "progress-pulse-c";
+        });
+        progressBar.getProperties().put("pulse-step", (step + 1) % 3);
+    }
+
     private void refreshVersions() {
         refreshBtn.setDisable(true);
         versionCombo.setDisable(true);
@@ -580,8 +648,8 @@ public class LauncherUI extends javafx.application.Application {
         }
 
         setControlsBusy(true);
-        downloadProgress.setVisible(true);
         downloadProgress.setProgress(0);
+        startProgressAnimation(downloadProgress);
         setStatus("正在准备下载", version + " 首次启动需要补齐客户端、依赖库和资源文件。 ");
 
         downloader.setListener(new GameDownloader.DownloadListener() {
@@ -593,9 +661,7 @@ public class LauncherUI extends javafx.application.Application {
             @Override
             public void onProgress(long downloaded, long total) {
                 Platform.runLater(() -> {
-                    if (total > 0) {
-                        downloadProgress.setProgress((double) downloaded / total);
-                    }
+                    updateProgress(downloadProgress, downloaded, total);
                     detailLabel.setText("当前进度: " + formatBytes(downloaded) + (total > 0 ? " / " + formatBytes(total) : ""));
                 });
             }
@@ -604,7 +670,7 @@ public class LauncherUI extends javafx.application.Application {
             public void onError(String message) {
                 Platform.runLater(() -> {
                     setStatus("下载失败", message);
-                    downloadProgress.setVisible(false);
+                    stopProgressAnimation(downloadProgress, true);
                     setControlsBusy(false);
                 });
             }
@@ -612,7 +678,8 @@ public class LauncherUI extends javafx.application.Application {
             @Override
             public void onComplete() {
                 Platform.runLater(() -> {
-                    downloadProgress.setVisible(false);
+                    downloadProgress.setProgress(1);
+                    stopProgressAnimation(downloadProgress, true);
                     setStatus("下载完成", version + " 的必需文件已经就绪，准备启动游戏。 ");
                     startGame(version);
                 });
@@ -630,7 +697,7 @@ public class LauncherUI extends javafx.application.Application {
         int memory = (int) Math.round(memorySlider.getValue());
 
         setControlsBusy(true);
-        downloadProgress.setVisible(false);
+        stopProgressAnimation(downloadProgress, true);
         setStatus("正在启动游戏...", "准备认证、拼接类路径并拉起客户端进程。 ");
 
         runAsync("ecl-launch-game", () -> {
@@ -642,19 +709,137 @@ public class LauncherUI extends javafx.application.Application {
                 gameLauncher.setGameDir(gameDir);
                 gameLauncher.setJvmArgs(extraJvmArgs == null ? "" : extraJvmArgs);
                 gameLauncher.setJavaPath(javaPath);
-                gameLauncher.launch();
+                long launchStartedAt = System.currentTimeMillis();
+                Process process = gameLauncher.launch();
+                monitorGameProcess(process, version, launchStartedAt);
 
                 Platform.runLater(() -> {
-                    setStatus("游戏已启动", version + " 已交给系统运行，启动器现在可以继续使用。 ");
+                    setStatus("游戏已启动", version + " 正在运行。若异常退出，启动器会自动分析错误。 ");
                     setControlsBusy(false);
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
-                    setStatus("启动失败", cleanMessage(e));
+                    CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, getActiveGameDir());
+                    setStatus("启动失败", report.getTitle());
+                    showGameErrorDialog(report);
                     setControlsBusy(false);
                 });
             }
         });
+    }
+
+    private void monitorGameProcess(Process process, String version, long launchStartedAt) {
+        runAsync("ecl-monitor-game-" + version, () -> {
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    appendCapturedLog(output, line);
+                }
+
+                int exitCode = process.waitFor();
+                if (exitCode == 0) {
+                    Platform.runLater(() -> setStatus("游戏已正常退出", version + " 退出码 0。"));
+                    return;
+                }
+
+                CrashAnalyzer.Report report = CrashAnalyzer.analyzeGameExit(version, exitCode, output.toString(), getActiveGameDir(), launchStartedAt);
+                Platform.runLater(() -> {
+                    setStatus("游戏异常退出", report.getTitle());
+                    showGameErrorDialog(report);
+                });
+            } catch (Exception e) {
+                CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, getActiveGameDir());
+                Platform.runLater(() -> {
+                    setStatus("错误分析失败", report.getTitle());
+                    showGameErrorDialog(report);
+                });
+            }
+        });
+    }
+
+    private void appendCapturedLog(StringBuilder output, String line) {
+        output.append(line).append(System.lineSeparator());
+        if (output.length() > MAX_CAPTURED_GAME_LOG_CHARS) {
+            output.delete(0, output.length() - MAX_CAPTURED_GAME_LOG_CHARS);
+        }
+    }
+
+    private void showGameErrorDialog(CrashAnalyzer.Report report) {
+        Stage dialog = new Stage();
+        dialog.initOwner(primaryStage);
+        dialog.initModality(Modality.NONE);
+        dialog.setTitle("启动错误诊断");
+        applyWindowIcon(dialog);
+
+        Label title = new Label(report.getTitle());
+        title.getStyleClass().add("status-title");
+        title.setWrapText(true);
+
+        Label explanation = new Label(report.getExplanation());
+        explanation.getStyleClass().add("status-detail");
+        explanation.setWrapText(true);
+
+        Label suggestions = new Label(toBulletText(report.getSuggestions()));
+        suggestions.getStyleClass().add("diagnostic-text");
+        suggestions.setWrapText(true);
+
+        TextArea evidenceArea = new TextArea(toBulletText(report.getEvidence()));
+        evidenceArea.getStyleClass().add("diagnostic-log");
+        evidenceArea.setEditable(false);
+        evidenceArea.setWrapText(true);
+        evidenceArea.setPrefRowCount(10);
+
+        Button openCrashDirBtn = new Button("打开崩溃报告");
+        openCrashDirBtn.getStyleClass().addAll("app-button", "secondary-button");
+        openCrashDirBtn.setDisable(report.getCrashReportFile() == null);
+        openCrashDirBtn.setOnAction(e -> {
+            File crashFile = report.getCrashReportFile();
+            if (crashFile != null && crashFile.getParentFile() != null) {
+                openLocalFolder(crashFile.getParentFile(), "崩溃报告目录");
+            }
+        });
+
+        Button openModsBtn = new Button("打开 mods");
+        openModsBtn.getStyleClass().addAll("app-button", "secondary-button");
+        openModsBtn.setOnAction(e -> openLocalFolder(resolveModsDir(getSelectedVersion()), "模组目录"));
+
+        Button closeBtn = new Button("关闭");
+        closeBtn.getStyleClass().addAll("app-button", "ghost-button");
+        closeBtn.setOnAction(e -> dialog.close());
+
+        HBox actions = new HBox(10, openCrashDirBtn, openModsBtn, closeBtn);
+        actions.setAlignment(Pos.CENTER_RIGHT);
+
+        VBox root = new VBox(14,
+                createSurface("中文解释", null, title, explanation),
+                createSurface("修复建议", null, suggestions),
+                createSurface("关键日志", "下面是启动器从英文报错中提取的关键行", evidenceArea),
+                actions
+        );
+        root.getStyleClass().add("root-pane");
+        root.setPadding(new Insets(18));
+
+        Scene scene = new Scene(createWheelScrollPane(root), 760, 620);
+        URL stylesheet = getClass().getResource("/css/launcher.css");
+        if (stylesheet != null) {
+            scene.getStylesheets().add(stylesheet.toExternalForm());
+        }
+        dialog.setScene(scene);
+        dialog.show();
+    }
+
+    private String toBulletText(List<String> items) {
+        if (items == null || items.isEmpty()) {
+            return "未提取到关键日志。";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String item : items) {
+            if (item != null && !item.isBlank()) {
+                sb.append("- ").append(item.trim()).append(System.lineSeparator());
+            }
+        }
+        return sb.toString().trim();
     }
 
     private AuthProvider buildAuthProvider(String authType, String server, String username, String password) {
@@ -846,10 +1031,10 @@ public class LauncherUI extends javafx.application.Application {
         setControlsBusy(true);
         searchBtn.setDisable(true);
         importBtn.setDisable(true);
-        modProgress.setVisible(true);
         modProgress.setProgress(0);
-        downloadProgress.setVisible(true);
         downloadProgress.setProgress(0);
+        startProgressAnimation(modProgress);
+        startProgressAnimation(downloadProgress);
         String loaderLabel = loader == null ? "" : " / " + loader;
         setStatus("正在下载" + target.title, project.getTitle() + " -> " + gameVersion + loaderLabel);
 
@@ -873,9 +1058,8 @@ public class LauncherUI extends javafx.application.Application {
                             @Override
                             public void onProgress(long downloaded, long total) {
                                 Platform.runLater(() -> {
-                                    double progress = total > 0 ? (double) downloaded / total : ProgressBar.INDETERMINATE_PROGRESS;
-                                    modProgress.setProgress(progress);
-                                    downloadProgress.setProgress(progress);
+                                    updateProgress(modProgress, downloaded, total);
+                                    updateProgress(downloadProgress, downloaded, total);
                                 });
                             }
                         },
@@ -884,7 +1068,9 @@ public class LauncherUI extends javafx.application.Application {
 
                 Platform.runLater(() -> {
                     modProgress.setProgress(1);
-                    downloadProgress.setVisible(false);
+                    downloadProgress.setProgress(1);
+                    stopProgressAnimation(modProgress, false);
+                    stopProgressAnimation(downloadProgress, true);
                     setControlsBusy(false);
                     searchBtn.setDisable(false);
                     importBtn.setDisable(false);
@@ -896,8 +1082,8 @@ public class LauncherUI extends javafx.application.Application {
             } catch (Exception e) {
                 Platform.runLater(() -> {
                     String message = cleanMessage(e);
-                    modProgress.setVisible(false);
-                    downloadProgress.setVisible(false);
+                    stopProgressAnimation(modProgress, true);
+                    stopProgressAnimation(downloadProgress, true);
                     setControlsBusy(false);
                     searchBtn.setDisable(false);
                     importBtn.setDisable(false);

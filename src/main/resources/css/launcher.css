@@ -251,6 +251,25 @@
     -fx-text-fill: #f6ffe8;
 }
 
+.diagnostic-text {
+    -fx-text-fill: #edf7df;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+    -fx-line-spacing: 4;
+}
+
+.diagnostic-log {
+    -fx-control-inner-background: #0b110a;
+    -fx-background-color: #0b110a;
+    -fx-background-radius: 0;
+    -fx-border-radius: 0;
+    -fx-border-color: #060906 #4d6142 #4d6142 #060906;
+    -fx-border-width: 2;
+    -fx-text-fill: #cbd8bd;
+    -fx-font-family: "Consolas", "Microsoft YaHei UI", monospace;
+    -fx-font-size: 11px;
+}
+
 .app-button {
     -fx-background-radius: 0;
     -fx-border-radius: 0;
@@ -299,7 +318,7 @@
 }
 
 .download-progress {
-    -fx-pref-height: 10;
+    -fx-pref-height: 12;
 }
 
 .download-progress > .track {
@@ -312,6 +331,22 @@
 .download-progress > .bar {
     -fx-background-color: #5fa64a;
     -fx-background-radius: 2;
+}
+
+.download-progress.progress-pulse-a > .bar {
+    -fx-background-color: linear-gradient(to right, #4f8f37, #73bb55, #4f8f37);
+}
+
+.download-progress.progress-pulse-b > .bar {
+    -fx-background-color: linear-gradient(to right, #5fa64a, #9bd17b, #5fa64a);
+}
+
+.download-progress.progress-pulse-c > .bar {
+    -fx-background-color: linear-gradient(to right, #79bb5a, #d8ff9c, #79bb5a);
+}
+
+.download-progress:indeterminate > .bar {
+    -fx-background-color: linear-gradient(to right, #2f5f2b, #8fd66a, #2f5f2b);
 }
 
 .memory-slider .track {

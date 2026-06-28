@@ -88,7 +88,7 @@ public class GameLauncher {
         if (appDataDir != null) {
             pb.environment().put("APPDATA", appDataDir.getAbsolutePath());
         }
-        pb.inheritIO();
+        pb.redirectErrorStream(true);
 
         return pb.start();
     }
