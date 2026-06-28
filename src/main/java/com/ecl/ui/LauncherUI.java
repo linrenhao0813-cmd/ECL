@@ -73,6 +73,7 @@ public class LauncherUI extends javafx.application.Application {
     private Stage primaryStage;
 
     private ComboBox<String> versionCombo;
+    private ComboBox<VersionManager.VersionCategory> versionTypeCombo;
     private TextField usernameField;
     private PasswordField passwordField;
     private Slider memorySlider;
@@ -387,6 +388,18 @@ public class LauncherUI extends javafx.application.Application {
         versionCombo.setVisibleRowCount(14);
         applyFieldStyle(versionCombo);
 
+        versionTypeCombo = new ComboBox<>();
+        versionTypeCombo.getItems().addAll(VersionManager.VersionCategory.values());
+        versionTypeCombo.setValue(parseVersionCategory(settingsManager.getString("versionCategory2", VersionManager.VersionCategory.FEATURED.name())));
+        versionTypeCombo.setPrefWidth(176);
+        versionTypeCombo.setTooltip(new Tooltip("默认显示正式版、预览版/快照和愚人节版，也可以只看某一类"));
+        versionTypeCombo.setOnAction(e -> {
+            settingsManager.setString("versionCategory2", getSelectedVersionCategory().name());
+            settingsManager.save();
+            refreshVersions();
+        });
+        applyFieldStyle(versionTypeCombo);
+
         memorySlider = new Slider(512, 16384, savedMem);
         memorySlider.setMajorTickUnit(2048);
         memorySlider.setMinorTickCount(3);
@@ -404,6 +417,11 @@ public class LauncherUI extends javafx.application.Application {
         HBox memoryBox = new HBox(12, memorySlider, memoryLabel);
         memoryBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(memorySlider, Priority.ALWAYS);
+
+        HBox versionBox = new HBox(10, versionTypeCombo, versionCombo);
+        versionBox.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(versionCombo, Priority.ALWAYS);
+
         int row = 0;
         grid.add(new Label("登录方式:"), 0, row);
         grid.add(authTypeCombo, 1, row++);
@@ -420,7 +438,7 @@ public class LauncherUI extends javafx.application.Application {
         grid.add(passwordField, 1, row++);
 
         grid.add(new Label("游戏版本:"), 0, row);
-        grid.add(versionCombo, 1, row++);
+        grid.add(versionBox, 1, row++);
 
         grid.add(new Label("最大内存:"), 0, row);
         grid.add(memoryBox, 1, row);
@@ -484,7 +502,8 @@ public class LauncherUI extends javafx.application.Application {
 
         int count = versionCombo == null ? 0 : versionCombo.getItems().size();
         String selectedVersion = versionCombo == null ? null : versionCombo.getValue();
-        String versionSummary = count == 0 ? "等待拉取版本列表" : count + " 个正式版" + (selectedVersion == null ? "" : "，当前 " + selectedVersion);
+        String categoryLabel = getSelectedVersionCategory().getLabel();
+        String versionSummary = count == 0 ? "等待拉取" + categoryLabel + "列表" : count + " 个" + categoryLabel + (selectedVersion == null ? "" : "，当前 " + selectedVersion);
         versionSummaryLabel.setText(versionSummary);
 
         if (memorySummaryLabel != null) {
@@ -569,14 +588,17 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private void refreshVersions() {
+        VersionManager.VersionCategory category = getSelectedVersionCategory();
+        String categoryLabel = category.getLabel();
         refreshBtn.setDisable(true);
         versionCombo.setDisable(true);
-        setStatus("正在获取版本列表...", "优先请求 Mojang 最新版本清单，失败时会回退到本地缓存。 ");
+        versionTypeCombo.setDisable(true);
+        setStatus("正在获取版本列表...", "正在加载 " + categoryLabel + "，失败时会回退到本地缓存。 ");
 
         runAsync("ecl-refresh-versions", () -> {
             try {
                 versionManager.refresh();
-                List<String> versions = versionManager.getReleaseVersions();
+                List<String> versions = versionManager.getVersions(category);
                 Platform.runLater(() -> {
                     String current = versionCombo.getValue();
                     versionCombo.getItems().setAll(versions);
@@ -585,9 +607,10 @@ public class LauncherUI extends javafx.application.Application {
                     } else if (!versions.isEmpty()) {
                         versionCombo.getSelectionModel().select(0);
                     }
-                    setStatus("版本列表已更新", versions.isEmpty() ? "没有发现可用的正式版。" : "已载入 " + versions.size() + " 个正式版。 ");
+                    setStatus("版本列表已更新", versions.isEmpty() ? "没有发现可用的" + categoryLabel + "。" : "已载入 " + versions.size() + " 个" + categoryLabel + "。 ");
                     refreshBtn.setDisable(false);
                     versionCombo.setDisable(false);
+                    versionTypeCombo.setDisable(false);
                     updateRuntimeSummary();
                 });
             } catch (Exception e) {
@@ -595,16 +618,32 @@ public class LauncherUI extends javafx.application.Application {
                     setStatus("获取版本列表失败", cleanMessage(e));
                     refreshBtn.setDisable(false);
                     versionCombo.setDisable(false);
+                    versionTypeCombo.setDisable(false);
                     updateRuntimeSummary();
                 });
             }
         });
     }
 
+    private VersionManager.VersionCategory getSelectedVersionCategory() {
+        if (versionTypeCombo == null || versionTypeCombo.getValue() == null) {
+            return VersionManager.VersionCategory.FEATURED;
+        }
+        return versionTypeCombo.getValue();
+    }
+
+    private VersionManager.VersionCategory parseVersionCategory(String value) {
+        try {
+            return VersionManager.VersionCategory.valueOf(value);
+        } catch (Exception ignored) {
+            return VersionManager.VersionCategory.FEATURED;
+        }
+    }
+
     private void launchGame() {
         String selectedVersion = versionCombo.getValue();
         if (selectedVersion == null || selectedVersion.isBlank()) {
-            setStatus("请选择游戏版本", "先刷新并选择一个可启动的正式版。 ");
+            setStatus("请选择游戏版本", "先刷新并选择一个可启动的 Minecraft 版本。 ");
             return;
         }
 
@@ -865,6 +904,7 @@ public class LauncherUI extends javafx.application.Application {
         refreshBtn.setDisable(busy);
         settingsBtn.setDisable(busy);
         versionCombo.setDisable(busy);
+        versionTypeCombo.setDisable(busy);
         authTypeCombo.setDisable(busy);
         usernameField.setDisable(busy || AUTH_MICROSOFT.equals(authTypeCombo.getValue()));
         yggdrasilServerField.setDisable(busy);
