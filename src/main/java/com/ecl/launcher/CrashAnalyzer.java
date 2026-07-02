@@ -87,7 +87,7 @@ public class CrashAnalyzer {
         } else if (containsAny(lower, "outofmemoryerror", "java heap space", "gc overhead limit exceeded")) {
             title = "内存不足";
             explanation = "游戏或模组加载时内存不够，Java 抛出了内存溢出错误。";
-            suggestions.add("把启动器里的最大内存调高，例如 4096 MB 或 6144 MB。");
+            suggestions.add("关闭其他占用内存的程序，或减少本次启动加载的内容。");
             suggestions.add("减少大型材质包、光影或高负载模组。");
         } else if (containsAny(lower, "duplicatemodsfoundexception", "duplicate mod", "found duplicate mods")) {
             title = "存在重复模组";

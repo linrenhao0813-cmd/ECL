@@ -97,18 +97,19 @@ public class VersionManager {
 
     public String getVersionUrl(String versionId) {
         ensureManifestLoaded();
-        if (manifest == null) {
-            return null;
-        }
+        JsonObject version = findVersion(versionId);
+        return version == null ? null : getString(version, "url");
+    }
 
-        JsonArray arr = manifest.getAsJsonArray("versions");
-        for (JsonElement el : arr) {
-            JsonObject v = el.getAsJsonObject();
-            if (versionId.equals(v.get("id").getAsString())) {
-                return v.get("url").getAsString();
-            }
-        }
-        return null;
+    public String getVersionType(String versionId) {
+        ensureManifestLoaded();
+        JsonObject version = findVersion(versionId);
+        return version == null ? "" : getString(version, "type");
+    }
+
+    public boolean isReleaseOrSnapshot(String versionId) {
+        String type = getVersionType(versionId);
+        return "release".equals(type) || "snapshot".equals(type);
     }
 
     public boolean isVersionDownloaded(String versionId) {
@@ -141,6 +142,20 @@ public class VersionManager {
         } catch (IOException ignored) {
             return null;
         }
+    }
+
+    private JsonObject findVersion(String versionId) {
+        if (manifest == null || versionId == null || versionId.isBlank()) {
+            return null;
+        }
+        JsonArray arr = manifest.getAsJsonArray("versions");
+        for (JsonElement el : arr) {
+            JsonObject v = el.getAsJsonObject();
+            if (versionId.equals(getString(v, "id"))) {
+                return v;
+            }
+        }
+        return null;
     }
 
     private boolean matchesCategory(JsonObject version, VersionCategory category) {

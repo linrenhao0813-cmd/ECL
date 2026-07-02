@@ -30,13 +30,17 @@ public class ModrinthDownloader {
         private final String title;
         private final String author;
         private final String description;
+        private final long downloads;
+        private final long follows;
 
-        public Project(String projectId, String slug, String title, String author, String description) {
+        public Project(String projectId, String slug, String title, String author, String description, long downloads, long follows) {
             this.projectId = projectId;
             this.slug = slug;
             this.title = title;
             this.author = author;
             this.description = description;
+            this.downloads = downloads;
+            this.follows = follows;
         }
 
         public String getProjectId() {
@@ -51,9 +55,19 @@ public class ModrinthDownloader {
             return description;
         }
 
+        public long getDownloads() {
+            return downloads;
+        }
+
+        public long getFollows() {
+            return follows;
+        }
+
         @Override
         public String toString() {
-            return title + (author == null || author.isBlank() ? "" : " / " + author);
+            return title
+                    + (author == null || author.isBlank() ? "" : " / " + author)
+                    + "    下载 " + formatCount(downloads);
         }
     }
 
@@ -80,6 +94,14 @@ public class ModrinthDownloader {
         if (trimmedQuery.isBlank()) {
             throw new IOException("请输入要搜索的内容名称");
         }
+        return fetchProjects(trimmedQuery, gameVersion, projectType, loader, "relevance", limit);
+    }
+
+    public List<Project> listOfficialProjects(String gameVersion, String projectType, String loader, int limit) throws IOException {
+        return fetchProjects("", gameVersion, projectType, loader, "downloads", limit);
+    }
+
+    private List<Project> fetchProjects(String query, String gameVersion, String projectType, String loader, String index, int limit) throws IOException {
         if (gameVersion == null || gameVersion.isBlank()) {
             throw new IOException("请先选择游戏版本");
         }
@@ -99,10 +121,12 @@ public class ModrinthDownloader {
         }
         facets.append("]");
         String url = API_BASE + "/search"
-                + "?query=" + encode(trimmedQuery)
-                + "&limit=" + Math.max(1, Math.min(limit, 20))
-                + "&index=relevance"
+                + "?limit=" + Math.max(1, Math.min(limit, 50))
+                + "&index=" + encode(index == null || index.isBlank() ? "downloads" : index)
                 + "&facets=" + encode(facets.toString());
+        if (query != null && !query.isBlank()) {
+            url += "&query=" + encode(query.trim());
+        }
 
         JsonObject json = JsonParser.parseString(HttpUtil.get(url)).getAsJsonObject();
         JsonArray hits = json.getAsJsonArray("hits");
@@ -122,7 +146,9 @@ public class ModrinthDownloader {
                     getString(hit, "slug"),
                     getString(hit, "title"),
                     getString(hit, "author"),
-                    getString(hit, "description")
+                    getString(hit, "description"),
+                    getLong(hit, "downloads"),
+                    getLong(hit, "follows")
             ));
         }
         return projects;
@@ -343,5 +369,26 @@ public class ModrinthDownloader {
             return null;
         }
         return object.get(key).getAsString();
+    }
+
+    private long getLong(JsonObject object, String key) {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return 0;
+        }
+        try {
+            return object.get(key).getAsLong();
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private static String formatCount(long value) {
+        if (value >= 100000000) {
+            return (value / 100000000) + "亿+";
+        }
+        if (value >= 10000) {
+            return (value / 10000) + "万+";
+        }
+        return Long.toString(value);
     }
 }
