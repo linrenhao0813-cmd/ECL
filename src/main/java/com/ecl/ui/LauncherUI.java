@@ -2,6 +2,7 @@ package com.ecl.ui;
 
 import com.ecl.ECLConfig;
 import com.ecl.auth.AuthProvider;
+import com.ecl.auth.MicrosoftAuth;
 import com.ecl.auth.OfflineAuth;
 import com.ecl.auth.YggdrasilAuth;
 import com.ecl.config.SettingsManager;
@@ -30,17 +31,22 @@ import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 import javafx.util.Duration;
 
 import java.awt.Desktop;
@@ -66,6 +72,25 @@ public class LauncherUI extends javafx.application.Application {
     private static final String MC_CHINESE_WIKI_VERSION_URL_PREFIX = "https://zh.minecraft.wiki/w/";
     private static final int MAX_CAPTURED_GAME_LOG_CHARS = 80000;
     private static final int DEFAULT_MAX_MEMORY_MB = 2048;
+    private static final double WINDOW_WIDTH = 1366;
+    private static final double WINDOW_HEIGHT = 768;
+    private static final double NAV_WIDTH = 188;
+    private static final double LAUNCH_WIDTH = 700;
+    private static final double UTILITY_WIDTH = 330;
+    private static final String ICON_GRASS_BLOCK = "/icons/ui/grass-block.png";
+    private static final String ICON_STONE_BLOCK = "/icons/ui/stone-block.png";
+    private static final String ICON_WOOD_BLOCK = "/icons/ui/wood-block.png";
+    private static final String ICON_LAMP_BLOCK = "/icons/ui/lamp-block.png";
+    private static final String ICON_MEMORY_BLOCK = "/icons/ui/memory-block.png";
+    private static final String ICON_HOME = "/icons/ui/home.png";
+    private static final String ICON_MODRINTH = "/icons/ui/modrinth.png";
+    private static final String ICON_GEAR = "/icons/ui/gear.png";
+    private static final String ICON_LOG = "/icons/ui/log.png";
+    private static final String ICON_FOLDER = "/icons/ui/folder.png";
+    private static final String ICON_JAVA = "/icons/ui/java.png";
+    private static final String ICON_DOWNLOAD = "/icons/ui/download.png";
+    private static final String ICON_CHECK = "/icons/ui/check.png";
+    private static final String ICON_SIGNAL = "/icons/ui/signal.png";
 
     private VersionManager versionManager;
     private GameDownloader downloader;
@@ -84,6 +109,7 @@ public class LauncherUI extends javafx.application.Application {
     private Button launchBtn;
     private Button refreshBtn;
     private Button settingsBtn;
+    private Button microsoftLoginBtn;
     private Button selectedVersionWikiButton;
     private ComboBox<String> authTypeCombo;
     private TextField yggdrasilServerField;
@@ -109,22 +135,26 @@ public class LauncherUI extends javafx.application.Application {
     private String javaPath;
     private File gameDir;
     private String extraJvmArgs;
+    private double windowDragOffsetX;
+    private double windowDragOffsetY;
     private final Map<ProgressBar, Timeline> progressAnimations = new HashMap<>();
     private final Map<AppView, Button> navButtons = new HashMap<>();
     private AppView activeView = AppView.HOME;
 
     private enum AppView {
-        HOME("⌂", "首页"),
-        VERSIONS("▧", "版本"),
-        MODRINTH("◎", "Modrinth"),
-        SETTINGS("⚙", "设置"),
-        LOGS("▤", "日志");
+        HOME(ICON_HOME, "⌂", "首页"),
+        VERSIONS(ICON_STONE_BLOCK, "□", "版本"),
+        MODRINTH(ICON_MODRINTH, "◎", "Modrinth"),
+        SETTINGS(ICON_GEAR, "⚙", "设置"),
+        LOGS(ICON_LOG, "▤", "日志");
 
-        private final String icon;
+        private final String iconResource;
+        private final String fallbackIcon;
         private final String label;
 
-        AppView(String icon, String label) {
-            this.icon = icon;
+        AppView(String iconResource, String fallbackIcon, String label) {
+            this.iconResource = iconResource;
+            this.fallbackIcon = fallbackIcon;
             this.label = label;
         }
     }
@@ -179,8 +209,10 @@ public class LauncherUI extends javafx.application.Application {
         extraJvmArgs = settingsManager.getString("jvmArgs", "");
         contentTargets = createContentTargets();
 
+        primaryStage.initStyle(StageStyle.UNDECORATED);
+
         BorderPane root = createRoot();
-        Scene scene = new Scene(root, 1366, 768);
+        Scene scene = new Scene(root, WINDOW_WIDTH, WINDOW_HEIGHT);
         URL stylesheet = getClass().getResource("/css/launcher.css");
         if (stylesheet != null) {
             scene.getStylesheets().add(stylesheet.toExternalForm());
@@ -189,9 +221,10 @@ public class LauncherUI extends javafx.application.Application {
         primaryStage.setTitle("ECL Launcher");
         applyWindowIcon(primaryStage);
         primaryStage.setMinWidth(1180);
-        primaryStage.setMinHeight(720);
+        primaryStage.setMinHeight(660);
         primaryStage.setScene(scene);
         primaryStage.show();
+        primaryStage.centerOnScreen();
 
         updateAuthFields();
         updateRuntimeSummary();
@@ -202,27 +235,83 @@ public class LauncherUI extends javafx.application.Application {
     private BorderPane createRoot() {
         BorderPane root = new BorderPane();
         root.getStyleClass().add("root-pane");
-        root.setPadding(new Insets(22, 24, 0, 24));
+        root.setPadding(Insets.EMPTY);
 
-        root.setTop(createHeader());
-        BorderPane.setMargin(root.getTop(), new Insets(0, 0, 18, 0));
+        VBox topStack = new VBox(createWindowTitleBar(), createHeader());
+        root.setTop(topStack);
 
-        workspacePane = new HBox(14);
+        workspacePane = new HBox(16);
         workspacePane.getStyleClass().add("main-body");
         workspacePane.setFillHeight(false);
         workspacePane.getChildren().add(createNavigationRail());
         renderActiveView();
         root.setCenter(createWheelScrollPane(workspacePane));
+        BorderPane.setMargin(root.getCenter(), new Insets(0, 16, 0, 16));
         root.setBottom(createFooterBar());
+        BorderPane.setMargin(root.getBottom(), new Insets(0, 16, 0, 16));
         return root;
     }
 
+    private HBox createWindowTitleBar() {
+        HBox titleBar = new HBox(12);
+        titleBar.getStyleClass().add("window-title-bar");
+        titleBar.setAlignment(Pos.CENTER_LEFT);
+
+        Label closeDot = createTrafficDot("traffic-red");
+        Label minDot = createTrafficDot("traffic-yellow");
+        Label zoomDot = createTrafficDot("traffic-green");
+
+        Label title = new Label("ECL Launcher");
+        title.getStyleClass().add("window-title");
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        Button minimizeButton = createWindowButton("—", () -> primaryStage.setIconified(true));
+        Button maximizeButton = createWindowButton("□", () -> primaryStage.setMaximized(!primaryStage.isMaximized()));
+        Button closeButton = createWindowButton("×", () -> primaryStage.close());
+        closeButton.getStyleClass().add("window-close-button");
+
+        titleBar.getChildren().addAll(closeDot, minDot, zoomDot, title, spacer, minimizeButton, maximizeButton, closeButton);
+        titleBar.setOnMousePressed(event -> {
+            windowDragOffsetX = event.getSceneX();
+            windowDragOffsetY = event.getSceneY();
+        });
+        titleBar.setOnMouseDragged(event -> {
+            if (!primaryStage.isMaximized()) {
+                primaryStage.setX(event.getScreenX() - windowDragOffsetX);
+                primaryStage.setY(event.getScreenY() - windowDragOffsetY);
+            }
+        });
+        titleBar.setOnMouseClicked(event -> {
+            if (event.getClickCount() == 2) {
+                primaryStage.setMaximized(!primaryStage.isMaximized());
+            }
+        });
+        return titleBar;
+    }
+
+    private Label createTrafficDot(String styleClass) {
+        Label dot = new Label();
+        dot.getStyleClass().addAll("traffic-dot", styleClass);
+        return dot;
+    }
+
+    private Button createWindowButton(String text, Runnable action) {
+        Button button = new Button(text);
+        button.getStyleClass().add("window-button");
+        button.setOnAction(e -> action.run());
+        return button;
+    }
+
     private HBox createHeader() {
-        HBox header = new HBox(28);
+        HBox header = new HBox(16);
         header.getStyleClass().add("hero-header");
         header.setAlignment(Pos.CENTER_LEFT);
 
         VBox brand = new VBox(4);
+        brand.setMinWidth(390);
+        brand.setPrefWidth(390);
         Label title = new Label("ECL Launcher");
         title.getStyleClass().add("app-title");
         Label subtitle = new Label("轻量 Minecraft 启动器");
@@ -230,18 +319,20 @@ public class LauncherUI extends javafx.application.Application {
         brand.getChildren().addAll(title, subtitle);
 
         Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
+        spacer.setMinWidth(40);
+        spacer.setPrefWidth(40);
+        spacer.setMaxWidth(40);
 
         topAuthBadgeLabel = createValueLabel("Steve");
         topVersionBadgeLabel = createValueLabel("未选择");
         runtimeBadgeLabel = createValueLabel("检查中");
         topMemoryBadgeLabel = createValueLabel("自动");
 
-        HBox stats = new HBox(14,
-                createStatusCard("▣", "离线账号", topAuthBadgeLabel),
-                createStatusCard("▣", "版本", topVersionBadgeLabel),
-                createStatusCard("♨", "Java", runtimeBadgeLabel),
-                createStatusCard("▣", "内存", topMemoryBadgeLabel)
+        HBox stats = new HBox(10,
+                createStatusCard(ICON_GRASS_BLOCK, "账号", topAuthBadgeLabel, 170),
+                createStatusCard(ICON_GRASS_BLOCK, "版本", topVersionBadgeLabel, 230),
+                createStatusCard(ICON_JAVA, "Java", runtimeBadgeLabel, 150),
+                createStatusCard(ICON_MEMORY_BLOCK, "内存", topMemoryBadgeLabel, 185)
         );
         stats.setAlignment(Pos.CENTER_RIGHT);
 
@@ -249,9 +340,8 @@ public class LauncherUI extends javafx.application.Application {
         return header;
     }
 
-    private HBox createStatusCard(String iconText, String title, Label valueLabel) {
-        Label icon = new Label(iconText);
-        icon.getStyleClass().add("stat-icon");
+    private HBox createStatusCard(String iconResource, String title, Label valueLabel, double width) {
+        Node icon = createIconNode(iconResource, "■", 42, "stat-icon");
 
         VBox text = new VBox(4);
         Label titleLabel = new Label(title);
@@ -262,27 +352,32 @@ public class LauncherUI extends javafx.application.Application {
         HBox card = new HBox(14, icon, text);
         card.getStyleClass().add("stat-card");
         card.setAlignment(Pos.CENTER_LEFT);
+        card.setMinWidth(width);
+        card.setPrefWidth(width);
+        card.setMaxWidth(width);
         return card;
     }
 
     private HBox createFooterBar() {
-        Label status = new Label("✓  镜像源可用  ·  资源校验完成");
+        Label status = new Label("镜像源可用  ·  资源校验完成");
         status.getStyleClass().add("footer-status");
+        HBox statusGroup = new HBox(10, createIconNode(ICON_CHECK, "✓", 32, "footer-icon"), status);
+        statusGroup.setAlignment(Pos.CENTER_LEFT);
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        Label signal = new Label("▂▅█");
-        signal.getStyleClass().add("footer-signal");
-        HBox footer = new HBox(12, status, spacer, signal);
+        Node signal = createIconNode(ICON_SIGNAL, "▂▅█", 35, "footer-signal");
+        HBox footer = new HBox(12, statusGroup, spacer, signal);
         footer.getStyleClass().add("footer-bar");
         footer.setAlignment(Pos.CENTER_LEFT);
         return footer;
     }
 
     private VBox createNavigationRail() {
-        VBox rail = new VBox(10);
+        VBox rail = new VBox(22);
         rail.getStyleClass().add("nav-rail");
-        rail.setPrefWidth(118);
-        rail.setMinWidth(112);
+        rail.setPrefWidth(NAV_WIDTH);
+        rail.setMinWidth(NAV_WIDTH);
+        rail.setMaxWidth(NAV_WIDTH);
 
         navButtons.clear();
         for (AppView view : AppView.values()) {
@@ -293,10 +388,8 @@ public class LauncherUI extends javafx.application.Application {
 
     private Button createNavButton(AppView view) {
         Button button = new Button(view.label);
-        Label icon = new Label(view.icon);
-        icon.getStyleClass().add("nav-icon");
-        button.setGraphic(icon);
-        button.setGraphicTextGap(16);
+        button.setGraphic(createIconNode(view.iconResource, view.fallbackIcon, 40, "nav-icon"));
+        button.setGraphicTextGap(14);
         button.getStyleClass().add("nav-button");
         if (view == activeView) {
             button.getStyleClass().add("nav-button-selected");
@@ -358,12 +451,14 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private void addMainContent(Node primary, Node secondary) {
-        if (primary instanceof Region region) {
+        boolean fixedWidth = primary.getStyleClass().contains("launch-pane");
+        if (primary instanceof Region region && !fixedWidth) {
             region.setMaxWidth(Double.MAX_VALUE);
         }
-        HBox.setHgrow(primary, Priority.ALWAYS);
+        HBox.setHgrow(primary, fixedWidth ? Priority.NEVER : Priority.ALWAYS);
         workspacePane.getChildren().add(primary);
         if (secondary != null) {
+            HBox.setHgrow(secondary, Priority.NEVER);
             workspacePane.getChildren().add(secondary);
         }
     }
@@ -390,11 +485,11 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private VBox createUtilityColumn() {
-        VBox pane = new VBox(14);
+        VBox pane = new VBox(8);
         pane.getStyleClass().add("utility-column");
-        pane.setPrefWidth(360);
-        pane.setMinWidth(340);
-        pane.setMaxWidth(380);
+        pane.setPrefWidth(UTILITY_WIDTH);
+        pane.setMinWidth(UTILITY_WIDTH);
+        pane.setMaxWidth(UTILITY_WIDTH);
 
         statusLabel = new Label("等待任务");
         statusLabel.getStyleClass().add("status-title");
@@ -409,7 +504,7 @@ public class LauncherUI extends javafx.application.Application {
         downloadProgress.setVisible(true);
 
         VBox statusCard = createSurface(
-                "▣  下载队列",
+                "下载队列",
                 null,
                 statusLabel,
                 detailLabel,
@@ -422,11 +517,6 @@ public class LauncherUI extends javafx.application.Application {
         memorySummaryLabel = createValueLabel();
         jvmArgsSummaryLabel = createValueLabel();
 
-        authSummaryLabel = createValueLabel();
-        authHintLabel = new Label();
-        authHintLabel.getStyleClass().add("status-detail");
-        authHintLabel.setWrapText(true);
-
         VBox diagnosticCard = createDiagnosticPane();
 
         pane.getChildren().addAll(statusCard, createSidebarModrinthPane(), diagnosticCard);
@@ -434,22 +524,21 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private VBox createDiagnosticPane() {
-        HBox okRow = createDiagnosticRow("✓", "状态正常", "");
-        HBox crashRow = createDiagnosticRow("▤", "崩溃报告", String.valueOf(countCrashReports()));
+        HBox okRow = createDiagnosticRow(ICON_CHECK, "✓", "状态正常", "");
+        HBox crashRow = createDiagnosticRow(ICON_LOG, "▤", "崩溃报告", String.valueOf(countCrashReports()));
 
         VBox rows = new VBox(0, okRow, crashRow);
         rows.getStyleClass().add("sidebar-list");
 
         return createSurface(
-                "⌁  诊断",
+                "诊断",
                 null,
                 rows
         );
     }
 
-    private HBox createDiagnosticRow(String iconText, String text, String value) {
-        Label icon = new Label(iconText);
-        icon.getStyleClass().add("sidebar-icon");
+    private HBox createDiagnosticRow(String iconResource, String fallbackIcon, String text, String value) {
+        Node icon = createIconNode(iconResource, fallbackIcon, 38, "sidebar-icon");
         Label title = new Label(text);
         title.getStyleClass().add("sidebar-title");
         Region spacer = new Region();
@@ -470,12 +559,11 @@ public class LauncherUI extends javafx.application.Application {
                 createSidebarModrinthRow(contentTargets.get(1), "热门光影推荐"),
                 createSidebarModrinthRow(contentTargets.get(2), "优质材质包推荐")
         );
-        return createSurface("◎  Modrinth 推荐", null, rows);
+        return createSurface("Modrinth 推荐", null, rows);
     }
 
     private HBox createSidebarModrinthRow(ContentTarget target, String subtitle) {
-        Label icon = new Label(target.initial);
-        icon.getStyleClass().add("sidebar-icon");
+        Node icon = createIconNode(iconForContentTarget(target), target.initial, 44, "sidebar-icon");
         VBox text = new VBox(2);
         Label title = new Label(target.title);
         title.getStyleClass().add("sidebar-title");
@@ -502,11 +590,26 @@ public class LauncherUI extends javafx.application.Application {
     private VBox createLaunchPane() {
         VBox pane = new VBox(14);
         pane.getStyleClass().add("launch-pane");
-        HBox.setHgrow(pane, Priority.ALWAYS);
-        VBox launchCard = new VBox(18);
+        pane.setMinWidth(LAUNCH_WIDTH);
+        pane.setPrefWidth(LAUNCH_WIDTH);
+        pane.setMaxWidth(LAUNCH_WIDTH);
+        HBox.setHgrow(pane, Priority.NEVER);
+
+        StackPane launchCard = new StackPane();
         launchCard.getStyleClass().add("launch-surface");
-        launchCard.getChildren().addAll(createLaunchHero(), createForm(), createActionBar());
-        launchCard.getStyleClass().add("launch-surface");
+
+        VBox content = new VBox(16);
+        content.getStyleClass().add("launch-content");
+        content.setAlignment(Pos.TOP_CENTER);
+        content.getChildren().addAll(createLaunchHero(), createForm(), createActionBar());
+
+        launchCard.getChildren().add(content);
+        launchCard.getChildren().addAll(
+                createLaunchCorner("launch-corner-tl", Pos.TOP_LEFT),
+                createLaunchCorner("launch-corner-tr", Pos.TOP_RIGHT),
+                createLaunchCorner("launch-corner-bl", Pos.BOTTOM_LEFT),
+                createLaunchCorner("launch-corner-br", Pos.BOTTOM_RIGHT)
+        );
         pane.getChildren().add(launchCard);
         return pane;
     }
@@ -515,13 +618,23 @@ public class LauncherUI extends javafx.application.Application {
         selectedVersionTitleLabel = new Label("选择 Minecraft 版本");
         selectedVersionTitleLabel.getStyleClass().add("launch-version-title");
 
-        Label meta = new Label("▣  已选择的版本");
+        Label metaText = new Label("已选择的版本");
+        metaText.getStyleClass().add("focus-badge-text");
+        HBox meta = new HBox(10, createIconNode(ICON_GRASS_BLOCK, "■", 34, "focus-badge-icon"), metaText);
         meta.getStyleClass().add("focus-badge");
+        meta.setAlignment(Pos.CENTER);
 
         VBox hero = new VBox(14, selectedVersionTitleLabel, meta);
         hero.getStyleClass().add("launch-hero");
         hero.setAlignment(Pos.CENTER);
         return hero;
+    }
+
+    private Region createLaunchCorner(String styleClass, Pos alignment) {
+        Region corner = new Region();
+        corner.getStyleClass().addAll("launch-corner", styleClass);
+        StackPane.setAlignment(corner, alignment);
+        return corner;
     }
 
     private VBox createVersionsPage() {
@@ -619,7 +732,10 @@ public class LauncherUI extends javafx.application.Application {
     private VBox createMainPage() {
         VBox page = new VBox(14);
         page.getStyleClass().add("launch-pane");
-        HBox.setHgrow(page, Priority.ALWAYS);
+        page.setMinWidth(LAUNCH_WIDTH);
+        page.setPrefWidth(LAUNCH_WIDTH);
+        page.setMaxWidth(LAUNCH_WIDTH);
+        HBox.setHgrow(page, Priority.NEVER);
         return page;
     }
 
@@ -701,14 +817,19 @@ public class LauncherUI extends javafx.application.Application {
         grid.setHgap(10);
         grid.setVgap(12);
 
-        String previousVersion = versionCombo == null ? null : versionCombo.getValue();
+        String previousVersion = versionCombo == null ? settingsManager.getString("selectedVersion", "") : versionCombo.getValue();
         VersionManager.VersionCategory previousCategory = versionTypeCombo == null || versionTypeCombo.getValue() == null
                 ? parseVersionCategory(settingsManager.getString("versionCategory2", VersionManager.VersionCategory.FEATURED.name()))
                 : versionTypeCombo.getValue();
+        String previousAuthType = authTypeCombo == null ? normalizeAuthType(settingsManager.getString("authType", AUTH_OFFLINE)) : normalizeAuthType(authTypeCombo.getValue());
+        String previousUsername = usernameField == null ? settingsManager.getString("username", settingsManager.getString("microsoftProfileName", "Steve")) : usernameField.getText();
+        if (previousUsername == null || previousUsername.isBlank()) {
+            previousUsername = "Steve";
+        }
 
         authTypeCombo = new ComboBox<>();
         authTypeCombo.getItems().addAll(AUTH_OFFLINE, AUTH_MICROSOFT, AUTH_YGGDRASIL);
-        authTypeCombo.setValue(AUTH_OFFLINE);
+        authTypeCombo.setValue(previousAuthType);
         authTypeCombo.setOnAction(e -> updateAuthFields());
         applyFieldStyle(authTypeCombo);
 
@@ -716,7 +837,7 @@ public class LauncherUI extends javafx.application.Application {
         yggdrasilServerField.setPromptText("输入 Yggdrasil 认证地址");
         applyFieldStyle(yggdrasilServerField);
 
-        usernameField = new TextField("Steve");
+        usernameField = new TextField(previousUsername);
         usernameField.setPromptText("输入玩家名称");
         applyFieldStyle(usernameField);
         usernameField.textProperty().addListener((obs, oldValue, newValue) -> updateRuntimeSummary());
@@ -725,11 +846,20 @@ public class LauncherUI extends javafx.application.Application {
         passwordField.setPromptText("外置登录时需要");
         applyFieldStyle(passwordField);
 
+        authSummaryLabel = createValueLabel();
+        authHintLabel = new Label();
+        authHintLabel.getStyleClass().add("status-detail");
+        authHintLabel.setWrapText(true);
+
         versionCombo = new ComboBox<>();
         versionCombo.setPromptText("选择游戏版本");
         versionCombo.setVisibleRowCount(14);
         applyFieldStyle(versionCombo);
         versionCombo.valueProperty().addListener((obs, oldValue, newValue) -> {
+            if (newValue != null && !newValue.isBlank()) {
+                settingsManager.setString("selectedVersion", newValue);
+                settingsManager.save();
+            }
             updateRuntimeSummary();
             updateSelectedVersionWikiButton();
         });
@@ -750,10 +880,6 @@ public class LauncherUI extends javafx.application.Application {
         restoreVersionComboItems(previousVersion);
         updateSelectedVersionWikiButton();
 
-        HBox versionBox = new HBox(10, versionTypeCombo, versionCombo, selectedVersionWikiButton);
-        versionBox.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(versionCombo, Priority.ALWAYS);
-
         TextField gameDirField = new TextField(abbreviate(getActiveGameDir().getAbsolutePath(), 72));
         gameDirField.setEditable(false);
         applyFieldStyle(gameDirField);
@@ -762,38 +888,48 @@ public class LauncherUI extends javafx.application.Application {
         jvmField.setEditable(false);
         applyFieldStyle(jvmField);
 
-        Button folderButton = new Button("▣");
-        folderButton.getStyleClass().addAll("app-button", "icon-button");
-        folderButton.setTooltip(new Tooltip("打开游戏目录"));
-        folderButton.setOnAction(e -> openLocalFolder(getActiveGameDir(), "游戏目录"));
+        Button folderButton = createIconActionButton(ICON_FOLDER, "▣", "打开游戏目录",
+                () -> openLocalFolder(getActiveGameDir(), "游戏目录"));
 
-        Button jvmButton = new Button("⚙");
-        jvmButton.getStyleClass().addAll("app-button", "icon-button");
-        jvmButton.setTooltip(new Tooltip("高级设置"));
-        jvmButton.setOnAction(e -> showSettingsDialog());
+        Button jvmButton = createIconActionButton(ICON_GEAR, "⚙", "高级设置", this::showSettingsDialog);
 
         HBox gameDirBox = new HBox(10, gameDirField, folderButton);
         HBox.setHgrow(gameDirField, Priority.ALWAYS);
         HBox jvmBox = new HBox(10, jvmField, jvmButton);
         HBox.setHgrow(jvmField, Priority.ALWAYS);
+        authTypeCombo.setPrefWidth(220);
+        microsoftLoginBtn = new Button("正版登录");
+        microsoftLoginBtn.getStyleClass().addAll("app-button", "secondary-button", "compact-button");
+        microsoftLoginBtn.setTooltip(new Tooltip("登录 Microsoft 正版 Minecraft Java 版账号"));
+        microsoftLoginBtn.setOnAction(e -> loginMicrosoftAccount());
+        HBox authBox = new HBox(10, authTypeCombo, usernameField, microsoftLoginBtn);
+        authBox.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(usernameField, Priority.ALWAYS);
+        VBox authHelpBox = new VBox(4, authSummaryLabel, authHintLabel);
+        HBox versionBox = new HBox(10, versionTypeCombo, versionCombo, selectedVersionWikiButton);
+        versionBox.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(versionCombo, Priority.ALWAYS);
+        versionCombo.valueProperty().addListener((obs, oldValue, newValue) ->
+                gameDirField.setText(abbreviate(getActiveGameDir().getAbsolutePath(), 72)));
 
         int row = 0;
-        grid.add(new Label("登录方式"), 0, row);
-        grid.add(authTypeCombo, 1, row++);
-
         serverLabel = new Label("外置服务器:");
-        grid.add(serverLabel, 0, row);
-        grid.add(yggdrasilServerField, 1, row++);
-
-        grid.add(new Label("用户名"), 0, row);
-        grid.add(usernameField, 1, row++);
-
         passwordLabel = new Label("密码:");
-        grid.add(passwordLabel, 0, row);
-        grid.add(passwordField, 1, row++);
 
         grid.add(new Label("游戏版本"), 0, row);
         grid.add(versionBox, 1, row++);
+
+        grid.add(new Label("账号模式"), 0, row);
+        grid.add(authBox, 1, row++);
+
+        grid.add(serverLabel, 0, row);
+        grid.add(yggdrasilServerField, 1, row++);
+
+        grid.add(passwordLabel, 0, row);
+        grid.add(passwordField, 1, row++);
+
+        grid.add(new Label("登录状态"), 0, row);
+        grid.add(authHelpBox, 1, row++);
 
         grid.add(new Label("游戏目录"), 0, row);
         grid.add(gameDirBox, 1, row++);
@@ -849,7 +985,11 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private HBox createActionBar() {
-        launchBtn = new Button("▶  启动游戏");
+        Label playIcon = new Label("▶");
+        playIcon.getStyleClass().add("launch-play-icon");
+        launchBtn = new Button("启动游戏");
+        launchBtn.setGraphic(playIcon);
+        launchBtn.setGraphicTextGap(22);
         launchBtn.getStyleClass().addAll("app-button", "launch-button");
         launchBtn.setDefaultButton(true);
         launchBtn.setOnAction(e -> launchGame());
@@ -881,12 +1021,15 @@ public class LauncherUI extends javafx.application.Application {
         setFieldVisible(passwordField, yggdrasil);
 
         if (microsoft) {
-            authSummaryLabel.setText("微软登录预留入口");
-            authHintLabel.setText("当前版本还没有接入 Microsoft OAuth 流程，先使用离线登录或外置登录。 ");
+            usernameField.setPromptText("授权后自动读取正版玩家名");
+            authSummaryLabel.setText("微软正版登录");
+            authHintLabel.setText("启动时会打开浏览器并显示设备码，授权成功后自动读取 Minecraft Java 版档案。 ");
         } else if (yggdrasil) {
+            usernameField.setPromptText("输入外置登录用户名或邮箱");
             authSummaryLabel.setText("外置登录 / Yggdrasil");
             authHintLabel.setText("兼容 LittleSkin、Blessing Skin 和其他 authlib-injector 服务端。 ");
         } else {
+            usernameField.setPromptText("输入玩家名称");
             authSummaryLabel.setText("离线登录");
             authHintLabel.setText("会为当前用户名生成本地 UUID，适合单机和快速调试。 ");
         }
@@ -896,7 +1039,7 @@ public class LauncherUI extends javafx.application.Application {
 
     private void updateRuntimeSummary() {
         setSummaryText(javaSummaryLabel, javaPath, 64);
-        setSummaryText(gameDirSummaryLabel, gameDir == null ? ECLConfig.getGameDir().getAbsolutePath() : gameDir.getAbsolutePath(), 68);
+        setSummaryText(gameDirSummaryLabel, getActiveGameDir().getAbsolutePath(), 68);
 
         int count = versionCombo == null ? 0 : versionCombo.getItems().size();
         String selectedVersion = versionCombo == null ? null : versionCombo.getValue();
@@ -907,7 +1050,7 @@ public class LauncherUI extends javafx.application.Application {
             selectedVersionTitleLabel.setText(selectedVersion == null || selectedVersion.isBlank() ? "选择 Minecraft 版本" : selectedVersion);
         }
         if (topVersionBadgeLabel != null) {
-            topVersionBadgeLabel.setText(selectedVersion == null || selectedVersion.isBlank() ? "未选择" : selectedVersion);
+            topVersionBadgeLabel.setText(selectedVersion == null || selectedVersion.isBlank() ? "未选择" : abbreviate(selectedVersion, 16));
         }
         if (topAuthBadgeLabel != null) {
             topAuthBadgeLabel.setText(getAuthDisplayName());
@@ -1080,6 +1223,13 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
+    private String normalizeAuthType(String value) {
+        if (AUTH_MICROSOFT.equals(value) || AUTH_YGGDRASIL.equals(value) || AUTH_OFFLINE.equals(value)) {
+            return value;
+        }
+        return AUTH_OFFLINE;
+    }
+
     private void launchGame() {
         String selectedVersion = versionCombo.getValue();
         if (selectedVersion == null || selectedVersion.isBlank()) {
@@ -1104,6 +1254,9 @@ public class LauncherUI extends javafx.application.Application {
         settingsManager.setString("javaPath", javaPath);
         settingsManager.setString("gameDir", gameDir.getAbsolutePath());
         settingsManager.setString("jvmArgs", extraJvmArgs == null ? "" : extraJvmArgs);
+        settingsManager.setString("selectedVersion", selectedVersion);
+        settingsManager.setString("authType", authTypeCombo.getValue());
+        settingsManager.setString("username", usernameField.getText().trim());
         if (AUTH_YGGDRASIL.equals(authTypeCombo.getValue())) {
             settingsManager.setString("yggdrasilServer", yggdrasilServerField.getText().trim());
         }
@@ -1177,25 +1330,27 @@ public class LauncherUI extends javafx.application.Application {
         setStatus("正在启动游戏...", "准备认证、拼接类路径并拉起客户端进程。 ");
 
         runAsync("ecl-launch-game", () -> {
+            File launchDir = resolveVersionGameDir(version);
             try {
+                ensureVersionGameDirs(version);
                 AuthProvider auth = buildAuthProvider(authType, server, username, password);
                 gameLauncher.setAuth(auth);
                 gameLauncher.setVersion(version);
                 gameLauncher.setMaxMemory(DEFAULT_MAX_MEMORY_MB);
-                gameLauncher.setGameDir(gameDir);
+                gameLauncher.setGameDir(launchDir);
                 gameLauncher.setJvmArgs(extraJvmArgs == null ? "" : extraJvmArgs);
                 gameLauncher.setJavaPath(javaPath);
                 long launchStartedAt = System.currentTimeMillis();
                 Process process = gameLauncher.launch();
-                monitorGameProcess(process, version, launchStartedAt);
+                monitorGameProcess(process, version, launchDir, launchStartedAt);
 
                 Platform.runLater(() -> {
-                    setStatus("游戏已启动", version + " 正在运行。若异常退出，启动器会自动分析错误。 ");
+                    setStatus("游戏已启动", version + " 正在运行，实例目录: " + launchDir.getAbsolutePath());
                     setControlsBusy(false);
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
-                    CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, getActiveGameDir());
+                    CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
                     setStatus("启动失败", report.getTitle());
                     showGameErrorDialog(report);
                     setControlsBusy(false);
@@ -1204,7 +1359,7 @@ public class LauncherUI extends javafx.application.Application {
         });
     }
 
-    private void monitorGameProcess(Process process, String version, long launchStartedAt) {
+    private void monitorGameProcess(Process process, String version, File launchDir, long launchStartedAt) {
         runAsync("ecl-monitor-game-" + version, () -> {
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
@@ -1219,13 +1374,13 @@ public class LauncherUI extends javafx.application.Application {
                     return;
                 }
 
-                CrashAnalyzer.Report report = CrashAnalyzer.analyzeGameExit(version, exitCode, output.toString(), getActiveGameDir(), launchStartedAt);
+                CrashAnalyzer.Report report = CrashAnalyzer.analyzeGameExit(version, exitCode, output.toString(), launchDir, launchStartedAt);
                 Platform.runLater(() -> {
                     setStatus("游戏异常退出", report.getTitle());
                     showGameErrorDialog(report);
                 });
             } catch (Exception e) {
-                CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, getActiveGameDir());
+                CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
                 Platform.runLater(() -> {
                     setStatus("错误分析失败", report.getTitle());
                     showGameErrorDialog(report);
@@ -1305,6 +1460,137 @@ public class LauncherUI extends javafx.application.Application {
         dialog.show();
     }
 
+    private void loginMicrosoftAccount() {
+        authTypeCombo.setValue(AUTH_MICROSOFT);
+        updateAuthFields();
+        setControlsBusy(true);
+        setStatus("微软正版登录", "正在准备 Microsoft 设备码登录。");
+
+        runAsync("ecl-login-microsoft", () -> {
+            try {
+                MicrosoftAuth microsoftAuth = authenticateMicrosoftAccount();
+                Platform.runLater(() -> {
+                    usernameField.setText(microsoftAuth.getUsername());
+                    setStatus("微软正版登录成功", "已登录 " + microsoftAuth.getUsername() + "，现在可以直接启动游戏。");
+                    updateRuntimeSummary();
+                    setControlsBusy(false);
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    setStatus("微软正版登录失败", cleanMessage(e));
+                    setControlsBusy(false);
+                });
+            }
+        });
+    }
+
+    private MicrosoftAuth authenticateMicrosoftAccount() {
+        MicrosoftAuth microsoftAuth = new MicrosoftAuth(settingsManager.getString("microsoftRefreshToken", ""), new MicrosoftAuth.LoginListener() {
+            @Override
+            public void onDeviceCode(MicrosoftAuth.DeviceCode deviceCode) {
+                Platform.runLater(() -> {
+                    boolean copied = copyMicrosoftDeviceCodeToClipboard(deviceCode.getUserCode());
+                    setStatus("微软正版登录", copied
+                            ? "登录代码已自动复制: " + deviceCode.getUserCode() + "。浏览器打开后直接粘贴完成授权。"
+                            : "无法自动复制登录代码，请手动复制 " + deviceCode.getUserCode() + " 完成授权。");
+                    showMicrosoftDeviceCodeDialog(deviceCode);
+                    openMicrosoftVerificationPage(deviceCode);
+                });
+            }
+
+            @Override
+            public void onStatus(String message) {
+                Platform.runLater(() -> setStatus("微软正版登录", message));
+            }
+        });
+        microsoftAuth.login();
+        String refreshToken = microsoftAuth.getRefreshToken();
+        if (refreshToken != null && !refreshToken.isBlank()) {
+            settingsManager.setString("microsoftRefreshToken", refreshToken);
+        }
+        settingsManager.setString("authType", AUTH_MICROSOFT);
+        settingsManager.setString("microsoftProfileName", microsoftAuth.getUsername());
+        settingsManager.setString("username", microsoftAuth.getUsername());
+        settingsManager.save();
+        return microsoftAuth;
+    }
+
+    private void showMicrosoftDeviceCodeDialog(MicrosoftAuth.DeviceCode deviceCode) {
+        Stage dialog = new Stage(StageStyle.UTILITY);
+        dialog.initOwner(primaryStage);
+        dialog.initModality(Modality.NONE);
+        dialog.setTitle("微软正版登录");
+
+        Label title = new Label("微软正版登录");
+        title.getStyleClass().add("section-title");
+        Label message = createBodyText("登录代码已自动复制。浏览器打开后直接粘贴代码完成授权，授权成功后窗口可以关闭。");
+
+        TextField codeField = new TextField(deviceCode.getUserCode());
+        codeField.setEditable(false);
+        codeField.setFocusTraversable(true);
+        applyFieldStyle(codeField);
+
+        TextField urlField = new TextField(deviceCode.getVerificationUri());
+        urlField.setEditable(false);
+        applyFieldStyle(urlField);
+
+        Button openButton = createActionButton("打开浏览器", "primary-button", () -> openMicrosoftVerificationPage(deviceCode));
+        Button copyButton = createActionButton("复制代码", "secondary-button", () -> copyMicrosoftDeviceCode(deviceCode.getUserCode()));
+        Button closeButton = createActionButton("关闭", "ghost-button", dialog::close);
+        HBox actions = new HBox(10, openButton, copyButton, closeButton);
+        actions.setAlignment(Pos.CENTER_LEFT);
+
+        VBox root = new VBox(12,
+                title,
+                message,
+                createInfoRow("登录代码", createStaticValueLabel(deviceCode.getUserCode())),
+                codeField,
+                createInfoRow("验证地址", createStaticValueLabel(deviceCode.getVerificationUri())),
+                urlField,
+                actions
+        );
+        root.getStyleClass().add("surface");
+        root.setPadding(new Insets(18));
+
+        Scene scene = new Scene(root, 520, 330);
+        URL stylesheet = getClass().getResource("/css/launcher.css");
+        if (stylesheet != null) {
+            scene.getStylesheets().add(stylesheet.toExternalForm());
+        }
+        dialog.setScene(scene);
+        dialog.show();
+        codeField.requestFocus();
+        codeField.selectAll();
+    }
+
+    private void openMicrosoftVerificationPage(MicrosoftAuth.DeviceCode deviceCode) {
+        try {
+            getHostServices().showDocument(deviceCode.getVerificationUri());
+            setStatus("微软正版登录", "登录代码已自动复制: " + deviceCode.getUserCode() + "。浏览器打开后直接粘贴完成授权。");
+        } catch (Exception e) {
+            setStatus("无法打开微软登录页面", cleanMessage(e) + "；请手动打开 " + deviceCode.getVerificationUri());
+        }
+    }
+
+    private void copyMicrosoftDeviceCode(String userCode) {
+        if (copyMicrosoftDeviceCodeToClipboard(userCode)) {
+            setStatus("已复制微软登录代码", userCode);
+        } else {
+            setStatus("复制微软登录代码失败", "请手动选择并复制 " + userCode);
+        }
+    }
+
+    private boolean copyMicrosoftDeviceCodeToClipboard(String userCode) {
+        try {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(userCode);
+            Clipboard.getSystemClipboard().setContent(content);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     private String toBulletText(List<String> items) {
         if (items == null || items.isEmpty()) {
             return "未提取到关键日志。";
@@ -1320,7 +1606,12 @@ public class LauncherUI extends javafx.application.Application {
 
     private AuthProvider buildAuthProvider(String authType, String server, String username, String password) {
         if (AUTH_MICROSOFT.equals(authType)) {
-            throw new UnsupportedOperationException("暂不支持微软登录，请先使用离线登录或外置登录。");
+            MicrosoftAuth microsoftAuth = authenticateMicrosoftAccount();
+            Platform.runLater(() -> {
+                usernameField.setText(microsoftAuth.getUsername());
+                updateRuntimeSummary();
+            });
+            return microsoftAuth;
         }
 
         if (AUTH_YGGDRASIL.equals(authType)) {
@@ -1340,6 +1631,9 @@ public class LauncherUI extends javafx.application.Application {
         launchBtn.setDisable(busy);
         refreshBtn.setDisable(busy);
         settingsBtn.setDisable(busy);
+        if (microsoftLoginBtn != null) {
+            microsoftLoginBtn.setDisable(busy);
+        }
         versionCombo.setDisable(busy);
         versionTypeCombo.setDisable(busy);
         updateSelectedVersionWikiButton();
@@ -1357,6 +1651,12 @@ public class LauncherUI extends javafx.application.Application {
         }
 
         File importDir = target.folderSupplier.get();
+        try {
+            ensureDirectory(importDir);
+        } catch (IOException e) {
+            setStatus("无法创建" + target.title + "目录", cleanMessage(e));
+            return;
+        }
 
         Stage dialog = new Stage();
         dialog.initOwner(primaryStage);
@@ -1598,12 +1898,45 @@ public class LauncherUI extends javafx.application.Application {
         return versionCombo == null ? null : versionCombo.getValue();
     }
 
-    private File getActiveGameDir() {
+    private File getConfiguredGameRootDir() {
         return gameDir == null ? ECLConfig.getGameDir() : gameDir;
     }
 
+    private File getActiveGameDir() {
+        return resolveVersionGameDir(getSelectedVersion());
+    }
+
+    private File resolveVersionGameDir(String gameVersion) {
+        File rootDir = getConfiguredGameRootDir();
+        if (gameVersion == null || gameVersion.isBlank()) {
+            return rootDir;
+        }
+        return new File(new File(rootDir, "instances"), sanitizeVersionDirectoryName(gameVersion));
+    }
+
+    private void ensureVersionGameDirs(String gameVersion) throws IOException {
+        File instanceDir = resolveVersionGameDir(gameVersion);
+        ensureDirectory(instanceDir);
+        ensureDirectory(new File(instanceDir, "mods"));
+        ensureDirectory(new File(instanceDir, "shaderpacks"));
+        ensureDirectory(new File(instanceDir, "resourcepacks"));
+        ensureDirectory(new File(instanceDir, "saves"));
+        ensureDirectory(new File(instanceDir, "logs"));
+    }
+
+    private void ensureDirectory(File dir) throws IOException {
+        if (!dir.exists() && !dir.mkdirs()) {
+            throw new IOException("无法创建目录: " + dir.getAbsolutePath());
+        }
+    }
+
+    private String sanitizeVersionDirectoryName(String version) {
+        String sanitized = version.trim().replaceAll("[\\\\/:*?\"<>|]", "_");
+        return sanitized.isBlank() ? "unknown-version" : sanitized;
+    }
+
     private File resolveModsDir(String gameVersion) {
-        return new File(getActiveGameDir(), "mods");
+        return new File(resolveVersionGameDir(gameVersion), "mods");
     }
 
     private void showSettingsDialog() {
@@ -1726,6 +2059,7 @@ public class LauncherUI extends javafx.application.Application {
         ScrollPane scrollPane = new ScrollPane(content);
         scrollPane.getStyleClass().add("main-scroll");
         scrollPane.setFitToWidth(true);
+        scrollPane.setMinHeight(0);
         scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         scrollPane.setPannable(true);
@@ -1895,6 +2229,42 @@ public class LauncherUI extends javafx.application.Application {
     private void applyFieldStyle(Control control) {
         control.getStyleClass().add("field-control");
         control.setMaxWidth(Double.MAX_VALUE);
+    }
+
+    private Button createIconActionButton(String iconResource, String fallbackIcon, String tooltip, Runnable action) {
+        Button button = new Button();
+        button.setGraphic(createIconNode(iconResource, fallbackIcon, 34, "icon-button-image"));
+        button.getStyleClass().addAll("app-button", "icon-button");
+        button.setTooltip(new Tooltip(tooltip));
+        button.setOnAction(e -> action.run());
+        return button;
+    }
+
+    private Node createIconNode(String resourcePath, String fallbackText, double size, String styleClass) {
+        URL iconUrl = resourcePath == null ? null : getClass().getResource(resourcePath);
+        if (iconUrl != null) {
+            ImageView icon = new ImageView(new Image(iconUrl.toExternalForm()));
+            icon.setFitWidth(size);
+            icon.setFitHeight(size);
+            icon.setPreserveRatio(true);
+            icon.getStyleClass().add(styleClass);
+            return icon;
+        }
+        Label fallback = new Label(fallbackText == null ? "" : fallbackText);
+        fallback.getStyleClass().add(styleClass);
+        return fallback;
+    }
+
+    private String iconForContentTarget(ContentTarget target) {
+        if (target == null || target.projectType == null) {
+            return ICON_GRASS_BLOCK;
+        }
+        return switch (target.projectType) {
+            case "shader" -> ICON_LAMP_BLOCK;
+            case "resourcepack" -> ICON_WOOD_BLOCK;
+            case "modpack" -> ICON_STONE_BLOCK;
+            default -> ICON_GRASS_BLOCK;
+        };
     }
 
     private Label createBadge(String text, String styleClass) {
