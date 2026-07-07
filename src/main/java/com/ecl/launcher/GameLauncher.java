@@ -6,6 +6,7 @@ import com.ecl.auth.OfflineAuth;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JavaRuntimeUtil;
+import com.ecl.util.MinecraftRuleUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -78,7 +79,8 @@ public class GameLauncher {
         launchDirectory.mkdirs();
         gameDir = launchDirectory;
 
-        String resolvedJavaPath = JavaRuntimeUtil.resolveJavaExecutable(javaPath);
+        int requiredJavaMajor = determineRequiredJavaMajor(versionJson);
+        String resolvedJavaPath = JavaRuntimeUtil.resolveJavaExecutable(javaPath, requiredJavaMajor);
         List<String> command = buildCommand(resolvedJavaPath, versionJson);
 
         ProcessBuilder pb = new ProcessBuilder(command);
@@ -91,6 +93,59 @@ public class GameLauncher {
         pb.redirectErrorStream(true);
 
         return pb.start();
+    }
+
+    private int determineRequiredJavaMajor(JsonObject versionJson) {
+        if (versionJson != null && versionJson.has("javaVersion")) {
+            JsonObject javaVersion = versionJson.getAsJsonObject("javaVersion");
+            if (javaVersion.has("majorVersion")) {
+                try {
+                    return javaVersion.get("majorVersion").getAsInt();
+                } catch (NumberFormatException | IllegalStateException ignored) {
+                }
+            }
+        }
+
+        return inferRequiredJavaMajorFromVersionId();
+    }
+
+    private int inferRequiredJavaMajorFromVersionId() {
+        int[] release = parseReleaseVersion(versionId);
+        if (release == null) {
+            return 8;
+        }
+
+        int minor = release[1];
+        int patch = release[2];
+        if (minor > 20 || minor == 20 && patch >= 5) {
+            return 21;
+        }
+        if (minor >= 18) {
+            return 17;
+        }
+        return 8;
+    }
+
+    private int[] parseReleaseVersion(String id) {
+        if (id == null || !id.startsWith("1.")) {
+            return null;
+        }
+
+        String[] parts = id.split("\\.");
+        if (parts.length < 2) {
+            return null;
+        }
+
+        try {
+            int minor = Integer.parseInt(parts[1].replaceAll("[^0-9].*$", ""));
+            int patch = 0;
+            if (parts.length >= 3) {
+                patch = Integer.parseInt(parts[2].replaceAll("[^0-9].*$", ""));
+            }
+            return new int[]{1, minor, patch};
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private List<String> buildCommand(String javaExecutable, JsonObject versionJson) throws IOException {
@@ -107,7 +162,11 @@ public class GameLauncher {
             }
         }
 
-        cmd.addAll(parseJVMArguments(versionJson));
+        List<String> parsedJvmArgs = parseJVMArguments(versionJson);
+        if (isMac() && !cmd.contains("-XstartOnFirstThread") && !parsedJvmArgs.contains("-XstartOnFirstThread")) {
+            cmd.add("-XstartOnFirstThread");
+        }
+        cmd.addAll(parsedJvmArgs);
         cmd.add("-cp");
         cmd.add(buildClassPath(versionJson));
         cmd.add(versionJson.get("mainClass").getAsString());
@@ -218,7 +277,7 @@ public class GameLauncher {
             boolean conditionsMet = true;
 
             if (rule.has("os")) {
-                conditionsMet &= evaluateOsCondition(rule.getAsJsonObject("os"));
+                conditionsMet &= MinecraftRuleUtil.evaluateOsCondition(rule.getAsJsonObject("os"));
             }
             if (rule.has("features")) {
                 conditionsMet &= evaluateFeaturesCondition(rule.getAsJsonObject("features"));
@@ -233,44 +292,6 @@ public class GameLauncher {
         }
 
         return allowed;
-    }
-
-    private boolean evaluateOsCondition(JsonObject osCondition) {
-        String osName = System.getProperty("os.name").toLowerCase();
-        String osArch = System.getProperty("os.arch").toLowerCase();
-        boolean match = true;
-
-        if (osCondition.has("name")) {
-            String name = osCondition.get("name").getAsString();
-            if (name.equals("windows") && !osName.contains("win")) {
-                match = false;
-            }
-            if (name.equals("osx") && !osName.contains("mac")) {
-                match = false;
-            }
-            if (name.equals("linux") && !osName.contains("linux")) {
-                match = false;
-            }
-        }
-
-        if (osCondition.has("arch")) {
-            String arch = osCondition.get("arch").getAsString();
-            if (arch.equals("x86") && osArch.contains("64")) {
-                match = false;
-            }
-            if (arch.equals("x86_64") && !osArch.contains("64")) {
-                match = false;
-            }
-        }
-
-        if (osCondition.has("version")) {
-            String versionPattern = osCondition.get("version").getAsString();
-            if (versionPattern.startsWith("^") && !System.getProperty("os.version", "").startsWith(versionPattern.substring(1))) {
-                match = false;
-            }
-        }
-
-        return match;
     }
 
     private boolean evaluateFeaturesCondition(JsonObject featuresCondition) {
@@ -326,7 +347,7 @@ public class GameLauncher {
         if (libraries != null) {
             for (JsonElement el : libraries) {
                 JsonObject lib = el.getAsJsonObject();
-                if (lib.has("rules") && !checkRules(lib.getAsJsonArray("rules"))) {
+                if (lib.has("rules") && !MinecraftRuleUtil.checkRules(lib.getAsJsonArray("rules"))) {
                     continue;
                 }
 
@@ -336,18 +357,20 @@ public class GameLauncher {
                         JsonObject artifact = downloads.getAsJsonObject("artifact");
                         String path = artifact.get("path").getAsString();
                         File file = new File(ECLConfig.getLibrariesDir(), path);
-                        if (file.exists()) {
-                            classpath.add(file.getAbsolutePath());
+                        if (!file.exists()) {
+                            throw new IOException("缺少依赖库: " + path);
                         }
+                        classpath.add(file.getAbsolutePath());
                     }
                 }
             }
         }
 
         File clientJar = new File(ECLConfig.getVersionsDir(), versionId + "/" + versionId + ".jar");
-        if (clientJar.exists()) {
-            classpath.add(clientJar.getAbsolutePath());
+        if (!clientJar.exists()) {
+            throw new IOException("缺少游戏主文件: " + clientJar.getAbsolutePath());
         }
+        classpath.add(clientJar.getAbsolutePath());
 
         extractNatives(versionJson, nativeClassifier);
         return String.join(File.pathSeparator, classpath);
@@ -364,6 +387,10 @@ public class GameLauncher {
 
         for (JsonElement el : libraries) {
             JsonObject lib = el.getAsJsonObject();
+            if (lib.has("rules") && !MinecraftRuleUtil.checkRules(lib.getAsJsonArray("rules"))) {
+                continue;
+            }
+
             if (!lib.has("downloads")) {
                 continue;
             }
@@ -374,12 +401,7 @@ public class GameLauncher {
             }
 
             JsonObject classifiers = downloads.getAsJsonObject("classifiers");
-            String[] nativeKeys = {
-                    "natives-" + nativeClassifier.split("-")[0],
-                    nativeClassifier,
-                    nativeClassifier.split("-")[0]
-            };
-            for (String key : nativeKeys) {
+            for (String key : MinecraftRuleUtil.nativeKeys(nativeClassifier)) {
                 if (classifiers.has(key)) {
                     JsonObject nativeArtifact = classifiers.getAsJsonObject(key);
                     if (nativeArtifact.has("path")) {
@@ -420,39 +442,6 @@ public class GameLauncher {
                 }
             }
         }
-    }
-
-    private boolean checkRules(JsonArray rules) {
-        boolean allowed = rules.isEmpty();
-        String osName = System.getProperty("os.name").toLowerCase();
-
-        for (JsonElement ruleEl : rules) {
-            JsonObject rule = ruleEl.getAsJsonObject();
-            String action = rule.get("action").getAsString();
-            boolean osMatch = true;
-
-            if (rule.has("os")) {
-                JsonObject os = rule.getAsJsonObject("os");
-                String name = os.has("name") ? os.get("name").getAsString() : "";
-                if (name.equals("windows") && !osName.contains("win")) {
-                    osMatch = false;
-                }
-                if (name.equals("osx") && !osName.contains("mac")) {
-                    osMatch = false;
-                }
-                if (name.equals("linux") && !osName.contains("linux")) {
-                    osMatch = false;
-                }
-            }
-
-            if ("allow".equals(action) && osMatch) {
-                allowed = true;
-            }
-            if ("disallow".equals(action) && osMatch) {
-                allowed = false;
-            }
-        }
-        return allowed;
     }
 
     private JsonObject loadVersionJsonWithInheritance() throws IOException {
@@ -503,5 +492,9 @@ public class GameLauncher {
         } catch (IOException ignored) {
         }
         return versionId;
+    }
+
+    private boolean isMac() {
+        return System.getProperty("os.name", "").toLowerCase().contains("mac");
     }
 }

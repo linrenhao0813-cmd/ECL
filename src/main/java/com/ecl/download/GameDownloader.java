@@ -3,6 +3,7 @@ package com.ecl.download;
 import com.ecl.ECLConfig;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.MinecraftRuleUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -45,20 +46,22 @@ public class GameDownloader {
                         .getAsJsonObject("client").get("sha1").getAsString();
 
                 File clientJar = new File(versionDir, versionId + ".jar");
-                HttpUtil.downloadFileWithProgress(clientUrl, clientJar, new HttpUtil.ProgressCallback() {
-                    @Override
-                    public void onStart(long total) {
-                        if (listener != null) listener.onProgress(0, total);
-                    }
+                if (!isValidSha1(clientJar, clientSha1)) {
+                    HttpUtil.downloadFileWithProgress(clientUrl, clientJar, new HttpUtil.ProgressCallback() {
+                        @Override
+                        public void onStart(long total) {
+                            if (listener != null) listener.onProgress(0, total);
+                        }
 
-                    @Override
-                    public void onProgress(long downloaded, long total) {
-                        if (listener != null) listener.onProgress(downloaded, total);
-                    }
+                        @Override
+                        public void onProgress(long downloaded, long total) {
+                            if (listener != null) listener.onProgress(downloaded, total);
+                        }
 
-                    @Override
-                    public void onComplete(File file) {}
-                }, sourceCallback("游戏主文件"));
+                        @Override
+                        public void onComplete(File file) {}
+                    }, sourceCallback("游戏主文件"));
+                }
 
                 if (!FileUtil.verifySha1(clientJar, clientSha1)) {
                     if (listener != null) listener.onError("游戏主文件校验失败");
@@ -87,7 +90,7 @@ public class GameDownloader {
             JsonObject lib = el.getAsJsonObject();
 
             if (lib.has("rules")) {
-                if (!checkRules(lib.getAsJsonArray("rules"))) continue;
+                if (!MinecraftRuleUtil.checkRules(lib.getAsJsonArray("rules"))) continue;
             }
 
             JsonObject artifacts = null;
@@ -105,20 +108,25 @@ public class GameDownloader {
                 if (!target.exists() || (sha1 != null && !FileUtil.verifySha1(target, sha1))) {
                     if (listener != null) listener.onStatus("下载库: " + path);
                     HttpUtil.downloadFile(url, target, sourceCallback("依赖库"));
+                    verifyDownloadedSha1(target, sha1, "依赖库校验失败: " + path);
                 }
             }
 
             if (artifacts != null && artifacts.has("classifiers")) {
                 JsonObject classifiers = artifacts.getAsJsonObject("classifiers");
-                String nativeKey = "natives-" + nativeClassifier.split("-")[0];
-                if (classifiers.has(nativeKey)) {
-                    JsonObject nativeArtifact = classifiers.getAsJsonObject(nativeKey);
-                    String url = nativeArtifact.get("url").getAsString();
-                    String path = nativeArtifact.get("path").getAsString();
-                    File target = new File(ECLConfig.getLibrariesDir(), path);
-                    if (!target.exists()) {
-                        if (listener != null) listener.onStatus("下载原生库: " + path);
-                        HttpUtil.downloadFile(url, target, sourceCallback("原生库"));
+                for (String nativeKey : MinecraftRuleUtil.nativeKeys(nativeClassifier)) {
+                    if (classifiers.has(nativeKey)) {
+                        JsonObject nativeArtifact = classifiers.getAsJsonObject(nativeKey);
+                        String url = nativeArtifact.get("url").getAsString();
+                        String path = nativeArtifact.get("path").getAsString();
+                        File target = new File(ECLConfig.getLibrariesDir(), path);
+                        String sha1 = nativeArtifact.has("sha1") ? nativeArtifact.get("sha1").getAsString() : null;
+                        if (!target.exists() || (sha1 != null && !FileUtil.verifySha1(target, sha1))) {
+                            if (listener != null) listener.onStatus("下载原生库: " + path);
+                            HttpUtil.downloadFile(url, target, sourceCallback("原生库"));
+                            verifyDownloadedSha1(target, sha1, "原生库校验失败: " + path);
+                        }
+                        break;
                     }
                 }
             }
@@ -131,13 +139,15 @@ public class GameDownloader {
 
         String assetId = assetIndex.get("id").getAsString();
         String assetUrl = assetIndex.get("url").getAsString();
+        String assetIndexSha1 = assetIndex.has("sha1") ? assetIndex.get("sha1").getAsString() : null;
 
         File assetDir = new File(ECLConfig.getAssetsDir(), "objects");
         File indexFile = new File(ECLConfig.getAssetsDir(), "indexes/" + assetId + ".json");
 
-        if (!indexFile.exists()) {
+        if (!indexFile.exists() || (assetIndexSha1 != null && !FileUtil.verifySha1(indexFile, assetIndexSha1))) {
             indexFile.getParentFile().mkdirs();
             HttpUtil.downloadFile(assetUrl, indexFile, sourceCallback("资源索引"));
+            verifyDownloadedSha1(indexFile, assetIndexSha1, "资源索引校验失败: " + assetId);
         }
 
         JsonObject indexJson = HttpUtil.readJson(indexFile);
@@ -152,10 +162,11 @@ public class GameDownloader {
             String subPath = hash.substring(0, 2) + "/" + hash;
             File target = new File(assetDir, subPath);
 
-            if (!target.exists()) {
+            if (!FileUtil.verifySha1(target, hash)) {
                 String url = "https://resources.download.minecraft.net/" + subPath;
                 target.getParentFile().mkdirs();
                 HttpUtil.downloadFile(url, target, sourceCallback("资源文件"));
+                verifyDownloadedSha1(target, hash, "资源文件校验失败: " + name);
             }
 
             count++;
@@ -165,27 +176,14 @@ public class GameDownloader {
         }
     }
 
-    private boolean checkRules(JsonArray rules) {
-        boolean allowed = rules.size() == 0;
-        String osName = System.getProperty("os.name").toLowerCase();
+    private boolean isValidSha1(File file, String sha1) {
+        return file.exists() && (sha1 == null || FileUtil.verifySha1(file, sha1));
+    }
 
-        for (JsonElement ruleEl : rules) {
-            JsonObject rule = ruleEl.getAsJsonObject();
-            String action = rule.get("action").getAsString();
-            boolean osMatch = true;
-
-            if (rule.has("os")) {
-                JsonObject os = rule.getAsJsonObject("os");
-                String name = os.has("name") ? os.get("name").getAsString() : "";
-                if (name.equals("windows") && !osName.contains("win")) osMatch = false;
-                if (name.equals("osx") && !osName.contains("mac")) osMatch = false;
-                if (name.equals("linux") && !osName.contains("linux")) osMatch = false;
-            }
-
-            if ("allow".equals(action) && osMatch) allowed = true;
-            if ("disallow".equals(action) && osMatch) allowed = false;
+    private void verifyDownloadedSha1(File file, String sha1, String message) throws IOException {
+        if (sha1 != null && !FileUtil.verifySha1(file, sha1)) {
+            throw new IOException(message);
         }
-        return allowed;
     }
 
     private HttpUtil.SourceCallback sourceCallback(String label) {
