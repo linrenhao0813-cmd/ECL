@@ -16,7 +16,7 @@ public class ECLConfig {
         if (baseDir == null) {
             String os = System.getProperty("os.name").toLowerCase();
             if (os.contains("win")) {
-                baseDir = new File(System.getenv("APPDATA"), ".ecl");
+                baseDir = new File(getWindowsRoamingDir(), ".ecl");
             } else if (os.contains("mac")) {
                 baseDir = new File(System.getProperty("user.home"), "Library/Application Support/.ecl");
             } else {
@@ -39,6 +39,16 @@ public class ECLConfig {
     }
 
     public static File getGameDir() {
+        String os = System.getProperty("os.name").toLowerCase();
+        if (os.contains("win")) {
+            return new File(getWindowsRoamingDir(), ".minecraft");
+        } else if (os.contains("mac")) {
+            return new File(System.getProperty("user.home"), "Library/Application Support/minecraft");
+        }
+        return new File(System.getProperty("user.home"), ".minecraft");
+    }
+
+    public static File getLegacyGameDir() {
         return new File(getBaseDir(), "game");
     }
 
@@ -48,5 +58,13 @@ public class ECLConfig {
         getLibrariesDir().mkdirs();
         getAssetsDir().mkdirs();
         getGameDir().mkdirs();
+    }
+
+    private static File getWindowsRoamingDir() {
+        String appData = System.getenv("APPDATA");
+        if (appData != null && !appData.isBlank()) {
+            return new File(appData);
+        }
+        return new File(System.getProperty("user.home"), "AppData/Roaming");
     }
 }

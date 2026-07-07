@@ -66,7 +66,14 @@ public class FileUtil {
         else if (os.contains("mac")) osName = "osx";
         else osName = "linux";
 
-        String osArch = arch.contains("64") ? "x86_64" : "x86";
+        String osArch;
+        if (arch.contains("aarch64") || arch.contains("arm64")) {
+            osArch = "arm64";
+        } else if (arch.contains("64") || arch.contains("amd64")) {
+            osArch = "x86_64";
+        } else {
+            osArch = "x86";
+        }
 
         return osName + "-" + osArch;
     }

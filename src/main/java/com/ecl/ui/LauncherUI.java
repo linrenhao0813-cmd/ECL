@@ -205,7 +205,7 @@ public class LauncherUI extends javafx.application.Application {
         gameLauncher = new GameLauncher();
 
         javaPath = JavaRuntimeUtil.resolveJavaExecutable(settingsManager.getString("javaPath", ""));
-        gameDir = new File(settingsManager.getString("gameDir", ECLConfig.getGameDir().getAbsolutePath()));
+        gameDir = loadConfiguredGameRootDir();
         extraJvmArgs = settingsManager.getString("jvmArgs", "");
         contentTargets = createContentTargets();
 
@@ -1902,6 +1902,28 @@ public class LauncherUI extends javafx.application.Application {
         return gameDir == null ? ECLConfig.getGameDir() : gameDir;
     }
 
+    private File loadConfiguredGameRootDir() {
+        File defaultGameDir = ECLConfig.getGameDir();
+        File configuredDir = new File(settingsManager.getString("gameDir", defaultGameDir.getAbsolutePath()));
+        if (isSamePath(configuredDir, ECLConfig.getLegacyGameDir())) {
+            configuredDir = defaultGameDir;
+            settingsManager.setString("gameDir", configuredDir.getAbsolutePath());
+            settingsManager.save();
+        }
+        return configuredDir;
+    }
+
+    private boolean isSamePath(File first, File second) {
+        if (first == null || second == null) {
+            return false;
+        }
+        String firstPath = first.getAbsoluteFile().toPath().normalize().toString();
+        String secondPath = second.getAbsoluteFile().toPath().normalize().toString();
+        return System.getProperty("os.name", "").toLowerCase().contains("win")
+                ? firstPath.equalsIgnoreCase(secondPath)
+                : firstPath.equals(secondPath);
+    }
+
     private File getActiveGameDir() {
         return resolveVersionGameDir(getSelectedVersion());
     }
@@ -1911,7 +1933,7 @@ public class LauncherUI extends javafx.application.Application {
         if (gameVersion == null || gameVersion.isBlank()) {
             return rootDir;
         }
-        return new File(new File(rootDir, "instances"), sanitizeVersionDirectoryName(gameVersion));
+        return new File(new File(rootDir, "versions"), sanitizeVersionDirectoryName(gameVersion));
     }
 
     private void ensureVersionGameDirs(String gameVersion) throws IOException {

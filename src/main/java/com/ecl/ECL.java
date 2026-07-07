@@ -44,12 +44,13 @@ public class ECL {
             classpath.add(currentClasspath);
         }
 
-        addCachedJar(classpath, "org.openjfx", "javafx-base", "21");
-        addCachedJar(classpath, "org.openjfx", "javafx-graphics", "21");
-        addCachedJar(classpath, "org.openjfx", "javafx-controls", "21");
-        addCachedJar(classpath, "org.openjfx", "javafx-fxml", "21");
-        addCachedJar(classpath, "org.openjfx", "javafx-media", "21");
-        addCachedJar(classpath, "org.openjfx", "javafx-web", "21");
+        String javafxClassifier = javafxClassifier();
+        addCachedJar(classpath, "org.openjfx", "javafx-base", "21", javafxClassifier);
+        addCachedJar(classpath, "org.openjfx", "javafx-graphics", "21", javafxClassifier);
+        addCachedJar(classpath, "org.openjfx", "javafx-controls", "21", javafxClassifier);
+        addCachedJar(classpath, "org.openjfx", "javafx-fxml", "21", javafxClassifier);
+        addCachedJar(classpath, "org.openjfx", "javafx-media", "21", javafxClassifier);
+        addCachedJar(classpath, "org.openjfx", "javafx-web", "21", javafxClassifier);
         addCachedJar(classpath, "com.google.code.gson", "gson", "2.10.1");
         addCachedJar(classpath, "org.jsoup", "jsoup", "1.17.2");
 
@@ -69,9 +70,16 @@ public class ECL {
     }
 
     private static void addCachedJar(List<String> classpath, String group, String artifact, String version) throws IOException {
+        addCachedJar(classpath, group, artifact, version, null);
+    }
+
+    private static void addCachedJar(List<String> classpath, String group, String artifact, String version, String classifier) throws IOException {
         File cacheDir = new File(System.getProperty("user.home"),
                 ".gradle/caches/modules-2/files-2.1/" + group + "/" + artifact + "/" + version);
-        File jar = findJar(cacheDir, artifact + "-" + version);
+        String prefix = classifier == null || classifier.isBlank()
+                ? artifact + "-" + version
+                : artifact + "-" + version + "-" + classifier;
+        File jar = findJar(cacheDir, prefix);
         if (jar == null) {
             throw new IOException("找不到依赖缓存: " + group + ":" + artifact + ":" + version);
         }
@@ -108,5 +116,17 @@ public class ECL {
     private static String javaExecutable() {
         String executable = System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java";
         return new File(System.getProperty("java.home"), "bin/" + executable).getAbsolutePath();
+    }
+
+    private static String javafxClassifier() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        String osArch = System.getProperty("os.arch", "").toLowerCase();
+        if (osName.contains("win")) {
+            return "win";
+        }
+        if (osName.contains("mac")) {
+            return osArch.contains("aarch64") || osArch.contains("arm64") ? "mac-aarch64" : "mac";
+        }
+        return "linux";
     }
 }
