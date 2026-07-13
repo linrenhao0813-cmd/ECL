@@ -7,7 +7,10 @@ group = 'com.ecl'
 version = '1.0.0'
 
 def osName = System.getProperty('os.name').toLowerCase()
-def javafxPlatform = osName.contains('win') ? 'win' : (osName.contains('mac') ? 'mac' : 'linux')
+def osArch = System.getProperty('os.arch').toLowerCase()
+def detectedJavafxPlatform = osName.contains('win') ? 'win' :
+        (osName.contains('mac') ? (osArch.contains('aarch64') || osArch.contains('arm64') ? 'mac-aarch64' : 'mac') : 'linux')
+def javafxPlatform = findProperty('javafxPlatform') ?: detectedJavafxPlatform
 
 repositories {
     maven { url = uri('https://maven.aliyun.com/repository/public') }
@@ -102,4 +105,40 @@ tasks.register('packageWindowsApp', Exec) {
             '--main-class', 'com.ecl.ECL',
             '--icon', iconFile,
             '--java-options', '-Dfile.encoding=UTF-8'
+}
+
+tasks.register('packageMacApp', Exec) {
+    dependsOn installDist
+    group = 'distribution'
+    description = 'Build a macOS app image with ECL.app.'
+    onlyIf {
+        System.getProperty('os.name').toLowerCase().contains('mac')
+    }
+
+    def outputDir = file("dist/macos/${javafxPlatform}")
+    def iconFile = file('src/main/resources/icons/ecl-icon.icns')
+    def jpackageExe = file("${System.getProperty('java.home')}/bin/jpackage")
+
+    doFirst {
+        normalizeForDelete(outputDir)
+        delete outputDir
+        outputDir.mkdirs()
+
+        def args = [
+                jpackageExe.absolutePath,
+                '--type', 'app-image',
+                '--name', 'ECL',
+                '--app-version', project.version.toString(),
+                '--vendor', 'ECL',
+                '--dest', outputDir.absolutePath,
+                '--input', file("$buildDir/install/ECL/lib").absolutePath,
+                '--main-jar', "ECL-${project.version}.jar",
+                '--main-class', 'com.ecl.ECL',
+                '--java-options', '-Dfile.encoding=UTF-8'
+        ]
+        if (iconFile.exists()) {
+            args.addAll(['--icon', iconFile.absolutePath])
+        }
+        commandLine args
+    }
 }

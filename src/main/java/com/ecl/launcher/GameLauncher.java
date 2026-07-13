@@ -89,7 +89,8 @@ public class GameLauncher {
         launchDirectory.mkdirs();
         gameDir = launchDirectory;
 
-        String resolvedJavaPath = JavaRuntimeUtil.resolveJavaExecutable(javaPath);
+        int requiredJavaMajor = determineRequiredJavaMajor(versionJson);
+        String resolvedJavaPath = JavaRuntimeUtil.resolveJavaExecutable(javaPath, requiredJavaMajor);
         List<String> command = buildCommand(resolvedJavaPath, versionJson);
 
         ProcessBuilder pb = new ProcessBuilder(command);
@@ -102,6 +103,59 @@ public class GameLauncher {
         pb.redirectErrorStream(true);
 
         return pb.start();
+    }
+
+    private int determineRequiredJavaMajor(JsonObject versionJson) {
+        if (versionJson != null && versionJson.has("javaVersion")) {
+            JsonObject javaVersion = versionJson.getAsJsonObject("javaVersion");
+            if (javaVersion.has("majorVersion")) {
+                try {
+                    return javaVersion.get("majorVersion").getAsInt();
+                } catch (NumberFormatException | IllegalStateException ignored) {
+                }
+            }
+        }
+
+        return inferRequiredJavaMajorFromVersionId();
+    }
+
+    private int inferRequiredJavaMajorFromVersionId() {
+        int[] release = parseReleaseVersion(versionId);
+        if (release == null) {
+            return 8;
+        }
+
+        int minor = release[1];
+        int patch = release[2];
+        if (minor > 20 || minor == 20 && patch >= 5) {
+            return 21;
+        }
+        if (minor >= 18) {
+            return 17;
+        }
+        return 8;
+    }
+
+    private int[] parseReleaseVersion(String id) {
+        if (id == null || !id.startsWith("1.")) {
+            return null;
+        }
+
+        String[] parts = id.split("\\.");
+        if (parts.length < 2) {
+            return null;
+        }
+
+        try {
+            int minor = Integer.parseInt(parts[1].replaceAll("[^0-9].*$", ""));
+            int patch = 0;
+            if (parts.length >= 3) {
+                patch = Integer.parseInt(parts[2].replaceAll("[^0-9].*$", ""));
+            }
+            return new int[]{1, minor, patch};
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private List<String> buildCommand(String javaExecutable, JsonObject versionJson) throws IOException {
@@ -267,9 +321,10 @@ public class GameLauncher {
                         JsonObject artifact = downloads.getAsJsonObject("artifact");
                         String path = artifact.get("path").getAsString();
                         File file = new File(ECLConfig.getLibrariesDir(), path);
-                        if (file.exists()) {
-                            classpath.add(file.getAbsolutePath());
+                        if (!file.exists()) {
+                            throw new IOException("缺少依赖库: " + path);
                         }
+                        classpath.add(file.getAbsolutePath());
                     }
                 }
             }
@@ -282,6 +337,7 @@ public class GameLauncher {
         } else {
             throw new IOException("Missing client JAR for version " + versionId + ": " + clientJar.getAbsolutePath());
         }
+        classpath.add(clientJar.getAbsolutePath());
 
         extractNatives(versionJson, nativeClassifier);
         return String.join(File.pathSeparator, classpath);
@@ -588,5 +644,9 @@ public class GameLauncher {
             }
         }
         return versionId;
+    }
+
+    private boolean isMac() {
+        return System.getProperty("os.name", "").toLowerCase().contains("mac");
     }
 }

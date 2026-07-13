@@ -1,12 +1,22 @@
 package com.ecl.util;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.BufferedReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class JavaRuntimeUtil {
+    private static final Pattern JAVA_VERSION_PATTERN = Pattern.compile("version \"([^\"]+)\"");
+
     private JavaRuntimeUtil() {
     }
 
@@ -38,6 +48,45 @@ public final class JavaRuntimeUtil {
         return executableName();
     }
 
+    public static String resolveJavaExecutable(String configuredPath, int requiredMajorVersion) throws IOException {
+        if (requiredMajorVersion <= 0) {
+            return resolveJavaExecutable(configuredPath);
+        }
+
+        Set<File> candidates = new LinkedHashSet<>();
+        addCandidate(candidates, configuredPath);
+        addCandidate(candidates, System.getProperty("java.home"));
+        addCandidate(candidates, System.getenv("JAVA_HOME"));
+        candidates.addAll(findInstalledJavaCandidates());
+
+        File bestKnown = null;
+        int bestKnownVersion = -1;
+        for (File candidate : candidates) {
+            int featureVersion = detectJavaFeatureVersion(candidate);
+            if (featureVersion >= requiredMajorVersion) {
+                return candidate.getAbsolutePath();
+            }
+            if (featureVersion > bestKnownVersion) {
+                bestKnown = candidate;
+                bestKnownVersion = featureVersion;
+            }
+        }
+
+        if (bestKnown != null && bestKnownVersion > 0) {
+            throw new IOException("当前 Minecraft 版本需要 Java " + requiredMajorVersion
+                    + " 或更高版本，但当前可用 Java 最高为 " + bestKnownVersion
+                    + ": " + bestKnown.getAbsolutePath());
+        }
+
+        String fallback = resolveJavaExecutable(configuredPath);
+        if (!executableName().equals(fallback)) {
+            return fallback;
+        }
+
+        throw new IOException("当前 Minecraft 版本需要 Java " + requiredMajorVersion
+                + " 或更高版本，但没有找到可用的 Java 运行时。");
+    }
+
     public static boolean isUsableJavaPath(String path) {
         return resolveJavaCandidate(path) != null;
     }
@@ -54,6 +103,16 @@ public final class JavaRuntimeUtil {
                 return fromBin;
             }
 
+            File fromMacBundle = new File(candidate, "Contents/Home/bin/" + executableName());
+            if (fromMacBundle.isFile()) {
+                return fromMacBundle;
+            }
+
+            File fromHomebrewBundle = new File(candidate, "libexec/openjdk.jdk/Contents/Home/bin/" + executableName());
+            if (fromHomebrewBundle.isFile()) {
+                return fromHomebrewBundle;
+            }
+
             File nestedExecutable = new File(candidate, executableName());
             if (nestedExecutable.isFile()) {
                 return nestedExecutable;
@@ -65,9 +124,17 @@ public final class JavaRuntimeUtil {
     }
 
     private static File findInstalledJava() {
+        List<File> candidates = findInstalledJavaCandidates();
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    private static List<File> findInstalledJavaCandidates() {
+        List<File> candidates = new ArrayList<>();
         List<File> roots = new ArrayList<>();
         String userHome = System.getProperty("user.home", "");
         String programFiles = System.getenv("ProgramFiles");
+        String programFilesX86 = System.getenv("ProgramFiles(x86)");
+        String osName = System.getProperty("os.name", "").toLowerCase();
 
         if (!userHome.isBlank()) {
             roots.add(new File(userHome, ".jdks"));
@@ -77,40 +144,119 @@ public final class JavaRuntimeUtil {
             roots.add(new File(programFiles, "Eclipse Adoptium"));
             roots.add(new File(programFiles, "Microsoft"));
         }
+        if (programFilesX86 != null && !programFilesX86.isBlank()) {
+            roots.add(new File(programFilesX86, "Java"));
+            roots.add(new File(programFilesX86, "Eclipse Adoptium"));
+        }
+        if (osName.contains("mac")) {
+            roots.add(new File("/Library/Java/JavaVirtualMachines"));
+            if (!userHome.isBlank()) {
+                roots.add(new File(userHome, "Library/Java/JavaVirtualMachines"));
+            }
+            roots.add(new File("/opt/homebrew/opt/openjdk"));
+            roots.add(new File("/usr/local/opt/openjdk"));
+            roots.add(new File("/opt/homebrew/Cellar/openjdk"));
+            roots.add(new File("/usr/local/Cellar/openjdk"));
+        }
 
         for (File root : roots) {
-            File javaExecutable = findJavaUnderRoot(root);
-            if (javaExecutable != null) {
-                return javaExecutable;
-            }
+            candidates.addAll(findJavaCandidatesUnderRoot(root));
         }
-        return null;
+        return candidates;
     }
 
-    private static File findJavaUnderRoot(File root) {
+    private static List<File> findJavaCandidatesUnderRoot(File root) {
+        List<File> candidates = new ArrayList<>();
         if (root == null || !root.exists()) {
-            return null;
+            return candidates;
         }
 
         File direct = resolveJavaCandidate(root.getAbsolutePath());
         if (direct != null) {
-            return direct;
+            candidates.add(direct);
         }
 
         File[] children = root.listFiles(File::isDirectory);
         if (children == null || children.length == 0) {
-            return null;
+            return candidates;
         }
 
         Arrays.sort(children, Comparator.comparing(File::getName).reversed());
         for (File child : children) {
             File candidate = resolveJavaCandidate(child.getAbsolutePath());
             if (candidate != null) {
-                return candidate;
+                candidates.add(candidate);
             }
         }
 
-        return null;
+        return candidates;
+    }
+
+    private static void addCandidate(Set<File> candidates, String path) {
+        File candidate = resolveJavaCandidate(path);
+        if (candidate != null) {
+            candidates.add(candidate);
+        }
+    }
+
+    private static int detectJavaFeatureVersion(File javaExecutable) {
+        if (javaExecutable == null || !javaExecutable.isFile()) {
+            return -1;
+        }
+
+        Process process = null;
+        try {
+            process = new ProcessBuilder(javaExecutable.getAbsolutePath(), "-version")
+                    .redirectErrorStream(true)
+                    .start();
+
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append('\n');
+                }
+            }
+
+            process.waitFor(3, TimeUnit.SECONDS);
+            return parseJavaFeatureVersion(output.toString());
+        } catch (IOException e) {
+            return -1;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return -1;
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+
+    private static int parseJavaFeatureVersion(String versionOutput) {
+        if (versionOutput == null || versionOutput.isBlank()) {
+            return -1;
+        }
+
+        Matcher matcher = JAVA_VERSION_PATTERN.matcher(versionOutput);
+        if (!matcher.find()) {
+            return -1;
+        }
+
+        String version = matcher.group(1);
+        String[] parts = version.split("[._+-]");
+        if (parts.length == 0) {
+            return -1;
+        }
+
+        try {
+            int first = Integer.parseInt(parts[0]);
+            if (first == 1 && parts.length > 1) {
+                return Integer.parseInt(parts[1]);
+            }
+            return first;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     private static String executableName() {

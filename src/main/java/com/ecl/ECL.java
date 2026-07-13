@@ -66,9 +66,16 @@ public class ECL {
     }
 
     private static void addCachedJar(List<String> classpath, String group, String artifact, String version) throws IOException {
+        addCachedJar(classpath, group, artifact, version, null);
+    }
+
+    private static void addCachedJar(List<String> classpath, String group, String artifact, String version, String classifier) throws IOException {
         File cacheDir = new File(System.getProperty("user.home"),
                 ".gradle/caches/modules-2/files-2.1/" + group + "/" + artifact + "/" + version);
-        File jar = findJar(cacheDir, artifact + "-" + version);
+        String prefix = classifier == null || classifier.isBlank()
+                ? artifact + "-" + version
+                : artifact + "-" + version + "-" + classifier;
+        File jar = findJar(cacheDir, prefix);
         if (jar == null) {
             throw new IOException("找不到依赖缓存: " + group + ":" + artifact + ":" + version);
         }
@@ -105,5 +112,17 @@ public class ECL {
     private static String javaExecutable() {
         String executable = PlatformUtil.isWindows() ? "java.exe" : "java";
         return new File(System.getProperty("java.home"), "bin/" + executable).getAbsolutePath();
+    }
+
+    private static String javafxClassifier() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        String osArch = System.getProperty("os.arch", "").toLowerCase();
+        if (osName.contains("win")) {
+            return "win";
+        }
+        if (osName.contains("mac")) {
+            return osArch.contains("aarch64") || osArch.contains("arm64") ? "mac-aarch64" : "mac";
+        }
+        return "linux";
     }
 }

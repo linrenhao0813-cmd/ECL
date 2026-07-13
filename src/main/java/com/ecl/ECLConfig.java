@@ -70,6 +70,16 @@ public class ECLConfig {
     }
 
     public static File getGameDir() {
+        String os = System.getProperty("os.name").toLowerCase();
+        if (os.contains("win")) {
+            return new File(getWindowsRoamingDir(), ".minecraft");
+        } else if (os.contains("mac")) {
+            return new File(System.getProperty("user.home"), "Library/Application Support/minecraft");
+        }
+        return new File(System.getProperty("user.home"), ".minecraft");
+    }
+
+    public static File getLegacyGameDir() {
         return new File(getBaseDir(), "game");
     }
 
