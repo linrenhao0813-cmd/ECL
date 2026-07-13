@@ -15,6 +15,7 @@ ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle �
 - 游戏异常退出后自动分析英文日志，输出中文解释和修复建议
 - 当前版本可一键打开 mc 中文 Wiki 对应版本更新介绍
 - 官方源下载较慢或失败时自动尝试镜像源
+- 依赖库和资源文件使用受控线程池并发下载，默认按设备使用 4～8 个线程
 - 极简 Minecraft 风格 JavaFX 桌面界面
 - Windows `jpackage` 应用镜像打包任务，可生成 `ECL.exe`
 
@@ -186,6 +187,7 @@ game/instances/<version>/
 - JavaFX 应用类：`com.ecl.ui.LauncherUI`
 - 默认应用版本：`1.0.0`
 - 源码编译编码：`UTF-8`
+- 下载线程数：默认自动选择 4～8，可通过 JVM 参数 `-Decl.download.threads=线程数` 调整（范围 2～16）
 
 清理构建产物：
 

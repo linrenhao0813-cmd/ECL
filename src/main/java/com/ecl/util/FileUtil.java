@@ -6,6 +6,7 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Locale;
 
 public class FileUtil {
     public static String sha1(File file) throws IOException {
@@ -27,7 +28,7 @@ public class FileUtil {
         byte[] hash = digest.digest();
         StringBuilder sb = new StringBuilder();
         for (byte b : hash) {
-            sb.append(String.format("%02x", b));
+            sb.append(String.format(Locale.ROOT, "%02x", b));
         }
         return sb.toString();
     }
@@ -58,16 +59,8 @@ public class FileUtil {
     }
 
     public static String getNativeClassifier() {
-        String os = System.getProperty("os.name").toLowerCase();
         String arch = System.getProperty("os.arch").toLowerCase();
-
-        String osName;
-        if (os.contains("win")) osName = "windows";
-        else if (os.contains("mac")) osName = "osx";
-        else osName = "linux";
-
         String osArch = arch.contains("64") ? "x86_64" : "x86";
-
-        return osName + "-" + osArch;
+        return PlatformUtil.current().minecraftName() + "-" + osArch;
     }
 }

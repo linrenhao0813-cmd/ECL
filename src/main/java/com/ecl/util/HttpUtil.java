@@ -15,22 +15,20 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.Writer;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
+import java.util.Map;
+import java.util.StringJoiner;
 
 public class HttpUtil {
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final Gson COMPACT_GSON = new Gson();
+    private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
     public static String get(String urlStr) throws IOException {
-        HttpURLConnection conn = openConnection(urlStr, "GET", 15000, 15000);
-        try {
-            ensureSuccess(conn);
-            return readStream(conn.getInputStream());
-        } finally {
-            conn.disconnect();
-        }
+        Response response = request("GET", urlStr, null, null, Map.of());
+        response.requireSuccess();
+        return response.body();
     }
 
     public static String getWithMirrors(String urlStr, SourceCallback callback) throws IOException {
@@ -39,13 +37,10 @@ public class HttpUtil {
             boolean mirror = DownloadSourceUtil.isMirror(urlStr, candidate);
             notifySource(callback, urlStr, candidate, mirror);
             try {
-                HttpURLConnection conn = openConnection(candidate, "GET", timeoutFor(mirror), timeoutFor(mirror));
-                try {
-                    ensureSuccess(conn);
-                    return readStream(conn.getInputStream());
-                } finally {
-                    conn.disconnect();
-                }
+                Response response = request("GET", candidate, null, null, Map.of(),
+                        timeoutFor(mirror), timeoutFor(mirror));
+                response.requireSuccess();
+                return response.body();
             } catch (IOException e) {
                 lastError = e;
                 notifyFailure(callback, candidate, e);
@@ -55,18 +50,54 @@ public class HttpUtil {
     }
 
     public static String postJson(String urlStr, String body) throws IOException {
-        HttpURLConnection conn = openConnection(urlStr, "POST", 15000, 15000);
-        conn.setDoOutput(true);
-        conn.setRequestProperty("Content-Type", "application/json");
-        conn.setRequestProperty("Accept", "application/json");
+        Response response = request("POST", urlStr, "application/json", body, Map.of());
+        response.requireSuccess();
+        return response.body();
+    }
 
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(body.getBytes(StandardCharsets.UTF_8));
+    public static String postJson(String urlStr, JsonObject body) throws IOException {
+        return postJson(urlStr, COMPACT_GSON.toJson(body));
+    }
+
+    public static Response postForm(String urlStr, Map<String, String> form) throws IOException {
+        StringJoiner encoded = new StringJoiner("&");
+        for (Map.Entry<String, String> entry : form.entrySet()) {
+            encoded.add(java.net.URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8) + "="
+                    + java.net.URLEncoder.encode(entry.getValue() == null ? "" : entry.getValue(), StandardCharsets.UTF_8));
         }
+        return request("POST", urlStr, "application/x-www-form-urlencoded", encoded.toString(), Map.of());
+    }
 
+    public static Response getBearer(String urlStr, String bearerToken) throws IOException {
+        return request("GET", urlStr, null, null, Map.of("Authorization", "Bearer " + bearerToken));
+    }
+
+    public static Response postJsonResponse(String urlStr, JsonObject body) throws IOException {
+        return request("POST", urlStr, "application/json", COMPACT_GSON.toJson(body), Map.of());
+    }
+
+    public static Response request(String method, String urlStr, String contentType, String body,
+                                   Map<String, String> headers) throws IOException {
+        return request(method, urlStr, contentType, body, headers, 15000, 30000);
+    }
+
+    private static Response request(String method, String urlStr, String contentType, String body,
+                                    Map<String, String> headers, int connectTimeout, int readTimeout) throws IOException {
+        checkInterrupted();
+        HttpURLConnection conn = openConnection(urlStr, method, connectTimeout, readTimeout);
+        conn.setRequestProperty("Accept", "application/json");
+        if (contentType != null) conn.setRequestProperty("Content-Type", contentType);
+        if (headers != null) headers.forEach(conn::setRequestProperty);
         try {
-            ensureSuccess(conn);
-            return readStream(conn.getInputStream());
+            if (body != null) {
+                conn.setDoOutput(true);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(body.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            int statusCode = conn.getResponseCode();
+            InputStream stream = statusCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            return new Response(statusCode, readStream(stream), conn.getURL().toString());
         } finally {
             conn.disconnect();
         }
@@ -84,17 +115,25 @@ public class HttpUtil {
 
         IOException lastError = null;
         for (String candidate : DownloadSourceUtil.candidates(urlStr)) {
+            checkInterrupted();
             boolean mirror = DownloadSourceUtil.isMirror(urlStr, candidate);
             notifySource(callback, urlStr, candidate, mirror);
             HttpURLConnection conn = openConnection(candidate, "GET", timeoutFor(mirror), timeoutFor(mirror));
             try {
                 ensureSuccess(conn);
-                try (InputStream is = conn.getInputStream()) {
-                    Files.copy(is, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                byte[] buffer = new byte[8192];
+                try (InputStream is = conn.getInputStream();
+                     OutputStream output = Files.newOutputStream(target.toPath())) {
+                    int read;
+                    while ((read = is.read(buffer)) != -1) {
+                        checkInterrupted();
+                        output.write(buffer, 0, read);
+                    }
                 }
                 return;
             } catch (IOException e) {
                 lastError = e;
+                Files.deleteIfExists(target.toPath());
                 notifyFailure(callback, candidate, e);
             } finally {
                 conn.disconnect();
@@ -116,6 +155,7 @@ public class HttpUtil {
 
         IOException lastError = null;
         for (String candidate : DownloadSourceUtil.candidates(urlStr)) {
+            checkInterrupted();
             boolean mirror = DownloadSourceUtil.isMirror(urlStr, candidate);
             notifySource(sourceCallback, urlStr, candidate, mirror);
             HttpURLConnection conn = openConnection(candidate, "GET", timeoutFor(mirror), timeoutFor(mirror));
@@ -132,6 +172,7 @@ public class HttpUtil {
                 int read;
                 try (InputStream is = conn.getInputStream(); FileOutputStream fos = new FileOutputStream(target)) {
                     while ((read = is.read(buffer)) != -1) {
+                        checkInterrupted();
                         fos.write(buffer, 0, read);
                         totalRead += read;
                         if (callback != null) {
@@ -169,7 +210,7 @@ public class HttpUtil {
             parent.mkdirs();
         }
         try (Writer writer = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8)) {
-            writer.write(GSON.toJson(obj));
+            writer.write(PRETTY_GSON.toJson(obj));
         }
     }
 
@@ -179,9 +220,10 @@ public class HttpUtil {
     }
 
     private static HttpURLConnection openConnection(String urlStr, String method, int connectTimeout, int readTimeout) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+        HttpURLConnection conn = (HttpURLConnection) URI.create(urlStr).toURL().openConnection();
         conn.setRequestMethod(method);
         conn.setRequestProperty("User-Agent", "ECL/1.0");
+        conn.setInstanceFollowRedirects(true);
         conn.setConnectTimeout(connectTimeout);
         conn.setReadTimeout(readTimeout);
         return conn;
@@ -213,7 +255,7 @@ public class HttpUtil {
         if (errorBody.isBlank()) {
             throw new IOException("HTTP " + code + " for " + conn.getURL());
         }
-        throw new IOException("HTTP " + code + " for " + conn.getURL() + ": " + abbreviate(errorBody));
+        throw new IOException("HTTP " + code + " for " + conn.getURL() + ": " + TextUtil.abbreviate(errorBody, 240));
     }
 
     private static String readStream(InputStream inputStream) throws IOException {
@@ -225,14 +267,30 @@ public class HttpUtil {
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
+                checkInterrupted();
                 sb.append(line);
             }
             return sb.toString();
         }
     }
 
-    private static String abbreviate(String text) {
-        return text.length() > 240 ? text.substring(0, 237) + "..." : text;
+    private static void checkInterrupted() throws IOException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new IOException("HTTP operation interrupted");
+        }
+    }
+
+    public record Response(int statusCode, String body, String url) {
+        public boolean isSuccess() {
+            return statusCode >= 200 && statusCode < 300;
+        }
+
+        public void requireSuccess() throws IOException {
+            if (!isSuccess()) {
+                String suffix = body == null || body.isBlank() ? "" : ": " + TextUtil.abbreviate(body, 240);
+                throw new IOException("HTTP " + statusCode + " for " + url + suffix);
+            }
+        }
     }
 
     public interface ProgressCallback {

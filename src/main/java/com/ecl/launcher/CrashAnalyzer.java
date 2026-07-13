@@ -3,13 +3,16 @@ package com.ecl.launcher;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class CrashAnalyzer {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CrashAnalyzer.class);
     private static final int MAX_REPORT_CHARS = 50000;
     private static final int MAX_EVIDENCE_LINES = 12;
 
@@ -73,7 +76,7 @@ public class CrashAnalyzer {
         return analyzeText(version, -1, text.toString(), findLatestCrashReport(gameDir));
     }
 
-    private static Report analyzeText(String version, int exitCode, String text, File crashReportFile) {
+    static Report analyzeText(String version, int exitCode, String text, File crashReportFile) {
         String lower = text == null ? "" : text.toLowerCase(Locale.ROOT);
         List<String> suggestions = new ArrayList<>();
         String title = "游戏异常退出";
@@ -152,6 +155,10 @@ public class CrashAnalyzer {
             evidence.add("已找到崩溃报告: " + crashReportFile.getAbsolutePath());
         }
 
+        if (version != null && !version.isBlank()) {
+            explanation = "Minecraft " + version.trim() + "：" + explanation;
+        }
+
         return new Report(title, explanation, suggestions, evidence, crashReportFile);
     }
 
@@ -215,12 +222,19 @@ public class CrashAnalyzer {
             return "";
         }
         try {
-            String text = Files.readString(file.toPath(), StandardCharsets.UTF_8);
+            long byteCount = Math.min(file.length(), (long) MAX_REPORT_CHARS * 4);
+            byte[] tail = new byte[(int) byteCount];
+            try (RandomAccessFile input = new RandomAccessFile(file, "r")) {
+                input.seek(file.length() - byteCount);
+                input.readFully(tail);
+            }
+            String text = new String(tail, StandardCharsets.UTF_8);
             if (text.length() <= MAX_REPORT_CHARS) {
                 return text;
             }
             return text.substring(text.length() - MAX_REPORT_CHARS);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            LOGGER.warn("Failed to read crash log tail from {}", file, e);
             return "";
         }
     }
