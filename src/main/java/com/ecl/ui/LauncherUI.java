@@ -64,7 +64,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.Supplier;
+import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -105,6 +105,7 @@ public class LauncherUI extends javafx.application.Application {
     private Stage primaryStage;
 
     private ComboBox<String> versionCombo;
+    private String lastContentVersion;
     private ComboBox<VersionManager.VersionCategory> versionTypeCombo;
     private TextField usernameField;
     private PasswordField passwordField;
@@ -174,11 +175,11 @@ public class LauncherUI extends javafx.application.Application {
         private final String[] allowedExtensions;
         private final boolean downloadDependencies;
         private final String searchHint;
-        private final Supplier<File> folderSupplier;
+        private final Function<String, File> folderResolver;
 
         private ContentTarget(String title, String subtitle, String initial, String projectType,
                               String defaultLoader, String[] loaders, String[] allowedExtensions,
-                              boolean downloadDependencies, String searchHint, Supplier<File> folderSupplier) {
+                              boolean downloadDependencies, String searchHint, Function<String, File> folderResolver) {
             this.title = title;
             this.subtitle = subtitle;
             this.initial = initial;
@@ -188,7 +189,7 @@ public class LauncherUI extends javafx.application.Application {
             this.allowedExtensions = allowedExtensions;
             this.downloadDependencies = downloadDependencies;
             this.searchHint = searchHint;
-            this.folderSupplier = folderSupplier;
+            this.folderResolver = folderResolver;
         }
 
         private boolean usesLoader() {
@@ -246,7 +247,8 @@ public class LauncherUI extends javafx.application.Application {
         gameLauncher = controller.gameLauncher();
 
         javaPath = JavaRuntimeUtil.resolveJavaExecutable(settingsManager.getString(ECLConfig.SETTING_JAVA_PATH, ""));
-        gameDir = new File(settingsManager.getString(ECLConfig.SETTING_GAME_DIR, ECLConfig.getGameDir().getAbsolutePath()));
+        gameDir = resolveConfiguredGameRootDir(new File(
+                settingsManager.getString(ECLConfig.SETTING_GAME_DIR, ECLConfig.getGameDir().getAbsolutePath())));
         extraJvmArgs = settingsManager.getString(ECLConfig.SETTING_JVM_ARGS, "");
         maxMemoryMb = settingsManager.getInt(ECLConfig.SETTING_MAX_MEMORY_MB, ECLConfig.AUTO_MEMORY_MB);
         if (maxMemoryMb < ECLConfig.AUTO_MEMORY_MB
@@ -522,19 +524,19 @@ public class LauncherUI extends javafx.application.Application {
                 new ContentTarget(
                         "模组", "Fabric / Forge / NeoForge / Quilt", "M", "mod",
                         "fabric", new String[]{"fabric", "forge", "neoforge", "quilt"}, new String[]{".jar"},
-                        true, "搜索模组名称，例如 sodium、journeymap", () -> resolveModsDir(getSelectedVersion())),
+                        true, "搜索模组名称，例如 sodium、journeymap", this::resolveModsDir),
                 new ContentTarget(
                         "光影包", "Iris / OptiFine shaderpacks", "S", "shader",
                         null, new String[0], new String[]{".zip"},
-                        false, "搜索光影名称，例如 complementary、bsl", () -> new File(getActiveGameDir(), "shaderpacks")),
+                        false, "搜索光影名称，例如 complementary、bsl", version -> new File(resolveVersionGameDir(version), "shaderpacks")),
                 new ContentTarget(
                         "材质包", "resourcepacks 目录资源包", "R", "resourcepack",
                         null, new String[0], new String[]{".zip"},
-                        false, "搜索材质包名称，例如 fresh animations、faithful", () -> new File(getActiveGameDir(), "resourcepacks")),
+                        false, "搜索材质包名称，例如 fresh animations、faithful", version -> new File(resolveVersionGameDir(version), "resourcepacks")),
                 new ContentTarget(
                         "整合包", "完整玩法包与客户端预设", "P", "modpack",
                         "fabric", new String[]{"fabric", "forge", "neoforge", "quilt"}, new String[]{".mrpack"},
-                        false, "搜索整合包名称，例如 fabulously optimized", () -> new File(ECLConfig.getBaseDir(), "modpacks"))
+                        false, "搜索整合包名称，例如 fabulously optimized", version -> new File(ECLConfig.getBaseDir(), "modpacks"))
         );
     }
 
@@ -853,7 +855,7 @@ public class LauncherUI extends javafx.application.Application {
         Button folderBtn = new Button("目录");
         folderBtn.getStyleClass().addAll("app-button", "ghost-button", "compact-button");
         folderBtn.setTooltip(new Tooltip("打开本地" + target.title + "目录"));
-        folderBtn.setOnAction(e -> openLocalFolder(target.folderSupplier.get(), target.title + "目录"));
+        folderBtn.setOnAction(e -> openLocalFolder(target.folderResolver.apply(getSelectedVersion()), target.title + "目录"));
 
         HBox actions = new HBox(6, downloadBtn, folderBtn);
         actions.setAlignment(Pos.CENTER_LEFT);
@@ -1303,6 +1305,14 @@ public class LauncherUI extends javafx.application.Application {
             return;
         }
 
+        if (lastContentVersion != null && !lastContentVersion.equals(selectedVersion)
+                && versionManager.isVersionDownloaded(lastContentVersion)) {
+            setStatus("注意：启动版本与已下载内容的版本不一致",
+                    "模组 / 光影 / 材质包已下载到 " + lastContentVersion
+                            + " 的实例目录，当前将启动 " + selectedVersion
+                            + "，这些内容不会被加载。可切换到 " + lastContentVersion + " 再启动。 ");
+        }
+
         String configuredJavaPath = javaPath == null ? "" : javaPath.trim();
         if (!configuredJavaPath.isBlank() && !JavaRuntimeUtil.isUsableJavaPath(configuredJavaPath)) {
             setStatus("Java 路径无效", "高级设置里的 Java 路径不可用，请重新选择 java.exe 或 JDK 根目录。 ");
@@ -1654,7 +1664,7 @@ public class LauncherUI extends javafx.application.Application {
             return;
         }
 
-        File importDir = target.folderSupplier.get();
+        File importDir = target.folderResolver.apply(gameVersion);
         try {
             ensureDirectory(importDir);
         } catch (IOException e) {
@@ -1882,6 +1892,7 @@ public class LauncherUI extends javafx.application.Application {
                     String detail = "已导入 " + result.getFiles().size() + " 个文件到: " + importDir.getAbsolutePath();
                     dialogStatus.setText(mainFile + " 导入完成。 " + detail);
                     setStatus(target.title + "导入完成", detail);
+                    syncLaunchVersionToContent(gameVersion);
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
@@ -1902,19 +1913,47 @@ public class LauncherUI extends javafx.application.Application {
         return versionCombo == null ? null : versionCombo.getValue();
     }
 
+    /**
+     * Content is downloaded into the instance directory of {@code contentVersion}. To keep the
+     * launched game directory identical to the download target (so mods / shaderpacks /
+     * resourcepacks are actually loaded), the launch selection is realigned to that version after
+     * a successful import. Only selects the value when it is already offered by the combo.
+     */
+    private void syncLaunchVersionToContent(String contentVersion) {
+        if (contentVersion == null || contentVersion.isBlank()) {
+            return;
+        }
+        lastContentVersion = contentVersion;
+        if (versionCombo == null || contentVersion.equals(versionCombo.getValue())) {
+            return;
+        }
+        if (versionCombo.getItems().contains(contentVersion)) {
+            versionCombo.setValue(contentVersion);
+            updateRuntimeSummary();
+        }
+    }
+
     private File getConfiguredGameRootDir() {
         return gameDir == null ? ECLConfig.getGameDir() : gameDir;
     }
 
-    private File loadConfiguredGameRootDir() {
-        File defaultGameDir = ECLConfig.getGameDir();
-        File configuredDir = new File(settingsManager.getString("gameDir", defaultGameDir.getAbsolutePath()));
-        if (isSamePath(configuredDir, ECLConfig.getLegacyGameDir())) {
-            configuredDir = defaultGameDir;
-            settingsManager.setString("gameDir", configuredDir.getAbsolutePath());
-            settingsManager.save();
+    /**
+     * Normalizes a configured root directory into the single source of truth used for every
+     * content path (mods / shaderpacks / resourcepacks / saves). The legacy {@code <base>/game}
+     * location is folded back into the standard game directory so download targets and the launched
+     * game directory can never diverge because of an outdated saved path.
+     */
+    private File resolveConfiguredGameRootDir(File candidate) {
+        if (candidate == null || (candidate.getPath().isBlank())) {
+            return ECLConfig.getGameDir();
         }
-        return configuredDir;
+        if (isSamePath(candidate, ECLConfig.getLegacyGameDir())) {
+            File defaultGameDir = ECLConfig.getGameDir();
+            settingsManager.setString(ECLConfig.SETTING_GAME_DIR, defaultGameDir.getAbsolutePath());
+            settingsManager.save();
+            return defaultGameDir;
+        }
+        return candidate;
     }
 
     private boolean isSamePath(File first, File second) {
@@ -2063,7 +2102,7 @@ public class LauncherUI extends javafx.application.Application {
             }
 
             javaPath = configuredJava.isBlank() ? JavaRuntimeUtil.detectSystemJavaExecutable() : JavaRuntimeUtil.resolveJavaExecutable(configuredJava);
-            gameDir = new File(configuredGameDir);
+            gameDir = resolveConfiguredGameRootDir(new File(configuredGameDir));
             gameDir.mkdirs();
             extraJvmArgs = jvmField.getText().trim();
             maxMemoryMb = configuredMemoryMb;
