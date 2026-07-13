@@ -84,7 +84,7 @@ tasks.register('packageWindowsApp', Exec) {
         System.getProperty('os.name').toLowerCase().contains('win')
     }
 
-    def outputDir = file('dist/windows')
+    def outputDir = file(findProperty('windowsPackageDir') ?: 'dist/windows')
     def iconFile = file('src/main/resources/icons/ecl-icon.ico')
     def jpackageExe = file("${System.getProperty('java.home')}/bin/jpackage.exe")
 
