@@ -260,6 +260,6 @@ public final class JavaRuntimeUtil {
     }
 
     private static String executableName() {
-        return System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java";
+        return PlatformUtil.isWindows() ? "java.exe" : "java";
     }
 }

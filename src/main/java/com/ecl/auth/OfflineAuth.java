@@ -1,5 +1,6 @@
 package com.ecl.auth;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 public class OfflineAuth implements AuthProvider {
@@ -8,7 +9,7 @@ public class OfflineAuth implements AuthProvider {
 
     public OfflineAuth(String username) {
         this.username = username;
-        this.uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + username).getBytes());
+        this.uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
     }
 
     @Override

@@ -3,7 +3,8 @@ package com.ecl.download;
 import com.ecl.ECLConfig;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
-import com.ecl.util.MinecraftRuleUtil;
+import com.ecl.util.PlatformUtil;
+import com.ecl.util.RuleEvaluator;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -12,8 +13,16 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
-public class GameDownloader {
+public class GameDownloader implements AutoCloseable {
     public interface DownloadListener {
         void onStatus(String message);
         void onProgress(long downloaded, long total);
@@ -21,184 +30,324 @@ public class GameDownloader {
         void onComplete();
     }
 
-    private DownloadListener listener;
+    private final ExecutorService versionDownloadExecutor;
+    private final ExecutorService fileDownloadExecutor;
+    private final AtomicReference<Future<?>> activeDownload = new AtomicReference<>();
+    private volatile DownloadListener configuredListener;
+    private volatile boolean verifyExistingFiles;
+
+    public GameDownloader() {
+        versionDownloadExecutor = Executors.newSingleThreadExecutor(daemonThreadFactory("ecl-version-download"));
+        fileDownloadExecutor = Executors.newFixedThreadPool(
+                Math.max(1, ECLConfig.DOWNLOAD_THREADS), daemonThreadFactory("ecl-file-download"));
+    }
 
     public void setListener(DownloadListener listener) {
-        this.listener = listener;
+        this.configuredListener = listener;
+    }
+
+    /**
+     * Controls whether existing libraries and assets are re-hashed before launch.
+     * Newly downloaded files are always verified when the version metadata supplies a SHA-1.
+     */
+    public void setVerifyExistingFiles(boolean verifyExistingFiles) {
+        this.verifyExistingFiles = verifyExistingFiles;
     }
 
     public void downloadVersion(String versionId, String versionUrl) {
-        new Thread(() -> {
-            try {
-                if (listener != null) listener.onStatus("正在下载版本信息...");
-
-                File versionDir = new File(ECLConfig.getVersionsDir(), versionId);
-                versionDir.mkdirs();
-
-                JsonObject versionJson = HttpUtil.getJsonWithMirrors(versionUrl, sourceCallback("版本信息"));
-                File versionJsonFile = new File(versionDir, versionId + ".json");
-                HttpUtil.writeJson(versionJsonFile, versionJson);
-
-                if (listener != null) listener.onStatus("正在下载游戏主文件...");
-                String clientUrl = versionJson.getAsJsonObject("downloads")
-                        .getAsJsonObject("client").get("url").getAsString();
-                String clientSha1 = versionJson.getAsJsonObject("downloads")
-                        .getAsJsonObject("client").get("sha1").getAsString();
-
-                File clientJar = new File(versionDir, versionId + ".jar");
-                if (!isValidSha1(clientJar, clientSha1)) {
-                    HttpUtil.downloadFileWithProgress(clientUrl, clientJar, new HttpUtil.ProgressCallback() {
-                        @Override
-                        public void onStart(long total) {
-                            if (listener != null) listener.onProgress(0, total);
-                        }
-
-                        @Override
-                        public void onProgress(long downloaded, long total) {
-                            if (listener != null) listener.onProgress(downloaded, total);
-                        }
-
-                        @Override
-                        public void onComplete(File file) {}
-                    }, sourceCallback("游戏主文件"));
-                }
-
-                if (!FileUtil.verifySha1(clientJar, clientSha1)) {
-                    if (listener != null) listener.onError("游戏主文件校验失败");
-                    return;
-                }
-
-                if (listener != null) listener.onStatus("正在下载依赖库...");
-                downloadLibraries(versionJson);
-
-                if (listener != null) listener.onStatus("正在下载资源文件...");
-                downloadAssets(versionJson);
-
-                if (listener != null) listener.onStatus("下载完成！");
-                if (listener != null) listener.onComplete();
-            } catch (Exception e) {
-                if (listener != null) listener.onError("下载失败: " + e.getMessage());
-            }
-        }).start();
+        downloadVersionAsync(versionId, versionUrl);
     }
 
-    private void downloadLibraries(JsonObject versionJson) throws IOException {
+    public synchronized Future<?> downloadVersionAsync(String versionId, String versionUrl) {
+        cancelDownload();
+        DownloadListener runListener = configuredListener;
+        Future<?> task = versionDownloadExecutor.submit(
+                () -> downloadVersionInternal(versionId, versionUrl, runListener));
+        activeDownload.set(task);
+        return task;
+    }
+
+    public synchronized boolean cancelDownload() {
+        Future<?> task = activeDownload.getAndSet(null);
+        return task != null && !task.isDone() && task.cancel(true);
+    }
+
+    public boolean isDownloadInProgress() {
+        Future<?> task = activeDownload.get();
+        return task != null && !task.isDone();
+    }
+
+    @Override
+    public void close() {
+        cancelDownload();
+        versionDownloadExecutor.shutdownNow();
+        fileDownloadExecutor.shutdownNow();
+    }
+
+    private void downloadVersionInternal(String versionId, String versionUrl, DownloadListener runListener) {
+        try {
+            if (runListener != null) runListener.onStatus("正在下载版本信息...");
+
+            File versionDir = new File(ECLConfig.getVersionsDir(), versionId);
+            versionDir.mkdirs();
+
+            JsonObject versionJson = HttpUtil.getJsonWithMirrors(versionUrl, sourceCallback("版本信息", runListener));
+            File versionJsonFile = new File(versionDir, versionId + ".json");
+            HttpUtil.writeJson(versionJsonFile, versionJson);
+            checkCancelled();
+
+            JsonObject downloads = versionJson.has("downloads") ? versionJson.getAsJsonObject("downloads") : null;
+            JsonObject client = downloads != null && downloads.has("client")
+                    ? downloads.getAsJsonObject("client") : null;
+            if (client != null) {
+                if (runListener != null) runListener.onStatus("正在下载游戏主文件...");
+                String clientUrl = client.get("url").getAsString();
+                String clientSha1 = client.has("sha1") ? client.get("sha1").getAsString() : null;
+                File clientJar = new File(versionDir, versionId + ".jar");
+                if (needsDownload(clientJar, clientSha1)) {
+                HttpUtil.downloadFileWithProgress(clientUrl, clientJar, new HttpUtil.ProgressCallback() {
+                    @Override
+                    public void onStart(long total) {
+                        if (runListener != null) runListener.onProgress(0, total);
+                    }
+
+                    @Override
+                    public void onProgress(long downloaded, long total) {
+                        if (runListener != null) runListener.onProgress(downloaded, total);
+                    }
+
+                    @Override
+                    public void onComplete(File file) {}
+                }, sourceCallback("游戏主文件", runListener));
+                    verifyDownloadedFile(clientJar, clientSha1);
+                }
+            } else if (!hasUsableInheritedClient(versionJson)) {
+                throw new IOException("版本缺少 client 下载信息，且继承版本客户端不可用: " + versionId);
+            }
+            checkCancelled();
+
+            if (runListener != null) runListener.onStatus("正在下载依赖库...");
+            downloadLibraries(versionJson, runListener);
+            checkCancelled();
+
+            if (runListener != null) runListener.onStatus("正在下载资源文件...");
+            downloadAssets(versionJson, runListener);
+            checkCancelled();
+
+            if (runListener != null) runListener.onStatus("下载完成！");
+            if (runListener != null) runListener.onComplete();
+        } catch (Exception e) {
+            if (Thread.currentThread().isInterrupted()) {
+                if (runListener != null) runListener.onStatus("下载已取消");
+                return;
+            }
+            if (runListener != null) runListener.onError("下载失败: " + e.getMessage());
+        }
+    }
+
+    private void checkCancelled() throws InterruptedException {
+        if (Thread.currentThread().isInterrupted()) throw new InterruptedException("download cancelled");
+    }
+
+    private boolean hasUsableInheritedClient(JsonObject versionJson) {
+        if (!versionJson.has("inheritsFrom")) return false;
+        String current = versionJson.get("inheritsFrom").getAsString();
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        while (current != null && !current.isBlank() && visited.add(current)) {
+            File jar = new File(ECLConfig.getVersionsDir(), current + "/" + current + ".jar");
+            if (jar.isFile()) return true;
+            File jsonFile = new File(ECLConfig.getVersionsDir(), current + "/" + current + ".json");
+            if (!jsonFile.isFile()) return false;
+            try {
+                JsonObject parentJson = HttpUtil.readJson(jsonFile);
+                if (parentJson.has("jar")) {
+                    String jarId = parentJson.get("jar").getAsString();
+                    return new File(ECLConfig.getVersionsDir(), jarId + "/" + jarId + ".jar").isFile();
+                }
+                current = parentJson.has("inheritsFrom")
+                        ? parentJson.get("inheritsFrom").getAsString() : null;
+            } catch (IOException e) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private void downloadLibraries(JsonObject versionJson, DownloadListener runListener) throws IOException {
         JsonArray libraries = versionJson.getAsJsonArray("libraries");
-        String nativeClassifier = FileUtil.getNativeClassifier();
+        if (libraries == null) return;
+        List<String> missingLibraries = getMissingLibraries(versionJson);
+        if (!missingLibraries.isEmpty() && runListener != null) {
+            runListener.onStatus("检测到 " + missingLibraries.size() + " 个缺失的依赖库");
+        }
+        NativePlatform nativePlatform = NativePlatform.current();
+        List<FileDownloadTask> tasks = new ArrayList<>();
 
         for (JsonElement el : libraries) {
             JsonObject lib = el.getAsJsonObject();
 
-            if (lib.has("rules")) {
-                if (!MinecraftRuleUtil.checkRules(lib.getAsJsonArray("rules"))) continue;
+            if (lib.has("rules") && !RuleEvaluator.isAllowed(lib.getAsJsonArray("rules"))) {
+                continue;
             }
 
-            JsonObject artifacts = null;
-            if (lib.has("downloads")) {
-                artifacts = lib.getAsJsonObject("downloads");
-            }
-
+            JsonObject artifacts = lib.has("downloads") ? lib.getAsJsonObject("downloads") : null;
             if (artifacts != null && artifacts.has("artifact")) {
                 JsonObject artifact = artifacts.getAsJsonObject("artifact");
-                String url = artifact.get("url").getAsString();
-                String path = artifact.get("path").getAsString();
-                File target = new File(ECLConfig.getLibrariesDir(), path);
-                String sha1 = artifact.has("sha1") ? artifact.get("sha1").getAsString() : null;
-
-                if (!target.exists() || (sha1 != null && !FileUtil.verifySha1(target, sha1))) {
-                    if (listener != null) listener.onStatus("下载库: " + path);
-                    HttpUtil.downloadFile(url, target, sourceCallback("依赖库"));
-                    verifyDownloadedSha1(target, sha1, "依赖库校验失败: " + path);
-                }
+                addDownloadIfNeeded(tasks, artifact, "依赖库");
             }
 
             if (artifacts != null && artifacts.has("classifiers")) {
                 JsonObject classifiers = artifacts.getAsJsonObject("classifiers");
-                for (String nativeKey : MinecraftRuleUtil.nativeKeys(nativeClassifier)) {
-                    if (classifiers.has(nativeKey)) {
-                        JsonObject nativeArtifact = classifiers.getAsJsonObject(nativeKey);
-                        String url = nativeArtifact.get("url").getAsString();
-                        String path = nativeArtifact.get("path").getAsString();
-                        File target = new File(ECLConfig.getLibrariesDir(), path);
-                        String sha1 = nativeArtifact.has("sha1") ? nativeArtifact.get("sha1").getAsString() : null;
-                        if (!target.exists() || (sha1 != null && !FileUtil.verifySha1(target, sha1))) {
-                            if (listener != null) listener.onStatus("下载原生库: " + path);
-                            HttpUtil.downloadFile(url, target, sourceCallback("原生库"));
-                            verifyDownloadedSha1(target, sha1, "原生库校验失败: " + path);
-                        }
-                        break;
-                    }
+                String nativeKey = nativeClassifierKey(lib, nativePlatform.osName(), nativePlatform.archBits());
+                if (nativeKey != null && classifiers.has(nativeKey)) {
+                    addDownloadIfNeeded(tasks, classifiers.getAsJsonObject(nativeKey), "原生库");
                 }
             }
         }
+
+        downloadConcurrently(tasks, "依赖库", runListener);
     }
 
-    private void downloadAssets(JsonObject versionJson) throws IOException {
+    private void addDownloadIfNeeded(List<FileDownloadTask> tasks, JsonObject artifact, String sourceLabel) {
+        String url = artifact.get("url").getAsString();
+        String path = artifact.get("path").getAsString();
+        String sha1 = artifact.has("sha1") ? artifact.get("sha1").getAsString() : null;
+        File target = new File(ECLConfig.getLibrariesDir(), path);
+        if (needsDownload(target, sha1)) {
+            tasks.add(new FileDownloadTask(url, target, sha1, sourceLabel));
+        }
+    }
+
+    private void downloadAssets(JsonObject versionJson, DownloadListener runListener) throws IOException {
         JsonObject assetIndex = versionJson.getAsJsonObject("assetIndex");
         if (assetIndex == null) return;
 
         String assetId = assetIndex.get("id").getAsString();
         String assetUrl = assetIndex.get("url").getAsString();
-        String assetIndexSha1 = assetIndex.has("sha1") ? assetIndex.get("sha1").getAsString() : null;
-
         File assetDir = new File(ECLConfig.getAssetsDir(), "objects");
         File indexFile = new File(ECLConfig.getAssetsDir(), "indexes/" + assetId + ".json");
 
-        if (!indexFile.exists() || (assetIndexSha1 != null && !FileUtil.verifySha1(indexFile, assetIndexSha1))) {
+        String indexSha1 = assetIndex.has("sha1") ? assetIndex.get("sha1").getAsString() : null;
+        if (needsDownload(indexFile, indexSha1)) {
             indexFile.getParentFile().mkdirs();
-            HttpUtil.downloadFile(assetUrl, indexFile, sourceCallback("资源索引"));
-            verifyDownloadedSha1(indexFile, assetIndexSha1, "资源索引校验失败: " + assetId);
+            HttpUtil.downloadFile(assetUrl, indexFile, sourceCallback("资源索引", runListener));
+            verifyDownloadedFile(indexFile, indexSha1);
         }
 
-        JsonObject indexJson = HttpUtil.readJson(indexFile);
-        JsonObject objects = indexJson.getAsJsonObject("objects");
-
-        int total = objects.size();
-        int count = 0;
-
+        JsonObject objects = HttpUtil.readJson(indexFile).getAsJsonObject("objects");
+        List<FileDownloadTask> tasks = new ArrayList<>();
         for (String name : objects.keySet()) {
-            JsonObject obj = objects.get(name).getAsJsonObject();
+            JsonObject obj = objects.getAsJsonObject(name);
             String hash = obj.get("hash").getAsString();
             String subPath = hash.substring(0, 2) + "/" + hash;
             File target = new File(assetDir, subPath);
-
-            if (!FileUtil.verifySha1(target, hash)) {
-                String url = "https://resources.download.minecraft.net/" + subPath;
-                target.getParentFile().mkdirs();
-                HttpUtil.downloadFile(url, target, sourceCallback("资源文件"));
-                verifyDownloadedSha1(target, hash, "资源文件校验失败: " + name);
+            if (needsDownload(target, hash)) {
+                tasks.add(new FileDownloadTask(
+                        "https://resources.download.minecraft.net/" + subPath,
+                        target, hash, "资源文件"));
             }
+        }
 
-            count++;
-            if (count % 50 == 0 && listener != null) {
-                listener.onStatus("下载资源文件: " + count + "/" + total);
+        downloadConcurrently(tasks, "资源文件", runListener);
+    }
+
+    boolean needsDownload(File target, String expectedSha1) {
+        if (!target.isFile()) return true;
+        return verifyExistingFiles && hasSha1(expectedSha1) && !FileUtil.verifySha1(target, expectedSha1);
+    }
+
+    private void verifyDownloadedFile(File target, String expectedSha1) throws IOException {
+        if (!hasSha1(expectedSha1) || FileUtil.verifySha1(target, expectedSha1)) return;
+        if (!target.delete()) target.deleteOnExit();
+        throw new IOException(target.getName() + " 的 SHA-1 校验失败");
+    }
+
+    private static boolean hasSha1(String sha1) {
+        return sha1 != null && !sha1.isBlank();
+    }
+
+    static String nativeClassifierKey(JsonObject library, String osName, String archBits) {
+        if (library.has("natives")) {
+            JsonObject natives = library.getAsJsonObject("natives");
+            if (natives.has(osName)) {
+                return natives.get(osName).getAsString().replace("${arch}", archBits);
             }
+        }
+        return "natives-" + osName;
+    }
+
+    private void downloadConcurrently(List<FileDownloadTask> tasks, String phase,
+                                      DownloadListener runListener) throws IOException {
+        if (tasks.isEmpty()) {
+            if (runListener != null) runListener.onStatus(phase + "已是最新，无需下载");
+            return;
+        }
+
+        int threadCount = Math.min(ECLConfig.DOWNLOAD_THREADS, tasks.size());
+        if (runListener != null) {
+            runListener.onStatus("使用 " + threadCount + " 个线程下载" + phase + "，共 " + tasks.size() + " 个文件...");
+        }
+
+        ExecutorCompletionService<Void> completionService = new ExecutorCompletionService<>(fileDownloadExecutor);
+        List<Future<Void>> phaseTasks = new ArrayList<>(tasks.size());
+
+        for (FileDownloadTask task : tasks) {
+            phaseTasks.add(completionService.submit(() -> {
+                downloadAndVerify(task, runListener);
+                return null;
+            }));
+        }
+
+        IOException firstError = null;
+        int completed = 0;
+        try {
+            while (completed < tasks.size()) {
+                try {
+                    completionService.take().get();
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    IOException error = cause instanceof IOException
+                            ? (IOException) cause
+                            : new IOException(cause == null ? e : cause);
+                    if (firstError == null) firstError = error;
+                }
+                completed++;
+                if (runListener != null && (completed == tasks.size() || completed % 25 == 0)) {
+                    runListener.onStatus("下载" + phase + ": " + completed + "/" + tasks.size());
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException(phase + "下载被中断", e);
+        } finally {
+            if (Thread.currentThread().isInterrupted()) {
+                phaseTasks.forEach(task -> task.cancel(true));
+            }
+        }
+
+        if (firstError != null) {
+            throw new IOException(phase + "下载失败: " + firstError.getMessage(), firstError);
         }
     }
 
-    private boolean isValidSha1(File file, String sha1) {
-        return file.exists() && (sha1 == null || FileUtil.verifySha1(file, sha1));
+    private void downloadAndVerify(FileDownloadTask task, DownloadListener runListener) throws IOException {
+        HttpUtil.downloadFile(task.url, task.target, sourceCallback(task.sourceLabel, runListener));
+        verifyDownloadedFile(task.target, task.sha1);
     }
 
-    private void verifyDownloadedSha1(File file, String sha1, String message) throws IOException {
-        if (sha1 != null && !FileUtil.verifySha1(file, sha1)) {
-            throw new IOException(message);
-        }
-    }
-
-    private HttpUtil.SourceCallback sourceCallback(String label) {
+    private HttpUtil.SourceCallback sourceCallback(String label, DownloadListener runListener) {
         return new HttpUtil.SourceCallback() {
             @Override
             public void onSource(String originalUrl, String candidateUrl, boolean mirror, String sourceName) {
-                if (listener != null && mirror) {
-                    listener.onStatus(label + "官方源响应较慢，切换到" + sourceName + "...");
+                if (runListener != null && mirror) {
+                    runListener.onStatus(label + "官方源响应较慢，切换到" + sourceName + "...");
                 }
             }
 
             @Override
             public void onFailure(String candidateUrl, IOException error) {
-                if (listener != null) {
-                    listener.onStatus(label + "下载源失败，尝试下一个源: " + error.getMessage());
+                if (runListener != null) {
+                    runListener.onStatus(label + "下载源失败，尝试下一个源: " + error.getMessage());
                 }
             }
         };
@@ -206,10 +355,14 @@ public class GameDownloader {
 
     public List<String> getMissingLibraries(JsonObject versionJson) {
         List<String> missing = new ArrayList<>();
+        if (versionJson == null || !versionJson.has("libraries")) return missing;
         JsonArray libraries = versionJson.getAsJsonArray("libraries");
 
         for (JsonElement el : libraries) {
             JsonObject lib = el.getAsJsonObject();
+            if (lib.has("rules") && !RuleEvaluator.isAllowed(lib.getAsJsonArray("rules"))) {
+                continue;
+            }
             if (lib.has("downloads")) {
                 JsonObject downloads = lib.getAsJsonObject("downloads");
                 if (downloads.has("artifact")) {
@@ -217,11 +370,42 @@ public class GameDownloader {
                     String path = artifact.get("path").getAsString();
                     File target = new File(ECLConfig.getLibrariesDir(), path);
                     if (!target.exists()) {
-                        missing.add(lib.get("name").getAsString());
+                        missing.add(lib.has("name") ? lib.get("name").getAsString() : path);
                     }
                 }
             }
         }
         return missing;
+    }
+
+    private static ThreadFactory daemonThreadFactory(String prefix) {
+        AtomicInteger threadNumber = new AtomicInteger();
+        return runnable -> {
+            Thread thread = new Thread(runnable, prefix + "-" + threadNumber.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
+    }
+
+    private record NativePlatform(String osName, String archBits) {
+        private static NativePlatform current() {
+            String architecture = System.getProperty("os.arch", "").toLowerCase();
+            String bits = architecture.contains("64") || architecture.contains("aarch64") ? "64" : "32";
+            return new NativePlatform(PlatformUtil.current().minecraftName(), bits);
+        }
+    }
+
+    private static final class FileDownloadTask {
+        private final String url;
+        private final File target;
+        private final String sha1;
+        private final String sourceLabel;
+
+        private FileDownloadTask(String url, File target, String sha1, String sourceLabel) {
+            this.url = url;
+            this.target = target;
+            this.sha1 = sha1;
+            this.sourceLabel = sourceLabel;
+        }
     }
 }

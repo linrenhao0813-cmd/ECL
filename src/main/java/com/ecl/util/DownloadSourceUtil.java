@@ -6,8 +6,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class DownloadSourceUtil {
+    private static final Logger LOGGER = LoggerFactory.getLogger(DownloadSourceUtil.class);
     private DownloadSourceUtil() {
     }
 
@@ -43,7 +46,8 @@ public final class DownloadSourceUtil {
                     // Keep unknown hosts on the official URL only.
                 }
             }
-        } catch (URISyntaxException ignored) {
+        } catch (URISyntaxException e) {
+            LOGGER.warn("Invalid download URL; mirror resolution skipped: {}", originalUrl, e);
         }
 
         return new ArrayList<>(urls);

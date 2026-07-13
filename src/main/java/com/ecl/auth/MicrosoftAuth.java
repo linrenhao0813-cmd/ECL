@@ -1,29 +1,24 @@
 package com.ecl.auth;
 
-import com.google.gson.Gson;
+import com.ecl.util.HttpUtil;
+import com.ecl.util.JsonUtil;
+import com.ecl.util.TextUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.StringJoiner;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Microsoft account authentication for official Minecraft Java accounts.
  */
 public class MicrosoftAuth implements AuthProvider {
-    private static final Gson GSON = new Gson();
-
+    private static final Logger LOGGER = LoggerFactory.getLogger(MicrosoftAuth.class);
     private static final String CLIENT_ID = System.getProperty("ecl.microsoft.clientId", "00000000402b5328");
     private static final String MSA_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
     private static final String DEVICE_CODE_URL = "https://login.live.com/oauth20_connect.srf?mkt=zh-CN";
@@ -37,16 +32,26 @@ public class MicrosoftAuth implements AuthProvider {
     private String username;
     private String uuid;
     private String accessToken;
+    private long accessTokenExpiresAt;
     private String refreshToken;
     private boolean loggedIn;
     private final LoginListener listener;
 
     public MicrosoftAuth() {
-        this(null, null);
+        this(CachedSession.empty(), null);
     }
 
     public MicrosoftAuth(String refreshToken, LoginListener listener) {
-        this.refreshToken = blankToNull(refreshToken);
+        this(new CachedSession(refreshToken, null, 0, null, null), listener);
+    }
+
+    public MicrosoftAuth(CachedSession cachedSession, LoginListener listener) {
+        CachedSession cached = cachedSession == null ? CachedSession.empty() : cachedSession;
+        this.refreshToken = blankToNull(cached.refreshToken());
+        this.accessToken = blankToNull(cached.accessToken());
+        this.accessTokenExpiresAt = cached.accessTokenExpiresAt();
+        this.username = blankToNull(cached.username());
+        this.uuid = blankToNull(cached.uuid());
         this.listener = listener;
     }
 
@@ -67,6 +72,11 @@ public class MicrosoftAuth implements AuthProvider {
 
     public String getRefreshToken() {
         return refreshToken;
+    }
+
+    /** Epoch milliseconds at which the cached Minecraft access token expires. */
+    public long getAccessTokenExpiresAt() {
+        return accessTokenExpiresAt;
     }
 
     @Override
@@ -97,10 +107,15 @@ public class MicrosoftAuth implements AuthProvider {
         username = null;
         uuid = null;
         accessToken = null;
+        accessTokenExpiresAt = 0;
         refreshToken = null;
     }
 
     private void authenticate() throws IOException, InterruptedException {
+        if (tryCachedMinecraftSession()) {
+            return;
+        }
+
         OAuthToken microsoftToken = tryRefreshMicrosoftToken();
         if (microsoftToken == null) {
             microsoftToken = loginWithDeviceCode();
@@ -115,17 +130,45 @@ public class MicrosoftAuth implements AuthProvider {
 
         notifyStatus("正在换取 Minecraft 服务令牌...");
         XboxToken xstsToken = authorizeXsts(xboxToken.token);
-        String minecraftAccessToken = loginMinecraft(xstsToken.userHash, xstsToken.token);
+        MinecraftToken minecraftToken = loginMinecraft(xstsToken.userHash, xstsToken.token);
 
         notifyStatus("正在检查 Minecraft Java 版授权...");
-        validateEntitlements(minecraftAccessToken);
-        JsonObject profile = loadMinecraftProfile(minecraftAccessToken);
+        validateEntitlements(minecraftToken.accessToken);
+        JsonObject profile = loadMinecraftProfile(minecraftToken.accessToken);
 
         username = requireString(profile, "name", "Minecraft profile");
         uuid = requireString(profile, "id", "Minecraft profile");
-        accessToken = minecraftAccessToken;
+        accessToken = minecraftToken.accessToken;
+        accessTokenExpiresAt = minecraftToken.expiresAt;
         loggedIn = true;
         notifyStatus("微软正版登录成功: " + username);
+    }
+
+    private boolean tryCachedMinecraftSession() {
+        long reuseDeadline = System.currentTimeMillis() + 2 * 60_000L;
+        if (accessToken == null || accessTokenExpiresAt <= reuseDeadline) {
+            accessToken = null;
+            accessTokenExpiresAt = 0;
+            return false;
+        }
+
+        notifyStatus("正在验证缓存的 Minecraft 登录状态...");
+        try {
+            validateEntitlements(accessToken);
+            JsonObject profile = loadMinecraftProfile(accessToken);
+            username = requireString(profile, "name", "Minecraft profile");
+            uuid = requireString(profile, "id", "Minecraft profile");
+            loggedIn = true;
+            notifyStatus("已恢复 Minecraft 登录状态: " + username);
+            return true;
+        } catch (IOException e) {
+            LOGGER.info("Cached Minecraft access token could not be reused; falling back to refresh token", e);
+            accessToken = null;
+            accessTokenExpiresAt = 0;
+            loggedIn = false;
+            notifyStatus("缓存登录已失效，正在静默刷新 Microsoft 登录状态...");
+            return false;
+        }
     }
 
     private OAuthToken tryRefreshMicrosoftToken() {
@@ -141,7 +184,7 @@ public class MicrosoftAuth implements AuthProvider {
         form.put("scope", MSA_SCOPE);
 
         try {
-            JsonObject json = requireSuccess(postForm(TOKEN_URL, form), "Microsoft refresh token");
+            JsonObject json = requireSuccess(HttpUtil.postForm(TOKEN_URL, form), "Microsoft refresh token");
             return parseOAuthToken(json);
         } catch (IOException e) {
             notifyStatus("已保存的微软登录已过期，需要重新授权。");
@@ -155,16 +198,16 @@ public class MicrosoftAuth implements AuthProvider {
         form.put("scope", MSA_SCOPE);
         form.put("response_type", "device_code");
 
-        JsonObject json = requireSuccess(postForm(DEVICE_CODE_URL, form), "Microsoft device code");
+        JsonObject json = requireSuccess(HttpUtil.postForm(DEVICE_CODE_URL, form), "Microsoft device code");
         String deviceCode = requireString(json, "device_code", "Microsoft device code");
         String userCode = requireString(json, "user_code", "Microsoft device code");
-        String verificationUri = getString(json, "verification_uri", getString(json, "verification_url", null));
+        String verificationUri = JsonUtil.getString(json, "verification_uri", JsonUtil.getString(json, "verification_url", null));
         if (verificationUri == null || verificationUri.isBlank()) {
             throw new IOException("Microsoft device code response did not contain verification URL");
         }
-        String message = getString(json, "message", "请在浏览器中打开 " + verificationUri + " 并输入代码 " + userCode);
-        int expiresIn = Math.max(60, getInt(json, "expires_in", 900));
-        int interval = Math.max(1, getInt(json, "interval", 5));
+        String message = JsonUtil.getString(json, "message", "请在浏览器中打开 " + verificationUri + " 并输入代码 " + userCode);
+        int expiresIn = Math.max(60, JsonUtil.getInt(json, "expires_in", 900));
+        int interval = Math.max(1, JsonUtil.getInt(json, "interval", 5));
 
         DeviceCode prompt = new DeviceCode(deviceCode, userCode, verificationUri, message, expiresIn, interval);
         notifyDeviceCode(prompt);
@@ -178,13 +221,13 @@ public class MicrosoftAuth implements AuthProvider {
             pollForm.put("client_id", CLIENT_ID);
             pollForm.put("device_code", deviceCode);
 
-            HttpResponse response = postForm(TOKEN_URL, pollForm);
-            JsonObject tokenJson = parseJson(response.body, "Microsoft token");
+            HttpUtil.Response response = HttpUtil.postForm(TOKEN_URL, pollForm);
+            JsonObject tokenJson = parseJson(response.body(), "Microsoft token");
             if (response.isSuccess() && tokenJson.has("access_token")) {
                 return parseOAuthToken(tokenJson);
             }
 
-            String error = getString(tokenJson, "error", "");
+            String error = JsonUtil.getString(tokenJson, "error", "");
             if ("authorization_pending".equals(error)) {
                 continue;
             }
@@ -201,7 +244,7 @@ public class MicrosoftAuth implements AuthProvider {
     private OAuthToken parseOAuthToken(JsonObject json) throws IOException {
         OAuthToken token = new OAuthToken();
         token.accessToken = requireString(json, "access_token", "Microsoft OAuth token");
-        token.refreshToken = getString(json, "refresh_token", refreshToken);
+        token.refreshToken = JsonUtil.getString(json, "refresh_token", refreshToken);
         return token;
     }
 
@@ -229,7 +272,7 @@ public class MicrosoftAuth implements AuthProvider {
         payload.addProperty("RelyingParty", "http://auth.xboxlive.com");
         payload.addProperty("TokenType", "JWT");
 
-        JsonObject json = requireSuccess(postJson(XBOX_AUTH_URL, payload), "Xbox Live authentication");
+        JsonObject json = requireSuccess(HttpUtil.postJsonResponse(XBOX_AUTH_URL, payload), "Xbox Live authentication");
         return parseXboxToken(json, "Xbox Live authentication");
     }
 
@@ -246,24 +289,28 @@ public class MicrosoftAuth implements AuthProvider {
         payload.addProperty("RelyingParty", "rp://api.minecraftservices.com/");
         payload.addProperty("TokenType", "JWT");
 
-        HttpResponse response = postJson(XSTS_AUTH_URL, payload);
-        JsonObject json = parseJson(response.body, "Xbox XSTS authorization");
+        HttpUtil.Response response = HttpUtil.postJsonResponse(XSTS_AUTH_URL, payload);
+        JsonObject json = parseJson(response.body(), "Xbox XSTS authorization");
         if (!response.isSuccess()) {
             throw new IOException(describeXstsError(json));
         }
         return parseXboxToken(json, "Xbox XSTS authorization");
     }
 
-    private String loginMinecraft(String userHash, String xstsToken) throws IOException {
+    private MinecraftToken loginMinecraft(String userHash, String xstsToken) throws IOException {
         JsonObject payload = new JsonObject();
         payload.addProperty("identityToken", "XBL3.0 x=" + userHash + ";" + xstsToken);
 
-        JsonObject json = requireSuccess(postJson(MC_LOGIN_URL, payload), "Minecraft services login");
-        return requireString(json, "access_token", "Minecraft services login");
+        JsonObject json = requireSuccess(HttpUtil.postJsonResponse(MC_LOGIN_URL, payload), "Minecraft services login");
+        MinecraftToken token = new MinecraftToken();
+        token.accessToken = requireString(json, "access_token", "Minecraft services login");
+        int expiresIn = Math.max(60, JsonUtil.getInt(json, "expires_in", 86_400));
+        token.expiresAt = System.currentTimeMillis() + expiresIn * 1000L;
+        return token;
     }
 
     private void validateEntitlements(String minecraftAccessToken) throws IOException {
-        JsonObject json = requireSuccess(getBearer(MC_ENTITLEMENTS_URL, minecraftAccessToken), "Minecraft entitlement check");
+        JsonObject json = requireSuccess(HttpUtil.getBearer(MC_ENTITLEMENTS_URL, minecraftAccessToken), "Minecraft entitlement check");
         JsonArray items = json.has("items") && json.get("items").isJsonArray() ? json.getAsJsonArray("items") : null;
         if (items == null || items.isEmpty()) {
             throw new IOException("此微软账号没有 Minecraft Java 版授权。");
@@ -271,13 +318,13 @@ public class MicrosoftAuth implements AuthProvider {
     }
 
     private JsonObject loadMinecraftProfile(String minecraftAccessToken) throws IOException {
-        HttpResponse response = getBearer(MC_PROFILE_URL, minecraftAccessToken);
-        JsonObject json = parseJson(response.body, "Minecraft profile");
+        HttpUtil.Response response = HttpUtil.getBearer(MC_PROFILE_URL, minecraftAccessToken);
+        JsonObject json = parseJson(response.body(), "Minecraft profile");
         if (response.isSuccess()) {
             return json;
         }
 
-        if (response.code == 404) {
+        if (response.statusCode() == 404) {
             throw new IOException("此微软账号没有可用的 Minecraft Java 版档案，请先购买并创建 Java 版玩家名。");
         }
         throw new IOException(errorMessage(json, "Minecraft profile request failed"));
@@ -292,7 +339,7 @@ public class MicrosoftAuth implements AuthProvider {
             if (displayClaims.has("xui") && displayClaims.get("xui").isJsonArray()) {
                 JsonArray xui = displayClaims.getAsJsonArray("xui");
                 if (!xui.isEmpty() && xui.get(0).isJsonObject()) {
-                    token.userHash = getString(xui.get(0).getAsJsonObject(), "uhs", null);
+                    token.userHash = JsonUtil.getString(xui.get(0).getAsJsonObject(), "uhs", null);
                 }
             }
         }
@@ -303,51 +350,8 @@ public class MicrosoftAuth implements AuthProvider {
         return token;
     }
 
-    private HttpResponse postForm(String url, Map<String, String> form) throws IOException {
-        return request("POST", url, "application/x-www-form-urlencoded", encodeForm(form), null);
-    }
-
-    private HttpResponse postJson(String url, JsonObject payload) throws IOException {
-        return request("POST", url, "application/json", GSON.toJson(payload), null);
-    }
-
-    private HttpResponse getBearer(String url, String bearerToken) throws IOException {
-        return request("GET", url, null, null, bearerToken);
-    }
-
-    private HttpResponse request(String method, String url, String contentType, String body, String bearerToken) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
-        conn.setRequestMethod(method);
-        conn.setRequestProperty("User-Agent", "ECL/1.0");
-        conn.setRequestProperty("Accept", "application/json");
-        conn.setConnectTimeout(15000);
-        conn.setReadTimeout(30000);
-
-        if (contentType != null) {
-            conn.setRequestProperty("Content-Type", contentType);
-        }
-        if (bearerToken != null && !bearerToken.isBlank()) {
-            conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
-        }
-        if (body != null) {
-            conn.setDoOutput(true);
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(body.getBytes(StandardCharsets.UTF_8));
-            }
-        }
-
-        int code = conn.getResponseCode();
-        String responseBody;
-        try {
-            responseBody = readStream(code >= 400 ? conn.getErrorStream() : conn.getInputStream());
-        } finally {
-            conn.disconnect();
-        }
-        return new HttpResponse(code, responseBody);
-    }
-
-    private JsonObject requireSuccess(HttpResponse response, String source) throws IOException {
-        JsonObject json = parseJson(response.body, source);
+    private JsonObject requireSuccess(HttpUtil.Response response, String source) throws IOException {
+        JsonObject json = parseJson(response.body(), source);
         if (response.isSuccess()) {
             return json;
         }
@@ -363,78 +367,39 @@ public class MicrosoftAuth implements AuthProvider {
             if (element != null && element.isJsonObject()) {
                 return element.getAsJsonObject();
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOGGER.warn("{} returned invalid JSON", source, e);
         }
-        throw new IOException(source + " returned invalid JSON: " + abbreviate(body));
-    }
-
-    private String encodeForm(Map<String, String> form) {
-        StringJoiner joiner = new StringJoiner("&");
-        for (Map.Entry<String, String> entry : form.entrySet()) {
-            joiner.add(urlEncode(entry.getKey()) + "=" + urlEncode(entry.getValue()));
-        }
-        return joiner.toString();
-    }
-
-    private String urlEncode(String value) {
-        return java.net.URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
-    }
-
-    private String readStream(InputStream inputStream) throws IOException {
-        if (inputStream == null) {
-            return "";
-        }
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-            }
-            return sb.toString();
-        }
+        throw new IOException(source + " returned invalid JSON: " + TextUtil.abbreviate(body, 240));
     }
 
     private String requireString(JsonObject json, String key, String source) throws IOException {
-        String value = getString(json, key, null);
+        String value = JsonUtil.getString(json, key, null);
         if (value == null || value.isBlank()) {
             throw new IOException(source + " response did not contain " + key);
         }
         return value;
     }
 
-    private String getString(JsonObject json, String key, String defaultValue) {
-        if (json != null && json.has(key) && !json.get(key).isJsonNull()) {
-            return json.get(key).getAsString();
-        }
-        return defaultValue;
-    }
-
-    private int getInt(JsonObject json, String key, int defaultValue) {
-        if (json != null && json.has(key) && !json.get(key).isJsonNull()) {
-            return json.get(key).getAsInt();
-        }
-        return defaultValue;
-    }
-
     private String errorMessage(JsonObject json, String fallback) {
-        String description = getString(json, "error_description", null);
+        String description = JsonUtil.getString(json, "error_description", null);
         if (description != null && !description.isBlank()) {
             return description;
         }
-        String errorMessage = getString(json, "errorMessage", null);
+        String errorMessage = JsonUtil.getString(json, "errorMessage", null);
         if (errorMessage != null && !errorMessage.isBlank()) {
             return errorMessage;
         }
-        String message = getString(json, "message", null);
+        String message = JsonUtil.getString(json, "message", null);
         if (message != null && !message.isBlank()) {
             return message;
         }
-        String error = getString(json, "error", null);
+        String error = JsonUtil.getString(json, "error", null);
         return error == null || error.isBlank() ? fallback : error;
     }
 
     private String describeXstsError(JsonObject json) {
-        String xerr = getString(json, "XErr", "");
+        String xerr = JsonUtil.getString(json, "XErr", "");
         return switch (xerr) {
             case "2148916233" -> "此微软账号没有 Xbox 账号，请先在 xbox.com 创建 Xbox 档案。";
             case "2148916235" -> "Xbox Live 当前在该账号地区不可用。";
@@ -461,15 +426,18 @@ public class MicrosoftAuth implements AuthProvider {
         return value == null || value.isBlank() ? null : value;
     }
 
-    private String abbreviate(String text) {
-        return text.length() > 240 ? text.substring(0, 237) + "..." : text;
-    }
-
     public interface LoginListener {
         default void onDeviceCode(DeviceCode deviceCode) {
         }
 
         default void onStatus(String message) {
+        }
+    }
+
+    public record CachedSession(String refreshToken, String accessToken, long accessTokenExpiresAt,
+                                String username, String uuid) {
+        public static CachedSession empty() {
+            return new CachedSession(null, null, 0, null, null);
         }
     }
 
@@ -525,17 +493,9 @@ public class MicrosoftAuth implements AuthProvider {
         private String userHash;
     }
 
-    private static class HttpResponse {
-        private final int code;
-        private final String body;
-
-        private HttpResponse(int code, String body) {
-            this.code = code;
-            this.body = body == null ? "" : body;
-        }
-
-        private boolean isSuccess() {
-            return code >= 200 && code < 300;
-        }
+    private static class MinecraftToken {
+        private String accessToken;
+        private long expiresAt;
     }
+
 }

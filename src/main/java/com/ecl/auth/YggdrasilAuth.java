@@ -3,6 +3,8 @@ package com.ecl.auth;
 import com.ecl.util.HttpUtil;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.UUID;
@@ -12,6 +14,7 @@ import java.util.UUID;
  * Compatible with LittleSkin, Blessing Skin, and other authlib-injector based servers.
  */
 public class YggdrasilAuth implements AuthProvider {
+    private static final Logger LOGGER = LoggerFactory.getLogger(YggdrasilAuth.class);
 
     private final String authServer;
     private String username;
@@ -72,9 +75,10 @@ public class YggdrasilAuth implements AuthProvider {
     public void logout() {
         if (accessToken != null) {
             try {
-                String payload = "{\"accessToken\":\"" + accessToken + "\",\"clientToken\":\"" + clientToken + "\"}";
+                JsonObject payload = tokenPayload();
                 postJson(authServer + "invalidate", payload);
-            } catch (IOException ignored) {
+            } catch (IOException e) {
+                LOGGER.warn("Yggdrasil logout invalidation failed for {}", authServer, e);
             }
         }
         loggedIn = false;
@@ -83,12 +87,14 @@ public class YggdrasilAuth implements AuthProvider {
     }
 
     public void authenticate(String username, String password) throws IOException {
-        String payload = "{"
-                + "\"agent\":{\"name\":\"Minecraft\",\"version\":1},"
-                + "\"username\":\"" + escape(username) + "\","
-                + "\"password\":\"" + escape(password) + "\","
-                + "\"clientToken\":\"" + clientToken + "\""
-                + "}";
+        JsonObject agent = new JsonObject();
+        agent.addProperty("name", "Minecraft");
+        agent.addProperty("version", 1);
+        JsonObject payload = new JsonObject();
+        payload.add("agent", agent);
+        payload.addProperty("username", username);
+        payload.addProperty("password", password);
+        payload.addProperty("clientToken", clientToken);
 
         String response = postJson(authServer + "authenticate", payload);
         JsonObject json = JsonParser.parseString(response).getAsJsonObject();
@@ -119,7 +125,7 @@ public class YggdrasilAuth implements AuthProvider {
             return false;
         }
 
-        String payload = "{\"accessToken\":\"" + accessToken + "\",\"clientToken\":\"" + clientToken + "\"}";
+        JsonObject payload = tokenPayload();
         try {
             postJson(authServer + "validate", payload);
             return true;
@@ -133,7 +139,7 @@ public class YggdrasilAuth implements AuthProvider {
             throw new IllegalStateException("No access token to refresh");
         }
 
-        String payload = "{\"accessToken\":\"" + accessToken + "\",\"clientToken\":\"" + clientToken + "\"}";
+        JsonObject payload = tokenPayload();
         String response = postJson(authServer + "refresh", payload);
         JsonObject json = JsonParser.parseString(response).getAsJsonObject();
 
@@ -147,11 +153,14 @@ public class YggdrasilAuth implements AuthProvider {
         }
     }
 
-    private String postJson(String urlStr, String body) throws IOException {
+    private String postJson(String urlStr, JsonObject body) throws IOException {
         return HttpUtil.postJson(urlStr, body);
     }
 
-    private String escape(String str) {
-        return str.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+    private JsonObject tokenPayload() {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("accessToken", accessToken);
+        payload.addProperty("clientToken", clientToken);
+        return payload;
     }
 }

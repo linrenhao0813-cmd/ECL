@@ -2,6 +2,7 @@ package com.ecl.download;
 
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.TextUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -16,7 +17,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import static com.ecl.util.JsonUtil.getString;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class ModrinthDownloader {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ModrinthDownloader.class);
     private static final String API_BASE = "https://api.modrinth.com/v2";
 
     public interface DownloadListener {
@@ -67,7 +73,7 @@ public class ModrinthDownloader {
         public String toString() {
             return title
                     + (author == null || author.isBlank() ? "" : " / " + author)
-                    + "    下载 " + formatCount(downloads);
+                    + "    下载 " + TextUtil.formatCount(downloads);
         }
     }
 
@@ -345,7 +351,7 @@ public class ModrinthDownloader {
         if (filename == null) {
             return null;
         }
-        return filename.replaceAll("[\\\\/:*?\"<>|]", "_");
+        return TextUtil.replaceInvalidFilenameChars(filename);
     }
 
     private String escapeFacetValue(String value) {
@@ -364,31 +370,16 @@ public class ModrinthDownloader {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
-    private String getString(JsonObject object, String key) {
-        if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
-            return null;
-        }
-        return object.get(key).getAsString();
-    }
-
     private long getLong(JsonObject object, String key) {
         if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
             return 0;
         }
         try {
             return object.get(key).getAsLong();
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOGGER.debug("Invalid numeric field '{}' in Modrinth response", key, e);
             return 0;
         }
     }
 
-    private static String formatCount(long value) {
-        if (value >= 100000000) {
-            return (value / 100000000) + "亿+";
-        }
-        if (value >= 10000) {
-            return (value / 10000) + "万+";
-        }
-        return Long.toString(value);
-    }
 }

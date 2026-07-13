@@ -12,6 +12,8 @@ import com.ecl.launcher.CrashAnalyzer;
 import com.ecl.launcher.GameLauncher;
 import com.ecl.launcher.VersionManager;
 import com.ecl.util.JavaRuntimeUtil;
+import com.ecl.util.PlatformUtil;
+import com.ecl.util.TextUtil;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
@@ -27,7 +29,6 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
@@ -61,17 +62,21 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import static com.ecl.util.TextUtil.abbreviate;
+import static com.ecl.util.TextUtil.formatCount;
 
 public class LauncherUI extends javafx.application.Application {
+    private static final Logger LOGGER = LoggerFactory.getLogger(LauncherUI.class);
     private static final String AUTH_OFFLINE = "离线登录";
     private static final String AUTH_MICROSOFT = "微软登录 (Microsoft)";
     private static final String AUTH_YGGDRASIL = "外置登录 (Yggdrasil)";
-    private static final String MODRINTH_DISCOVER_URL = "https://modrinth.com/discover/";
     private static final String MC_CHINESE_WIKI_VERSION_URL_PREFIX = "https://zh.minecraft.wiki/w/";
-    private static final int MAX_CAPTURED_GAME_LOG_CHARS = 80000;
-    private static final int DEFAULT_MAX_MEMORY_MB = 2048;
     private static final double WINDOW_WIDTH = 1366;
     private static final double WINDOW_HEIGHT = 768;
     private static final double NAV_WIDTH = 188;
@@ -88,7 +93,6 @@ public class LauncherUI extends javafx.application.Application {
     private static final String ICON_LOG = "/icons/ui/log.png";
     private static final String ICON_FOLDER = "/icons/ui/folder.png";
     private static final String ICON_JAVA = "/icons/ui/java.png";
-    private static final String ICON_DOWNLOAD = "/icons/ui/download.png";
     private static final String ICON_CHECK = "/icons/ui/check.png";
     private static final String ICON_SIGNAL = "/icons/ui/signal.png";
 
@@ -97,6 +101,7 @@ public class LauncherUI extends javafx.application.Application {
     private ModrinthDownloader modrinthDownloader;
     private GameLauncher gameLauncher;
     private SettingsManager settingsManager;
+    private MainController controller;
     private Stage primaryStage;
 
     private ComboBox<String> versionCombo;
@@ -130,11 +135,11 @@ public class LauncherUI extends javafx.application.Application {
     private Label selectedVersionTitleLabel;
     private HBox workspacePane;
     private List<ContentTarget> contentTargets;
-    private ContentTarget selectedContentTarget;
 
     private String javaPath;
     private File gameDir;
     private String extraJvmArgs;
+    private int maxMemoryMb;
     private double windowDragOffsetX;
     private double windowDragOffsetY;
     private final Map<ProgressBar, Timeline> progressAnimations = new HashMap<>();
@@ -191,22 +196,64 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
+    /** Fixed-size character ring that retains only the newest log tail without head deletions. */
+    private static final class BoundedLogBuffer {
+        private final char[] chars;
+        private int start;
+        private int size;
+
+        private BoundedLogBuffer(int capacity) {
+            chars = new char[Math.max(1, capacity)];
+        }
+
+        private void appendLine(String line) {
+            append(line);
+            append(System.lineSeparator());
+        }
+
+        private void append(CharSequence text) {
+            for (int i = 0; i < text.length(); i++) {
+                int writeIndex = (start + size) % chars.length;
+                chars[writeIndex] = text.charAt(i);
+                if (size < chars.length) {
+                    size++;
+                } else {
+                    start = (start + 1) % chars.length;
+                }
+            }
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder result = new StringBuilder(size);
+            int firstPart = Math.min(size, chars.length - start);
+            result.append(chars, start, firstPart);
+            if (firstPart < size) {
+                result.append(chars, 0, size - firstPart);
+            }
+            return result.toString();
+        }
+    }
+
     @Override
     public void start(Stage primaryStage) {
         this.primaryStage = primaryStage;
-        ECLConfig.ensureDirs();
+        controller = new MainController();
+        settingsManager = controller.settings();
+        versionManager = controller.versions();
+        downloader = controller.gameDownloader();
+        modrinthDownloader = controller.modrinthDownloader();
+        gameLauncher = controller.gameLauncher();
 
-        settingsManager = new SettingsManager();
-        settingsManager.load();
-
-        versionManager = new VersionManager();
-        downloader = new GameDownloader();
-        modrinthDownloader = new ModrinthDownloader();
-        gameLauncher = new GameLauncher();
-
-        javaPath = JavaRuntimeUtil.resolveJavaExecutable(settingsManager.getString("javaPath", ""));
-        gameDir = loadConfiguredGameRootDir();
-        extraJvmArgs = settingsManager.getString("jvmArgs", "");
+        javaPath = JavaRuntimeUtil.resolveJavaExecutable(settingsManager.getString(ECLConfig.SETTING_JAVA_PATH, ""));
+        gameDir = new File(settingsManager.getString(ECLConfig.SETTING_GAME_DIR, ECLConfig.getGameDir().getAbsolutePath()));
+        extraJvmArgs = settingsManager.getString(ECLConfig.SETTING_JVM_ARGS, "");
+        maxMemoryMb = settingsManager.getInt(ECLConfig.SETTING_MAX_MEMORY_MB, ECLConfig.AUTO_MEMORY_MB);
+        if (maxMemoryMb < ECLConfig.AUTO_MEMORY_MB
+                || (maxMemoryMb > ECLConfig.AUTO_MEMORY_MB && maxMemoryMb < ECLConfig.MIN_GAME_MEMORY_MB)
+                || maxMemoryMb > ECLConfig.MAX_GAME_MEMORY_MB) {
+            maxMemoryMb = ECLConfig.AUTO_MEMORY_MB;
+        }
         contentTargets = createContentTargets();
 
         primaryStage.initStyle(StageStyle.UNDECORATED);
@@ -230,6 +277,13 @@ public class LauncherUI extends javafx.application.Application {
         updateRuntimeSummary();
         setStatus("就绪", "首次运行会自动拉取版本清单，未下载的版本会在启动前补齐资源。");
         refreshVersions();
+    }
+
+    @Override
+    public void stop() {
+        if (controller != null) {
+            controller.close();
+        }
     }
 
     private BorderPane createRoot() {
@@ -822,7 +876,9 @@ public class LauncherUI extends javafx.application.Application {
                 ? parseVersionCategory(settingsManager.getString("versionCategory2", VersionManager.VersionCategory.FEATURED.name()))
                 : versionTypeCombo.getValue();
         String previousAuthType = authTypeCombo == null ? normalizeAuthType(settingsManager.getString("authType", AUTH_OFFLINE)) : normalizeAuthType(authTypeCombo.getValue());
-        String previousUsername = usernameField == null ? settingsManager.getString("username", settingsManager.getString("microsoftProfileName", "Steve")) : usernameField.getText();
+        String previousUsername = usernameField == null
+                ? settingsManager.getString("username", settingsManager.getString(ECLConfig.SETTING_MICROSOFT_PROFILE_NAME, "Steve"))
+                : usernameField.getText();
         if (previousUsername == null || previousUsername.isBlank()) {
             previousUsername = "Steve";
         }
@@ -858,7 +914,9 @@ public class LauncherUI extends javafx.application.Application {
         versionCombo.valueProperty().addListener((obs, oldValue, newValue) -> {
             if (newValue != null && !newValue.isBlank()) {
                 settingsManager.setString("selectedVersion", newValue);
-                settingsManager.save();
+                if (!settingsManager.save()) {
+                    setStatus("设置保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
+                }
             }
             updateRuntimeSummary();
             updateSelectedVersionWikiButton();
@@ -871,7 +929,10 @@ public class LauncherUI extends javafx.application.Application {
         versionTypeCombo.setTooltip(new Tooltip("默认显示正式版、预览版/快照和愚人节版，也可以只看某一类"));
         versionTypeCombo.setOnAction(e -> {
             settingsManager.setString("versionCategory2", getSelectedVersionCategory().name());
-            settingsManager.save();
+            if (!settingsManager.save()) {
+                setStatus("设置保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
+                return;
+            }
             refreshVersions();
         });
         applyFieldStyle(versionTypeCombo);
@@ -884,7 +945,9 @@ public class LauncherUI extends javafx.application.Application {
         gameDirField.setEditable(false);
         applyFieldStyle(gameDirField);
 
-        TextField jvmField = new TextField(extraJvmArgs == null || extraJvmArgs.isBlank() ? "自动内存" : extraJvmArgs);
+        TextField jvmField = new TextField(extraJvmArgs == null || extraJvmArgs.isBlank()
+                ? "未设置（内存: " + getMemoryDisplayText() + "）"
+                : extraJvmArgs);
         jvmField.setEditable(false);
         applyFieldStyle(jvmField);
 
@@ -958,8 +1021,8 @@ public class LauncherUI extends javafx.application.Application {
             } else if (!versions.isEmpty()) {
                 versionCombo.getSelectionModel().select(0);
             }
-        } catch (Exception ignored) {
-            // Version refresh will surface network/cache failures through the status area.
+        } catch (Exception e) {
+            LOGGER.warn("Failed to restore version choices", e);
         }
     }
 
@@ -1023,7 +1086,7 @@ public class LauncherUI extends javafx.application.Application {
         if (microsoft) {
             usernameField.setPromptText("授权后自动读取正版玩家名");
             authSummaryLabel.setText("微软正版登录");
-            authHintLabel.setText("启动时会打开浏览器并显示设备码，授权成功后自动读取 Minecraft Java 版档案。 ");
+            authHintLabel.setText("会优先静默恢复已保存的登录状态；仅在缓存和刷新令牌失效时显示设备码。 ");
         } else if (yggdrasil) {
             usernameField.setPromptText("输入外置登录用户名或邮箱");
             authSummaryLabel.setText("外置登录 / Yggdrasil");
@@ -1056,8 +1119,12 @@ public class LauncherUI extends javafx.application.Application {
             topAuthBadgeLabel.setText(getAuthDisplayName());
         }
 
+        String memoryText = getMemoryDisplayText();
         if (memorySummaryLabel != null) {
-            memorySummaryLabel.setText("自动");
+            memorySummaryLabel.setText(memoryText);
+        }
+        if (topMemoryBadgeLabel != null) {
+            topMemoryBadgeLabel.setText(memoryText);
         }
         jvmArgsSummaryLabel.setText(extraJvmArgs == null || extraJvmArgs.isBlank() ? "未设置" : abbreviate(extraJvmArgs, 68));
         jvmArgsSummaryLabel.setTooltip(extraJvmArgs == null || extraJvmArgs.isBlank() ? null : new Tooltip(extraJvmArgs));
@@ -1068,6 +1135,19 @@ public class LauncherUI extends javafx.application.Application {
         } else {
             runtimeBadgeLabel.setText("未配置");
         }
+    }
+
+    private int getEffectiveMaxMemoryMb() {
+        return maxMemoryMb == ECLConfig.AUTO_MEMORY_MB
+                ? ECLConfig.calculateAutoMemoryMb()
+                : maxMemoryMb;
+    }
+
+    private String getMemoryDisplayText() {
+        int effectiveMemoryMb = getEffectiveMaxMemoryMb();
+        return maxMemoryMb == ECLConfig.AUTO_MEMORY_MB
+                ? "自动 " + effectiveMemoryMb + " MB"
+                : effectiveMemoryMb + " MB";
     }
 
     private String getAuthDisplayName() {
@@ -1083,21 +1163,6 @@ public class LauncherUI extends javafx.application.Application {
             username = "Steve";
         }
         return abbreviate(username.trim(), 14);
-    }
-
-    private String getAuthBadgeText() {
-        String authType = authTypeCombo == null ? AUTH_OFFLINE : authTypeCombo.getValue();
-        if (AUTH_MICROSOFT.equals(authType)) {
-            return "账号 Microsoft";
-        }
-        if (AUTH_YGGDRASIL.equals(authType)) {
-            return "账号 Yggdrasil";
-        }
-        String username = usernameField == null ? "Player" : usernameField.getText();
-        if (username == null || username.isBlank()) {
-            username = "Player";
-        }
-        return "账号 " + abbreviate(username.trim(), 14);
     }
 
     private void setSummaryText(Label label, String value, int maxLength) {
@@ -1218,7 +1283,8 @@ public class LauncherUI extends javafx.application.Application {
     private VersionManager.VersionCategory parseVersionCategory(String value) {
         try {
             return VersionManager.VersionCategory.valueOf(value);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOGGER.debug("Invalid saved version category: {}", value, e);
             return VersionManager.VersionCategory.FEATURED;
         }
     }
@@ -1251,16 +1317,20 @@ public class LauncherUI extends javafx.application.Application {
             return;
         }
 
-        settingsManager.setString("javaPath", javaPath);
-        settingsManager.setString("gameDir", gameDir.getAbsolutePath());
-        settingsManager.setString("jvmArgs", extraJvmArgs == null ? "" : extraJvmArgs);
+        settingsManager.setString(ECLConfig.SETTING_JAVA_PATH, javaPath);
+        settingsManager.setString(ECLConfig.SETTING_GAME_DIR, gameDir.getAbsolutePath());
+        settingsManager.setString(ECLConfig.SETTING_JVM_ARGS, extraJvmArgs == null ? "" : extraJvmArgs);
+        settingsManager.setInt(ECLConfig.SETTING_MAX_MEMORY_MB, maxMemoryMb);
         settingsManager.setString("selectedVersion", selectedVersion);
         settingsManager.setString("authType", authTypeCombo.getValue());
         settingsManager.setString("username", usernameField.getText().trim());
         if (AUTH_YGGDRASIL.equals(authTypeCombo.getValue())) {
             settingsManager.setString("yggdrasilServer", yggdrasilServerField.getText().trim());
         }
-        settingsManager.save();
+        if (!settingsManager.save()) {
+            setStatus("设置保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
+            return;
+        }
         updateRuntimeSummary();
 
         if (!versionManager.isVersionDownloaded(selectedVersion)) {
@@ -1336,7 +1406,7 @@ public class LauncherUI extends javafx.application.Application {
                 AuthProvider auth = buildAuthProvider(authType, server, username, password);
                 gameLauncher.setAuth(auth);
                 gameLauncher.setVersion(version);
-                gameLauncher.setMaxMemory(DEFAULT_MAX_MEMORY_MB);
+                gameLauncher.setMaxMemory(getEffectiveMaxMemoryMb());
                 gameLauncher.setGameDir(launchDir);
                 gameLauncher.setJvmArgs(extraJvmArgs == null ? "" : extraJvmArgs);
                 gameLauncher.setJavaPath(javaPath);
@@ -1361,11 +1431,11 @@ public class LauncherUI extends javafx.application.Application {
 
     private void monitorGameProcess(Process process, String version, File launchDir, long launchStartedAt) {
         runAsync("ecl-monitor-game-" + version, () -> {
-            StringBuilder output = new StringBuilder();
+            BoundedLogBuffer output = new BoundedLogBuffer(ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    appendCapturedLog(output, line);
+                    output.appendLine(line);
                 }
 
                 int exitCode = process.waitFor();
@@ -1389,82 +1459,16 @@ public class LauncherUI extends javafx.application.Application {
         });
     }
 
-    private void appendCapturedLog(StringBuilder output, String line) {
-        output.append(line).append(System.lineSeparator());
-        if (output.length() > MAX_CAPTURED_GAME_LOG_CHARS) {
-            output.delete(0, output.length() - MAX_CAPTURED_GAME_LOG_CHARS);
-        }
-    }
-
     private void showGameErrorDialog(CrashAnalyzer.Report report) {
-        Stage dialog = new Stage();
-        dialog.initOwner(primaryStage);
-        dialog.initModality(Modality.NONE);
-        dialog.setTitle("启动错误诊断");
-        applyWindowIcon(dialog);
-
-        Label title = new Label(report.getTitle());
-        title.getStyleClass().add("status-title");
-        title.setWrapText(true);
-
-        Label explanation = new Label(report.getExplanation());
-        explanation.getStyleClass().add("status-detail");
-        explanation.setWrapText(true);
-
-        Label suggestions = new Label(toBulletText(report.getSuggestions()));
-        suggestions.getStyleClass().add("diagnostic-text");
-        suggestions.setWrapText(true);
-
-        TextArea evidenceArea = new TextArea(toBulletText(report.getEvidence()));
-        evidenceArea.getStyleClass().add("diagnostic-log");
-        evidenceArea.setEditable(false);
-        evidenceArea.setWrapText(true);
-        evidenceArea.setPrefRowCount(10);
-
-        Button openCrashDirBtn = new Button("打开崩溃报告");
-        openCrashDirBtn.getStyleClass().addAll("app-button", "secondary-button");
-        openCrashDirBtn.setDisable(report.getCrashReportFile() == null);
-        openCrashDirBtn.setOnAction(e -> {
-            File crashFile = report.getCrashReportFile();
-            if (crashFile != null && crashFile.getParentFile() != null) {
-                openLocalFolder(crashFile.getParentFile(), "崩溃报告目录");
-            }
-        });
-
-        Button openModsBtn = new Button("打开 mods");
-        openModsBtn.getStyleClass().addAll("app-button", "secondary-button");
-        openModsBtn.setOnAction(e -> openLocalFolder(resolveModsDir(getSelectedVersion()), "模组目录"));
-
-        Button closeBtn = new Button("关闭");
-        closeBtn.getStyleClass().addAll("app-button", "ghost-button");
-        closeBtn.setOnAction(e -> dialog.close());
-
-        HBox actions = new HBox(10, openCrashDirBtn, openModsBtn, closeBtn);
-        actions.setAlignment(Pos.CENTER_RIGHT);
-
-        VBox root = new VBox(14,
-                createSurface("中文解释", null, title, explanation),
-                createSurface("修复建议", null, suggestions),
-                createSurface("关键日志", "下面是启动器从英文报错中提取的关键行", evidenceArea),
-                actions
-        );
-        root.getStyleClass().add("root-pane");
-        root.setPadding(new Insets(18));
-
-        Scene scene = new Scene(createWheelScrollPane(root), 760, 620);
-        URL stylesheet = getClass().getResource("/css/launcher.css");
-        if (stylesheet != null) {
-            scene.getStylesheets().add(stylesheet.toExternalForm());
-        }
-        dialog.setScene(scene);
-        dialog.show();
+        CrashDiagnosticDialog.show(primaryStage, report, resolveModsDir(getSelectedVersion()),
+                folder -> openLocalFolder(folder, "诊断目录"));
     }
 
     private void loginMicrosoftAccount() {
         authTypeCombo.setValue(AUTH_MICROSOFT);
         updateAuthFields();
         setControlsBusy(true);
-        setStatus("微软正版登录", "正在准备 Microsoft 设备码登录。");
+        setStatus("微软正版登录", "正在尝试恢复已保存的 Microsoft 登录状态。");
 
         runAsync("ecl-login-microsoft", () -> {
             try {
@@ -1485,7 +1489,14 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private MicrosoftAuth authenticateMicrosoftAccount() {
-        MicrosoftAuth microsoftAuth = new MicrosoftAuth(settingsManager.getString("microsoftRefreshToken", ""), new MicrosoftAuth.LoginListener() {
+        MicrosoftAuth.CachedSession cachedSession = new MicrosoftAuth.CachedSession(
+                settingsManager.getString(ECLConfig.SETTING_MICROSOFT_REFRESH_TOKEN, ""),
+                settingsManager.getString(ECLConfig.SETTING_MICROSOFT_ACCESS_TOKEN, ""),
+                settingsManager.getLong(ECLConfig.SETTING_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT, 0),
+                settingsManager.getString(ECLConfig.SETTING_MICROSOFT_PROFILE_NAME, ""),
+                settingsManager.getString(ECLConfig.SETTING_MICROSOFT_PROFILE_UUID, "")
+        );
+        MicrosoftAuth microsoftAuth = new MicrosoftAuth(cachedSession, new MicrosoftAuth.LoginListener() {
             @Override
             public void onDeviceCode(MicrosoftAuth.DeviceCode deviceCode) {
                 Platform.runLater(() -> {
@@ -1506,12 +1517,17 @@ public class LauncherUI extends javafx.application.Application {
         microsoftAuth.login();
         String refreshToken = microsoftAuth.getRefreshToken();
         if (refreshToken != null && !refreshToken.isBlank()) {
-            settingsManager.setString("microsoftRefreshToken", refreshToken);
+            settingsManager.setString(ECLConfig.SETTING_MICROSOFT_REFRESH_TOKEN, refreshToken);
         }
+        settingsManager.setString(ECLConfig.SETTING_MICROSOFT_ACCESS_TOKEN, microsoftAuth.getAccessToken());
+        settingsManager.setLong(ECLConfig.SETTING_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT, microsoftAuth.getAccessTokenExpiresAt());
         settingsManager.setString("authType", AUTH_MICROSOFT);
-        settingsManager.setString("microsoftProfileName", microsoftAuth.getUsername());
+        settingsManager.setString(ECLConfig.SETTING_MICROSOFT_PROFILE_NAME, microsoftAuth.getUsername());
+        settingsManager.setString(ECLConfig.SETTING_MICROSOFT_PROFILE_UUID, microsoftAuth.getUUID());
         settingsManager.setString("username", microsoftAuth.getUsername());
-        settingsManager.save();
+        if (!settingsManager.save()) {
+            Platform.runLater(() -> setStatus("微软登录信息保存失败", "登录已成功，但无法保存刷新令牌，请检查目录权限或查看日志。"));
+        }
         return microsoftAuth;
     }
 
@@ -1586,22 +1602,10 @@ public class LauncherUI extends javafx.application.Application {
             content.putString(userCode);
             Clipboard.getSystemClipboard().setContent(content);
             return true;
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOGGER.warn("Failed to copy Microsoft device code", e);
             return false;
         }
-    }
-
-    private String toBulletText(List<String> items) {
-        if (items == null || items.isEmpty()) {
-            return "未提取到关键日志。";
-        }
-        StringBuilder sb = new StringBuilder();
-        for (String item : items) {
-            if (item != null && !item.isBlank()) {
-                sb.append("- ").append(item.trim()).append(System.lineSeparator());
-            }
-        }
-        return sb.toString().trim();
     }
 
     private AuthProvider buildAuthProvider(String authType, String server, String username, String password) {
@@ -1953,7 +1957,7 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private String sanitizeVersionDirectoryName(String version) {
-        String sanitized = version.trim().replaceAll("[\\\\/:*?\"<>|]", "_");
+        String sanitized = TextUtil.replaceInvalidFilenameChars(version.trim());
         return sanitized.isBlank() ? "unknown-version" : sanitized;
     }
 
@@ -1985,7 +1989,7 @@ public class LauncherUI extends javafx.application.Application {
             if (initial != null) {
                 chooser.setInitialDirectory(initial);
             }
-            if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            if (PlatformUtil.isWindows()) {
                 chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Java 可执行文件", "java.exe", "*.exe"));
             }
             File selected = chooser.showOpenDialog(dialog);
@@ -2019,6 +2023,10 @@ public class LauncherUI extends javafx.application.Application {
         HBox dirBox = new HBox(10, dirField, dirBrowseBtn);
         HBox.setHgrow(dirField, Priority.ALWAYS);
 
+        TextField memoryField = new TextField(maxMemoryMb == ECLConfig.AUTO_MEMORY_MB ? "" : Integer.toString(maxMemoryMb));
+        memoryField.setPromptText("留空为自动（当前 " + ECLConfig.calculateAutoMemoryMb() + " MB）");
+        applyFieldStyle(memoryField);
+
         TextField jvmField = new TextField(extraJvmArgs);
         jvmField.setPromptText("例如: -XX:+UseG1GC -Dfile.encoding=UTF-8");
         applyFieldStyle(jvmField);
@@ -2026,6 +2034,7 @@ public class LauncherUI extends javafx.application.Application {
         VBox dialogRoot = new VBox(18,
                 createSurface("Java 路径", "可填写 java.exe，也可以直接指向 JDK 根目录", javaBox),
                 createSurface("游戏目录", "启动器会在这个目录下运行游戏进程", dirBox),
+                createSurface("最大内存", "留空时按物理内存自动分配，也可填写 MB 数值", memoryField),
                 createSurface("额外 JVM 参数", "这些参数会附加到默认启动参数之后", jvmField)
         );
         dialogRoot.getStyleClass().add("root-pane");
@@ -2045,18 +2054,31 @@ public class LauncherUI extends javafx.application.Application {
                 configuredGameDir = ECLConfig.getGameDir().getAbsolutePath();
             }
 
+            int configuredMemoryMb;
+            try {
+                configuredMemoryMb = parseMemorySetting(memoryField.getText());
+            } catch (IllegalArgumentException memoryError) {
+                setStatus("内存设置无效", memoryError.getMessage());
+                return;
+            }
+
             javaPath = configuredJava.isBlank() ? JavaRuntimeUtil.detectSystemJavaExecutable() : JavaRuntimeUtil.resolveJavaExecutable(configuredJava);
             gameDir = new File(configuredGameDir);
             gameDir.mkdirs();
             extraJvmArgs = jvmField.getText().trim();
+            maxMemoryMb = configuredMemoryMb;
 
-            settingsManager.setString("javaPath", javaPath);
-            settingsManager.setString("gameDir", gameDir.getAbsolutePath());
-            settingsManager.setString("jvmArgs", extraJvmArgs);
-            settingsManager.save();
+            settingsManager.setString(ECLConfig.SETTING_JAVA_PATH, javaPath);
+            settingsManager.setString(ECLConfig.SETTING_GAME_DIR, gameDir.getAbsolutePath());
+            settingsManager.setString(ECLConfig.SETTING_JVM_ARGS, extraJvmArgs);
+            settingsManager.setInt(ECLConfig.SETTING_MAX_MEMORY_MB, maxMemoryMb);
+            if (!settingsManager.save()) {
+                setStatus("设置保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
+                return;
+            }
 
             updateRuntimeSummary();
-            setStatus("设置已保存", "新的 Java 路径、游戏目录和 JVM 参数已经生效。 ");
+            setStatus("设置已保存", "新的 Java 路径、游戏目录、内存和 JVM 参数已经生效。 ");
             dialog.close();
         });
 
@@ -2075,6 +2097,22 @@ public class LauncherUI extends javafx.application.Application {
         }
         dialog.setScene(scene);
         dialog.show();
+    }
+
+    private int parseMemorySetting(String value) {
+        if (value == null || value.isBlank() || "自动".equals(value.trim())) {
+            return ECLConfig.AUTO_MEMORY_MB;
+        }
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            if (parsed < ECLConfig.MIN_GAME_MEMORY_MB || parsed > ECLConfig.MAX_GAME_MEMORY_MB) {
+                throw new IllegalArgumentException("请输入 " + ECLConfig.MIN_GAME_MEMORY_MB + " 到 "
+                        + ECLConfig.MAX_GAME_MEMORY_MB + " 之间的 MB 数值，或留空使用自动分配。");
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("请输入整数 MB 数值，或留空使用自动分配。", e);
+        }
     }
 
     private ScrollPane createWheelScrollPane(Node content) {
@@ -2112,15 +2150,6 @@ public class LauncherUI extends javafx.application.Application {
 
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
-    }
-
-    private void openExternalUrl(String url, String label) {
-        try {
-            getHostServices().showDocument(url);
-            setStatus("已打开" + label, "浏览器会显示可下载内容，下载后放入对应本地目录即可。");
-        } catch (Exception e) {
-            setStatus("无法打开" + label, cleanMessage(e));
-        }
     }
 
     private void openMinecraftWikiVersionPage(String version) {
@@ -2167,7 +2196,8 @@ public class LauncherUI extends javafx.application.Application {
         } catch (Exception e) {
             try {
                 getHostServices().showDocument(new URI("file", "", folder.getAbsolutePath().replace('\\', '/'), null).toString());
-            } catch (URISyntaxException ignored) {
+            } catch (URISyntaxException uriError) {
+                LOGGER.warn("Failed to open local folder {}", folder, uriError);
                 setStatus("无法打开" + label, cleanMessage(e));
             }
         }
@@ -2194,9 +2224,7 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private void runAsync(String threadName, Runnable action) {
-        Thread thread = new Thread(action, threadName);
-        thread.setDaemon(true);
-        thread.start();
+        controller.runAsync(threadName, action);
     }
 
     private void setFieldVisible(Node node, boolean visible) {
@@ -2289,44 +2317,19 @@ public class LauncherUI extends javafx.application.Application {
         };
     }
 
-    private Label createBadge(String text, String styleClass) {
-        Label badge = new Label(text);
-        badge.getStyleClass().addAll("badge", styleClass);
-        return badge;
-    }
-
-    private String abbreviate(String text, int maxLength) {
-        if (text == null || text.length() <= maxLength) {
-            return text;
-        }
-        int head = Math.max(8, maxLength / 2 - 2);
-        int tail = Math.max(8, maxLength - head - 3);
-        return text.substring(0, head) + "..." + text.substring(text.length() - tail);
-    }
-
     private String formatBytes(long bytes) {
         if (bytes < 1024) {
             return bytes + " B";
         }
         double kb = bytes / 1024.0;
         if (kb < 1024) {
-            return String.format("%.1f KB", kb);
+            return String.format(Locale.ROOT, "%.1f KB", kb);
         }
         double mb = kb / 1024.0;
         if (mb < 1024) {
-            return String.format("%.1f MB", mb);
+            return String.format(Locale.ROOT, "%.1f MB", mb);
         }
-        return String.format("%.2f GB", mb / 1024.0);
-    }
-
-    private String formatCount(long value) {
-        if (value >= 100000000) {
-            return String.format("%.1f 亿", value / 100000000.0);
-        }
-        if (value >= 10000) {
-            return String.format("%.1f 万", value / 10000.0);
-        }
-        return Long.toString(value);
+        return String.format(Locale.ROOT, "%.2f GB", mb / 1024.0);
     }
 
     private String cleanMessage(Throwable throwable) {

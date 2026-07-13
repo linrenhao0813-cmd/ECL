@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.List;
+import com.ecl.util.PlatformUtil;
 
 /**
  * Main entry point for ECL.
@@ -44,15 +45,10 @@ public class ECL {
             classpath.add(currentClasspath);
         }
 
-        String javafxClassifier = javafxClassifier();
-        addCachedJar(classpath, "org.openjfx", "javafx-base", "21", javafxClassifier);
-        addCachedJar(classpath, "org.openjfx", "javafx-graphics", "21", javafxClassifier);
-        addCachedJar(classpath, "org.openjfx", "javafx-controls", "21", javafxClassifier);
-        addCachedJar(classpath, "org.openjfx", "javafx-fxml", "21", javafxClassifier);
-        addCachedJar(classpath, "org.openjfx", "javafx-media", "21", javafxClassifier);
-        addCachedJar(classpath, "org.openjfx", "javafx-web", "21", javafxClassifier);
+        addCachedJar(classpath, "org.openjfx", "javafx-base", "21");
+        addCachedJar(classpath, "org.openjfx", "javafx-graphics", "21");
+        addCachedJar(classpath, "org.openjfx", "javafx-controls", "21");
         addCachedJar(classpath, "com.google.code.gson", "gson", "2.10.1");
-        addCachedJar(classpath, "org.jsoup", "jsoup", "1.17.2");
 
         List<String> command = new ArrayList<>();
         command.add(javaExecutable());
@@ -114,7 +110,7 @@ public class ECL {
     }
 
     private static String javaExecutable() {
-        String executable = System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java";
+        String executable = PlatformUtil.isWindows() ? "java.exe" : "java";
         return new File(System.getProperty("java.home"), "bin/" + executable).getAbsolutePath();
     }
 
