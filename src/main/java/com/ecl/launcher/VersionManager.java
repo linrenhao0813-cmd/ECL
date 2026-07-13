@@ -4,6 +4,7 @@ import com.ecl.ECLConfig;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
+import com.ecl.util.MinecraftRuleUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -260,6 +261,10 @@ public class VersionManager {
         File indexFile = new File(ECLConfig.getAssetsDir(), "indexes/" + assetId + ".json");
         String sha1 = getString(assetIndex, "sha1");
         return sha1.isBlank() ? indexFile.exists() : FileUtil.verifySha1(indexFile, sha1);
+    }
+
+    private String getString(JsonObject object, String key) {
+        return JsonUtil.getString(object, key, "");
     }
 
     private boolean matchesCategory(JsonObject version, VersionCategory category) {

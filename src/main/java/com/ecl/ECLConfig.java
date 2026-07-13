@@ -83,6 +83,13 @@ public class ECLConfig {
         return new File(getBaseDir(), "game");
     }
 
+    private static File getWindowsRoamingDir() {
+        String appData = System.getenv("APPDATA");
+        return appData == null || appData.isBlank()
+                ? new File(System.getProperty("user.home"), "AppData/Roaming")
+                : new File(appData);
+    }
+
     public static void ensureDirs() {
         getBaseDir().mkdirs();
         getVersionsDir().mkdirs();
