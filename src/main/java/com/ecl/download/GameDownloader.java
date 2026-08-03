@@ -19,10 +19,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class GameDownloader implements AutoCloseable {
+public class GameDownloader implements DownloadService {
     public interface DownloadListener {
         void onStatus(String message);
         void onProgress(long downloaded, long total);
@@ -34,7 +35,7 @@ public class GameDownloader implements AutoCloseable {
     private final ExecutorService fileDownloadExecutor;
     private final AtomicReference<Future<?>> activeDownload = new AtomicReference<>();
     private volatile DownloadListener configuredListener;
-    private volatile boolean verifyExistingFiles;
+    private volatile boolean verifyExistingFiles = true;
 
     public GameDownloader() {
         versionDownloadExecutor = Executors.newSingleThreadExecutor(daemonThreadFactory("ecl-version-download"));
@@ -69,7 +70,7 @@ public class GameDownloader implements AutoCloseable {
 
     public synchronized boolean cancelDownload() {
         Future<?> task = activeDownload.getAndSet(null);
-        return task != null && !task.isDone() && task.cancel(true);
+        return task != null && task.cancel(true);
     }
 
     public boolean isDownloadInProgress() {
@@ -82,6 +83,8 @@ public class GameDownloader implements AutoCloseable {
         cancelDownload();
         versionDownloadExecutor.shutdownNow();
         fileDownloadExecutor.shutdownNow();
+        awaitTermination(versionDownloadExecutor, "version download");
+        awaitTermination(fileDownloadExecutor, "file download");
     }
 
     private void downloadVersionInternal(String versionId, String versionUrl, DownloadListener runListener) {
@@ -147,6 +150,17 @@ public class GameDownloader implements AutoCloseable {
 
     private void checkCancelled() throws InterruptedException {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedException("download cancelled");
+    }
+
+    private void awaitTermination(ExecutorService executor, String executorName) {
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out while stopping " + executorName + " executor");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while stopping " + executorName + " executor", e);
+        }
     }
 
     private boolean hasUsableInheritedClient(JsonObject versionJson) {

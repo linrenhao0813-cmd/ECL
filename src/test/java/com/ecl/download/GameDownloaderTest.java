@@ -16,15 +16,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameDownloaderTest {
     @Test
-    void existingFilesAreTrustedUnlessStrictVerificationIsEnabled(@TempDir Path tempDir) throws IOException {
+    void existingFilesAreVerifiedByDefaultAndCanBeExplicitlyTrusted(@TempDir Path tempDir) throws IOException {
         File existing = tempDir.resolve("library.jar").toFile();
         Files.writeString(existing.toPath(), "actual contents");
 
         try (GameDownloader downloader = new GameDownloader()) {
-            assertFalse(downloader.needsDownload(existing, "0000000000000000000000000000000000000000"));
-            downloader.setVerifyExistingFiles(true);
             assertTrue(downloader.needsDownload(existing, "0000000000000000000000000000000000000000"));
             assertFalse(downloader.needsDownload(existing, FileUtil.sha1(existing)));
+            downloader.setVerifyExistingFiles(false);
+            assertFalse(downloader.needsDownload(existing, "0000000000000000000000000000000000000000"));
             assertTrue(downloader.needsDownload(tempDir.resolve("missing.jar").toFile(), null));
         }
     }

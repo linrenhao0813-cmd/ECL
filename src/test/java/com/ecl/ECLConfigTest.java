@@ -14,4 +14,11 @@ class ECLConfigTest {
         assertTrue(memoryMb <= ECLConfig.MAX_AUTO_MEMORY_MB);
         assertEquals(0, memoryMb % 256);
     }
+
+    @Test
+    void worldBackupSettingsHaveSafeDefaults() {
+        assertTrue(ECLConfig.KEY_BACKUP_ON_LAUNCH.defaultValue());
+        assertEquals(10, ECLConfig.KEY_BACKUP_KEEP_COUNT.defaultValue());
+        assertEquals(false, ECLConfig.KEY_BACKUP_INCLUDE_MODS.defaultValue());
+    }
 }

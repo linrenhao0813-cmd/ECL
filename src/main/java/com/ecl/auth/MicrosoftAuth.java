@@ -1,5 +1,6 @@
 package com.ecl.auth;
 
+import com.ecl.exception.AuthException;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
 import com.ecl.util.TextUtil;
@@ -29,13 +30,22 @@ public class MicrosoftAuth implements AuthProvider {
     private static final String MC_ENTITLEMENTS_URL = "https://api.minecraftservices.com/entitlements/mcstore";
     private static final String MC_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile";
 
-    private String username;
-    private String uuid;
-    private String accessToken;
-    private long accessTokenExpiresAt;
-    private String refreshToken;
-    private boolean loggedIn;
+    private volatile String username;
+    private volatile String uuid;
+    private volatile String accessToken;
+    private volatile long accessTokenExpiresAt;
+    private volatile String refreshToken;
+    private volatile boolean loggedIn;
     private final LoginListener listener;
+
+    /** Lock for coordinating state field updates across authenticate/logout/getCachedSession. */
+    private final Object stateLock = new Object();
+
+    /**
+     * 登录代次计数器。每次开始登录或 logout() 时递增，后台登录流程在写回状态前检查代次是否匹配，
+     * 防止登录完成后才被 logout() 清空的状态被后台线程"复活"。
+     */
+    private volatile long generation;
 
     public MicrosoftAuth() {
         this(CachedSession.empty(), null);
@@ -91,114 +101,154 @@ public class MicrosoftAuth implements AuthProvider {
 
     @Override
     public void login() {
+        long gen = beginLogin();
         try {
-            authenticate();
+            authenticate(gen);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Microsoft authentication was interrupted", e);
+            throw new AuthException("Microsoft authentication was interrupted", e);
         } catch (IOException e) {
-            throw new RuntimeException("Microsoft authentication failed: " + e.getMessage(), e);
+            throw new AuthException("Microsoft authentication failed: " + e.getMessage(), e);
         }
     }
 
     @Override
     public void logout() {
-        loggedIn = false;
-        username = null;
-        uuid = null;
-        accessToken = null;
-        accessTokenExpiresAt = 0;
-        refreshToken = null;
+        synchronized (stateLock) {
+            generation++;
+            loggedIn = false;
+            username = null;
+            uuid = null;
+            accessToken = null;
+            accessTokenExpiresAt = 0;
+            refreshToken = null;
+        }
     }
 
-    private void authenticate() throws IOException, InterruptedException {
-        if (tryCachedMinecraftSession()) {
+    public CachedSession getCachedSession() {
+        synchronized (stateLock) {
+            return new CachedSession(refreshToken, accessToken, accessTokenExpiresAt, username, uuid);
+        }
+    }
+
+    private void authenticate(long gen) throws IOException, InterruptedException {
+        ensureActiveGeneration(gen);
+        if (tryCachedMinecraftSession(gen)) {
             return;
         }
 
-        OAuthToken microsoftToken = tryRefreshMicrosoftToken();
+        OAuthToken microsoftToken = tryRefreshMicrosoftToken(gen);
         if (microsoftToken == null) {
-            microsoftToken = loginWithDeviceCode();
+            microsoftToken = loginWithDeviceCode(gen);
         }
 
         if (microsoftToken.refreshToken != null && !microsoftToken.refreshToken.isBlank()) {
-            refreshToken = microsoftToken.refreshToken;
+            commitRefreshToken(gen, microsoftToken.refreshToken);
         }
 
+        ensureActiveGeneration(gen);
         notifyStatus("正在验证 Xbox Live 身份...");
         XboxToken xboxToken = authenticateXboxLive(microsoftToken.accessToken);
 
+        ensureActiveGeneration(gen);
         notifyStatus("正在换取 Minecraft 服务令牌...");
         XboxToken xstsToken = authorizeXsts(xboxToken.token);
+        ensureActiveGeneration(gen);
         MinecraftToken minecraftToken = loginMinecraft(xstsToken.userHash, xstsToken.token);
 
+        ensureActiveGeneration(gen);
         notifyStatus("正在检查 Minecraft Java 版授权...");
         validateEntitlements(minecraftToken.accessToken);
         JsonObject profile = loadMinecraftProfile(minecraftToken.accessToken);
 
-        username = requireString(profile, "name", "Minecraft profile");
-        uuid = requireString(profile, "id", "Minecraft profile");
-        accessToken = minecraftToken.accessToken;
-        accessTokenExpiresAt = minecraftToken.expiresAt;
-        loggedIn = true;
-        notifyStatus("微软正版登录成功: " + username);
+        String profileName = requireString(profile, "name", "Minecraft profile");
+        String profileUuid = requireString(profile, "id", "Minecraft profile");
+        commitAuthenticatedSession(gen, profileName, profileUuid,
+                minecraftToken.accessToken, minecraftToken.expiresAt);
+        notifyStatusIfCurrent(gen, "微软正版登录成功: " + profileName);
+        ensureActiveGeneration(gen);
     }
 
-    private boolean tryCachedMinecraftSession() {
+    private boolean tryCachedMinecraftSession(long gen) throws LoginCancelledException {
         long reuseDeadline = System.currentTimeMillis() + 2 * 60_000L;
-        if (accessToken == null || accessTokenExpiresAt <= reuseDeadline) {
-            accessToken = null;
-            accessTokenExpiresAt = 0;
-            return false;
+        String cachedAccessToken;
+        long cachedExpiresAt;
+        synchronized (stateLock) {
+            ensureActiveGenerationLocked(gen);
+            cachedAccessToken = accessToken;
+            cachedExpiresAt = accessTokenExpiresAt;
+            if (cachedAccessToken == null || cachedExpiresAt <= reuseDeadline) {
+                accessToken = null;
+                accessTokenExpiresAt = 0;
+                loggedIn = false;
+                return false;
+            }
         }
 
         notifyStatus("正在验证缓存的 Minecraft 登录状态...");
         try {
-            validateEntitlements(accessToken);
-            JsonObject profile = loadMinecraftProfile(accessToken);
-            username = requireString(profile, "name", "Minecraft profile");
-            uuid = requireString(profile, "id", "Minecraft profile");
-            loggedIn = true;
-            notifyStatus("已恢复 Minecraft 登录状态: " + username);
+            validateEntitlements(cachedAccessToken);
+            JsonObject profile = loadMinecraftProfile(cachedAccessToken);
+            String profileName = requireString(profile, "name", "Minecraft profile");
+            String profileUuid = requireString(profile, "id", "Minecraft profile");
+            commitAuthenticatedSession(gen, profileName, profileUuid,
+                    cachedAccessToken, cachedExpiresAt);
+            notifyStatusIfCurrent(gen, "已恢复 Minecraft 登录状态: " + profileName);
+            ensureActiveGeneration(gen);
             return true;
+        } catch (LoginCancelledException e) {
+            throw e;
         } catch (IOException e) {
             LOGGER.info("Cached Minecraft access token could not be reused; falling back to refresh token", e);
-            accessToken = null;
-            accessTokenExpiresAt = 0;
-            loggedIn = false;
+            synchronized (stateLock) {
+                ensureActiveGenerationLocked(gen);
+                accessToken = null;
+                accessTokenExpiresAt = 0;
+                loggedIn = false;
+            }
             notifyStatus("缓存登录已失效，正在静默刷新 Microsoft 登录状态...");
             return false;
         }
     }
 
-    private OAuthToken tryRefreshMicrosoftToken() {
-        if (refreshToken == null || refreshToken.isBlank()) {
-            return null;
+    private OAuthToken tryRefreshMicrosoftToken(long gen) throws LoginCancelledException {
+        String cachedRefreshToken;
+        synchronized (stateLock) {
+            ensureActiveGenerationLocked(gen);
+            cachedRefreshToken = refreshToken;
+            if (cachedRefreshToken == null || cachedRefreshToken.isBlank()) {
+                return null;
+            }
         }
 
         notifyStatus("正在刷新微软登录状态...");
         Map<String, String> form = new LinkedHashMap<>();
         form.put("client_id", CLIENT_ID);
-        form.put("refresh_token", refreshToken);
+        form.put("refresh_token", cachedRefreshToken);
         form.put("grant_type", "refresh_token");
         form.put("scope", MSA_SCOPE);
 
         try {
             JsonObject json = requireSuccess(HttpUtil.postForm(TOKEN_URL, form), "Microsoft refresh token");
+            ensureActiveGeneration(gen);
             return parseOAuthToken(json);
+        } catch (LoginCancelledException e) {
+            throw e;
         } catch (IOException e) {
             notifyStatus("已保存的微软登录已过期，需要重新授权。");
             return null;
         }
     }
 
-    private OAuthToken loginWithDeviceCode() throws IOException, InterruptedException {
+    private OAuthToken loginWithDeviceCode(long gen) throws IOException, InterruptedException {
+        ensureActiveGeneration(gen);
         Map<String, String> form = new LinkedHashMap<>();
         form.put("client_id", CLIENT_ID);
         form.put("scope", MSA_SCOPE);
         form.put("response_type", "device_code");
 
         JsonObject json = requireSuccess(HttpUtil.postForm(DEVICE_CODE_URL, form), "Microsoft device code");
+        ensureActiveGeneration(gen);
         String deviceCode = requireString(json, "device_code", "Microsoft device code");
         String userCode = requireString(json, "user_code", "Microsoft device code");
         String verificationUri = JsonUtil.getString(json, "verification_uri", JsonUtil.getString(json, "verification_url", null));
@@ -215,6 +265,7 @@ public class MicrosoftAuth implements AuthProvider {
         long deadline = System.currentTimeMillis() + expiresIn * 1000L;
         while (System.currentTimeMillis() < deadline) {
             Thread.sleep(interval * 1000L);
+            ensureActiveGeneration(gen);
 
             Map<String, String> pollForm = new LinkedHashMap<>();
             pollForm.put("grant_type", "urn:ietf:params:oauth:grant-type:device_code");
@@ -222,6 +273,7 @@ public class MicrosoftAuth implements AuthProvider {
             pollForm.put("device_code", deviceCode);
 
             HttpUtil.Response response = HttpUtil.postForm(TOKEN_URL, pollForm);
+            ensureActiveGeneration(gen);
             JsonObject tokenJson = parseJson(response.body(), "Microsoft token");
             if (response.isSuccess() && tokenJson.has("access_token")) {
                 return parseOAuthToken(tokenJson);
@@ -239,6 +291,50 @@ public class MicrosoftAuth implements AuthProvider {
         }
 
         throw new IOException("Microsoft device login timed out");
+    }
+
+    long beginLogin() {
+        synchronized (stateLock) {
+            return ++generation;
+        }
+    }
+
+    void commitAuthenticatedSession(long gen, String profileName, String profileUuid,
+                                    String minecraftAccessToken, long expiresAt)
+            throws LoginCancelledException {
+        synchronized (stateLock) {
+            ensureActiveGenerationLocked(gen);
+            username = profileName;
+            uuid = profileUuid;
+            accessToken = minecraftAccessToken;
+            accessTokenExpiresAt = expiresAt;
+            loggedIn = true;
+        }
+    }
+
+    private void commitRefreshToken(long gen, String newRefreshToken) throws LoginCancelledException {
+        synchronized (stateLock) {
+            ensureActiveGenerationLocked(gen);
+            refreshToken = newRefreshToken;
+        }
+    }
+
+    private void ensureActiveGeneration(long gen) throws LoginCancelledException {
+        synchronized (stateLock) {
+            ensureActiveGenerationLocked(gen);
+        }
+    }
+
+    private void ensureActiveGenerationLocked(long gen) throws LoginCancelledException {
+        if (generation != gen) {
+            throw new LoginCancelledException();
+        }
+    }
+
+    private void notifyStatusIfCurrent(long gen, String message) throws LoginCancelledException {
+        ensureActiveGeneration(gen);
+        notifyStatus(message);
+        ensureActiveGeneration(gen);
     }
 
     private OAuthToken parseOAuthToken(JsonObject json) throws IOException {
@@ -431,6 +527,12 @@ public class MicrosoftAuth implements AuthProvider {
         }
 
         default void onStatus(String message) {
+        }
+    }
+
+    static final class LoginCancelledException extends IOException {
+        LoginCancelledException() {
+            super("Microsoft authentication was cancelled");
         }
     }
 

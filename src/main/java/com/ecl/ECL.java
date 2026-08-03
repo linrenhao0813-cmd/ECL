@@ -13,6 +13,8 @@ import com.ecl.util.PlatformUtil;
  */
 public class ECL {
     private static final String BOOTSTRAPPED_ENV = "ECL_BOOTSTRAPPED";
+    private static final String JAVAFX_VERSION = "21";
+    private static final String GSON_VERSION = "2.10.1";
 
     public static void main(String[] args) {
         if (!hasClass("javafx.application.Application") && !"1".equals(System.getenv(BOOTSTRAPPED_ENV))) {
@@ -45,10 +47,11 @@ public class ECL {
             classpath.add(currentClasspath);
         }
 
-        addCachedJar(classpath, "org.openjfx", "javafx-base", "21");
-        addCachedJar(classpath, "org.openjfx", "javafx-graphics", "21");
-        addCachedJar(classpath, "org.openjfx", "javafx-controls", "21");
-        addCachedJar(classpath, "com.google.code.gson", "gson", "2.10.1");
+        String javafxClassifier = javafxClassifier();
+        addCachedJar(classpath, "org.openjfx", "javafx-base", JAVAFX_VERSION, javafxClassifier);
+        addCachedJar(classpath, "org.openjfx", "javafx-graphics", JAVAFX_VERSION, javafxClassifier);
+        addCachedJar(classpath, "org.openjfx", "javafx-controls", JAVAFX_VERSION, javafxClassifier);
+        addCachedJar(classpath, "com.google.code.gson", "gson", GSON_VERSION);
 
         List<String> command = new ArrayList<>();
         command.add(javaExecutable());

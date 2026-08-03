@@ -12,7 +12,9 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -74,6 +76,24 @@ public class ModrinthDownloader {
             return title
                     + (author == null || author.isBlank() ? "" : " / " + author)
                     + "    下载 " + TextUtil.formatCount(downloads);
+        }
+    }
+
+    public record ProjectVersion(
+            String versionId,
+            String name,
+            String versionNumber,
+            String versionType
+    ) {
+        @Override
+        public String toString() {
+            String displayVersion = versionNumber == null || versionNumber.isBlank()
+                    ? versionId : versionNumber;
+            String displayName = name == null || name.isBlank() || name.equals(displayVersion)
+                    ? "" : name + " · ";
+            String displayType = versionType == null || versionType.isBlank()
+                    ? "" : " · " + versionType;
+            return displayName + displayVersion + displayType;
         }
     }
 
@@ -179,8 +199,72 @@ public class ModrinthDownloader {
 
         List<File> files = new ArrayList<>();
         Set<String> visitedVersions = new HashSet<>();
+        Deque<String> dependencyPath = new ArrayDeque<>();
         JsonObject version = findLatestVersion(project.getProjectId(), gameVersion, loader);
-        File mainFile = downloadVersion(version, gameVersion, loader, targetDir, listener, visitedVersions, files,
+        File mainFile = downloadVersion(version, gameVersion, loader, targetDir, listener,
+                visitedVersions, dependencyPath, files,
+                true, includeRequiredDependencies, allowedExtensions);
+        return new DownloadResult(mainFile, files);
+    }
+
+    public List<ProjectVersion> listProjectVersions(
+            Project project,
+            String gameVersion,
+            String loader
+    ) throws IOException {
+        if (project == null) {
+            throw new IOException("请选择一个下载项目");
+        }
+        JsonArray versions = findVersions(project.getProjectId(), gameVersion, loader);
+        List<ProjectVersion> result = new ArrayList<>();
+        for (JsonElement element : versions) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject version = element.getAsJsonObject();
+            String versionId = getString(version, "id");
+            if (versionId == null || versionId.isBlank()) {
+                continue;
+            }
+            result.add(new ProjectVersion(
+                    versionId,
+                    getString(version, "name"),
+                    getString(version, "version_number"),
+                    getString(version, "version_type")));
+        }
+        return List.copyOf(result);
+    }
+
+    public DownloadResult downloadVersion(
+            Project project,
+            ProjectVersion selectedVersion,
+            String gameVersion,
+            String loader,
+            File targetDir,
+            boolean includeRequiredDependencies,
+            DownloadListener listener,
+            String... allowedExtensions
+    ) throws IOException {
+        if (project == null || selectedVersion == null) {
+            throw new IOException("请选择项目和具体版本");
+        }
+        if (targetDir == null) {
+            throw new IOException("导入目录无效");
+        }
+        if (!targetDir.exists() && !targetDir.mkdirs()) {
+            throw new IOException("无法创建导入目录: " + targetDir.getAbsolutePath());
+        }
+        JsonObject version = getVersion(selectedVersion.versionId());
+        String projectId = getString(version, "project_id");
+        if (projectId != null && !projectId.isBlank()
+                && !project.getProjectId().equals(projectId)) {
+            throw new IOException("所选版本不属于当前 Modrinth 项目");
+        }
+
+        List<File> files = new ArrayList<>();
+        File mainFile = downloadVersion(
+                version, gameVersion, loader, targetDir, listener,
+                new HashSet<>(), new ArrayDeque<>(), files,
                 true, includeRequiredDependencies, allowedExtensions);
         return new DownloadResult(mainFile, files);
     }
@@ -190,18 +274,28 @@ public class ModrinthDownloader {
     }
 
     private File downloadVersion(JsonObject version, String gameVersion, String loader, File targetDir, DownloadListener listener,
-                                 Set<String> visitedVersions, List<File> files, boolean primary,
+                                 Set<String> visitedVersions, Deque<String> dependencyPath, List<File> files, boolean primary,
                                  boolean includeRequiredDependencies, String... allowedExtensions) throws IOException {
+        ensureCompatibleVersion(version, gameVersion, loader);
         String versionId = getString(version, "id");
-        if (versionId != null && !visitedVersions.add(versionId)) {
-            return null;
+        boolean trackedInPath = versionId != null && !versionId.isBlank();
+        if (trackedInPath) {
+            ensureNoDependencyCycle(dependencyPath, versionId);
+            if (!visitedVersions.add(versionId)) {
+                return null;
+            }
+            dependencyPath.addLast(versionId);
         }
 
         JsonObject fileJson = selectPrimaryFile(version, allowedExtensions);
         String url = getString(fileJson, "url");
-        String filename = sanitizeFilename(getString(fileJson, "filename"));
-        if (url == null || url.isBlank() || filename == null || filename.isBlank()) {
-            throw new IOException("Modrinth 文件信息不完整");
+        String originalFilename = getString(fileJson, "filename");
+        String filename = sanitizeFilename(originalFilename);
+        if (url == null || url.isBlank()) {
+            throw new IOException("Modrinth 文件信息不完整：缺少下载地址");
+        }
+        if (filename == null || filename.isBlank()) {
+            throw new IOException("Modrinth 文件名无效，无法创建本地文件");
         }
 
         File target = new File(targetDir, filename);
@@ -239,13 +333,49 @@ public class ModrinthDownloader {
 
         files.add(target);
         if (includeRequiredDependencies) {
-            downloadRequiredDependencies(version, gameVersion, loader, targetDir, listener, visitedVersions, files);
+            downloadRequiredDependencies(version, gameVersion, loader, targetDir, listener,
+                    visitedVersions, dependencyPath, files);
+        }
+        if (trackedInPath) {
+            dependencyPath.removeLast();
         }
         return target;
     }
 
+    private static void ensureCompatibleVersion(
+            JsonObject version,
+            String gameVersion,
+            String loader
+    ) throws IOException {
+        if (version == null) {
+            throw new IOException("Modrinth 版本信息为空");
+        }
+        if (gameVersion != null && !gameVersion.isBlank()
+                && !containsIgnoreCase(version, "game_versions", gameVersion)) {
+            throw new IOException("Modrinth 版本与目标 Minecraft " + gameVersion + " 不兼容");
+        }
+        if (loader != null && !loader.isBlank()
+                && !containsIgnoreCase(version, "loaders", loader)) {
+            throw new IOException("Modrinth 版本与目标加载器 " + loader + " 不兼容");
+        }
+    }
+
+    private static boolean containsIgnoreCase(JsonObject object, String arrayName, String expected) {
+        if (!object.has(arrayName) || !object.get(arrayName).isJsonArray()) {
+            return false;
+        }
+        for (JsonElement element : object.getAsJsonArray(arrayName)) {
+            if (element.isJsonPrimitive()
+                    && expected.equalsIgnoreCase(element.getAsString())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void downloadRequiredDependencies(JsonObject version, String gameVersion, String loader, File modsDir, DownloadListener listener,
-                                              Set<String> visitedVersions, List<File> files) throws IOException {
+                                              Set<String> visitedVersions, Deque<String> dependencyPath,
+                                              List<File> files) throws IOException {
         if (!version.has("dependencies") || !version.get("dependencies").isJsonArray()) {
             return;
         }
@@ -268,23 +398,45 @@ public class ModrinthDownloader {
             }
 
             if (dependencyVersion != null) {
-                downloadVersion(dependencyVersion, gameVersion, loader, modsDir, listener, visitedVersions, files, false, true, ".jar");
+                downloadVersion(dependencyVersion, gameVersion, loader, modsDir, listener,
+                        visitedVersions, dependencyPath, files, false, true, ".jar");
             }
         }
     }
 
+    static void ensureNoDependencyCycle(Deque<String> dependencyPath, String versionId) throws IOException {
+        if (!dependencyPath.contains(versionId)) {
+            return;
+        }
+        List<String> cycle = new ArrayList<>();
+        boolean cycleStarted = false;
+        for (String current : dependencyPath) {
+            if (current.equals(versionId)) {
+                cycleStarted = true;
+            }
+            if (cycleStarted) {
+                cycle.add(current);
+            }
+        }
+        cycle.add(versionId);
+        throw new IOException("Detected circular Modrinth dependency chain: " + String.join(" -> ", cycle));
+    }
+
     private JsonObject findLatestVersion(String projectId, String gameVersion, String loader) throws IOException {
+        JsonArray versions = findVersions(projectId, gameVersion, loader);
+        if (versions.isEmpty()) {
+            throw new IOException("没有找到兼容 " + gameVersion + " / " + loader + " 的可下载文件");
+        }
+        return versions.get(0).getAsJsonObject();
+    }
+
+    private JsonArray findVersions(String projectId, String gameVersion, String loader) throws IOException {
         String url = API_BASE + "/project/" + encodePath(projectId) + "/version"
                 + "?game_versions=" + encodeJsonArray(gameVersion);
         if (loader != null && !loader.isBlank()) {
             url += "&loaders=" + encodeJsonArray(loader);
         }
-
-        JsonArray versions = JsonParser.parseString(HttpUtil.get(url)).getAsJsonArray();
-        if (versions.isEmpty()) {
-            throw new IOException("没有找到兼容 " + gameVersion + " / " + loader + " 的可下载文件");
-        }
-        return versions.get(0).getAsJsonObject();
+        return JsonParser.parseString(HttpUtil.get(url)).getAsJsonArray();
     }
 
     private JsonObject getVersion(String versionId) throws IOException {

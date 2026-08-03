@@ -2,7 +2,9 @@ package com.ecl;
 
 import java.io.File;
 import java.lang.management.ManagementFactory;
+import javax.management.ObjectName;
 
+import com.ecl.config.SettingKey;
 import com.ecl.util.PlatformUtil;
 
 public class ECLConfig {
@@ -23,15 +25,91 @@ public class ECLConfig {
     public static final int MAX_AUTO_MEMORY_MB = 8_192;
     public static final int RESERVED_SYSTEM_MEMORY_MB = 2_048;
 
+    // Backward-compatible String keys (deprecated — prefer SettingKey constants)
+    /** @deprecated Use {@link #KEY_JAVA_PATH} instead. */
+    @Deprecated
     public static final String SETTING_JAVA_PATH = "javaPath";
+    /** @deprecated Use {@link #KEY_GAME_DIR} instead. */
+    @Deprecated
     public static final String SETTING_GAME_DIR = "gameDir";
+    /** @deprecated Use {@link #KEY_JVM_ARGS} instead. */
+    @Deprecated
     public static final String SETTING_JVM_ARGS = "jvmArgs";
+    /** @deprecated Use {@link #KEY_MAX_MEMORY_MB} instead. */
+    @Deprecated
     public static final String SETTING_MAX_MEMORY_MB = "maxMemoryMb";
+    /** @deprecated Use {@link #KEY_MICROSOFT_REFRESH_TOKEN} instead. */
+    @Deprecated
     public static final String SETTING_MICROSOFT_REFRESH_TOKEN = "microsoftRefreshToken";
+    /** @deprecated Use {@link #KEY_MICROSOFT_ACCESS_TOKEN} instead. */
+    @Deprecated
     public static final String SETTING_MICROSOFT_ACCESS_TOKEN = "microsoftAccessToken";
+    /** @deprecated Use {@link #KEY_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT} instead. */
+    @Deprecated
     public static final String SETTING_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT = "microsoftAccessTokenExpiresAt";
+    /** @deprecated Use {@link #KEY_MICROSOFT_PROFILE_NAME} instead. */
+    @Deprecated
     public static final String SETTING_MICROSOFT_PROFILE_NAME = "microsoftProfileName";
+    /** @deprecated Use {@link #KEY_MICROSOFT_PROFILE_UUID} instead. */
+    @Deprecated
     public static final String SETTING_MICROSOFT_PROFILE_UUID = "microsoftProfileUuid";
+
+    // Settings keys used by LauncherUI (factor out magic strings)
+    /** @deprecated Use {@link #KEY_SELECTED_VERSION} instead. */
+    @Deprecated
+    public static final String SETTING_SELECTED_VERSION = "selectedVersion";
+    /** @deprecated Use {@link #KEY_VERSION_CATEGORY} instead. */
+    @Deprecated
+    public static final String SETTING_VERSION_CATEGORY = "versionCategory2";
+    /** @deprecated Use {@link #KEY_AUTH_TYPE} instead. */
+    @Deprecated
+    public static final String SETTING_AUTH_TYPE = "authType";
+    /** @deprecated Use {@link #KEY_USERNAME} instead. */
+    @Deprecated
+    public static final String SETTING_USERNAME = "username";
+    /** @deprecated Use {@link #KEY_YGGDRASIL_SERVER} instead. */
+    @Deprecated
+    public static final String SETTING_YGGDRASIL_SERVER = "yggdrasilServer";
+
+    public static final String DEFAULT_YGGDRASIL_SERVER = "https://littleskin.cn/api/yggdrasil/";
+
+    // ---- Type-safe SettingKey constants ----
+    public static final SettingKey<String> KEY_JAVA_PATH = new SettingKey<>("javaPath", String.class, "");
+    public static final SettingKey<String> KEY_GAME_DIR = new SettingKey<>("gameDir", String.class, "");
+    public static final SettingKey<String> KEY_JVM_ARGS = new SettingKey<>("jvmArgs", String.class, "");
+    public static final SettingKey<Integer> KEY_MAX_MEMORY_MB = new SettingKey<>("maxMemoryMb", Integer.class, AUTO_MEMORY_MB);
+    public static final SettingKey<String> KEY_MICROSOFT_REFRESH_TOKEN = new SettingKey<>("microsoftRefreshToken", String.class, "");
+    public static final SettingKey<String> KEY_MICROSOFT_ACCESS_TOKEN = new SettingKey<>("microsoftAccessToken", String.class, "");
+    public static final SettingKey<Long> KEY_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT = new SettingKey<>("microsoftAccessTokenExpiresAt", Long.class, 0L);
+    public static final SettingKey<String> KEY_MICROSOFT_PROFILE_NAME = new SettingKey<>("microsoftProfileName", String.class, "");
+    public static final SettingKey<String> KEY_MICROSOFT_PROFILE_UUID = new SettingKey<>("microsoftProfileUuid", String.class, "");
+    public static final SettingKey<String> KEY_SELECTED_VERSION = new SettingKey<>("selectedVersion", String.class, "");
+    public static final SettingKey<String> KEY_VERSION_CATEGORY = new SettingKey<>("versionCategory2", String.class, "FEATURED");
+    public static final SettingKey<String> KEY_AUTH_TYPE = new SettingKey<>("authType", String.class, "OFFLINE");
+    public static final SettingKey<String> KEY_USERNAME = new SettingKey<>("username", String.class, "");
+    public static final SettingKey<String> KEY_YGGDRASIL_SERVER = new SettingKey<>("yggdrasilServer", String.class, DEFAULT_YGGDRASIL_SERVER);
+    public static final SettingKey<String> KEY_MOD_RELEASE_CHANNEL =
+            new SettingKey<>("modReleaseChannel", String.class, "RELEASE_AND_BETA");
+    public static final SettingKey<Integer> KEY_GAME_WIDTH =
+            new SettingKey<>("gameWidth", Integer.class, 1280);
+    public static final SettingKey<Integer> KEY_GAME_HEIGHT =
+            new SettingKey<>("gameHeight", Integer.class, 720);
+    public static final SettingKey<Boolean> KEY_GAME_FULLSCREEN =
+            new SettingKey<>("gameFullscreen", Boolean.class, false);
+    public static final SettingKey<String> KEY_QUICK_SERVER =
+            new SettingKey<>("quickServer", String.class, "");
+    public static final SettingKey<Boolean> KEY_CLOSE_AFTER_LAUNCH =
+            new SettingKey<>("closeAfterLaunch", Boolean.class, false);
+    public static final SettingKey<Integer> KEY_PROCESSOR_COUNT =
+            new SettingKey<>("processorCount", Integer.class, 0);
+    public static final SettingKey<Boolean> KEY_SHOW_GAME_CONSOLE =
+            new SettingKey<>("showGameConsole", Boolean.class, true);
+    public static final SettingKey<Boolean> KEY_BACKUP_ON_LAUNCH =
+            new SettingKey<>("backupOnLaunch", Boolean.class, true);
+    public static final SettingKey<Integer> KEY_BACKUP_KEEP_COUNT =
+            new SettingKey<>("backupKeepCount", Integer.class, 10);
+    public static final SettingKey<Boolean> KEY_BACKUP_INCLUDE_MODS =
+            new SettingKey<>("backupIncludeMods", Boolean.class, false);
 
     private static volatile File baseDir;
 
@@ -69,8 +147,12 @@ public class ECLConfig {
         return new File(getBaseDir(), "assets");
     }
 
+    public static File getBackupsDir() {
+        return new File(getBaseDir(), "backups");
+    }
+
     public static File getGameDir() {
-        String os = System.getProperty("os.name").toLowerCase();
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
         if (os.contains("win")) {
             return new File(getWindowsRoamingDir(), ".minecraft");
         } else if (os.contains("mac")) {
@@ -95,6 +177,7 @@ public class ECLConfig {
         getVersionsDir().mkdirs();
         getLibrariesDir().mkdirs();
         getAssetsDir().mkdirs();
+        getBackupsDir().mkdirs();
         getGameDir().mkdirs();
     }
 
@@ -115,9 +198,19 @@ public class ECLConfig {
     }
 
     private static long getTotalPhysicalMemoryMb() {
-        java.lang.management.OperatingSystemMXBean bean = ManagementFactory.getOperatingSystemMXBean();
-        if (bean instanceof com.sun.management.OperatingSystemMXBean physicalMemoryBean) {
-            return physicalMemoryBean.getTotalMemorySize() / (1024L * 1024L);
+        try {
+            java.lang.management.OperatingSystemMXBean bean = ManagementFactory.getOperatingSystemMXBean();
+            if (bean instanceof com.sun.management.OperatingSystemMXBean physicalMemoryBean) {
+                return physicalMemoryBean.getTotalMemorySize() / (1024L * 1024L);
+            }
+            Object totalBytes = ManagementFactory.getPlatformMBeanServer()
+                    .getAttribute(new ObjectName("java.lang", "type", "OperatingSystem"),
+                            "TotalPhysicalMemorySize");
+            if (totalBytes instanceof Number num) {
+                return num.longValue() / (1024L * 1024L);
+            }
+        } catch (Exception ignored) {
+            // Unsupported management extensions fall back to the conservative default below.
         }
         return -1;
     }

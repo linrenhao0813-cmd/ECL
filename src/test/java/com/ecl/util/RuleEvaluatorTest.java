@@ -40,4 +40,12 @@ class RuleEvaluatorTest {
 
         assertFalse(RuleEvaluator.isAllowed(rules));
     }
+
+    @Test
+    void doesNotTreatArm32AsX86() {
+        assertFalse(RuleEvaluator.matchesArchitecture("x86", "armhf"));
+        assertFalse(RuleEvaluator.matchesArchitecture("x86", "armv7l"));
+        assertTrue(RuleEvaluator.matchesArchitecture("x86", "i686"));
+        assertTrue(RuleEvaluator.matchesArchitecture("x86_64", "amd64"));
+    }
 }

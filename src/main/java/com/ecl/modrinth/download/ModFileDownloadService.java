@@ -1,0 +1,185 @@
+package com.ecl.modrinth.download;
+
+import com.ecl.modrinth.api.HashMismatchException;
+import com.ecl.util.HttpUtil;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+
+public final class ModFileDownloadService {
+    private final ExecutorService executor;
+    private final HashVerifier hashVerifier;
+
+    public ModFileDownloadService(ExecutorService executor, HashVerifier hashVerifier) {
+        this.executor = Objects.requireNonNull(executor, "executor");
+        this.hashVerifier = Objects.requireNonNull(hashVerifier, "hashVerifier");
+    }
+
+    public CompletableFuture<List<DownloadedModFile>> downloadAll(
+            Collection<ModDownloadRequest> requests,
+            Consumer<ModDownloadProgress> progressListener
+    ) {
+        List<ModDownloadRequest> work = requests == null ? List.of() : List.copyOf(requests);
+        long overallTotal = work.stream().mapToLong(request -> Math.max(0, request.expectedSize())).sum();
+        AtomicLong overallDownloaded = new AtomicLong();
+        List<CompletableFuture<DownloadedModFile>> futures = new ArrayList<>(work.size());
+        for (ModDownloadRequest request : work) {
+            futures.add(submitDownload(
+                    request, overallDownloaded, overallTotal, progressListener));
+        }
+        CompletableFuture<List<DownloadedModFile>> result = CompletableFuture.allOf(
+                        futures.toArray(CompletableFuture[]::new))
+                .thenApply(ignored -> futures.stream().map(CompletableFuture::join).toList());
+        result.whenComplete((ignored, error) -> {
+            if (result.isCancelled() || error != null) {
+                futures.forEach(future -> future.cancel(true));
+            }
+        });
+        return result;
+    }
+
+    private CompletableFuture<DownloadedModFile> submitDownload(
+            ModDownloadRequest request,
+            AtomicLong overallDownloaded,
+            long overallTotal,
+            Consumer<ModDownloadProgress> progressListener
+    ) {
+        CompletableFuture<DownloadedModFile> future = new CompletableFuture<>();
+        AtomicReference<Future<?>> taskReference = new AtomicReference<>();
+        Future<?> task = executor.submit(() -> {
+            try {
+                future.complete(downloadWithHashRetry(
+                        request, overallDownloaded, overallTotal, progressListener));
+            } catch (Throwable error) {
+                future.completeExceptionally(error);
+            }
+        });
+        taskReference.set(task);
+        future.whenComplete((ignored, error) -> {
+            if (future.isCancelled()) {
+                Future<?> submitted = taskReference.get();
+                if (submitted != null) {
+                    submitted.cancel(true);
+                }
+            }
+        });
+        return future;
+    }
+
+    private DownloadedModFile downloadWithHashRetry(
+            ModDownloadRequest request,
+            AtomicLong overallDownloaded,
+            long overallTotal,
+            Consumer<ModDownloadProgress> listener
+    ) {
+        RuntimeException failure = null;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            throwIfInterrupted(request);
+            try {
+                Files.createDirectories(request.temporaryFile().getParent());
+                Files.deleteIfExists(request.temporaryFile());
+                long startedAt = System.nanoTime();
+                AtomicLong previousFileBytes = new AtomicLong();
+                HttpUtil.downloadFileWithProgress(
+                        request.uri().toString(),
+                        request.temporaryFile().toFile(),
+                        new HttpUtil.ProgressCallback() {
+                            @Override
+                            public void onStart(long total) {
+                                notifyProgress(listener, request, 0, total, overallDownloaded.get(),
+                                        overallTotal, 0);
+                            }
+
+                            @Override
+                            public void onProgress(long downloaded, long total) {
+                                long delta = Math.max(0, downloaded - previousFileBytes.getAndSet(downloaded));
+                                long aggregate = overallDownloaded.addAndGet(delta);
+                                double seconds = Math.max(0.001,
+                                        Duration.ofNanos(System.nanoTime() - startedAt).toNanos() / 1_000_000_000.0);
+                                notifyProgress(listener, request, downloaded, total, aggregate,
+                                        overallTotal, downloaded / seconds);
+                            }
+
+                            @Override
+                            public void onComplete(java.io.File file) {
+                            }
+                        });
+                throwIfInterrupted(request);
+                HashVerifier.HashResult hashes =
+                        hashVerifier.verify(request.temporaryFile(), request.expectedHashes());
+                throwIfInterrupted(request);
+                long size = Files.size(request.temporaryFile());
+                return new DownloadedModFile(request, request.temporaryFile(), hashes, size);
+            } catch (HashMismatchException e) {
+                failure = e;
+                subtractPartial(overallDownloaded, request.temporaryFile());
+                deleteQuietly(request.temporaryFile());
+            } catch (IOException e) {
+                deleteQuietly(request.temporaryFile());
+                if (Thread.currentThread().isInterrupted()
+                        || e instanceof java.nio.channels.ClosedByInterruptException
+                        || e.getCause() instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                    CancellationException cancellation =
+                            new CancellationException("Mod download cancelled: " + request.fileName());
+                    cancellation.initCause(e);
+                    throw cancellation;
+                }
+                throw new java.util.concurrent.CompletionException(e);
+            }
+        }
+        throw failure == null
+                ? new HashMismatchException("Hash verification failed: " + request.fileName())
+                : failure;
+    }
+
+    private static void throwIfInterrupted(ModDownloadRequest request) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new CancellationException("Mod download cancelled: " + request.fileName());
+        }
+    }
+
+    private static void subtractPartial(AtomicLong overallDownloaded, java.nio.file.Path file) {
+        try {
+            long size = Files.size(file);
+            overallDownloaded.updateAndGet(value -> Math.max(0, value - size));
+        } catch (IOException ignored) {
+            // The next progress event will continue from the current aggregate.
+        }
+    }
+
+    private static void deleteQuietly(java.nio.file.Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static void notifyProgress(
+            Consumer<ModDownloadProgress> listener,
+            ModDownloadRequest request,
+            long downloaded,
+            long total,
+            long overallDownloaded,
+            long overallTotal,
+            double speed
+    ) {
+        if (listener != null) {
+            listener.accept(new ModDownloadProgress(
+                    request.fileName(), downloaded, total,
+                    overallDownloaded, overallTotal, speed));
+        }
+    }
+}

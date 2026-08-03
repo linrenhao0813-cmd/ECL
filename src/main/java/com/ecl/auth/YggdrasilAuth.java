@@ -1,5 +1,6 @@
 package com.ecl.auth;
 
+import com.ecl.exception.AuthException;
 import com.ecl.util.HttpUtil;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -7,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.UUID;
 
 /**
@@ -18,7 +20,7 @@ public class YggdrasilAuth implements AuthProvider {
 
     private final String authServer;
     private String username;
-    private String password;
+    private char[] password;
     private String uuid;
     private String accessToken;
     private String clientToken;
@@ -31,7 +33,7 @@ public class YggdrasilAuth implements AuthProvider {
 
     public void setCredentials(String username, String password) {
         this.username = username;
-        this.password = password;
+        this.password = password == null ? null : password.toCharArray();
     }
 
     @Override
@@ -67,7 +69,7 @@ public class YggdrasilAuth implements AuthProvider {
         try {
             authenticate(username, password);
         } catch (IOException e) {
-            throw new RuntimeException("Yggdrasil authentication failed", e);
+            throw new AuthException("Yggdrasil authentication failed", e);
         }
     }
 
@@ -84,40 +86,61 @@ public class YggdrasilAuth implements AuthProvider {
         loggedIn = false;
         uuid = null;
         accessToken = null;
+        clearPassword();
     }
 
-    public void authenticate(String username, String password) throws IOException {
-        JsonObject agent = new JsonObject();
-        agent.addProperty("name", "Minecraft");
-        agent.addProperty("version", 1);
-        JsonObject payload = new JsonObject();
-        payload.add("agent", agent);
-        payload.addProperty("username", username);
-        payload.addProperty("password", password);
-        payload.addProperty("clientToken", clientToken);
-
-        String response = postJson(authServer + "authenticate", payload);
-        JsonObject json = JsonParser.parseString(response).getAsJsonObject();
-
-        if (json.has("error")) {
-            String message = json.has("errorMessage") ? json.get("errorMessage").getAsString() : json.get("error").getAsString();
-            throw new IOException("Authentication failed: " + message);
+    private void clearPassword() {
+        if (password != null) {
+            Arrays.fill(password, '\0');
+            password = null;
         }
+    }
 
-        this.accessToken = json.get("accessToken").getAsString();
-        this.clientToken = json.get("clientToken").getAsString();
+    public void authenticate(String username, char[] password) throws IOException {
+        // Convert char[] to String at the last possible moment
+        String passwordStr = new String(password);
+        try {
+            JsonObject agent = new JsonObject();
+            agent.addProperty("name", "Minecraft");
+            agent.addProperty("version", 1);
+            JsonObject payload = new JsonObject();
+            payload.add("agent", agent);
+            payload.addProperty("username", username);
+            payload.addProperty("password", passwordStr);
+            payload.addProperty("clientToken", clientToken);
 
-        JsonObject profile = json.getAsJsonObject("selectedProfile");
-        if (profile == null && json.has("availableProfiles") && json.getAsJsonArray("availableProfiles").size() > 0) {
-            profile = json.getAsJsonArray("availableProfiles").get(0).getAsJsonObject();
+            String response = postJson(authServer + "authenticate", payload);
+            JsonObject json = JsonParser.parseString(response).getAsJsonObject();
+
+            if (json.has("error")) {
+                String message = json.has("errorMessage") ? json.get("errorMessage").getAsString() : json.get("error").getAsString();
+                throw new IOException("Authentication failed: " + message);
+            }
+
+            this.accessToken = json.get("accessToken").getAsString();
+            this.clientToken = json.get("clientToken").getAsString();
+
+            JsonObject profile = json.getAsJsonObject("selectedProfile");
+            if (profile == null && json.has("availableProfiles") && json.getAsJsonArray("availableProfiles").size() > 0) {
+                profile = json.getAsJsonArray("availableProfiles").get(0).getAsJsonObject();
+            }
+
+            if (profile != null) {
+                this.uuid = profile.get("id").getAsString();
+                this.username = profile.get("name").getAsString();
+            }
+
+            this.loggedIn = true;
+
+            // Clear password String immediately after use
+            passwordStr = null;
+        } finally {
+            // Ensure password String is cleared even on exception
+            if (passwordStr != null) {
+                passwordStr = null;
+            }
+            clearPassword();
         }
-
-        if (profile != null) {
-            this.uuid = profile.get("id").getAsString();
-            this.username = profile.get("name").getAsString();
-        }
-
-        this.loggedIn = true;
     }
 
     public boolean validate() throws IOException {

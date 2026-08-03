@@ -11,6 +11,8 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.image.Image;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -28,12 +30,14 @@ public final class CrashDiagnosticDialog {
         Stage dialog = new Stage();
         dialog.initOwner(owner);
         dialog.initModality(Modality.NONE);
-        dialog.setTitle("启动错误诊断");
+        dialog.setTitle("崩溃诊断");
         applyIcon(dialog);
 
-        Label title = new Label(report.getTitle());
-        title.getStyleClass().add("status-title");
-        title.setWrapText(true);
+        Label title = new Label("崩溃诊断");
+        title.getStyleClass().add("section-title");
+        Label reportTitle = new Label(report.getTitle());
+        reportTitle.getStyleClass().add("status-title");
+        reportTitle.setWrapText(true);
         Label explanation = new Label(report.getExplanation());
         explanation.getStyleClass().add("status-detail");
         explanation.setWrapText(true);
@@ -46,7 +50,7 @@ public final class CrashDiagnosticDialog {
         evidence.setWrapText(true);
         evidence.setPrefRowCount(10);
 
-        Button crashDir = button("打开崩溃报告", "secondary-button");
+        Button crashDir = button("打开崩溃日志", "secondary-button");
         crashDir.setDisable(report.getCrashReportFile() == null);
         crashDir.setOnAction(event -> {
             File reportFile = report.getCrashReportFile();
@@ -55,16 +59,26 @@ public final class CrashDiagnosticDialog {
         Button mods = button("打开 mods", "secondary-button");
         mods.setOnAction(event -> folderOpener.accept(modsDir));
         Button close = button("关闭", "ghost-button");
-        close.setOnAction(event -> dialog.close());
+        close.setOnAction(e -> dialog.close());
         HBox actions = new HBox(10, crashDir, mods, close);
         actions.setAlignment(Pos.CENTER_RIGHT);
 
-        VBox root = new VBox(14,
-                surface("中文解释", null, title, explanation),
+        VBox contentBox = new VBox(14,
+                surface("解释", null, reportTitle, explanation),
                 surface("修复建议", null, suggestions),
-                surface("关键日志", "下面是启动器从英文报错中提取的关键行", evidence), actions);
+                surface("证据", "从原始崩溃报告中提取的关键行", evidence),
+                actions);
+        contentBox.getStyleClass().add("root-pane");
+        contentBox.setPadding(new Insets(18));
+
+        StackPane root = new StackPane(contentBox,
+                createCornerBracket("corner-bracket-tl", Pos.TOP_LEFT),
+                createCornerBracket("corner-bracket-tr", Pos.TOP_RIGHT),
+                createCornerBracket("corner-bracket-bl", Pos.BOTTOM_LEFT),
+                createCornerBracket("corner-bracket-br", Pos.BOTTOM_RIGHT));
+        root.setPadding(new Insets(8));
         root.getStyleClass().add("root-pane");
-        root.setPadding(new Insets(18));
+
         ScrollPane scroll = new ScrollPane(root);
         scroll.getStyleClass().add("main-scroll");
         scroll.setFitToWidth(true);
@@ -73,6 +87,14 @@ public final class CrashDiagnosticDialog {
         if (stylesheet != null) scene.getStylesheets().add(stylesheet.toExternalForm());
         dialog.setScene(scene);
         dialog.show();
+    }
+
+    private static Region createCornerBracket(String styleClass, Pos alignment) {
+        Region corner = new Region();
+        corner.getStyleClass().addAll("corner-bracket", styleClass);
+        corner.setMouseTransparent(true);
+        StackPane.setAlignment(corner, alignment);
+        return corner;
     }
 
     private static VBox surface(String heading, String subtitle, Node... nodes) {
@@ -97,10 +119,10 @@ public final class CrashDiagnosticDialog {
     }
 
     private static String toBulletText(List<String> items) {
-        if (items == null || items.isEmpty()) return "未提取到关键日志。";
+        if (items == null || items.isEmpty()) return "（无）";
         return items.stream().filter(item -> item != null && !item.isBlank())
                 .map(item -> "- " + item.trim()).reduce((left, right) -> left + System.lineSeparator() + right)
-                .orElse("未提取到关键日志。");
+                .orElse("（无）");
     }
 
     private static void applyIcon(Stage stage) {

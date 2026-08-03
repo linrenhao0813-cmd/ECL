@@ -15,9 +15,12 @@ import com.google.gson.JsonObject;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -28,12 +31,18 @@ import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class GameLauncher {
+public class GameLauncher implements LaunchService {
     private static final Logger LOGGER = LoggerFactory.getLogger(GameLauncher.class);
     private static final String NATIVES_EXTRACTION_MARKER = ".ecl-natives-extracted";
+    private static final Pattern RELEASE_VERSION_PATTERN =
+            Pattern.compile("^(\\d+)\\.(\\d+)(?:\\.(\\d+))?(?:[-+_].*)?$");
+    private static final Pattern SNAPSHOT_VERSION_PATTERN =
+            Pattern.compile("^(\\d{2})w(\\d{2})([a-z].*)?$", Pattern.CASE_INSENSITIVE);
     private AuthProvider auth;
     private String versionId;
     private int maxMemory = 2048;
@@ -41,6 +50,11 @@ public class GameLauncher {
     private File gameDir;
     private String jvmArgs = "";
     private String javaPath = "";
+    private int gameWidth = 1280;
+    private int gameHeight = 720;
+    private boolean fullscreen;
+    private String serverAddress = "";
+    private int processorCount;
 
     public GameLauncher() {
         this.auth = new OfflineAuth("Player");
@@ -75,6 +89,27 @@ public class GameLauncher {
         this.javaPath = javaPath == null ? "" : javaPath.trim();
     }
 
+    @Override
+    public void setGameResolution(int width, int height) {
+        this.gameWidth = Math.max(320, width);
+        this.gameHeight = Math.max(240, height);
+    }
+
+    @Override
+    public void setFullscreen(boolean fullscreen) {
+        this.fullscreen = fullscreen;
+    }
+
+    @Override
+    public void setServerAddress(String serverAddress) {
+        this.serverAddress = serverAddress == null ? "" : serverAddress.trim();
+    }
+
+    @Override
+    public void setProcessorCount(int processorCount) {
+        this.processorCount = Math.max(0, processorCount);
+    }
+
     public Process launch() throws IOException {
         if (versionId == null || versionId.isBlank()) {
             throw new IOException("未选择游戏版本");
@@ -90,7 +125,10 @@ public class GameLauncher {
         gameDir = launchDirectory;
 
         int requiredJavaMajor = determineRequiredJavaMajor(versionJson);
-        String resolvedJavaPath = JavaRuntimeUtil.resolveJavaExecutable(javaPath, requiredJavaMajor);
+        String resolvedJavaPath = JavaRuntimeUtil.resolveOrDownloadJavaExecutable(
+                javaPath, requiredJavaMajor,
+                message -> LOGGER.info("{}", message),
+                (downloaded, total) -> { });
         List<String> command = buildCommand(resolvedJavaPath, versionJson);
 
         ProcessBuilder pb = new ProcessBuilder(command);
@@ -112,6 +150,7 @@ public class GameLauncher {
                 try {
                     return javaVersion.get("majorVersion").getAsInt();
                 } catch (NumberFormatException | IllegalStateException ignored) {
+                    LOGGER.debug("Could not parse javaVersion.majorVersion from version JSON", ignored);
                 }
             }
         }
@@ -121,49 +160,75 @@ public class GameLauncher {
 
     private int inferRequiredJavaMajorFromVersionId() {
         int[] release = parseReleaseVersion(versionId);
-        if (release == null) {
+        if (release != null) {
+            int minor = release[1];
+            int patch = release[2];
+            if (minor > 20 || minor == 20 && patch >= 5) {
+                return 21;
+            }
+            if (minor >= 18) {
+                return 17;
+            }
             return 8;
         }
 
-        int minor = release[1];
-        int patch = release[2];
-        if (minor > 20 || minor == 20 && patch >= 5) {
+        int[] snapshot = parseSnapshotVersion(versionId);
+        if (snapshot == null) {
+            return 8;
+        }
+
+        int year = snapshot[0];
+        int week = snapshot[1];
+        if (year > 24 || year == 24 && week >= 14) {
             return 21;
         }
-        if (minor >= 18) {
+        if (year > 21 || year == 21 && week >= 37) {
             return 17;
         }
         return 8;
     }
 
     private int[] parseReleaseVersion(String id) {
-        if (id == null || !id.startsWith("1.")) {
+        if (id == null) {
             return null;
         }
 
-        String[] parts = id.split("\\.");
-        if (parts.length < 2) {
+        Matcher matcher = RELEASE_VERSION_PATTERN.matcher(id.trim());
+        if (!matcher.matches()) {
             return null;
         }
 
         try {
-            int minor = Integer.parseInt(parts[1].replaceAll("[^0-9].*$", ""));
-            int patch = 0;
-            if (parts.length >= 3) {
-                patch = Integer.parseInt(parts[2].replaceAll("[^0-9].*$", ""));
-            }
-            return new int[]{1, minor, patch};
+            int major = Integer.parseInt(matcher.group(1));
+            int minor = Integer.parseInt(matcher.group(2));
+            int patch = matcher.group(3) == null ? 0 : Integer.parseInt(matcher.group(3));
+            return new int[]{major, minor, patch};
         } catch (NumberFormatException e) {
             return null;
         }
     }
 
+    private int[] parseSnapshotVersion(String id) {
+        if (id == null) {
+            return null;
+        }
+        Matcher matcher = SNAPSHOT_VERSION_PATTERN.matcher(id.trim());
+        if (!matcher.matches()) {
+            return null;
+        }
+        return new int[]{Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2))};
+    }
+
     private List<String> buildCommand(String javaExecutable, JsonObject versionJson) throws IOException {
+        String mainClass = requireMainClass(versionJson);
         List<String> cmd = new ArrayList<>();
         Map<String, String> variables = buildLaunchVariables(versionJson);
         cmd.add(javaExecutable);
         cmd.add("-Xms" + minMemory + "m");
         cmd.add("-Xmx" + maxMemory + "m");
+        if (processorCount > 0) {
+            cmd.add("-XX:ActiveProcessorCount=" + processorCount);
+        }
 
         if (jvmArgs != null && !jvmArgs.isEmpty()) {
             for (String arg : jvmArgs.split("\\s+")) {
@@ -176,9 +241,64 @@ public class GameLauncher {
         cmd.addAll(parseJVMArguments(versionJson, variables));
         cmd.add("-cp");
         cmd.add(buildClassPath(versionJson));
-        cmd.add(versionJson.get("mainClass").getAsString());
+        cmd.add(mainClass);
         cmd.addAll(parseGameArguments(versionJson, variables));
+        cmd.add("--width");
+        cmd.add(Integer.toString(gameWidth));
+        cmd.add("--height");
+        cmd.add(Integer.toString(gameHeight));
+        if (fullscreen) {
+            cmd.add("--fullscreen");
+        }
+        appendServerArguments(cmd);
         return cmd;
+    }
+
+    private void appendServerArguments(List<String> command) {
+        if (serverAddress == null || serverAddress.isBlank()) {
+            return;
+        }
+        String host = serverAddress.trim();
+        String port = null;
+        if (host.startsWith("[") && host.contains("]")) {
+            int bracket = host.indexOf(']');
+            if (bracket + 1 < host.length() && host.charAt(bracket + 1) == ':') {
+                port = host.substring(bracket + 2);
+                host = host.substring(1, bracket);
+            }
+        } else {
+            int colon = host.lastIndexOf(':');
+            if (colon > 0 && host.indexOf(':') == colon) {
+                port = host.substring(colon + 1);
+                host = host.substring(0, colon);
+            }
+        }
+        command.add("--server");
+        command.add(host);
+        if (port != null && port.matches("\\d{1,5}")) {
+            command.add("--port");
+            command.add(port);
+        }
+    }
+
+    String requireMainClass(JsonObject versionJson) throws IOException {
+        if (versionJson == null || !versionJson.has("mainClass")) {
+            throw invalidMainClass();
+        }
+        JsonElement element = versionJson.get("mainClass");
+        if (element == null || !element.isJsonPrimitive()
+                || !element.getAsJsonPrimitive().isString()) {
+            throw invalidMainClass();
+        }
+        String mainClass = element.getAsString().trim();
+        if (mainClass.isEmpty()) {
+            throw invalidMainClass();
+        }
+        return mainClass;
+    }
+
+    private IOException invalidMainClass() {
+        return new IOException("版本 JSON 的 mainClass 字段缺失或不是非空字符串: " + versionId);
     }
 
     private List<String> parseJVMArguments(JsonObject versionJson, Map<String, String> variables) {
@@ -295,8 +415,11 @@ public class GameLauncher {
     }
 
     private String replaceVariables(String arg, Map<String, String> variables) {
+        if (arg == null || arg.indexOf("${") < 0) {
+            return arg;
+        }
         for (Map.Entry<String, String> entry : variables.entrySet()) {
-            if (entry.getValue() != null) {
+            if (entry.getValue() != null && arg.indexOf(entry.getKey()) >= 0) {
                 arg = arg.replace(entry.getKey(), entry.getValue());
             }
         }
@@ -304,7 +427,7 @@ public class GameLauncher {
     }
 
     private String buildClassPath(JsonObject versionJson) throws IOException {
-        List<String> classpath = new ArrayList<>();
+        Set<String> classpath = new LinkedHashSet<>();
         String nativeClassifier = FileUtil.getNativeClassifier();
 
         JsonArray libraries = versionJson.getAsJsonArray("libraries");
@@ -332,9 +455,7 @@ public class GameLauncher {
 
         String clientJarId = getEffectiveClientJarId(versionJson);
         File clientJar = new File(ECLConfig.getVersionsDir(), clientJarId + "/" + clientJarId + ".jar");
-        if (clientJar.exists()) {
-            classpath.add(clientJar.getAbsolutePath());
-        } else {
+        if (!clientJar.exists()) {
             throw new IOException("Missing client JAR for version " + versionId + ": " + clientJar.getAbsolutePath());
         }
         classpath.add(clientJar.getAbsolutePath());
@@ -345,7 +466,7 @@ public class GameLauncher {
 
     private void extractNatives(JsonObject versionJson, String nativeClassifier) throws IOException {
         File nativesDir = new File(ECLConfig.getVersionsDir(), versionId + "/natives");
-        nativesDir.mkdirs();
+        Files.createDirectories(nativesDir.toPath());
 
         JsonArray libraries = versionJson.getAsJsonArray("libraries");
         if (libraries == null) {
@@ -386,18 +507,22 @@ public class GameLauncher {
         }
 
         File marker = new File(nativesDir, NATIVES_EXTRACTION_MARKER);
-        String fingerprint = buildNativesFingerprint(nativeFiles);
-        if (isNativesExtractionCurrent(marker, fingerprint)) {
+        String sourceFingerprint = buildNativesFingerprint(nativeFiles);
+        if (isNativesExtractionCurrent(marker, sourceFingerprint, nativesDir.toPath())) {
             return;
         }
 
+        clearNativesDirectory(nativesDir.toPath(), marker.toPath());
+        ExtractionBudget extractionBudget = new ExtractionBudget(new ExtractionLimits(
+                MAX_EXTRACTED_TOTAL_BYTES, MAX_EXTRACTED_SINGLE_BYTES, MAX_EXTRACTED_ENTRIES));
         for (File nativeFile : nativeFiles) {
             if (nativeFile.isFile()) {
-                extractJar(nativeFile, nativesDir);
+                extractJar(nativeFile, nativesDir, extractionBudget);
             }
         }
         try {
-            Files.writeString(marker.toPath(), fingerprint, StandardCharsets.UTF_8);
+            writeMarkerAtomically(marker.toPath(),
+                    buildNativesMarker(sourceFingerprint, nativesDir.toPath(), marker.toPath()));
         } catch (IOException e) {
             LOGGER.warn("Failed to write natives extraction marker for version {}", versionId, e);
         }
@@ -433,30 +558,87 @@ public class GameLauncher {
         return keys;
     }
 
-    private boolean isNativesExtractionCurrent(File marker, String fingerprint) {
+    private boolean isNativesExtractionCurrent(File marker, String sourceFingerprint, Path nativesDir) {
         if (!marker.isFile()) {
             return false;
         }
         try {
-            return fingerprint.equals(Files.readString(marker.toPath(), StandardCharsets.UTF_8));
+            String currentFingerprint = buildNativesMarker(sourceFingerprint, nativesDir, marker.toPath());
+            return currentFingerprint.equals(Files.readString(marker.toPath(), StandardCharsets.UTF_8));
         } catch (IOException e) {
             LOGGER.debug("Failed to read natives extraction marker for version {}", versionId, e);
             return false;
         }
     }
 
-    private String buildNativesFingerprint(Iterable<File> nativeFiles) {
+    private String buildNativesFingerprint(Iterable<File> nativeFiles) throws IOException {
         StringBuilder fingerprint = new StringBuilder();
         for (File nativeFile : nativeFiles) {
             fingerprint.append(nativeFile.getAbsolutePath())
-                    .append('|').append(nativeFile.isFile() ? nativeFile.length() : -1)
-                    .append('|').append(nativeFile.isFile() ? nativeFile.lastModified() : -1)
+                    .append('|').append(nativeFile.isFile() ? FileUtil.sha1(nativeFile) : "missing")
                     .append('\n');
         }
         return fingerprint.toString();
     }
 
-    private void extractJar(File jarFile, File targetDir) throws IOException {
+    private String buildNativesMarker(String sourceFingerprint, Path nativesDir, Path marker) throws IOException {
+        StringBuilder fingerprint = new StringBuilder("sources\n")
+                .append(sourceFingerprint)
+                .append("extracted\n");
+        try (var entries = Files.walk(nativesDir)) {
+            for (Path entry : entries.filter(Files::isRegularFile).sorted().toList()) {
+                if (entry.equals(marker)) {
+                    continue;
+                }
+                fingerprint.append(nativesDir.relativize(entry).toString().replace(File.separatorChar, '/'))
+                        .append('|').append(FileUtil.sha1(entry.toFile()))
+                        .append('\n');
+            }
+        }
+        return fingerprint.toString();
+    }
+
+    private void clearNativesDirectory(Path nativesDir, Path marker) throws IOException {
+        if (!Files.isDirectory(nativesDir)) {
+            return;
+        }
+        try (var entries = Files.list(nativesDir)) {
+            for (Path entry : entries.toList()) {
+                if (entry.equals(marker)) {
+                    Files.deleteIfExists(entry);
+                    continue;
+                }
+                if (Files.isDirectory(entry)) {
+                    FileUtil.deleteDirectory(entry);
+                } else {
+                    Files.deleteIfExists(entry);
+                }
+            }
+        }
+    }
+
+    private void writeMarkerAtomically(Path marker, String fingerprint) throws IOException {
+        Files.createDirectories(marker.getParent());
+        Path tempFile = Files.createTempFile(marker.getParent(), "natives-", ".marker.tmp");
+        try {
+            Files.writeString(tempFile, fingerprint, StandardCharsets.UTF_8,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            try {
+                Files.move(tempFile, marker, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tempFile, marker, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
+    }
+
+    // 安全限制：防止 ZIP 炸弹
+    private static final long MAX_EXTRACTED_TOTAL_BYTES = 500 * 1024 * 1024L;  // 500 MB
+    private static final long MAX_EXTRACTED_SINGLE_BYTES = 100 * 1024 * 1024L; // 100 MB 单个文件
+    private static final int MAX_EXTRACTED_ENTRIES = 10_000;                    // 最多 1 万个文件
+
+    void extractJar(File jarFile, File targetDir, ExtractionBudget budget) throws IOException {
         Path targetRoot = targetDir.toPath().toAbsolutePath().normalize();
         try (JarFile jar = new JarFile(jarFile)) {
             Enumeration<JarEntry> entries = jar.entries();
@@ -464,6 +646,21 @@ public class GameLauncher {
                 JarEntry entry = entries.nextElement();
                 if (entry.getName().startsWith("META-INF/") || entry.isDirectory()) {
                     continue;
+                }
+
+                if (++budget.entryCount > budget.limits.maxEntries()) {
+                    throw new IOException("ZIP 炸弹防护: 解压文件数超过上限 "
+                            + budget.limits.maxEntries() + ": " + jarFile);
+                }
+
+                long declaredSize = entry.getSize();
+                if (declaredSize > budget.limits.maxSingleBytes()) {
+                    throw new IOException("ZIP 炸弹防护: 单个解压文件声明大小超过限制 (" + declaredSize + " bytes): " + entry.getName());
+                }
+                if (declaredSize >= 0
+                        && declaredSize > budget.limits.maxTotalBytes() - budget.totalBytes) {
+                    throw new IOException("ZIP 炸弹防护: 解压总大小超过上限 "
+                            + budget.limits.maxTotalBytes() / 1024 / 1024 + " MB: " + jarFile);
                 }
 
                 Path outPath = targetRoot.resolve(entry.getName()).normalize();
@@ -475,10 +672,53 @@ public class GameLauncher {
                     Files.createDirectories(parent);
                 }
 
-                try (InputStream is = jar.getInputStream(entry)) {
-                    Files.copy(is, outPath, StandardCopyOption.REPLACE_EXISTING);
+                // 手动缓冲复制，边读边检查大小，防止 ZIP 炸弹在数据落盘后才被发现
+                long entryBytes = 0;
+                try (InputStream is = jar.getInputStream(entry);
+                     OutputStream os = new java.io.BufferedOutputStream(Files.newOutputStream(outPath), 64 * 1024)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    int read;
+                    while ((read = is.read(buffer)) != -1) {
+                        if (read > budget.limits.maxSingleBytes() - entryBytes) {
+                            throw new IOException("ZIP 炸弹防护: 解压时单文件超过限制 ("
+                                    + budget.limits.maxSingleBytes() / 1024 / 1024 + " MB): " + entry.getName());
+                        }
+                        if (read > budget.limits.maxTotalBytes() - budget.totalBytes) {
+                            throw new IOException("ZIP 炸弹防护: 解压总大小超过上限 "
+                                    + budget.limits.maxTotalBytes() / 1024 / 1024 + " MB: " + jarFile);
+                        }
+                        os.write(buffer, 0, read);
+                        entryBytes += read;
+                        budget.totalBytes += read;
+                    }
+                } catch (IOException e) {
+                    try {
+                        Files.deleteIfExists(outPath);
+                    } catch (IOException cleanupError) {
+                        e.addSuppressed(cleanupError);
+                    }
+                    throw e;
                 }
             }
+        }
+    }
+
+    record ExtractionLimits(long maxTotalBytes, long maxSingleBytes, int maxEntries) {
+        ExtractionLimits {
+            if (maxTotalBytes <= 0 || maxSingleBytes <= 0 || maxEntries <= 0
+                    || maxSingleBytes > maxTotalBytes) {
+                throw new IllegalArgumentException("Invalid native extraction limits");
+            }
+        }
+    }
+
+    static final class ExtractionBudget {
+        private final ExtractionLimits limits;
+        private long totalBytes;
+        private int entryCount;
+
+        ExtractionBudget(ExtractionLimits limits) {
+            this.limits = limits;
         }
     }
 

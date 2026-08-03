@@ -19,6 +19,7 @@ repositories {
 
 dependencies {
     implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.2'
     implementation 'org.slf4j:slf4j-api:2.0.16'
     runtimeOnly 'ch.qos.logback:logback-classic:1.5.16'
     implementation "org.openjfx:javafx-base:21:${javafxPlatform}"
@@ -33,8 +34,8 @@ test {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -66,14 +67,32 @@ application {
     mainClass = 'com.ecl.ECL'
 }
 
+tasks.register('captureLauncherUi', JavaExec) {
+    dependsOn testClasses
+    group = 'verification'
+    description = 'Render the real JavaFX launcher window to a PNG for visual QA.'
+
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ecl.ui.LauncherUiSnapshot'
+    systemProperty 'ecl.reduceMotion', 'true'
+    systemProperty 'ecl.snapshot', 'true'
+    systemProperty 'ecl.snapshot.path',
+            (findProperty('uiSnapshotPath') ?: file("$buildDir/visual-qa/ecl-home.png").absolutePath)
+    systemProperty 'ecl.snapshot.mode',
+            (findProperty('uiSnapshotMode') ?: 'home')
+
+    def isolatedAppData = file("$buildDir/ui-preview-appdata")
+    systemProperty 'user.home', isolatedAppData.absolutePath
+    environment 'APPDATA', isolatedAppData.absolutePath
+    doFirst {
+        isolatedAppData.mkdirs()
+    }
+}
+
 jar {
     manifest {
         attributes 'Main-Class': 'com.ecl.ECL'
     }
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    }
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 tasks.register('packageWindowsApp', Exec) {

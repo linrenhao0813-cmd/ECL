@@ -51,13 +51,16 @@ public final class RuleEvaluator {
     }
 
     private static boolean matchesArchitecture(String expected) {
-        String actual = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        boolean is64Bit = actual.contains("64") || actual.equals("aarch64");
+        return matchesArchitecture(expected, System.getProperty("os.arch", ""));
+    }
+
+    static boolean matchesArchitecture(String expected, String actualArchitecture) {
+        String actual = actualArchitecture == null ? "" : actualArchitecture.toLowerCase(Locale.ROOT);
         if ("x86".equalsIgnoreCase(expected)) {
-            return !is64Bit && (actual.contains("86") || actual.contains("i386"));
+            return actual.matches("x86|i[3-6]86");
         }
         if ("x86_64".equalsIgnoreCase(expected) || "amd64".equalsIgnoreCase(expected)) {
-            return is64Bit && !actual.contains("arm") && !actual.contains("aarch");
+            return actual.equals("x86_64") || actual.equals("amd64") || actual.equals("x64");
         }
         return matchesPattern(expected, actual);
     }
