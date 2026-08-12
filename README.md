@@ -21,6 +21,11 @@ ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle �
 - 游戏异常退出后自动分析英文日志，输出中文解释和修复建议
 - 当前版本可一键打开 mc 中文 Wiki 对应版本更新介绍
 - 官方源下载较慢或失败时自动尝试镜像源
+- 下载使用 `.part` 临时文件并支持 HTTP Range 续传；中断后保留已完成数据
+- ECL、Modrinth、CurseForge 和 MultiMC 整合包预览、事务导入与导出
+- 简体中文、繁体中文、English 三语运行时切换，无需重启
+- 浅色/深色主题、首次启动向导与一键脱敏诊断包
+- 无头 CLI 支持账户、Java、版本、启动 dry-run、模组、整合包、诊断和设置操作
 - 依赖库和资源文件使用受控线程池并发下载，默认按设备使用 4～8 个线程
 - 极简 Minecraft 风格 JavaFX 桌面界面
 - Windows `jpackage` 应用镜像打包任务，可生成 `ECL.exe`
@@ -63,7 +68,7 @@ ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle �
 
 搜索结果支持点击查看简介，下载完成后会自动安装到对应实例。模组下载会尝试同时处理 Modrinth 标记的必需依赖。
 
-没有输入关键词时，下载窗口会自动加载 Modrinth 官网下载量排序列表，便于像 PCL2 下载页一样直接浏览热门模组、光影包、材质包和整合包。
+没有输入关键词时，下载窗口会自动加载 Modrinth 官网下载量排序列表，便于直接浏览热门模组、光影包、材质包和整合包。
 
 ## 启动可靠性与运行环境
 
@@ -104,7 +109,7 @@ Java 查找顺序包括用户配置路径、当前运行时、`JAVA_HOME`、启�
 
 ## 环境要求
 
-- JDK 17 或更高版本
+- JDK 21
 - Gradle Wrapper 已包含在项目中，无需单独安装 Gradle
 - 网络连接，用于下载 Gradle 依赖、Minecraft 资源、Microsoft 登录令牌和 Modrinth 内容
 
@@ -122,7 +127,29 @@ Java 查找顺序包括用户配置路径、当前运行时、`JAVA_HOME`、启�
 ./gradlew run
 ```
 
-首次启动时，Gradle 会下载 JavaFX、Gson、Jsoup 等依赖。
+首次启动时，Gradle 会下载 JavaFX、Gson、Jackson、picocli 等依赖。
+
+无图形环境或自动化脚本可以使用命令行入口：
+
+```powershell
+.\gradlew.bat :ecl-cli:run --args="doctor --json"
+```
+
+打包后的启动器也支持 `ECL --cli doctor --json`。CLI 高频命令包括：
+
+```text
+doctor
+java detect|list
+version list|inspect
+account list|add-offline|remove|default
+launch <version> [--dry-run] [--account ...] [--memory ...]
+mod list|enable|disable
+pack preview|import|export
+diagnostics <output.zip>
+settings get|set
+```
+
+全局 `--json` 可用于脚本化输出。Windows 运行 Gradle/CLI 脚本前若 `java` 不在 `PATH`，需要在同一个 PowerShell 会话设置 JDK 21 的 `JAVA_HOME` 与 `PATH`。
 
 ## 构建
 
@@ -141,7 +168,7 @@ Java 查找顺序包括用户配置路径、当前运行时、`JAVA_HOME`、启�
 构建完成后可在以下目录找到启动脚本和依赖：
 
 ```text
-build/install/ECL/
+ecl-boot/build/install/ECL/
 ```
 
 ## Windows 应用打包
@@ -162,9 +189,21 @@ dist/windows/ECL/
 
 ```text
 dist/windows/ECL/ECL.exe
+dist/windows/ECL/ECL-CLI.exe
 ```
 
+`ECL.exe` 为桌面入口，`ECL-CLI.exe` 为带控制台输出的无头入口。
+
 该任务依赖 JDK 自带的 `jpackage.exe`。如果打包时提示 `dist/windows` 无法删除，通常是旧版 `ECL.exe` 正在运行、资源管理器占用目录，或 OneDrive 正在同步旧 runtime 文件。关闭相关进程或暂停同步后重新执行打包即可。
+
+macOS 和 Linux 分别使用：
+
+```bash
+./gradlew packageMacApp
+./gradlew packageLinuxApp
+```
+
+macOS 可通过 `-PmacSigningIdentity="Developer ID Application: ..."` 启用 `jpackage` 签名。Linux 应用镜像输出到 `dist/linux/linux-x64/` 或 `dist/linux/linux-aarch64/`。签名证书、时间戳服务及各平台公证必须由发布环境注入，发布前按 [发布清单](docs/RELEASE_CHECKLIST.md) 复核。
 
 ## 数据目录
 
@@ -182,7 +221,9 @@ ECL 会在用户目录下创建启动器数据目录：
 
 Microsoft 多账号列表位于 `microsoft-accounts.json`，令牌以加密形式保存；Yggdrasil 密码同样写入加密配置，不以明文保存。
 
-默认游戏根目录为系统 Minecraft 目录 `.minecraft`，具体版本使用 HMCL 同款的版本隔离目录：
+统一账户服务使用 `accounts.json` 保存离线、Microsoft 与 Yggdrasil 账户元数据，访问令牌和刷新令牌采用 AES-GCM 加密；CLI 列表与诊断包不会输出凭据。
+
+默认游戏根目录为系统 Minecraft 目录 `.minecraft`，具体版本使用独立的版本隔离目录：
 
 ```text
 .minecraft/versions/<version>/
@@ -192,30 +233,27 @@ Microsoft 多账号列表位于 `microsoft-accounts.json`，令牌以加密形�
 
 ```text
 .
-├── build.gradle
-├── settings.gradle
+├── build.gradle.kts              # 聚合构建与质量任务
+├── settings.gradle.kts           # 五模块声明
+├── gradle/libs.versions.toml      # 依赖版本唯一事实源
 ├── gradlew
 ├── gradlew.bat
-└── src
-    └── main
-        ├── java/com/ecl
-        │   ├── auth        # 登录认证
-        │   ├── config      # 配置管理
-        │   ├── download    # 游戏与内容下载
-        │   ├── launcher    # 游戏启动与版本管理
-        │   ├── ui          # JavaFX 界面
-        │   └── util        # 文件、HTTP、Java 运行时工具
-        └── resources
-            ├── css
-            ├── fxml
-            └── icons
+├── ecl-boot/                      # GUI/CLI 双入口与启动兜底
+├── ecl-core/                      # 认证、下载、版本、启动、任务与基础设施
+├── ecl-gui/                       # JavaFX 界面、样式和图标
+├── ecl-cli/                       # picocli 无头命令行入口
+├── ecl-dist/                      # jpackage 装配任务
+└── config/checkstyle/             # 静态检查规则
 ```
 
 ## 主要依赖
 
 - JavaFX 21
 - Gson 2.10.1
-- Jsoup 1.17.2
+- Jackson 2.18.2
+- picocli 4.7.6
+- SLF4J 2.0.16 + Logback 1.5.16
+- JUnit 5.11.4
 
 ## 开源协议
 

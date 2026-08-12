@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Platform discovery intentionally enumerates well-known installation roots. -->
+    <Match>
+        <Class name="com.ecl.util.JavaRuntimeUtil"/>
+        <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+    </Match>
+</FindBugsFilter>
