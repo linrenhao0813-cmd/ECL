@@ -4,6 +4,7 @@ import com.ecl.ECLConfig;
 import com.ecl.auth.AuthProvider;
 import com.ecl.auth.MicrosoftAuth;
 import com.ecl.auth.MicrosoftAccountStore;
+import com.ecl.auth.MinecraftSkinService;
 import com.ecl.auth.OfflineAuth;
 import com.ecl.auth.YggdrasilAuth;
 import com.ecl.backup.BackupEntry;
@@ -25,7 +26,9 @@ import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.pack.MrpackInstaller;
+import com.ecl.modrinth.ui.ChineseDescriptionService;
 import com.ecl.modrinth.ui.ModBrowserView;
+import com.ecl.modrinth.ui.RemoteImageLoader;
 import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.Messages;
 import com.ecl.util.PlatformUtil;
@@ -43,9 +46,11 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Control;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -140,6 +145,7 @@ public class LauncherUI extends javafx.application.Application {
     private MrpackInstaller mrpackInstaller;
     private WorldBackupService worldBackupService;
     private MicrosoftAccountStore microsoftAccountStore;
+    private MinecraftSkinService minecraftSkinService;
     private LaunchService gameLauncher;
     private SettingsManager settingsManager;
     private MainController controller;
@@ -162,6 +168,8 @@ public class LauncherUI extends javafx.application.Application {
     private Button settingsBtn;
     private Button microsoftLoginBtn;
     private Button microsoftAddAccountBtn;
+    private Button skinUploadBtn;
+    private Button homeSkinUploadButton;
     private ComboBox<MicrosoftAccountStore.Account> microsoftAccountCombo;
     private volatile MicrosoftAccountStore.Account selectedMicrosoftAccount;
     private volatile boolean lastMicrosoftAccountPersisted = true;
@@ -383,6 +391,7 @@ public class LauncherUI extends javafx.application.Application {
         mrpackInstaller = new MrpackInstaller();
         worldBackupService = new WorldBackupService();
         microsoftAccountStore = new MicrosoftAccountStore();
+        minecraftSkinService = new MinecraftSkinService();
         gameLauncher = controller.gameLauncher();
 
         javaPath = settingsManager.get(ECLConfig.KEY_JAVA_PATH);
@@ -1137,7 +1146,12 @@ public class LauncherUI extends javafx.application.Application {
         Region accountSpacer = new Region();
         VBox.setVgrow(accountSpacer, Priority.ALWAYS);
         Button manageAccount = createLinkButton("管理账号  ›", () -> expandInstanceSettings(authTypeCombo));
-        accountCard.getChildren().addAll(accountLabel, accountProfile, accountSpacer, manageAccount);
+        homeSkinUploadButton = createLinkButton("上传皮肤  ›", this::chooseAndUploadSkin);
+        Region accountActionSpacer = new Region();
+        HBox.setHgrow(accountActionSpacer, Priority.ALWAYS);
+        HBox accountActions = new HBox(8, manageAccount, accountActionSpacer, homeSkinUploadButton);
+        accountActions.setAlignment(Pos.CENTER_LEFT);
+        accountCard.getChildren().addAll(accountLabel, accountProfile, accountSpacer, accountActions);
 
         VBox environmentCard = new VBox(12);
         environmentCard.getStyleClass().addAll("home-card", "environment-card");
@@ -1869,22 +1883,100 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private VBox createModrinthPage() {
+        VBox page = createMainPage();
+
+        Label pageTitle = new Label("内容库");
+        pageTitle.getStyleClass().add("page-title");
+        Label pageSubtitle = new Label("从 Modrinth 查找并安装适配当前 Minecraft 实例的内容");
+        pageSubtitle.getStyleClass().add("page-subtitle");
+        VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
+        pageHeading.getStyleClass().add("content-library-heading");
+
+        VBox navigation = new VBox(8);
+        navigation.getStyleClass().add("content-library-nav");
+        navigation.setPrefWidth(210);
+        navigation.setMinWidth(210);
+        navigation.setMaxWidth(210);
+
+        Label navigationTitle = new Label("下载分类");
+        navigationTitle.getStyleClass().add("content-library-nav-title");
+        Label navigationHint = new Label("选择要浏览的内容类型");
+        navigationHint.getStyleClass().add("content-library-nav-hint");
+        navigation.getChildren().addAll(navigationTitle, navigationHint);
+
+        StackPane content = new StackPane();
+        content.getStyleClass().add("content-library-content");
+        content.setMinWidth(0);
+        HBox.setHgrow(content, Priority.ALWAYS);
+
+        List<Button> categoryButtons = new java.util.ArrayList<>();
+        for (ContentTarget target : contentTargets) {
+            Button categoryButton = createContentLibraryNavButton(target);
+            categoryButtons.add(categoryButton);
+            navigation.getChildren().add(categoryButton);
+            categoryButton.setOnAction(event -> {
+                categoryButtons.forEach(button ->
+                        button.getStyleClass().remove("content-library-nav-item-active"));
+                categoryButton.getStyleClass().add("content-library-nav-item-active");
+                closeActiveModBrowserView();
+                Node selectedContent = target.usesLoader()
+                        ? createModLibraryContent()
+                        : createContentLibraryBrowser(target);
+                content.getChildren().setAll(selectedContent);
+            });
+        }
+
+        HBox library = new HBox(18, navigation, content);
+        library.getStyleClass().add("content-library-layout");
+        library.setAlignment(Pos.TOP_LEFT);
+        HBox.setHgrow(content, Priority.ALWAYS);
+        page.getChildren().addAll(pageHeading, library);
+
+        if (!categoryButtons.isEmpty()) {
+            categoryButtons.getFirst().fire();
+        }
+        return page;
+    }
+
+    private Button createContentLibraryNavButton(ContentTarget target) {
+        Label icon = new Label(target.initial);
+        icon.getStyleClass().add("content-library-nav-icon");
+        Label title = new Label(target.title);
+        title.getStyleClass().add("content-library-nav-item-title");
+        Label detail = new Label(switch (target.projectType) {
+            case "mod" -> "扩展玩法与功能";
+            case "shader" -> "改善光照与画面";
+            case "resourcepack" -> "替换纹理与音效";
+            case "modpack" -> "完整客户端与玩法配置";
+            default -> target.subtitle;
+        });
+        detail.getStyleClass().add("content-library-nav-item-detail");
+        VBox labels = new VBox(2, title, detail);
+        HBox row = new HBox(10, icon, labels);
+        row.setAlignment(Pos.CENTER_LEFT);
+
+        Button button = new Button();
+        button.setGraphic(row);
+        button.getStyleClass().add("content-library-nav-item");
+        button.setMaxWidth(Double.MAX_VALUE);
+        return button;
+    }
+
+    private Node createModLibraryContent() {
         String selectedVersion = getSelectedVersion();
         if (selectedVersion == null || selectedVersion.isBlank()) {
-            VBox page = createMainPage();
-            page.getChildren().add(createSurface(
-                    "// 模组中心",
-                    "请先在首页选择一个已安装的模组加载器版本",
-                    createBodyText("模组必须和 Minecraft 版本及 Fabric / Quilt / Forge / NeoForge 加载器同时匹配。")
-            ));
-            return page;
+            Button choose = createActionButton("返回首页选择实例", "primary-button",
+                    () -> setActiveView(AppView.HOME));
+            return createSurface("模组", "请先选择一个 Minecraft 实例",
+                    createBodyText("模组必须同时匹配 Minecraft 版本以及 Fabric、Quilt、Forge 或 NeoForge 加载器。"),
+                    choose);
         }
         Path selectedMetadata = ECLConfig.getVersionsDir().toPath()
                 .resolve(selectedVersion).resolve(selectedVersion + ".json");
         if (!Files.isRegularFile(selectedMetadata)) {
             try {
                 String minecraftVersion = versionManager.resolveMinecraftVersionId(selectedVersion);
-                return createLoaderSelectionPage(selectedVersion, minecraftVersion);
+                return createContentLibraryLoaderPrompt(selectedVersion, minecraftVersion);
             } catch (IOException ignored) {
                 // Fall through to the detailed error state below.
             }
@@ -1906,14 +1998,169 @@ public class LauncherUI extends javafx.application.Application {
             return activeModBrowserView;
         } catch (Exception e) {
             LOGGER.warn("Cannot open mod browser for version {}", selectedVersion, e);
-            VBox page = createMainPage();
-            page.getChildren().add(createSurface(
-                    "// 无法打开模组中心",
-                    selectedVersion,
-                    createBodyText("无法识别该版本的 Minecraft 版本或模组加载器：" + e.getMessage())
-            ));
-            return page;
+            return createSurface("无法打开模组下载", selectedVersion,
+                    createBodyText("无法识别该版本的 Minecraft 版本或模组加载器：" + e.getMessage()));
         }
+    }
+
+    private VBox createContentLibraryLoaderPrompt(String profileId, String minecraftVersion) {
+        Button install = createActionButton("为此实例安装加载器", "primary-button",
+                this::showLoaderInstallDialog);
+        return createSurface("模组", versionManager.getVersionDisplayName(profileId),
+                createBodyText("当前实例是 Minecraft " + minecraftVersion
+                        + " 原版。安装 Fabric、Quilt、Forge 或 NeoForge 后即可浏览兼容模组。"),
+                install);
+    }
+
+    private Node createContentLibraryBrowser(ContentTarget target) {
+        List<String> profileIds = availableContentProfiles(target);
+        if (profileIds.isEmpty()) {
+            Button choose = createActionButton("返回首页选择实例", "primary-button",
+                    () -> setActiveView(AppView.HOME));
+            return createSurface(target.title, "还没有可用的 Minecraft 实例",
+                    createBodyText("请先安装或选择一个游戏版本，下载后会自动导入该实例的 "
+                            + ("shader".equals(target.projectType) ? "shaderpacks" : "resourcepacks") + " 目录。"),
+                    choose);
+        }
+
+        String activeProfile = getSelectedVersion();
+        String initialProfile = profileIds.contains(activeProfile) ? activeProfile : profileIds.getFirst();
+        ContentInstance initialInstance = resolveContentInstance(initialProfile);
+
+        Label eyebrow = new Label("MODRINTH / " + target.projectType.toUpperCase(Locale.ROOT));
+        eyebrow.getStyleClass().add("eyebrow");
+        Label title = new Label(target.title);
+        title.getStyleClass().add("content-library-section-title");
+        Label description = new Label("modpack".equals(target.projectType)
+                ? "选择兼容整合包，安装为独立实例后立即启动"
+                : "搜索、选择兼容版本并直接安装到当前实例");
+        description.getStyleClass().add("status-detail");
+        VBox heading = new VBox(4, eyebrow, title, description);
+
+        ComboBox<String> targetProfileCombo = new ComboBox<>();
+        targetProfileCombo.getItems().setAll(profileIds);
+        targetProfileCombo.setValue(initialProfile);
+        targetProfileCombo.setCellFactory(list -> createVersionCell());
+        targetProfileCombo.setButtonCell(createVersionCell());
+        targetProfileCombo.setVisibleRowCount(14);
+        applyFieldStyle(targetProfileCombo);
+        targetProfileCombo.setMaxWidth(Double.MAX_VALUE);
+
+        TextField searchField = new TextField();
+        searchField.setPromptText(target.searchHint);
+        applyFieldStyle(searchField);
+        HBox.setHgrow(searchField, Priority.ALWAYS);
+        Button searchButton = createActionButton("搜索", "primary-button", () -> { });
+        HBox searchBar = new HBox(8, searchField, searchButton);
+
+        ListView<ModrinthDownloader.Project> resultList = new ListView<>();
+        resultList.getStyleClass().add("mod-result-list");
+        resultList.setPrefHeight(330);
+        resultList.setPlaceholder(new Label("没有找到兼容内容"));
+        resultList.setCellFactory(list -> createContentProjectCell(target));
+
+        Label projectDescription = new Label("选择一个项目查看简介和兼容版本");
+        projectDescription.getStyleClass().add("content-library-description");
+        projectDescription.setWrapText(true);
+        projectDescription.setMinHeight(86);
+
+        ComboBox<ModrinthDownloader.ProjectVersion> versionComboBox = new ComboBox<>();
+        versionComboBox.setPromptText("选择具体版本");
+        versionComboBox.setDisable(true);
+        versionComboBox.setMaxWidth(Double.MAX_VALUE);
+        applyFieldStyle(versionComboBox);
+
+        Label targetLabel = new Label();
+        targetLabel.getStyleClass().add("content-library-target");
+        targetLabel.setWrapText(true);
+        updateContentTargetLabel(target, initialInstance, targetLabel);
+
+        Label status = new Label("正在加载 Modrinth 热门" + target.title + "…");
+        status.getStyleClass().add("status-detail");
+        status.setWrapText(true);
+        ProgressBar progress = new ProgressBar(0);
+        progress.getStyleClass().add("download-progress");
+        progress.setMaxWidth(Double.MAX_VALUE);
+        progress.setVisible(false);
+        progress.managedProperty().bind(progress.visibleProperty());
+
+        Button downloadButton = createActionButton("modpack".equals(target.projectType)
+                ? "安装并启动" : "下载并安装", "primary-button", () -> { });
+        downloadButton.setDisable(true);
+        Button folderButton = createActionButton("打开安装目录", "secondary-button", () -> {
+            ContentInstance instance = resolveContentInstance(targetProfileCombo.getValue());
+            File directory = target.folderResolver.apply(instance.profileId());
+            try {
+                ensureDirectory(directory);
+                openLocalFolder(directory, target.title + "目录");
+            } catch (IOException error) {
+                status.setText("无法创建目录: " + cleanMessage(error));
+            }
+        });
+        HBox actions = new HBox(8, downloadButton, folderButton);
+        actions.setAlignment(Pos.CENTER_RIGHT);
+
+        AtomicLong searchGeneration = new AtomicLong();
+        AtomicLong versionGeneration = new AtomicLong();
+        AtomicLong downloadGeneration = new AtomicLong();
+        AtomicLong descriptionGeneration = new AtomicLong();
+
+        resultList.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, selected) -> {
+            long selectedDescriptionGeneration = descriptionGeneration.incrementAndGet();
+            versionGeneration.incrementAndGet();
+            versionComboBox.getItems().clear();
+            versionComboBox.setDisable(selected == null);
+            downloadButton.setDisable(true);
+            projectDescription.setText(selected == null
+                    ? "选择一个项目查看简介和兼容版本"
+                    : "正在翻译中文简介…");
+            if (selected != null) {
+                setTranslatedProjectDescription(selected, projectDescription,
+                        descriptionGeneration, selectedDescriptionGeneration);
+                loadProjectVersions(target, selected,
+                        resolveContentInstance(targetProfileCombo.getValue()), versionComboBox,
+                        status, downloadButton, versionGeneration);
+            }
+        });
+        versionComboBox.valueProperty().addListener((observable, oldValue, selected) ->
+                downloadButton.setDisable(selected == null
+                        || resultList.getSelectionModel().getSelectedItem() == null));
+
+        Runnable search = () -> searchModrinthContent(target,
+                resolveContentInstance(targetProfileCombo.getValue()), searchField, resultList,
+                status, searchButton, downloadButton, searchGeneration);
+        searchButton.setOnAction(event -> search.run());
+        searchField.setOnAction(event -> search.run());
+        targetProfileCombo.setOnAction(event -> {
+            ContentInstance instance = resolveContentInstance(targetProfileCombo.getValue());
+            updateContentTargetLabel(target, instance, targetLabel);
+            versionGeneration.incrementAndGet();
+            versionComboBox.getItems().clear();
+            versionComboBox.setDisable(true);
+            resultList.getItems().clear();
+            downloadButton.setDisable(true);
+            search.run();
+        });
+        downloadButton.setOnAction(event -> {
+            ContentInstance instance = resolveContentInstance(targetProfileCombo.getValue());
+            File directory = target.folderResolver.apply(instance.profileId());
+            try {
+                ensureDirectory(directory);
+            } catch (IOException error) {
+                status.setText("无法创建目录: " + cleanMessage(error));
+                return;
+            }
+            downloadSelectedContent(target, resultList.getSelectionModel().getSelectedItem(),
+                    versionComboBox.getValue(), instance, directory, status, progress,
+                    searchButton, downloadButton, targetProfileCombo, downloadGeneration);
+        });
+
+        VBox browser = new VBox(12, heading, targetProfileCombo, searchBar, resultList,
+                projectDescription, versionComboBox, targetLabel, status, progress, actions);
+        browser.getStyleClass().addAll("surface", "content-library-browser");
+        browser.setFillWidth(true);
+        search.run();
+        return browser;
     }
 
     private record ContentInstance(
@@ -2258,6 +2505,10 @@ public class LauncherUI extends javafx.application.Application {
         microsoftAddAccountBtn.getStyleClass().addAll("app-button", "ghost-button", "compact-button");
         microsoftAddAccountBtn.setTooltip(new Tooltip("使用设备码添加另一个 Microsoft 账号"));
         microsoftAddAccountBtn.setOnAction(e -> addMicrosoftAccount());
+        skinUploadBtn = new Button("上传皮肤");
+        skinUploadBtn.getStyleClass().addAll("app-button", "ghost-button", "compact-button");
+        skinUploadBtn.setTooltip(new Tooltip("上传 PNG 皮肤到当前 Minecraft Java 正版账号"));
+        skinUploadBtn.setOnAction(e -> chooseAndUploadSkin());
         microsoftAccountCombo = new ComboBox<>();
         microsoftAccountCombo.setPromptText("选择已保存账号");
         microsoftAccountCombo.getItems().setAll(microsoftAccountStore.list());
@@ -2283,7 +2534,7 @@ public class LauncherUI extends javafx.application.Application {
         selectedMicrosoftAccount = microsoftAccountCombo.getValue();
         applyFieldStyle(microsoftAccountCombo);
         HBox authBox = new HBox(10, authTypeCombo, usernameField, microsoftAccountCombo,
-                microsoftLoginBtn, microsoftAddAccountBtn);
+                microsoftLoginBtn, microsoftAddAccountBtn, skinUploadBtn);
         authBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(usernameField, Priority.ALWAYS);
         HBox.setHgrow(microsoftAccountCombo, Priority.ALWAYS);
@@ -2631,6 +2882,8 @@ public class LauncherUI extends javafx.application.Application {
         setFieldVisible(microsoftAccountCombo, microsoft);
         setFieldVisible(microsoftLoginBtn, microsoft);
         setFieldVisible(microsoftAddAccountBtn, microsoft);
+        setFieldVisible(skinUploadBtn, microsoft);
+        setFieldVisible(homeSkinUploadButton, microsoft);
         setFieldVisible(serverLabel, yggdrasil);
         setFieldVisible(yggdrasilServerField, yggdrasil);
         setFieldVisible(passwordLabel, yggdrasil);
@@ -3317,6 +3570,88 @@ public class LauncherUI extends javafx.application.Application {
         });
     }
 
+    private void chooseAndUploadSkin() {
+        if (!AUTH_MICROSOFT.equals(authTypeCombo.getValue())) {
+            setStatus("仅支持正版皮肤上传", "请先将登录方式切换为 Microsoft 正版登录。");
+            return;
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("选择 Minecraft Java 版皮肤");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("PNG 皮肤图片 (*.png)", "*.png"));
+        File selected = chooser.showOpenDialog(primaryStage);
+        if (selected == null) return;
+
+        MinecraftSkinService.SkinImage skin;
+        try {
+            skin = minecraftSkinService.inspect(selected.toPath());
+        } catch (IOException error) {
+            setStatus("皮肤文件无效", cleanMessage(error));
+            return;
+        }
+
+        Dialog<MinecraftSkinService.Variant> dialog = new Dialog<>();
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("上传 Minecraft 皮肤");
+        dialog.setHeaderText("确认皮肤模型");
+        dialog.setOnShown(event -> {
+            if (dialog.getDialogPane().getScene().getWindow() instanceof Stage stage) {
+                applyWindowIcon(stage);
+            }
+        });
+
+        ImageView preview = new ImageView(new Image(selected.toURI().toString()));
+        preview.setFitWidth(192);
+        preview.setFitHeight(192);
+        preview.setPreserveRatio(true);
+        preview.setSmooth(false);
+        preview.getStyleClass().add("skin-preview");
+
+        ComboBox<MinecraftSkinService.Variant> variant = new ComboBox<>();
+        variant.getItems().setAll(MinecraftSkinService.Variant.values());
+        variant.setValue(MinecraftSkinService.Variant.CLASSIC);
+        variant.setMaxWidth(Double.MAX_VALUE);
+        applyFieldStyle(variant);
+
+        Label fileInfo = createBodyText(selected.getName() + " · "
+                + skin.width() + "×" + skin.height() + " · " + formatBytes(skin.fileSize()));
+        Label accountInfo = createBodyText("上传到：" + (selectedMicrosoftAccount == null
+                ? settingsManager.get(ECLConfig.KEY_MICROSOFT_PROFILE_NAME)
+                : selectedMicrosoftAccount.username()));
+        VBox content = new VBox(12, preview, fileInfo, accountInfo,
+                new Label("角色模型"), variant);
+        content.setAlignment(Pos.CENTER);
+        dialog.getDialogPane().setContent(content);
+        ButtonType upload = new ButtonType("上传并使用", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(upload, ButtonType.CANCEL);
+        dialog.setResultConverter(button -> button == upload ? variant.getValue() : null);
+        dialog.showAndWait().ifPresent(selectedVariant ->
+                uploadSkin(selected.toPath(), selectedVariant));
+    }
+
+    private void uploadSkin(Path skin, MinecraftSkinService.Variant variant) {
+        setControlsBusy(true);
+        setStatus("正在上传皮肤", "正在验证 Microsoft 登录并连接 Minecraft 皮肤服务…");
+        runAsync("ecl-upload-skin", () -> {
+            try {
+                MicrosoftAuth auth = authenticateMicrosoftAccount(false);
+                MinecraftSkinService.UploadResult result = minecraftSkinService.upload(
+                        auth.getAccessToken(), skin, variant);
+                Platform.runLater(() -> {
+                    String account = result.profileName() == null || result.profileName().isBlank()
+                            ? auth.getUsername() : result.profileName();
+                    setStatus("皮肤上传成功", account + " 已使用 " + variant + " 皮肤。重新进入游戏后生效。");
+                    setControlsBusy(false);
+                });
+            } catch (Exception error) {
+                Platform.runLater(() -> {
+                    setStatus("皮肤上传失败", cleanMessage(error));
+                    setControlsBusy(false);
+                });
+            }
+        });
+    }
+
     private MicrosoftAuth authenticateMicrosoftAccount(boolean forceNew) {
         MicrosoftAccountStore.Account selected = forceNew ? null : selectedMicrosoftAccount;
         MicrosoftAuth.CachedSession cachedSession = selected == null
@@ -3519,6 +3854,12 @@ public class LauncherUI extends javafx.application.Application {
         if (microsoftAddAccountBtn != null) {
             microsoftAddAccountBtn.setDisable(busy);
         }
+        if (skinUploadBtn != null) {
+            skinUploadBtn.setDisable(busy);
+        }
+        if (homeSkinUploadButton != null) {
+            homeSkinUploadButton.setDisable(busy);
+        }
         if (microsoftAccountCombo != null) {
             microsoftAccountCombo.setDisable(busy);
         }
@@ -3597,6 +3938,7 @@ public class LauncherUI extends javafx.application.Application {
         ListView<ModrinthDownloader.Project> resultList = new ListView<>();
         resultList.getStyleClass().add("mod-result-list");
         resultList.setPrefHeight(220);
+        resultList.setCellFactory(list -> createContentProjectCell(target));
 
         ComboBox<ModrinthDownloader.ProjectVersion> projectVersionCombo = new ComboBox<>();
         projectVersionCombo.setPromptText("选择具体版本");
@@ -3619,9 +3961,13 @@ public class LauncherUI extends javafx.application.Application {
         modProgress.managedProperty().bind(modProgress.visibleProperty());
         AtomicLong searchGeneration = new AtomicLong();
         AtomicLong versionGeneration = new AtomicLong();
+        AtomicLong downloadGeneration = new AtomicLong();
+        AtomicLong descriptionGeneration = new AtomicLong();
         dialog.setOnHidden(e -> {
             searchGeneration.incrementAndGet();
             versionGeneration.incrementAndGet();
+            downloadGeneration.incrementAndGet();
+            descriptionGeneration.incrementAndGet();
             stopProgressAnimation(modProgress, true);
         });
 
@@ -3629,7 +3975,7 @@ public class LauncherUI extends javafx.application.Application {
         dialogStatus.getStyleClass().add("status-detail");
         dialogStatus.setWrapText(true);
 
-        Button importBtn = new Button("导入");
+        Button importBtn = new Button("modpack".equals(target.projectType) ? "安装并启动" : "导入");
         importBtn.getStyleClass().addAll("app-button", "primary-button");
         importBtn.setDisable(true);
 
@@ -3651,12 +3997,15 @@ public class LauncherUI extends javafx.application.Application {
         closeBtn.setOnAction(e -> dialog.close());
 
         resultList.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, selected) -> {
+            long selectedDescriptionGeneration = descriptionGeneration.incrementAndGet();
             versionGeneration.incrementAndGet();
             importBtn.setDisable(true);
             projectVersionCombo.getItems().clear();
             projectVersionCombo.setDisable(selected == null);
-            descriptionLabel.setText(selected == null ? "选择一个结果查看简介" : formatProjectDescription(selected));
+            descriptionLabel.setText(selected == null ? "选择一个结果查看简介" : "正在翻译中文简介…");
             if (selected != null) {
+                setTranslatedProjectDescription(selected, descriptionLabel,
+                        descriptionGeneration, selectedDescriptionGeneration);
                 ContentInstance selectedInstance = resolveContentInstance(targetProfileCombo.getValue());
                 loadProjectVersions(
                         target,
@@ -3720,7 +4069,8 @@ public class LauncherUI extends javafx.application.Application {
                     modProgress,
                     searchBtn,
                     importBtn,
-                    targetProfileCombo);
+                    targetProfileCombo,
+                    downloadGeneration);
         });
 
         HBox actions = new HBox(10, importBtn, folderBtn, closeBtn);
@@ -3888,6 +4238,12 @@ public class LauncherUI extends javafx.application.Application {
                         return;
                     }
                     resultList.getItems().setAll(projects);
+                    RemoteImageLoader.prefetch(projects.stream()
+                            .map(ModrinthDownloader.Project::getIconUrl)
+                            .filter(java.util.Objects::nonNull)
+                            .map(this::safeUri)
+                            .filter(java.util.Objects::nonNull)
+                            .toList());
                     if (!projects.isEmpty()) {
                         resultList.getSelectionModel().select(0);
                     }
@@ -3914,14 +4270,82 @@ public class LauncherUI extends javafx.application.Application {
         });
     }
 
-    private String formatProjectDescription(ModrinthDownloader.Project project) {
-        String description = project.getDescription() == null || project.getDescription().isBlank()
-                ? "该项目没有提供简介。"
-                : project.getDescription();
-        return project.getTitle()
-                + "\n下载量: " + formatCount(project.getDownloads())
-                + "    关注: " + formatCount(project.getFollows())
-                + "\n\n" + description;
+    private ListCell<ModrinthDownloader.Project> createContentProjectCell(ContentTarget target) {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(ModrinthDownloader.Project project, boolean empty) {
+                super.updateItem(project, empty);
+                setText(null);
+                if (empty || project == null) {
+                    setGraphic(null);
+                    return;
+                }
+                ImageView cover = new ImageView(RemoteImageLoader.loadingPlaceholder());
+                cover.setFitWidth(54);
+                cover.setFitHeight(54);
+                cover.setPreserveRatio(true);
+                URI iconUri = safeUri(project.getIconUrl());
+                if (iconUri == null) {
+                    cover.setImage(RemoteImageLoader.brokenPlaceholder());
+                } else {
+                    RemoteImageLoader.load(iconUri).thenAccept(image -> Platform.runLater(() -> {
+                        if (getItem() == project) cover.setImage(image);
+                    }));
+                }
+                Label title = new Label(project.getTitle());
+                title.getStyleClass().add("mod-item-title");
+                Label summary = new Label("modpack".equals(target.projectType)
+                        ? "正在翻译简介…" : project.getDescription());
+                summary.getStyleClass().add("content-project-summary");
+                summary.setWrapText(true);
+                summary.setMaxWidth(620);
+                if ("modpack".equals(target.projectType)) {
+                    ChineseDescriptionService.translate(project.getDescription()).thenAccept(translated ->
+                            Platform.runLater(() -> {
+                                if (getItem() == project) {
+                                    summary.setText(translated == null || translated.isBlank()
+                                            ? project.getDescription() : translated);
+                                }
+                            }));
+                }
+                String author = project.getAuthor() == null || project.getAuthor().isBlank()
+                        ? "Modrinth" : project.getAuthor();
+                Label meta = new Label(author + " · 下载 " + formatCount(project.getDownloads()));
+                meta.getStyleClass().add("mod-item-meta");
+                VBox labels = new VBox(3, title, summary, meta);
+                HBox row = new HBox(12, cover, labels);
+                row.setAlignment(Pos.CENTER_LEFT);
+                setGraphic(row);
+            }
+        };
+    }
+
+    private URI safeUri(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return URI.create(value);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    private void setTranslatedProjectDescription(
+            ModrinthDownloader.Project project,
+            Label descriptionLabel,
+            AtomicLong descriptionGeneration,
+            long expectedGeneration
+    ) {
+        ChineseDescriptionService.translate(project.getDescription()).thenAccept(translated ->
+                Platform.runLater(() -> {
+                    if (descriptionLabel.getScene() == null
+                            || descriptionGeneration.get() != expectedGeneration) return;
+                    String description = translated == null || translated.isBlank()
+                            ? project.getDescription() : translated;
+                    descriptionLabel.setText(project.getTitle()
+                            + "\n下载量: " + formatCount(project.getDownloads())
+                            + "    关注: " + formatCount(project.getFollows())
+                            + "\n\n" + description);
+                }));
     }
 
     private void downloadSelectedContent(
@@ -3934,13 +4358,15 @@ public class LauncherUI extends javafx.application.Application {
             ProgressBar modProgress,
             Button searchBtn,
             Button importBtn,
-            ComboBox<String> targetProfileCombo
+            ComboBox<String> targetProfileCombo,
+            AtomicLong downloadGeneration
     ) {
         if (project == null || selectedVersion == null) {
             dialogStatus.setText("请先选择一个" + target.title + "及其具体版本。");
             return;
         }
 
+        long generation = downloadGeneration.incrementAndGet();
         String loader = target.usesLoader() ? instance.loader() : null;
         String gameVersion = instance.minecraftVersion();
         setControlsBusy(true);
@@ -3957,6 +4383,10 @@ public class LauncherUI extends javafx.application.Application {
                         + " -> " + gameVersion + loaderLabel);
 
         runAsync("ecl-download-modrinth-" + target.projectType, () -> {
+            if (generation != downloadGeneration.get()) {
+                // The download dialog was closed; do not start the transfer or touch the UI.
+                return;
+            }
             try {
                 ModrinthDownloader.DownloadResult result = modrinthDownloader.downloadVersion(
                         project,
@@ -3969,6 +4399,9 @@ public class LauncherUI extends javafx.application.Application {
                             @Override
                             public void onStatus(String message) {
                                 Platform.runLater(() -> {
+                                    if (generation != downloadGeneration.get()) {
+                                        return;
+                                    }
                                     dialogStatus.setText(message);
                                     setStatus("正在导入" + target.title, message);
                                 });
@@ -3977,6 +4410,9 @@ public class LauncherUI extends javafx.application.Application {
                             @Override
                             public void onProgress(long downloaded, long total) {
                                 Platform.runLater(() -> {
+                                    if (generation != downloadGeneration.get()) {
+                                        return;
+                                    }
                                     updateProgress(modProgress, downloaded, total);
                                     updateProgress(downloadProgress, downloaded, total);
                                 });
@@ -3997,6 +4433,9 @@ public class LauncherUI extends javafx.application.Application {
                                 @Override
                                 public void onStatus(String message) {
                                     Platform.runLater(() -> {
+                                        if (generation != downloadGeneration.get()) {
+                                            return;
+                                        }
                                         dialogStatus.setText(message);
                                         setStatus("正在安装整合包", message);
                                     });
@@ -4005,6 +4444,9 @@ public class LauncherUI extends javafx.application.Application {
                                 @Override
                                 public void onProgress(long downloaded, long total) {
                                     Platform.runLater(() -> {
+                                        if (generation != downloadGeneration.get()) {
+                                            return;
+                                        }
                                         updateProgress(modProgress, downloaded, total);
                                         updateProgress(downloadProgress, downloaded, total);
                                     });
@@ -4015,6 +4457,9 @@ public class LauncherUI extends javafx.application.Application {
 
                 MrpackInstaller.InstallResult completedPack = packResult;
                 Platform.runLater(() -> {
+                    if (generation != downloadGeneration.get()) {
+                        return;
+                    }
                     modProgress.setProgress(1);
                     downloadProgress.setProgress(1);
                     stopProgressAnimation(modProgress, false);
@@ -4033,12 +4478,18 @@ public class LauncherUI extends javafx.application.Application {
                     if (completedPack != null) {
                         restoreVersionComboItems(completedPack.profileId());
                         syncLaunchVersionToContent(completedPack.profileId());
+                        dialogStatus.setText(mainFile + " 安装完成，正在启动整合包…");
+                        setStatus("整合包安装完成", "正在启动 " + completedPack.name());
+                        Platform.runLater(this::launchGame);
                     } else {
                         syncLaunchVersionToContent(instance.profileId());
                     }
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
+                    if (generation != downloadGeneration.get()) {
+                        return;
+                    }
                     String message = cleanMessage(e);
                     stopProgressAnimation(modProgress, true);
                     stopProgressAnimation(downloadProgress, true);

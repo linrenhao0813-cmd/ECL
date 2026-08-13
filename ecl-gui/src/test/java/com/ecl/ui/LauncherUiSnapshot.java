@@ -10,6 +10,7 @@ import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.image.PixelFormat;
@@ -126,7 +127,7 @@ public final class LauncherUiSnapshot {
             }
 
             String mode = System.getProperty("ecl.snapshot.mode", "home");
-            long settleMillis = "modrinth-online".equalsIgnoreCase(mode) ? 4_000 : 900;
+            long settleMillis = mode.toLowerCase(java.util.Locale.ROOT).endsWith("-online") ? 6_000 : 900;
             PauseTransition settle = new PauseTransition(Duration.millis(settleMillis));
             settle.setOnFinished(event -> {
                 try {
@@ -174,6 +175,17 @@ public final class LauncherUiSnapshot {
                 ((javafx.scene.control.TitledPane) settingsPaneField.get(this)).setExpanded(true);
                 return primaryStage.getScene();
             }
+            if ("skin-upload".equalsIgnoreCase(mode)) {
+                Field authTypeField = LauncherUI.class.getDeclaredField("authTypeCombo");
+                authTypeField.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                ComboBox<String> authType = (ComboBox<String>) authTypeField.get(this);
+                authType.setValue("MICROSOFT");
+                Field settingsPaneField = LauncherUI.class.getDeclaredField("instanceSettingsPane");
+                settingsPaneField.setAccessible(true);
+                ((javafx.scene.control.TitledPane) settingsPaneField.get(this)).setExpanded(true);
+                return primaryStage.getScene();
+            }
             if ("modrinth-vanilla".equalsIgnoreCase(mode)) {
                 String profileId = createVisualProfile("visual-vanilla-instance", "");
                 ComboBox<String> combo = versionCombo();
@@ -188,6 +200,29 @@ public final class LauncherUiSnapshot {
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
                 showAppView("MODRINTH");
+                return primaryStage.getScene();
+            }
+            if ("content-shader".equalsIgnoreCase(mode)
+                    || "content-resourcepack".equalsIgnoreCase(mode)
+                    || "content-modpack".equalsIgnoreCase(mode)
+                    || "content-shader-online".equalsIgnoreCase(mode)
+                    || "content-resourcepack-online".equalsIgnoreCase(mode)
+                    || "content-modpack-online".equalsIgnoreCase(mode)) {
+                String profileId = createVisualProfile("visual-content-instance", "");
+                ComboBox<String> combo = versionCombo();
+                if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
+                combo.setValue(profileId);
+                showAppView("MODRINTH");
+                primaryStage.getScene().getRoot().applyCss();
+                String normalizedMode = mode.toLowerCase(java.util.Locale.ROOT);
+                int categoryIndex = normalizedMode.startsWith("content-shader") ? 1
+                        : normalizedMode.startsWith("content-resourcepack") ? 2 : 3;
+                Button category = primaryStage.getScene().getRoot()
+                        .lookupAll(".content-library-nav-item").stream()
+                        .filter(Button.class::isInstance)
+                        .map(Button.class::cast)
+                        .toList().get(categoryIndex);
+                category.fire();
                 return primaryStage.getScene();
             }
             if ("settings-page".equalsIgnoreCase(mode)) {

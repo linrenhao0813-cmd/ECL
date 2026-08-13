@@ -1,6 +1,7 @@
 package com.ecl.download;
 
 import com.ecl.ECLConfig;
+import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.PlatformUtil;
@@ -208,6 +209,16 @@ public class GameDownloader implements DownloadService {
             if (artifacts != null && artifacts.has("artifact")) {
                 JsonObject artifact = artifacts.getAsJsonObject("artifact");
                 addDownloadIfNeeded(tasks, artifact, "依赖库");
+            } else if (artifacts == null) {
+                // Fabric/Quilt style: bare Maven coordinate with a repository URL.
+                String name = lib.has("name") ? lib.get("name").getAsString() : "";
+                String repository = lib.has("url") ? lib.get("url").getAsString() : "";
+                if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {
+                    JsonObject artifact = new JsonObject();
+                    artifact.addProperty("path", MavenCoordinates.repositoryPath(name));
+                    artifact.addProperty("url", MavenCoordinates.repositoryUrl(repository, name));
+                    addDownloadIfNeeded(tasks, artifact, "依赖库");
+                }
             }
 
             if (artifacts != null && artifacts.has("classifiers")) {
@@ -222,11 +233,12 @@ public class GameDownloader implements DownloadService {
         downloadConcurrently(tasks, "依赖库", runListener);
     }
 
-    private void addDownloadIfNeeded(List<FileDownloadTask> tasks, JsonObject artifact, String sourceLabel) {
+    private void addDownloadIfNeeded(List<FileDownloadTask> tasks, JsonObject artifact, String sourceLabel)
+            throws IOException {
         String url = artifact.get("url").getAsString();
         String path = artifact.get("path").getAsString();
         String sha1 = artifact.has("sha1") ? artifact.get("sha1").getAsString() : null;
-        File target = new File(ECLConfig.getLibrariesDir(), path);
+        File target = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
         if (needsDownload(target, sha1)) {
             tasks.add(new FileDownloadTask(url, target, sha1, sourceLabel));
         }
@@ -382,14 +394,32 @@ public class GameDownloader implements DownloadService {
                 if (downloads.has("artifact")) {
                     JsonObject artifact = downloads.getAsJsonObject("artifact");
                     String path = artifact.get("path").getAsString();
-                    File target = new File(ECLConfig.getLibrariesDir(), path);
-                    if (!target.exists()) {
+                    File target = safeLibraryTarget(path);
+                    if (target != null && !target.exists()) {
                         missing.add(lib.has("name") ? lib.get("name").getAsString() : path);
+                    }
+                }
+            } else {
+                String name = lib.has("name") ? lib.get("name").getAsString() : "";
+                String repository = lib.has("url") ? lib.get("url").getAsString() : "";
+                if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {
+                    File target = safeLibraryTarget(MavenCoordinates.repositoryPath(name));
+                    if (target != null && !target.exists()) {
+                        missing.add(name);
                     }
                 }
             }
         }
         return missing;
+    }
+
+    /** Resolves a library path inside the libraries dir, or null when the path escapes it. */
+    private static File safeLibraryTarget(String path) {
+        try {
+            return FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private static ThreadFactory daemonThreadFactory(String prefix) {

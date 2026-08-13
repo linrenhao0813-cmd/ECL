@@ -1312,6 +1312,21 @@
     -fx-text-fill: -ecl-text;
 }
 
+.scene-root.theme-dark .content-library-nav-item-active,
+.scene-root.theme-dark .content-library-nav-item-active:hover {
+    -fx-background-color: #17314a;
+}
+
+.scene-root.theme-dark .content-library-nav-icon {
+    -fx-background-color: #263247;
+    -fx-text-fill: -ecl-secondary;
+}
+
+.scene-root.theme-dark .content-library-nav-item-active .content-library-nav-icon {
+    -fx-background-color: -ecl-blue;
+    -fx-text-fill: #07111f;
+}
+
 .scene-root.theme-dark .label,
 .scene-root.theme-dark .section-title,
 .scene-root.theme-dark .content-title,
@@ -2012,6 +2027,126 @@
     -fx-background-radius: 12;
     -fx-text-fill: #515154;
     -fx-effect: none;
+}
+
+/* ---------- Content library ---------- */
+.content-library-heading {
+    -fx-padding: 0 0 2 2;
+}
+
+.content-library-layout {
+    -fx-alignment: top-left;
+}
+
+.content-library-nav {
+    -fx-background-color: -ecl-surface;
+    -fx-background-radius: 18;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 18;
+    -fx-border-width: 1;
+    -fx-padding: 18 12;
+}
+
+.content-library-nav-title {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 15px;
+    -fx-font-weight: 700;
+    -fx-padding: 0 6 0 6;
+}
+
+.content-library-nav-hint {
+    -fx-text-fill: -ecl-tertiary;
+    -fx-font-size: 11px;
+    -fx-padding: 0 6 10 6;
+}
+
+.content-library-nav-item {
+    -fx-background-color: transparent;
+    -fx-background-radius: 12;
+    -fx-border-color: transparent;
+    -fx-padding: 10;
+    -fx-alignment: center-left;
+    -fx-cursor: hand;
+}
+
+.content-library-nav-item:hover {
+    -fx-background-color: -ecl-surface-muted;
+}
+
+.content-library-nav-item-active,
+.content-library-nav-item-active:hover {
+    -fx-background-color: #eaf3ff;
+}
+
+.content-library-nav-icon {
+    -fx-min-width: 34;
+    -fx-pref-width: 34;
+    -fx-min-height: 34;
+    -fx-pref-height: 34;
+    -fx-alignment: center;
+    -fx-background-color: #f0f0f4;
+    -fx-background-radius: 10;
+    -fx-text-fill: #515154;
+    -fx-font-size: 12px;
+    -fx-font-weight: 800;
+}
+
+.content-library-nav-item-active .content-library-nav-icon {
+    -fx-background-color: -ecl-blue;
+    -fx-text-fill: white;
+}
+
+.content-library-nav-item-title {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 13px;
+    -fx-font-weight: 700;
+}
+
+.content-library-nav-item-detail {
+    -fx-text-fill: -ecl-tertiary;
+    -fx-font-size: 10px;
+}
+
+.content-library-content {
+    -fx-alignment: top-left;
+}
+
+.content-library-browser {
+    -fx-padding: 18 20;
+    -fx-spacing: 12;
+}
+
+.content-library-section-title {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 24px;
+    -fx-font-weight: 800;
+}
+
+.content-library-description {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 12;
+    -fx-padding: 12;
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 12px;
+}
+
+.content-project-summary {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 11px;
+}
+
+.skin-preview {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+    -fx-padding: 10;
+}
+
+.content-library-target {
+    -fx-text-fill: -ecl-tertiary;
+    -fx-font-size: 10px;
+    -fx-padding: 2 0;
 }
 
 /* ---------- Modrinth, lists, tabs and logs ---------- */

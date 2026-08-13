@@ -1,6 +1,7 @@
 package com.ecl.launcher;
 
 import com.ecl.ECLConfig;
+import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
@@ -496,6 +497,16 @@ public class VersionManager {
                 continue;
             }
             if (!lib.has("downloads")) {
+                // Fabric/Quilt style: bare Maven coordinate with a repository URL.
+                String name = JsonUtil.getString(lib, "name", "");
+                String repository = JsonUtil.getString(lib, "url", "");
+                if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {
+                    File file = new File(ECLConfig.getLibrariesDir(),
+                            MavenCoordinates.repositoryPath(name));
+                    if (!file.isFile()) {
+                        return false;
+                    }
+                }
                 continue;
             }
 
@@ -525,7 +536,12 @@ public class VersionManager {
             return true;
         }
 
-        File file = new File(ECLConfig.getLibrariesDir(), path);
+        File file;
+        try {
+            file = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
+        } catch (IOException e) {
+            return false;
+        }
         String sha1 = getString(artifact, "sha1");
         return sha1.isBlank() ? file.exists() : FileUtil.verifySha1(file, sha1);
     }

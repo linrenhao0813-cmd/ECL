@@ -1,5 +1,6 @@
 package com.ecl.modrinth.ui;
 
+import com.ecl.ECLConfig;
 import com.ecl.util.HttpUtil;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
@@ -11,6 +12,12 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.util.Collection;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,7 +28,7 @@ import java.util.concurrent.Executors;
 public final class RemoteImageLoader {
     private static final int ICON_SIZE = 48;
     private static final int MAX_ICON_BYTES = 4 * 1024 * 1024;
-    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(3, runnable -> {
+    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(8, runnable -> {
         Thread thread = new Thread(runnable, "ecl-remote-image");
         thread.setDaemon(true);
         return thread;
@@ -44,7 +51,7 @@ public final class RemoteImageLoader {
         }
         CompletableFuture<Image> created = CompletableFuture.supplyAsync(() -> {
             try {
-                byte[] bytes = HttpUtil.getBytes(key, MAX_ICON_BYTES);
+                byte[] bytes = cachedBytes(key);
                 try (ByteArrayInputStream input = new ByteArrayInputStream(bytes)) {
                     Image image = new Image(input, ICON_SIZE, ICON_SIZE, true, true);
                     if (!image.isError()) {
@@ -60,12 +67,13 @@ public final class RemoteImageLoader {
         if (selected != null) {
             return selected;
         }
-        created.whenComplete((image, error) -> {
-            if (error != null || image == MISSING) {
-                CACHE.remove(key, created);
-            }
-        });
         return created;
+    }
+
+    /** Starts image requests before cells become visible so scrolling does not reveal blank covers. */
+    public static void prefetch(Collection<URI> uris) {
+        if (uris == null) return;
+        uris.stream().filter(java.util.Objects::nonNull).distinct().forEach(RemoteImageLoader::load);
     }
 
     public static Image loadingPlaceholder() {
@@ -78,6 +86,34 @@ public final class RemoteImageLoader {
 
     static int cacheSize() {
         return CACHE.size();
+    }
+
+    private static byte[] cachedBytes(String key) throws Exception {
+        Path directory = ECLConfig.getBaseDir().toPath().resolve("cache").resolve("project-icons");
+        Path file = directory.resolve(cacheName(key));
+        if (Files.isRegularFile(file)) {
+            long size = Files.size(file);
+            if (size > 0 && size <= MAX_ICON_BYTES) {
+                return Files.readAllBytes(file);
+            }
+        }
+        byte[] bytes = HttpUtil.getBytes(key, MAX_ICON_BYTES);
+        try {
+            Files.createDirectories(directory);
+            Path temporary = Files.createTempFile(directory, "icon-", ".tmp");
+            Files.write(temporary, bytes);
+            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception ignored) {
+            // A read-only or busy cache must never prevent the cover from being displayed.
+        }
+        return bytes;
+    }
+
+    private static String cacheName(String key) throws Exception {
+        byte[] digest = MessageDigest.getInstance("SHA-256")
+                .digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return HexFormat.of().formatHex(digest) + ".img";
     }
 
     private static Image decodeWithImageIo(byte[] bytes) {

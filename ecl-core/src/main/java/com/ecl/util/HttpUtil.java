@@ -169,6 +169,36 @@ public class HttpUtil {
         return request("POST", urlStr, "application/json", COMPACT_GSON.toJson(body), Map.of());
     }
 
+    /** Sends a bounded caller-built multipart body without converting PNG bytes through text. */
+    public static Response postMultipart(String urlStr, String boundary, byte[] body,
+                                         Map<String, String> headers) throws IOException {
+        if (boundary == null || boundary.isBlank()) {
+            throw new IllegalArgumentException("Multipart boundary is blank");
+        }
+        if (body == null) {
+            throw new IllegalArgumentException("Multipart body is null");
+        }
+        checkInterrupted();
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(urlStr))
+                .timeout(Duration.ofMillis(DEFAULT_READ_TIMEOUT_MS))
+                .header("User-Agent", "ECL/1.0")
+                .header("Accept", "application/json")
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary);
+        if (headers != null) headers.forEach(builder::header);
+        try {
+            HttpResponse<String> response = HTTP_CLIENT.send(
+                    builder.POST(HttpRequest.BodyPublishers.ofByteArray(body)).build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return new Response(response.statusCode(), response.body(),
+                    response.uri() == null ? urlStr : response.uri().toString(),
+                    response.headers().map());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("HTTP request interrupted", e);
+        }
+    }
+
     public static Response request(String method, String urlStr, String contentType, String body,
                                    Map<String, String> headers) throws IOException {
         return request(method, urlStr, contentType, body, headers, 15000, DEFAULT_READ_TIMEOUT_MS);

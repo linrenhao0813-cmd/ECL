@@ -220,9 +220,12 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         });
 
         Button searchButton = button("搜索", "primary-button");
+        searchButton.setMinWidth(64);
         searchButton.setOnAction(event -> viewModel.search(false));
-        HBox searchBar = new HBox(8, search, category, sort, source, searchButton);
+        HBox searchBar = new HBox(8, search, searchButton);
         searchBar.setAlignment(Pos.CENTER_LEFT);
+        HBox filterBar = new HBox(8, category, sort, source);
+        filterBar.setAlignment(Pos.CENTER_LEFT);
 
         searchDebounce.setOnFinished(event -> viewModel.search(false));
         search.textProperty().addListener((observable, oldValue, newValue) -> searchDebounce.playFromStart());
@@ -246,7 +249,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         HBox resultActions = new HBox(8, loadMore, retry);
         HBox.setHgrow(loadMore, Priority.ALWAYS);
 
-        VBox left = new VBox(8, searchBar, resultList, resultActions);
+        VBox left = new VBox(8, searchBar, filterBar, resultList, resultActions);
         left.setMinWidth(350);
         SplitPane.setResizableWithParent(left, true);
 
@@ -387,6 +390,9 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             resultList.refresh();
             installedList.refresh();
         });
+        viewModel.searchResults().addListener((ListChangeListener<ModProject>) change ->
+                RemoteImageLoader.prefetch(viewModel.searchResults().stream()
+                        .map(ModProject::iconUrl).filter(java.util.Objects::nonNull).toList()));
         viewModel.updateCountProperty().addListener((observable, oldValue, newValue) -> {
             int count = newValue == null ? 0 : newValue.intValue();
             installedTab.setText(count > 0 ? "已安装 (" + count + ")" : "已安装");
@@ -414,7 +420,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         }
         detailTitle.setText(project.title());
         detailMeta.setText(project.author() + " · 下载 " + project.downloads());
-        detailBody.setText(project.description());
+        showTranslatedDescription(project, null);
 
         CompletableFuture<ModProject> details = viewModel.loadProjectDetails(project);
         CompletableFuture<List<ModVersion>> versions = viewModel.loadVersions(project);
@@ -448,15 +454,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         if (project == null) {
             return;
         }
-        long generation = detailGeneration.incrementAndGet();
-        StringBuilder text = new StringBuilder(project.body().isBlank()
-                ? project.description() : project.body());
-        if (version != null) {
-            text.append("\n\n版本 ").append(version.versionNumber())
-                    .append(" · ").append(version.versionType());
-        }
-        detailBody.setText(text.toString());
-        detailBody.positionCaret(0);
+        long generation = showTranslatedDescription(project, version);
         boolean recommended = version != null && version.id().equals(recommendedVersionId);
         recommendationLabel.setText(recommended ? "推荐" : "");
         recommendationLabel.setVisible(recommended);
@@ -480,6 +478,23 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                         renderDependencyGroups(groups);
                     }
                 }));
+    }
+
+    private long showTranslatedDescription(ModProject project, ModVersion version) {
+        long generation = detailGeneration.incrementAndGet();
+        detailBody.setText("正在翻译中文简介…");
+        ChineseDescriptionService.translate(project.description()).thenAccept(translated ->
+                Platform.runLater(() -> {
+                    if (generation != detailGeneration.get() || detailedProject != project) return;
+                    String summary = translated == null || translated.isBlank()
+                            ? project.description() : translated;
+                    if (version != null) {
+                        summary += "\n\n版本 " + version.versionNumber() + " · " + version.versionType();
+                    }
+                    detailBody.setText(summary);
+                    detailBody.positionCaret(0);
+                }));
+        return generation;
     }
 
     private void renderDependencyGroups(List<ModBrowserViewModel.DependencyGroup> groups) {
@@ -993,10 +1008,17 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             }
             Label title = new Label(project.title());
             title.getStyleClass().add("mod-item-title");
-            Label description = new Label(project.description());
+            Label description = new Label("正在翻译简介…");
             description.getStyleClass().add("status-detail");
             description.setWrapText(true);
             description.setMaxWidth(270);
+            ChineseDescriptionService.translate(project.description()).thenAccept(translated ->
+                    Platform.runLater(() -> {
+                        if (getItem() == project) {
+                            description.setText(translated == null || translated.isBlank()
+                                    ? project.description() : translated);
+                        }
+                    }));
             boolean installed = viewModel.installedMods().stream()
                     .anyMatch(mod -> project.projectId().equals(mod.projectId()));
             String badges = project.author() + " · ↓ " + project.downloads()

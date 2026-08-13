@@ -63,8 +63,21 @@ public final class Library {
         }
 
         if (artifact == null && classifiers.isEmpty()) {
-            // A library with neither artifact nor classifiers cannot be downloaded.
-            return null;
+            // Fabric/Quilt profile JSONs declare dependencies as bare Maven coordinates
+            // (name + repository url, no downloads block). Resolve the jar so it can be
+            // downloaded and placed on the launch classpath.
+            String coordinate = JsonUtil.getString(library, "name", "");
+            String repository = JsonUtil.getString(library, "url", "");
+            if (MavenCoordinates.isSimpleCoordinate(coordinate) && !repository.isBlank()) {
+                String path = MavenCoordinates.repositoryPath(coordinate);
+                int slash = path.lastIndexOf('/');
+                String fileName = slash >= 0 ? path.substring(slash + 1) : path;
+                artifact = new DownloadObject(path, fileName,
+                        MavenCoordinates.repositoryUrl(repository, coordinate), "", -1L);
+            } else {
+                // A library with neither artifact nor classifiers cannot be downloaded.
+                return null;
+            }
         }
 
         Map<String, String> natives = Map.of();

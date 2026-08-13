@@ -38,15 +38,22 @@ public class ModrinthDownloader {
         private final String title;
         private final String author;
         private final String description;
+        private final String iconUrl;
         private final long downloads;
         private final long follows;
 
         public Project(String projectId, String slug, String title, String author, String description, long downloads, long follows) {
+            this(projectId, slug, title, author, description, null, downloads, follows);
+        }
+
+        public Project(String projectId, String slug, String title, String author, String description,
+                       String iconUrl, long downloads, long follows) {
             this.projectId = projectId;
             this.slug = slug;
             this.title = title;
             this.author = author;
             this.description = description;
+            this.iconUrl = iconUrl;
             this.downloads = downloads;
             this.follows = follows;
         }
@@ -61,6 +68,14 @@ public class ModrinthDownloader {
 
         public String getDescription() {
             return description;
+        }
+
+        public String getAuthor() {
+            return author;
+        }
+
+        public String getIconUrl() {
+            return iconUrl;
         }
 
         public long getDownloads() {
@@ -173,6 +188,7 @@ public class ModrinthDownloader {
                     getString(hit, "title"),
                     getString(hit, "author"),
                     getString(hit, "description"),
+                    getString(hit, "icon_url"),
                     getLong(hit, "downloads"),
                     getLong(hit, "follows")
             ));
@@ -304,10 +320,15 @@ public class ModrinthDownloader {
             sha1 = getString(fileJson.getAsJsonObject("hashes"), "sha1");
         }
 
-        if (target.exists() && (sha1 == null || FileUtil.verifySha1(target, sha1))) {
-            notifyStatus(listener, (primary ? "模组已存在，跳过下载: " : "依赖已存在，跳过下载: ") + filename);
+        if (existingFileSatisfies(target, sha1)) {
+            notifyStatus(listener, (primary ? "文件已存在，跳过下载: " : "依赖已存在，跳过下载: ") + filename);
         } else {
-            notifyStatus(listener, (primary ? "正在下载模组: " : "正在下载依赖: ") + filename);
+            if (target.exists()) {
+                // Same-name file with different content: overwrite, but tell the user first.
+                notifyStatus(listener, (primary ? "检测到同名文件，将覆盖更新: " : "检测到同名依赖，将覆盖更新: ") + filename);
+            } else {
+                notifyStatus(listener, (primary ? "正在下载: " : "正在下载依赖: ") + filename);
+            }
             HttpUtil.downloadFileWithProgress(url, target, new HttpUtil.ProgressCallback() {
                 @Override
                 public void onStart(long total) {
@@ -327,7 +348,7 @@ public class ModrinthDownloader {
 
             if (sha1 != null && !FileUtil.verifySha1(target, sha1)) {
                 target.delete();
-                throw new IOException("模组文件校验失败: " + filename);
+                throw new IOException("文件校验失败: " + filename);
             }
         }
 
@@ -485,6 +506,15 @@ public class ModrinthDownloader {
             }
         }
         return false;
+    }
+
+    /**
+     * Whether an existing target file can be reused: present on disk and either carries no
+     * expected SHA-1 (nothing to verify against) or matches it. A mismatch means the file must
+     * be overwritten with the freshly downloaded content.
+     */
+    static boolean existingFileSatisfies(File target, String sha1) {
+        return target.exists() && (sha1 == null || FileUtil.verifySha1(target, sha1));
     }
 
     private void notifyStatus(DownloadListener listener, String message) {

@@ -4,6 +4,7 @@ import com.ecl.game.ArgumentToken;
 import com.ecl.game.DownloadObject;
 import com.ecl.game.Library;
 import com.ecl.game.VersionMetadata;
+import com.ecl.util.FileUtil;
 import com.ecl.util.RuleEvaluator;
 
 import java.io.File;
@@ -163,7 +164,7 @@ public final class LaunchCommandBuilder {
             }
             File libraryRoot = library.isLocal() && options.instanceDirectory() != null
                     ? new File(options.instanceDirectory(), "libraries") : librariesDir;
-            File file = new File(libraryRoot, artifact.path());
+            File file = FileUtil.safeResolveUnder(libraryRoot, artifact.path());
             if (!file.exists()) {
                 throw new LaunchException(LaunchException.Kind.MISSING_FILES,
                         "缺少依赖库: " + artifact.path() + "（版本 " + version.id() + "）");

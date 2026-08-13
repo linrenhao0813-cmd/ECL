@@ -1,7 +1,9 @@
 package com.ecl.download.install;
 
 import com.ecl.ECLConfig;
+import com.ecl.game.MavenCoordinates;
 import com.ecl.task.Task;
+import com.ecl.util.FileUtil;
 import com.ecl.util.PlatformUtil;
 import com.ecl.util.RuleEvaluator;
 import com.google.gson.JsonArray;
@@ -9,6 +11,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -53,6 +56,15 @@ public final class DownloadLibrariesTask extends Task<Void> {
             }
             JsonObject downloads = library.has("downloads") ? library.getAsJsonObject("downloads") : null;
             if (downloads == null) {
+                // Fabric/Quilt style: bare Maven coordinate with a repository URL.
+                String name = library.has("name") ? library.get("name").getAsString() : "";
+                String repository = library.has("url") ? library.get("url").getAsString() : "";
+                if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {
+                    JsonObject artifact = new JsonObject();
+                    artifact.addProperty("path", MavenCoordinates.repositoryPath(name));
+                    artifact.addProperty("url", MavenCoordinates.repositoryUrl(repository, name));
+                    addIfNeeded(tasks, artifact, "依赖库");
+                }
                 continue;
             }
             if (downloads.has("artifact")) {
@@ -72,11 +84,12 @@ public final class DownloadLibrariesTask extends Task<Void> {
         return null;
     }
 
-    private void addIfNeeded(List<InstallHelpers.FileDownload> tasks, JsonObject artifact, String label) {
+    private void addIfNeeded(List<InstallHelpers.FileDownload> tasks, JsonObject artifact, String label)
+            throws IOException {
         String url = artifact.get("url").getAsString();
         String path = artifact.get("path").getAsString();
         String sha1 = artifact.has("sha1") ? artifact.get("sha1").getAsString() : null;
-        File target = new File(ECLConfig.getLibrariesDir(), path);
+        File target = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
         if (InstallHelpers.needsDownload(target, sha1, verifyExistingFiles)) {
             tasks.add(new InstallHelpers.FileDownload(url, target, sha1, label));
         }
@@ -93,13 +106,31 @@ public final class DownloadLibrariesTask extends Task<Void> {
             if (downloads != null && downloads.has("artifact")) {
                 JsonObject artifact = downloads.getAsJsonObject("artifact");
                 String path = artifact.get("path").getAsString();
-                File target = new File(ECLConfig.getLibrariesDir(), path);
-                if (!target.exists()) {
+                File target = safeLibraryTarget(path);
+                if (target != null && !target.exists()) {
                     missing.add(library.has("name") ? library.get("name").getAsString() : path);
+                }
+            } else if (downloads == null) {
+                String name = library.has("name") ? library.get("name").getAsString() : "";
+                String repository = library.has("url") ? library.get("url").getAsString() : "";
+                if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {
+                    File target = safeLibraryTarget(MavenCoordinates.repositoryPath(name));
+                    if (target != null && !target.exists()) {
+                        missing.add(name);
+                    }
                 }
             }
         }
         return missing;
+    }
+
+    /** Resolves a library path inside the libraries dir, or null when the path escapes it. */
+    private static File safeLibraryTarget(String path) {
+        try {
+            return FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private record PlatformBits(String osName, String archBits) {

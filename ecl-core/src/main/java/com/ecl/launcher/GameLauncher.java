@@ -3,8 +3,10 @@ package com.ecl.launcher;
 import com.ecl.ECLConfig;
 import com.ecl.auth.AuthProvider;
 import com.ecl.auth.OfflineAuth;
+import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.JsonUtil;
 import com.ecl.util.RuleEvaluator;
 import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.PlatformUtil;
@@ -454,12 +456,23 @@ public class GameLauncher implements LaunchService {
                     if (downloads.has("artifact")) {
                         JsonObject artifact = downloads.getAsJsonObject("artifact");
                         String path = artifact.get("path").getAsString();
-                        File file = new File(libraryDirectory(lib), path);
+                        File file = FileUtil.safeResolveUnder(libraryDirectory(lib), path);
                         if (!file.exists()) {
                             throw new IOException("缺少依赖库: " + path);
                         }
                         classpath.add(file.getAbsolutePath());
                     }
+                } else if (MavenCoordinates.isSimpleCoordinate(
+                        JsonUtil.getString(lib, "name", ""))
+                        && !JsonUtil.getString(lib, "url", "").isBlank()) {
+                    // Fabric/Quilt style: bare Maven coordinate with a repository URL.
+                    String path = MavenCoordinates.repositoryPath(
+                            JsonUtil.getString(lib, "name", ""));
+                    File file = FileUtil.safeResolveUnder(libraryDirectory(lib), path);
+                    if (!file.exists()) {
+                        throw new IOException("缺少依赖库: " + path);
+                    }
+                    classpath.add(file.getAbsolutePath());
                 }
             }
         }

@@ -74,4 +74,24 @@ public class FileUtil {
         String osArch = arch.contains("64") ? "x86_64" : "x86";
         return PlatformUtil.current().minecraftName() + "-" + osArch;
     }
+
+    /**
+     * Resolves a metadata-supplied relative path under {@code root}, refusing any value that
+     * escapes the root via {@code ..} segments, absolute paths or mixed path separators.
+     * Defends against malicious or tampered version metadata writing outside the libraries dir.
+     *
+     * @throws IOException when the path is blank or resolves outside {@code root}
+     */
+    public static File safeResolveUnder(File root, String relativePath) throws IOException {
+        if (relativePath == null || relativePath.isBlank()) {
+            throw new IOException("依赖路径为空");
+        }
+        Path rootPath = root.toPath().toAbsolutePath().normalize();
+        // Normalize backslashes so Windows-style separators cannot smuggle in ".." escapes.
+        Path candidate = rootPath.resolve(relativePath.replace('\\', '/')).normalize();
+        if (!candidate.startsWith(rootPath)) {
+            throw new IOException("依赖路径越界: " + relativePath);
+        }
+        return candidate.toFile();
+    }
 }

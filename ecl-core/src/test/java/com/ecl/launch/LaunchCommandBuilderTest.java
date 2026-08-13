@@ -145,6 +145,47 @@ class LaunchCommandBuilderTest {
     }
 
     @Test
+    void fabricStyleMavenLibrariesArePlacedOnClasspath() throws Exception {
+        writeVersion("fabric-1.21", """
+                {"mainClass":"net.fabricmc.loader.impl.launch.knot.KnotClient",
+                 "libraries":[{"name":"net.fabricmc:fabric-loader:0.16.9",
+                   "url":"https://maven.fabricmc.net/"}]}
+                """);
+        writeClientJar("fabric-1.21");
+        writeLibraryFile("net/fabricmc/fabric-loader/0.16.9/fabric-loader-0.16.9.jar");
+        LaunchOptions options = options().versionId("fabric-1.21").build();
+
+        LaunchCommand command = new LaunchCommandBuilder().build(
+                options, repository.resolve("fabric-1.21"), "java");
+
+        int cpIndex = command.arguments().indexOf("-cp");
+        String classpath = command.arguments().get(cpIndex + 1);
+        assertTrue(classpath.contains(librariesDir.resolve(
+                "net/fabricmc/fabric-loader/0.16.9/fabric-loader-0.16.9.jar").toString()));
+        assertEquals("net.fabricmc.loader.impl.launch.knot.KnotClient",
+                command.arguments().get(cpIndex + 2));
+    }
+
+    @Test
+    void missingFabricStyleMavenLibraryProducesMISSING_FILES() throws Exception {
+        writeVersion("fabric-broken", """
+                {"mainClass":"net.fabricmc.loader.impl.launch.knot.KnotClient",
+                 "libraries":[{"name":"net.fabricmc:fabric-loader:0.16.9",
+                   "url":"https://maven.fabricmc.net/"}]}
+                """);
+        writeClientJar("fabric-broken");
+        LaunchOptions options = options().versionId("fabric-broken").build();
+
+        LaunchException error = assertThrows(LaunchException.class,
+                () -> new LaunchCommandBuilder().build(
+                        options, repository.resolve("fabric-broken"), "java"));
+
+        assertEquals(LaunchException.Kind.MISSING_FILES, error.kind());
+        assertTrue(error.getMessage().contains(
+                "net/fabricmc/fabric-loader/0.16.9/fabric-loader-0.16.9.jar"));
+    }
+
+    @Test
     void missingClientJarProducesMISSING_FILES() throws Exception {
         LaunchOptions options = options().build();
         repository.invalidate("1.21");
