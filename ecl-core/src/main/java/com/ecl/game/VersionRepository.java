@@ -314,6 +314,8 @@ public class VersionRepository {
                 effectiveJarOf(effective),
                 firstNonBlank(JsonUtil.getString(effective, "eclMinecraftVersion", null), baseId),
                 firstNonBlank(JsonUtil.getString(effective, "eclModLoader", null), null),
+                JsonUtil.getString(effective, "eclModLoaderVersion", ""),
+                !JsonUtil.getString(effective, "eclModpackName", "").isBlank(),
                 JsonUtil.getString(effective, "type", ""),
                 javaMajor,
                 assetIndex,

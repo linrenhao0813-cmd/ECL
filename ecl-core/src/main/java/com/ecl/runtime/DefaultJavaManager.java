@@ -37,8 +37,15 @@ public final class DefaultJavaManager implements JavaManager {
 
     @Override
     public Optional<JavaRuntimeInfo> select(int requiredFeatureVersion) {
-        return detect().stream()
-                .filter(runtime -> runtime.featureVersion() >= requiredFeatureVersion)
+        List<JavaRuntimeInfo> detected = detect();
+        Optional<JavaRuntimeInfo> exact = detected.stream()
+                .filter(runtime -> runtime.featureVersion() == requiredFeatureVersion)
+                .findFirst();
+        if (exact.isPresent()) {
+            return exact;
+        }
+        return detected.stream()
+                .filter(runtime -> runtime.featureVersion() > requiredFeatureVersion)
                 .min(Comparator.comparingInt(runtime -> runtime.featureVersion() - requiredFeatureVersion));
     }
 

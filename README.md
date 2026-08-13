@@ -11,7 +11,7 @@ ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle �
 - 正版登录时自动复制 Microsoft 设备码，浏览器打开后可直接粘贴授权
 - 自定义 Java 路径、游戏目录、JVM 参数、最大内存、窗口分辨率、全屏、直连服务器和处理器核心数
 - 启动时按 Minecraft 版本自动选择满足要求的 Java；本机缺失时自动下载并管理 Eclipse Temurin JRE
-- 按版本创建独立实例目录，自动准备 `mods`、`shaderpacks`、`resourcepacks`、`saves` 和 `logs`
+- 支持始终隔离、仅 Mod 实例隔离和全部共享三种策略（默认仅 Mod 实例隔离），并可为单个实例指定独立或自定义运行目录
 - 自动解析 Minecraft 版本 JSON、依赖库、原生库、平台规则与启动参数
 - 下载和启动前校验客户端、依赖库、原生库与资源索引，缺失或损坏时自动补齐
 - Modrinth 模组、光影包、材质包和整合包内置搜索下载
@@ -50,7 +50,9 @@ ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle �
 
 ## Mod 加载器与版本管理
 
-版本页提供 `安装加载器`，支持 Fabric、Quilt、Forge 和 NeoForge。填写 Minecraft 版本后，可以留空加载器版本以自动选择最新兼容版本，也可以指定版本安装；安装完成的加载器实例会直接加入版本列表。
+首页“选择版本 / 加载器”和版本页均可安装 Fabric、Quilt、Forge 或 NeoForge。首页选择 Minecraft 版本与加载器后可直接“安装并启动”；进入模组中心时如果当前还是原版，也可一键安装加载器。加载器版本默认自动选择最新兼容版本，安装完成后会自动切换到独立模组实例。
+
+模组中心按当前 Minecraft 版本与加载器筛选 Modrinth 内容，并会读取标准 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 环境变量，以兼容本地代理网络。
 
 同一页面还提供版本删除和重装：
 
@@ -66,7 +68,11 @@ ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle �
 - 材质包：下载 `.zip` 并导入 `resourcepacks`
 - 整合包：下载 `.mrpack`，校验并下载客户端依赖，解压 overrides，自动准备所需加载器，并生成独立的可启动版本
 
-搜索结果支持点击查看简介，下载完成后会自动安装到对应实例。模组下载会尝试同时处理 Modrinth 标记的必需依赖。
+搜索结果支持异步图标与失败占位，点击后可查看推荐版本、发布渠道、加载器标签和格式化更新日志。依赖按必需、可选、内嵌与不兼容分组展示，并可点击进入依赖项目；下载完成后会事务安装到对应实例。
+
+进入“已安装”页会自动检查兼容更新并显示数量角标，30 分钟内不会重复请求。本地 JAR 即使离线也会尝试从 `fabric.mod.json`、`quilt.mod.json`、Forge/NeoForge TOML 或 `mcmod.info` 读取名称、版本和加载器。
+
+模组元数据通过可扩展 Provider 接口提供，当前内置 Modrinth；搜索栏的数据源选择器会自动列出通过 `ServiceLoader` 注册的其他实现。CurseForge Provider 尚未内置。
 
 没有输入关键词时，下载窗口会自动加载 Modrinth 官网下载量排序列表，便于直接浏览热门模组、光影包、材质包和整合包。
 
@@ -223,11 +229,15 @@ Microsoft 多账号列表位于 `microsoft-accounts.json`，令牌以加密形�
 
 统一账户服务使用 `accounts.json` 保存离线、Microsoft 与 Yggdrasil 账户元数据，访问令牌和刷新令牌采用 AES-GCM 加密；CLI 列表与诊断包不会输出凭据。
 
-默认游戏根目录为系统 Minecraft 目录 `.minecraft`，具体版本使用独立的版本隔离目录：
+默认游戏根目录为系统 Minecraft 目录 `.minecraft`。带加载器的实例和整合包默认使用独立运行目录，原版实例默认共享游戏根；可在高级设置中切换全局策略，或为当前实例覆盖为独立/自定义目录：
 
 ```text
 .minecraft/versions/<version>/
 ```
+
+实例级覆盖保存在 `<实例根>/.ecl/config/instance-game-settings.json`。原生库始终解压到实例根的 `natives-<platform>/`；标记为 `hint=local` 的私有库从实例根的 `libraries/` 加载，共享库与资源仍位于 ECL 数据目录。
+
+升级前已经包含 `saves`、`mods`、`config` 或日志等数据的旧实例会继续使用原隔离目录，避免存档“消失”；在高级设置中为该实例明确选择“跟随默认策略”后，才会采用新的全局策略。
 
 ## 项目结构
 

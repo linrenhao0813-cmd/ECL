@@ -2,13 +2,17 @@ package com.ecl.modrinth.ui.viewmodel;
 
 import com.ecl.modrinth.api.ModSearchIndex;
 import com.ecl.modrinth.api.ModSearchQuery;
-import com.ecl.modrinth.api.ModrinthApiClient;
+import com.ecl.modrinth.api.ModrinthApiException;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.InstalledMod;
 import com.ecl.modrinth.model.ModProject;
+import com.ecl.modrinth.model.ModDependency;
+import com.ecl.modrinth.model.DependencyType;
 import com.ecl.modrinth.model.ModUpdate;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
+import com.ecl.modrinth.provider.ContentSource;
+import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.service.LocalModScanner;
 import com.ecl.modrinth.service.ModDependencyResolver;
 import com.ecl.modrinth.service.ModInstallationResult;
@@ -20,9 +24,11 @@ import com.ecl.modrinth.transaction.ModInstallationPlan;
 import javafx.application.Platform;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.DoubleProperty;
+import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
+import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
@@ -30,6 +36,8 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 
 import java.util.Collection;
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,16 +46,19 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentHashMap;
 import java.nio.file.Path;
+import java.time.Duration;
 
 public final class ModBrowserViewModel implements AutoCloseable {
-    private final ModrinthApiClient apiClient;
-    private final ModDependencyResolver dependencyResolver;
+    private static final long UPDATE_CACHE_NANOS = Duration.ofMinutes(30).toNanos();
+    private ModMetadataProvider metadataProvider;
+    private ModDependencyResolver dependencyResolver;
     private final InstallationPlanBuilder planBuilder;
     private final ModInstallationService installationService;
     private final ModManagementService managementService;
-    private final LocalModScanner localScanner;
-    private final ModUpdateService updateService;
+    private LocalModScanner localScanner;
+    private ModUpdateService updateService;
 
     private final StringProperty searchText = new SimpleStringProperty("");
     private final ObjectProperty<ModSearchIndex> sortIndex =
@@ -58,18 +69,23 @@ public final class ModBrowserViewModel implements AutoCloseable {
     private final ObservableList<InstalledMod> installedMods = FXCollections.observableArrayList();
     private final DoubleProperty overallProgress = new SimpleDoubleProperty(0);
     private final StringProperty currentOperation = new SimpleStringProperty("就绪");
+    private final IntegerProperty updateCount = new SimpleIntegerProperty();
     private final BooleanProperty operationCancellable = new SimpleBooleanProperty();
     private final ObjectProperty<ModInstanceContext> instance = new SimpleObjectProperty<>();
     private final Map<String, ModUpdate> updates = new LinkedHashMap<>();
     private final Map<String, String> installedHealth = new LinkedHashMap<>();
     private final AtomicLong requestGeneration = new AtomicLong();
+    private final Map<String, CompletableFuture<ModProject>> projectRequests = new ConcurrentHashMap<>();
 
     private volatile CompletableFuture<?> activeRequest;
+    private volatile CompletableFuture<?> updateRequest;
+    private volatile long lastUpdateCheckNanos;
+    private volatile boolean installedLoaded;
     private int offset;
     private String category = "";
 
     public ModBrowserViewModel(
-            ModrinthApiClient apiClient,
+            ModMetadataProvider metadataProvider,
             ModDependencyResolver dependencyResolver,
             InstallationPlanBuilder planBuilder,
             ModInstallationService installationService,
@@ -77,7 +93,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
             LocalModScanner localScanner,
             ModUpdateService updateService
     ) {
-        this.apiClient = Objects.requireNonNull(apiClient, "apiClient");
+        this.metadataProvider = Objects.requireNonNull(metadataProvider, "metadataProvider");
         this.dependencyResolver = Objects.requireNonNull(dependencyResolver, "dependencyResolver");
         this.planBuilder = Objects.requireNonNull(planBuilder, "planBuilder");
         this.installationService = Objects.requireNonNull(installationService, "installationService");
@@ -91,7 +107,42 @@ public final class ModBrowserViewModel implements AutoCloseable {
         offset = 0;
         searchResults.clear();
         updates.clear();
+        updateCount.set(0);
+        updateRequest = null;
+        lastUpdateCheckNanos = 0;
+        installedLoaded = false;
         refreshInstalled();
+    }
+
+    public void setMetadataProvider(ModMetadataProvider provider) {
+        setMetadataProvider(provider, dependencyResolver, localScanner, updateService);
+    }
+
+    public void setMetadataProvider(ModMetadataProvider provider,
+                                    ModDependencyResolver resolver,
+                                    LocalModScanner scanner,
+                                    ModUpdateService updater) {
+        ModMetadataProvider selected = Objects.requireNonNull(provider, "provider");
+        if (metadataProvider == selected && dependencyResolver == resolver
+                && localScanner == scanner && updateService == updater) {
+            return;
+        }
+        requestGeneration.incrementAndGet();
+        cancelActiveRequest();
+        metadataProvider = selected;
+        dependencyResolver = Objects.requireNonNull(resolver, "resolver");
+        localScanner = Objects.requireNonNull(scanner, "scanner");
+        updateService = Objects.requireNonNull(updater, "updater");
+        projectRequests.clear();
+        offset = 0;
+        searchResults.clear();
+        updates.clear();
+        updateCount.set(0);
+        currentOperation.set("已切换数据源至 " + selected.source().name());
+    }
+
+    public ContentSource contentSource() {
+        return metadataProvider.source();
     }
 
     public void setCategory(String value) {
@@ -116,7 +167,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
         ModSearchQuery query = new ModSearchQuery(
                 searchText.get(), context.minecraftVersion(), context.loaderName(),
                 categories, sortIndex.get(), offset, 20);
-        CompletableFuture<?> request = apiClient.searchMods(query)
+        CompletableFuture<?> request = metadataProvider.search(query)
                 .whenComplete((result, error) -> Platform.runLater(() -> {
                     if (generation != requestGeneration.get()) {
                         return;
@@ -145,7 +196,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
     public CompletableFuture<List<ModVersion>> loadVersions(String projectId) {
         ModInstanceContext context = requireInstance();
         setBusy("正在读取版本…", true);
-        CompletableFuture<List<ModVersion>> request = apiClient.getProjectVersions(
+        CompletableFuture<List<ModVersion>> request = metadataProvider.getVersions(
                 projectId, context.minecraftVersion(), context.loaderName());
         activeRequest = request;
         request.whenComplete((ignored, error) -> Platform.runLater(() -> {
@@ -158,7 +209,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
     }
 
     public CompletableFuture<ModProject> loadProjectDetails(ModProject project) {
-        CompletableFuture<ModProject> request = apiClient.getProject(project.projectId());
+        CompletableFuture<ModProject> request = loadProject(project.projectId());
         activeRequest = request;
         request.whenComplete((ignored, error) -> {
             if (error != null) {
@@ -166,6 +217,56 @@ public final class ModBrowserViewModel implements AutoCloseable {
             }
         });
         return request;
+    }
+
+    public CompletableFuture<List<DependencyGroup>> loadDependencyGroups(ModVersion version) {
+        if (version == null || version.dependencies().isEmpty()) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        List<CompletableFuture<DependencyProject>> requests = version.dependencies().stream()
+                .map(this::loadDependencyProject).toList();
+        return CompletableFuture.allOf(requests.toArray(CompletableFuture[]::new))
+                .thenApply(ignored -> {
+                    Map<DependencyType, List<DependencyProject>> grouped =
+                            new EnumMap<>(DependencyType.class);
+                    requests.stream().map(CompletableFuture::join).forEach(item ->
+                            grouped.computeIfAbsent(item.dependency().type(), key -> new ArrayList<>())
+                                    .add(item));
+                    List<DependencyGroup> result = new ArrayList<>();
+                    for (DependencyType type : List.of(DependencyType.REQUIRED,
+                            DependencyType.OPTIONAL, DependencyType.EMBEDDED,
+                            DependencyType.INCOMPATIBLE, DependencyType.UNKNOWN)) {
+                        List<DependencyProject> projects = grouped.get(type);
+                        if (projects != null && !projects.isEmpty()) {
+                            result.add(new DependencyGroup(type, List.copyOf(projects)));
+                        }
+                    }
+                    return List.copyOf(result);
+                });
+    }
+
+    private CompletableFuture<DependencyProject> loadDependencyProject(ModDependency dependency) {
+        CompletableFuture<ModProject> project;
+        if (dependency.projectId() != null && !dependency.projectId().isBlank()) {
+            project = loadProject(dependency.projectId());
+        } else if (dependency.versionId() != null && !dependency.versionId().isBlank()) {
+            project = metadataProvider.getVersion(dependency.versionId())
+                    .thenCompose(version -> loadProject(version.projectId()));
+        } else {
+            project = CompletableFuture.failedFuture(
+                    new IllegalArgumentException("依赖缺少项目标识"));
+        }
+        return project.handle((value, error) -> new DependencyProject(
+                dependency, value, error == null ? "" : userMessage(error)));
+    }
+
+    private CompletableFuture<ModProject> loadProject(String projectId) {
+        return projectRequests.computeIfAbsent(projectId, key ->
+                metadataProvider.getProject(key).whenComplete((value, error) -> {
+                    if (error != null) {
+                        projectRequests.remove(key);
+                    }
+                }));
     }
 
     public CompletableFuture<ModInstallationPlan> preparePlan(ModVersion version) {
@@ -231,6 +332,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
                 errorMessage.set(userMessage(error));
             } else {
                 installedMods.setAll(mods);
+                installedLoaded = true;
             }
         }));
     }
@@ -294,24 +396,61 @@ public final class ModBrowserViewModel implements AutoCloseable {
     }
 
     public CompletableFuture<?> checkUpdates(ReleaseChannel channel) {
+        return checkUpdates(channel, false, List.copyOf(installedMods));
+    }
+
+    public CompletableFuture<?> ensureUpdatesChecked(ReleaseChannel channel) {
+        CompletableFuture<?> existing = updateRequest;
+        long now = System.nanoTime();
+        if (existing != null && !existing.isDone()) {
+            return existing;
+        }
+        if (lastUpdateCheckNanos != 0 && now - lastUpdateCheckNanos < UPDATE_CACHE_NANOS) {
+            return CompletableFuture.completedFuture(availableUpdates());
+        }
+        if (!installedLoaded) {
+            setBusy("正在同步本地模组…", true);
+            CompletableFuture<List<ModUpdate>> request = managementService.list(requireInstance())
+                    .thenCompose(mods -> {
+                        Platform.runLater(() -> {
+                            installedMods.setAll(mods);
+                            installedLoaded = true;
+                        });
+                        return updateService.checkUpdates(requireInstance(), mods, channel);
+                    });
+            return observeUpdateRequest(request, true);
+        }
+        return checkUpdates(channel, true, List.copyOf(installedMods));
+    }
+
+    private CompletableFuture<?> checkUpdates(ReleaseChannel channel, boolean automatic,
+                                              List<InstalledMod> candidates) {
         setBusy("正在检查兼容更新…", true);
-        CompletableFuture<?> request = updateService.checkUpdates(
-                        requireInstance(), List.copyOf(installedMods), channel)
-                .whenComplete((result, error) -> Platform.runLater(() -> {
+        CompletableFuture<List<ModUpdate>> request = updateService.checkUpdates(
+                        requireInstance(), candidates, channel);
+        return observeUpdateRequest(request, automatic);
+    }
+
+    private CompletableFuture<?> observeUpdateRequest(
+            CompletableFuture<List<ModUpdate>> request, boolean automatic) {
+        CompletableFuture<?> observed = request.whenComplete((result, error) -> Platform.runLater(() -> {
                     finishBusy();
                     if (error != null) {
                         errorMessage.set(userMessage(error));
                     } else {
                         updates.clear();
                         result.forEach(update -> updates.put(update.installedMod().projectId(), update));
+                        updateCount.set(result.size());
+                        lastUpdateCheckNanos = System.nanoTime();
                         currentOperation.set(result.isEmpty()
                                 ? "所有模组均为最新兼容版本"
-                                : "发现 " + result.size() + " 个更新");
+                                : (automatic ? "自动发现 " : "发现 ") + result.size() + " 个更新");
                         installedMods.setAll(List.copyOf(installedMods));
                     }
                 }));
-        activeRequest = request;
-        return request;
+        activeRequest = observed;
+        updateRequest = observed;
+        return observed;
     }
 
     public CompletableFuture<?> applyUpdate(String projectId) {
@@ -327,6 +466,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
                         errorMessage.set(userMessage(error));
                     } else {
                         updates.remove(projectId);
+                        updateCount.set(updates.size());
                         refreshInstalled();
                         currentOperation.set("模组更新完成");
                     }
@@ -400,6 +540,9 @@ public final class ModBrowserViewModel implements AutoCloseable {
                 && current.getCause() != null) {
             current = current.getCause();
         }
+        if (current instanceof ModrinthApiException apiError && apiError.retryable()) {
+            return "无法连接 Modrinth，请检查网络或代理设置后点击“重试”。";
+        }
         return current.getMessage() == null || current.getMessage().isBlank()
                 ? "操作失败，请查看日志" : current.getMessage();
     }
@@ -413,7 +556,14 @@ public final class ModBrowserViewModel implements AutoCloseable {
     public DoubleProperty overallProgressProperty() { return overallProgress; }
     public StringProperty currentOperationProperty() { return currentOperation; }
     public BooleanProperty operationCancellableProperty() { return operationCancellable; }
+    public IntegerProperty updateCountProperty() { return updateCount; }
     public ObjectProperty<ModInstanceContext> instanceProperty() { return instance; }
+
+    public record DependencyGroup(DependencyType type, List<DependencyProject> projects) {
+    }
+
+    public record DependencyProject(ModDependency dependency, ModProject project, String errorMessage) {
+    }
 
     @Override
     public void close() {

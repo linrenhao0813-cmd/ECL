@@ -64,6 +64,15 @@ public final class JavaRuntimeUtil {
         addCandidate(candidates, System.getenv("JAVA_HOME"));
         candidates.addAll(findInstalledJavaCandidates());
 
+        // Minecraft metadata normally names the feature version it was built for. Prefer an
+        // exact match before considering a newer runtime: newer Java releases can be present on
+        // the machine but still be rejected by a loader or by native libraries.
+        for (File candidate : candidates) {
+            if (detectJavaFeatureVersion(candidate) == requiredMajorVersion) {
+                return candidate.getAbsolutePath();
+            }
+        }
+
         File bestKnown = null;
         int bestKnownVersion = -1;
         for (File candidate : candidates) {

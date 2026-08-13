@@ -22,7 +22,8 @@ public final class VersionMetadata {
     private final String mainClass;
     private final String jar;
     private final String minecraftVersion;
-    private final String modLoader;
+    private final ModLoaderInfo modLoaderInfo;
+    private final boolean modpack;
     private final String type;
     private final int javaMajorVersion;
     private final AssetIndex assetIndex;
@@ -31,7 +32,8 @@ public final class VersionMetadata {
     private final VersionArguments arguments;
 
     VersionMetadata(String id, String inheritsFrom, String mainClass, String jar,
-                    String minecraftVersion, String modLoader, String type, int javaMajorVersion,
+                    String minecraftVersion, String explicitModLoader, String loaderVersion,
+                    boolean modpack, String type, int javaMajorVersion,
                     AssetIndex assetIndex, Map<String, DownloadObject> downloads,
                     List<Library> libraries, VersionArguments arguments) {
         this.id = id;
@@ -39,7 +41,9 @@ public final class VersionMetadata {
         this.mainClass = mainClass == null ? "" : mainClass;
         this.jar = jar;
         this.minecraftVersion = minecraftVersion;
-        this.modLoader = modLoader;
+        this.modLoaderInfo = LibraryAnalyzer.analyze(explicitModLoader, loaderVersion,
+                this.mainClass, libraries);
+        this.modpack = modpack;
         this.type = type;
         this.javaMajorVersion = javaMajorVersion;
         this.assetIndex = assetIndex;
@@ -78,7 +82,20 @@ public final class VersionMetadata {
 
     /** Detected mod loader ({@code fabric}/{@code forge}/{@code neoforge}/{@code quilt}), or null. */
     public String modLoader() {
-        return modLoader;
+        return modLoaderInfo == null ? null : modLoaderInfo.id();
+    }
+
+    /** Structured loader identity, including a best-effort version and detection source. */
+    public ModLoaderInfo modLoaderInfo() {
+        return modLoaderInfo;
+    }
+
+    public String modLoaderVersion() {
+        return modLoaderInfo == null ? "" : modLoaderInfo.version();
+    }
+
+    public boolean isModpack() {
+        return modpack;
     }
 
     /** Manifest type, e.g. {@code release} or {@code snapshot}; may be blank. */

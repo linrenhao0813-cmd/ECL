@@ -15,6 +15,7 @@ import com.ecl.util.TextUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -318,8 +319,7 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
                 .filter(LOADER_CATEGORIES::contains)
                 .distinct()
                 .toList();
-        String license = dto.license() == null
-                ? "" : firstNonBlank(dto.license().name(), dto.license().id());
+        String license = licenseName(dto.license());
         Map<String, String> links = dto.links() == null ? Map.of() : dto.links();
         String slug = dto.slug() == null ? "" : dto.slug();
         return new ModProject(
@@ -413,7 +413,7 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
         try {
             return objectMapper.readValue(body, type);
         } catch (JsonProcessingException e) {
-            throw new ModrinthApiException("Invalid Modrinth JSON response", 200, false, e);
+            throw invalidJsonResponse(body, e);
         }
     }
 
@@ -421,8 +421,22 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
         try {
             return objectMapper.readValue(body, type);
         } catch (JsonProcessingException e) {
-            throw new ModrinthApiException("Invalid Modrinth JSON response", 200, false, e);
+            throw invalidJsonResponse(body, e);
         }
+    }
+
+    private static ModrinthApiException invalidJsonResponse(String body, JsonProcessingException cause) {
+        return new ModrinthApiException("Invalid Modrinth JSON response", 200, false, cause);
+    }
+
+    private static String licenseName(JsonNode license) {
+        if (license == null || license.isNull()) {
+            return "";
+        }
+        if (license.isTextual()) {
+            return license.asText("");
+        }
+        return firstNonBlank(license.path("name").asText(""), license.path("id").asText(""));
     }
 
     private static List<String> normalizeHashes(Collection<String> hashes) {

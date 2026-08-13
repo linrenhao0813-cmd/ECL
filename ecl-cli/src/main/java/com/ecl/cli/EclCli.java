@@ -11,7 +11,7 @@ import com.ecl.config.SettingsManager;
 import com.ecl.diagnostic.DiagnosticBundleService;
 import com.ecl.exception.AuthException;
 import com.ecl.game.DefaultGameRepository;
-import com.ecl.game.InstanceIsolation;
+import com.ecl.game.DefaultIsolationType;
 import com.ecl.game.VersionMetadata;
 import com.ecl.game.VersionRepository;
 import com.ecl.launch.DefaultLauncher;
@@ -342,8 +342,10 @@ public final class EclCli implements Runnable {
             SettingsManager settings = loadSettings();
             File gameRoot = configuredGameRoot(settings);
             DefaultGameRepository games = new DefaultGameRepository(
-                    ECLConfig.getVersionsDir().toPath(), gameRoot.toPath());
-            Path instance = games.instanceDirectory(versionId, InstanceIsolation.VERSION_ISOLATED, null);
+                    ECLConfig.getVersionsDir().toPath(), gameRoot.toPath(),
+                    DefaultIsolationType.parse(settings.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE)));
+            Path instanceRoot = games.instanceRoot(versionId);
+            Path instance = games.runDirectory(versionId);
             AuthProvider auth = selectAuth(accountIdentity, username, !dryRun);
             LaunchEnvironment environment = new LaunchEnvironment(ECLConfig.getVersionsDir(),
                     ECLConfig.getLibrariesDir(), ECLConfig.getAssetsDir(),
@@ -353,6 +355,7 @@ public final class EclCli implements Runnable {
                     .versionId(versionId)
                     .auth(auth)
                     .gameDirectory(instance.toFile())
+                    .instanceDirectory(instanceRoot.toFile())
                     .environment(environment)
                     .maxMemoryMb(selectedMemory)
                     .javaExecutablePath(settings.get(ECLConfig.KEY_JAVA_PATH))
@@ -489,8 +492,13 @@ public final class EclCli implements Runnable {
         protected Path modsDirectory() {
             SettingsManager settings = loadSettings();
             DefaultGameRepository games = new DefaultGameRepository(ECLConfig.getVersionsDir().toPath(),
-                    configuredGameRoot(settings).toPath());
-            return games.instanceDirectory(versionId, InstanceIsolation.VERSION_ISOLATED, null).resolve("mods");
+                    configuredGameRoot(settings).toPath(),
+                    DefaultIsolationType.parse(settings.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE)));
+            try {
+                return games.runDirectory(versionId).resolve("mods");
+            } catch (IOException error) {
+                throw new IllegalStateException("无法解析实例运行目录: " + versionId, error);
+            }
         }
     }
 

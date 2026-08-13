@@ -14,6 +14,7 @@ public final class LaunchOptions {
     private final String versionId;
     private final AuthProvider auth;
     private final File gameDirectory;
+    private final File instanceDirectory;
     private final LaunchEnvironment environment;
     private final int maxMemoryMb;
     private final int minMemoryMb;
@@ -29,6 +30,8 @@ public final class LaunchOptions {
         this.versionId = builder.versionId;
         this.auth = builder.auth;
         this.gameDirectory = builder.gameDirectory;
+        this.instanceDirectory = builder.instanceDirectory == null
+                ? builder.gameDirectory : builder.instanceDirectory;
         this.environment = builder.environment;
         this.maxMemoryMb = builder.maxMemoryMb;
         this.minMemoryMb = builder.minMemoryMb;
@@ -53,6 +56,11 @@ public final class LaunchOptions {
     /** Working directory and game root of the launched instance. */
     public File gameDirectory() {
         return gameDirectory;
+    }
+
+    /** Stable instance root; may differ from the custom game run directory. */
+    public File instanceDirectory() {
+        return instanceDirectory;
     }
 
     public LaunchEnvironment environment() {
@@ -107,6 +115,7 @@ public final class LaunchOptions {
         private String versionId;
         private AuthProvider auth;
         private File gameDirectory;
+        private File instanceDirectory;
         private LaunchEnvironment environment;
         private int maxMemoryMb = 2048;
         private int minMemoryMb = 512;
@@ -130,6 +139,11 @@ public final class LaunchOptions {
 
         public Builder gameDirectory(File gameDirectory) {
             this.gameDirectory = gameDirectory;
+            return this;
+        }
+
+        public Builder instanceDirectory(File instanceDirectory) {
+            this.instanceDirectory = instanceDirectory;
             return this;
         }
 

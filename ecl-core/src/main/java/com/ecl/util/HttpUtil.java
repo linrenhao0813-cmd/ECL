@@ -10,8 +10,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.Writer;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.net.ProxySelector;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -24,6 +26,7 @@ import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
@@ -37,18 +40,88 @@ public class HttpUtil {
     private static final Gson COMPACT_GSON = GsonProvider.compact();
     private static final Gson PRETTY_GSON = GsonProvider.pretty();
 
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .connectTimeout(Duration.ofSeconds(15))
-            .build();
+    private static final HttpClient HTTP_CLIENT = createHttpClient();
 
     private static final int DEFAULT_READ_TIMEOUT_MS = 30_000;
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes (\\d+)-(\\d+)/(\\d+)");
+
+    private static HttpClient createHttpClient() {
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .connectTimeout(Duration.ofSeconds(15));
+        proxySelectorFor(System.getenv("HTTPS_PROXY"), System.getenv("HTTP_PROXY"),
+                System.getenv("ALL_PROXY")).ifPresent(builder::proxy);
+        return builder.build();
+    }
+
+    static Optional<ProxySelector> proxySelectorFor(String httpsProxy, String httpProxy,
+                                                     String allProxy) {
+        // Use a String[] instead of List.of(...): List.of rejects null elements, but
+        // System.getenv returns null for unset proxy variables, which crashed GUI
+        // startup with an ExceptionInInitializerError ("Failed to launch JVM").
+        for (String value : new String[]{httpsProxy, httpProxy, allProxy}) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            try {
+                String normalized = value.contains("://") ? value : "http://" + value;
+                URI uri = URI.create(normalized.trim());
+                String host = uri.getHost();
+                int port = uri.getPort();
+                if (host != null && !host.isBlank() && port > 0 && port <= 65535) {
+                    return Optional.of(ProxySelector.of(new InetSocketAddress(host, port)));
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Try the next standard proxy variable instead of preventing startup.
+            }
+        }
+        return Optional.empty();
+    }
 
     public static String get(String urlStr) throws IOException {
         Response response = request("GET", urlStr, null, null, Map.of());
         response.requireSuccess();
         return response.body();
+    }
+
+    /**
+     * Fetch a small binary resource through the same proxy-aware client used by API requests.
+     * The size limit is enforced while reading so remote icons cannot consume unbounded memory.
+     */
+    public static byte[] getBytes(String urlStr, int maxBytes) throws IOException {
+        if (maxBytes <= 0) {
+            throw new IllegalArgumentException("maxBytes must be positive");
+        }
+        checkInterrupted();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(urlStr))
+                .timeout(Duration.ofMillis(DEFAULT_READ_TIMEOUT_MS))
+                .header("User-Agent", "ECL/1.0")
+                .header("Accept", "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8,*/*;q=0.1")
+                .GET()
+                .build();
+        try {
+            HttpResponse<InputStream> response = HTTP_CLIENT.send(request,
+                    HttpResponse.BodyHandlers.ofInputStream());
+            try (InputStream input = response.body()) {
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    throw new IOException("HTTP " + response.statusCode() + " for " + urlStr);
+                }
+                long declaredLength = response.headers().firstValueAsLong("Content-Length")
+                        .orElse(-1L);
+                if (declaredLength > maxBytes) {
+                    throw new IOException("Response exceeds " + maxBytes + " bytes: " + urlStr);
+                }
+                byte[] bytes = input.readNBytes(maxBytes + 1);
+                if (bytes.length > maxBytes) {
+                    throw new IOException("Response exceeds " + maxBytes + " bytes: " + urlStr);
+                }
+                return bytes;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("HTTP request interrupted", e);
+        }
     }
 
     public static String getWithMirrors(String urlStr, SourceCallback callback) throws IOException {

@@ -11,6 +11,8 @@ import com.ecl.modrinth.model.ModDependency;
 import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
+import com.ecl.modrinth.provider.ModMetadataProvider;
+import com.ecl.modrinth.provider.ModrinthMetadataProvider;
 import com.ecl.util.FileUtil;
 
 import java.nio.file.Files;
@@ -28,14 +30,20 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 public final class DefaultModDependencyResolver implements ModDependencyResolver {
-    private final ModrinthApiClient apiClient;
+    private final ModMetadataProvider metadataProvider;
     private final ModVersionSelector versionSelector;
     private final Function<ModInstanceContext, Collection<InstalledMod>> installedModsProvider;
     private final int maxDepth;
     private final int maxDependencies;
 
     public DefaultModDependencyResolver(ModrinthApiClient apiClient, ModVersionSelector versionSelector) {
-        this(apiClient, versionSelector, ignored -> List.of(), 32, 256);
+        this(new ModrinthMetadataProvider(apiClient, false), versionSelector,
+                ignored -> List.of(), 32, 256);
+    }
+
+    public DefaultModDependencyResolver(ModMetadataProvider metadataProvider,
+                                        ModVersionSelector versionSelector) {
+        this(metadataProvider, versionSelector, ignored -> List.of(), 32, 256);
     }
 
     public DefaultModDependencyResolver(
@@ -45,7 +53,18 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
             int maxDepth,
             int maxDependencies
     ) {
-        this.apiClient = Objects.requireNonNull(apiClient, "apiClient");
+        this(new ModrinthMetadataProvider(apiClient, false), versionSelector,
+                installedModsProvider, maxDepth, maxDependencies);
+    }
+
+    public DefaultModDependencyResolver(
+            ModMetadataProvider metadataProvider,
+            ModVersionSelector versionSelector,
+            Function<ModInstanceContext, Collection<InstalledMod>> installedModsProvider,
+            int maxDepth,
+            int maxDependencies
+    ) {
+        this.metadataProvider = Objects.requireNonNull(metadataProvider, "metadataProvider");
         this.versionSelector = Objects.requireNonNull(versionSelector, "versionSelector");
         this.installedModsProvider = Objects.requireNonNull(installedModsProvider, "installedModsProvider");
         if (maxDepth < 1 || maxDependencies < 1) {
@@ -237,7 +256,7 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
     private CompletableFuture<ModVersion> resolveDependencyVersion(State state, ModDependency dependency,
                                                                    Deque<String> path) {
         if (dependency.versionId() != null && !dependency.versionId().isBlank()) {
-            return apiClient.getVersion(dependency.versionId()).thenApply(version -> {
+            return metadataProvider.getVersion(dependency.versionId()).thenApply(version -> {
                 if (versionSelector.selectBestVersion(
                         List.of(version), state.compatibility, state.releaseChannel).isEmpty()) {
                     throw missingDependency(path, dependency,
@@ -249,7 +268,7 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         if (dependency.projectId() == null || dependency.projectId().isBlank()) {
             return CompletableFuture.failedFuture(missingDependency(path, dependency, "缺少项目 ID 和版本 ID"));
         }
-        return apiClient.getProjectVersions(
+        return metadataProvider.getVersions(
                         dependency.projectId(),
                         state.compatibility.minecraftVersion(),
                         state.compatibility.loader().apiName())

@@ -9,5 +9,9 @@ public interface GameRepository {
 
     List<String> installedVersions();
 
+    Path instanceRoot(String versionId);
+
+    Path runDirectory(String versionId) throws IOException;
+
     Path instanceDirectory(String versionId, InstanceIsolation isolation, Path customDirectory);
 }

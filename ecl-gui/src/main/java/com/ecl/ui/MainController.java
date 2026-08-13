@@ -14,6 +14,10 @@ import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.download.ModFileDownloadService;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.ReleaseChannel;
+import com.ecl.modrinth.provider.ContentSource;
+import com.ecl.modrinth.provider.ModMetadataProvider;
+import com.ecl.modrinth.provider.ModMetadataProviderRegistry;
+import com.ecl.modrinth.provider.ModrinthMetadataProvider;
 import com.ecl.modrinth.repository.FileInstalledModRepository;
 import com.ecl.modrinth.repository.InstalledModRepository;
 import com.ecl.modrinth.service.DefaultInstanceOperationLock;
@@ -50,6 +54,7 @@ public final class MainController implements AutoCloseable {
     private final DownloadService gameDownloader;
     private final ModrinthDownloader modrinthDownloader;
     private final ModrinthApiClient modrinthApiClient;
+    private final ModMetadataProviderRegistry metadataProviders;
     private final LaunchService gameLauncher;
     private final ExecutorService backgroundExecutor;
     private final ExecutorService modDownloadExecutor;
@@ -61,6 +66,8 @@ public final class MainController implements AutoCloseable {
     private final LocalModScanner localModScanner;
     private final ModUpdateService modUpdateService;
     private final InstallationPlanBuilder installationPlanBuilder;
+    private final InstanceOperationLock modOperationLock;
+    private final Map<ContentSource, ModSourceServices> sourceServices = new ConcurrentHashMap<>();
     private final Map<UUID, ModInstanceContext> modInstances = new ConcurrentHashMap<>();
     private final Set<UUID> runningInstances = ConcurrentHashMap.newKeySet();
 
@@ -72,6 +79,9 @@ public final class MainController implements AutoCloseable {
         gameDownloader = new GameDownloader();
         modrinthDownloader = new ModrinthDownloader();
         modrinthApiClient = new DefaultModrinthApiClient();
+        metadataProviders = new ModMetadataProviderRegistry(
+                new ModrinthMetadataProvider(modrinthApiClient, false));
+        ModMetadataProvider metadataProvider = metadataProviders.require(ContentSource.MODRINTH);
         gameLauncher = new GameLauncher();
         AtomicInteger threadNumber = new AtomicInteger();
         backgroundExecutor = Executors.newCachedThreadPool(runnable -> {
@@ -88,9 +98,9 @@ public final class MainController implements AutoCloseable {
                 });
         installedModRepository = new FileInstalledModRepository();
         modVersionSelector = new DefaultModVersionSelector();
-        InstanceOperationLock operationLock = new DefaultInstanceOperationLock();
+        modOperationLock = new DefaultInstanceOperationLock();
         modDependencyResolver = new DefaultModDependencyResolver(
-                modrinthApiClient, modVersionSelector, instance -> {
+                metadataProvider, modVersionSelector, instance -> {
                     try {
                         return installedModRepository.findAll(instance);
                     } catch (IOException e) {
@@ -102,17 +112,19 @@ public final class MainController implements AutoCloseable {
         ModFileDownloadService fileDownloadService =
                 new ModFileDownloadService(modDownloadExecutor, hashVerifier);
         modInstallationService = new ModInstallationService(
-                installedModRepository, fileDownloadService, operationLock,
+                installedModRepository, fileDownloadService, modOperationLock,
                 backgroundExecutor, runningInstances::contains);
         modManagementService = new DefaultModManagementService(
-                installedModRepository, operationLock, backgroundExecutor,
+                installedModRepository, modOperationLock, backgroundExecutor,
                 runningInstances::contains, hashVerifier);
         localModScanner = new DefaultLocalModScanner(
-                modrinthApiClient, installedModRepository, hashVerifier, modVersionSelector,
-                operationLock, backgroundExecutor, runningInstances::contains);
+                metadataProvider, installedModRepository, hashVerifier, modVersionSelector,
+                modOperationLock, backgroundExecutor, runningInstances::contains);
         modUpdateService = new DefaultModUpdateService(
-                modrinthApiClient, modVersionSelector, modDependencyResolver,
+                metadataProvider, modVersionSelector, modDependencyResolver,
                 installationPlanBuilder, modInstallationService, modInstances::get);
+        sourceServices.put(ContentSource.MODRINTH,
+                new ModSourceServices(modDependencyResolver, localModScanner, modUpdateService));
     }
 
     public SettingsManager settings() { return settingsManager; }
@@ -120,6 +132,31 @@ public final class MainController implements AutoCloseable {
     public DownloadService gameDownloader() { return gameDownloader; }
     public ModrinthDownloader modrinthDownloader() { return modrinthDownloader; }
     public ModrinthApiClient modrinthApi() { return modrinthApiClient; }
+    public ModMetadataProvider metadataProvider(ContentSource source) {
+        return metadataProviders.require(source);
+    }
+    public java.util.List<ModMetadataProvider> metadataProviders() {
+        return metadataProviders.providers();
+    }
+    public ModSourceServices modSourceServices(ModMetadataProvider provider) {
+        return sourceServices.computeIfAbsent(provider.source(), ignored -> {
+            ModDependencyResolver resolver = new DefaultModDependencyResolver(
+                    provider, modVersionSelector, instance -> {
+                        try {
+                            return installedModRepository.findAll(instance);
+                        } catch (IOException error) {
+                            throw new IllegalStateException("无法读取实例模组索引", error);
+                        }
+                    }, 32, 256);
+            LocalModScanner scanner = new DefaultLocalModScanner(
+                    provider, installedModRepository, new HashVerifier(), modVersionSelector,
+                    modOperationLock, backgroundExecutor, runningInstances::contains);
+            ModUpdateService updater = new DefaultModUpdateService(
+                    provider, modVersionSelector, resolver, installationPlanBuilder,
+                    modInstallationService, modInstances::get);
+            return new ModSourceServices(resolver, scanner, updater);
+        });
+    }
     public InstalledModRepository installedMods() { return installedModRepository; }
     public ModVersionSelector modVersionSelector() { return modVersionSelector; }
     public ModDependencyResolver modDependencyResolver() { return modDependencyResolver; }
@@ -178,7 +215,13 @@ public final class MainController implements AutoCloseable {
         // Interrupt user-visible work first; downloader shutdown may wait for its own workers.
         backgroundExecutor.shutdownNow();
         modDownloadExecutor.shutdownNow();
+        metadataProviders.close();
         modrinthApiClient.close();
         gameDownloader.close();
+    }
+
+    public record ModSourceServices(ModDependencyResolver dependencyResolver,
+                                    LocalModScanner localScanner,
+                                    ModUpdateService updateService) {
     }
 }

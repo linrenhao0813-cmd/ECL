@@ -115,7 +115,8 @@ class VersionRepositoryTest {
         writeVersion("fabric-1.21", """
                 {"id":"fabric-1.21","inheritsFrom":"1.21",
                  "mainClass":"net.fabricmc.loader.impl.launch.knot.KnotClient",
-                 "eclModLoader":"fabric","eclMinecraftVersion":"1.21",
+                 "eclModLoader":"fabric","eclModLoaderVersion":"0.16.10",
+                 "eclMinecraftVersion":"1.21",
                  "arguments":{"jvm":["-Dfabric.skipMcProvider=true"]}}
                 """);
 
@@ -126,6 +127,8 @@ class VersionRepositoryTest {
         assertEquals("1.21", profile.clientJarId());
         assertEquals("1.21", profile.minecraftVersion());
         assertEquals("fabric", profile.modLoader());
+        assertEquals("0.16.10", profile.modLoaderVersion());
+        assertEquals(ModLoaderInfo.DetectionSource.EXPLICIT, profile.modLoaderInfo().source());
         assertEquals(21, profile.javaMajorVersion());
         assertEquals(1, profile.arguments().jvm().size(), "loader JVM arguments merge in");
         assertEquals(2, profile.arguments().game().size(), "base game arguments are inherited");

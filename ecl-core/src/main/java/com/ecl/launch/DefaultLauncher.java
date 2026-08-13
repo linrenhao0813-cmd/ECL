@@ -81,7 +81,8 @@ public final class DefaultLauncher implements Launcher {
             }
 
             if (allowWrites) {
-                NativeLibraryExtractor.extract(metadata, environment, versionId);
+                NativeLibraryExtractor.extract(metadata, environment, versionId,
+                        options.instanceDirectory());
             }
             return commandBuilder.build(options, metadata, javaExecutable);
         } catch (LaunchException alreadyClassified) {

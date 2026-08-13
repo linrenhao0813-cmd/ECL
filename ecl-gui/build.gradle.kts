@@ -19,6 +19,7 @@ dependencies {
     implementation("org.openjfx:javafx-base:${libs.versions.javafx.get()}:${javafxPlatform.get()}")
     implementation("org.openjfx:javafx-graphics:${libs.versions.javafx.get()}:${javafxPlatform.get()}")
     implementation("org.openjfx:javafx-controls:${libs.versions.javafx.get()}:${javafxPlatform.get()}")
+    implementation("com.twelvemonkeys.imageio:imageio-webp:3.13.1")
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

@@ -8,6 +8,8 @@ import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModUpdate;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
+import com.ecl.modrinth.provider.ModMetadataProvider;
+import com.ecl.modrinth.provider.ModrinthMetadataProvider;
 import com.ecl.modrinth.transaction.InstallationPlanBuilder;
 
 import java.util.ArrayList;
@@ -20,7 +22,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 public final class DefaultModUpdateService implements ModUpdateService {
-    private final ModrinthApiClient apiClient;
+    private final ModMetadataProvider metadataProvider;
     private final ModVersionSelector selector;
     private final ModDependencyResolver dependencyResolver;
     private final InstallationPlanBuilder planBuilder;
@@ -35,7 +37,19 @@ public final class DefaultModUpdateService implements ModUpdateService {
             ModInstallationService installationService,
             Function<UUID, ModInstanceContext> instanceResolver
     ) {
-        this.apiClient = Objects.requireNonNull(apiClient, "apiClient");
+        this(new ModrinthMetadataProvider(apiClient, false), selector, dependencyResolver,
+                planBuilder, installationService, instanceResolver);
+    }
+
+    public DefaultModUpdateService(
+            ModMetadataProvider metadataProvider,
+            ModVersionSelector selector,
+            ModDependencyResolver dependencyResolver,
+            InstallationPlanBuilder planBuilder,
+            ModInstallationService installationService,
+            Function<UUID, ModInstanceContext> instanceResolver
+    ) {
+        this.metadataProvider = Objects.requireNonNull(metadataProvider, "metadataProvider");
         this.selector = Objects.requireNonNull(selector, "selector");
         this.dependencyResolver = Objects.requireNonNull(dependencyResolver, "dependencyResolver");
         this.planBuilder = Objects.requireNonNull(planBuilder, "planBuilder");
@@ -58,7 +72,7 @@ public final class DefaultModUpdateService implements ModUpdateService {
             return CompletableFuture.completedFuture(List.of());
         }
         List<String> hashes = candidates.stream().map(InstalledMod::sha1).distinct().toList();
-        return apiClient.getLatestVersionsFromHashes(
+        return metadataProvider.getLatestVersionsFromHashes(
                         hashes, "sha1", List.of(instance.loaderName()),
                         List.of(instance.minecraftVersion()))
                 .thenApply(latest -> buildUpdates(candidates, latest, channel));

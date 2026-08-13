@@ -20,6 +20,10 @@ public interface LaunchService {
 
     void setGameDir(File dir);
 
+    /** Immutable instance root used for private libraries and native extraction. */
+    default void setInstanceDir(File dir) {
+    }
+
     void setJvmArgs(String args);
 
     void setJavaPath(String javaPath);

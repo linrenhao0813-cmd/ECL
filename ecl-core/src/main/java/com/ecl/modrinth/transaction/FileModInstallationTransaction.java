@@ -122,7 +122,8 @@ public final class FileModInstallationTransaction implements ModInstallationTran
                     path(stage.finalFile),
                     stage.oldFile == null ? null : path(stage.oldFile),
                     path(finalBackup),
-                    path(oldBackup)));
+                    path(oldBackup),
+                    Files.exists(stage.finalFile)));
         }
         return List.copyOf(entries);
     }
@@ -185,10 +186,12 @@ public final class FileModInstallationTransaction implements ModInstallationTran
                 Path old = resolveNullable(entry.oldFile());
                 Path finalBackup = resolve(entry.finalBackup());
                 Path oldBackup = resolve(entry.oldBackup());
-                Files.deleteIfExists(target);
                 if (Files.exists(finalBackup)) {
+                    Files.deleteIfExists(target);
                     Files.createDirectories(target.getParent());
                     move(finalBackup, target);
+                } else if (Boolean.FALSE.equals(entry.finalFileExisted())) {
+                    Files.deleteIfExists(target);
                 }
                 if (old != null && Files.exists(oldBackup)) {
                     Files.createDirectories(old.getParent());
@@ -252,10 +255,12 @@ public final class FileModInstallationTransaction implements ModInstallationTran
                 Path old = entry.oldFile() == null ? null : safeResolve(gameRoot, entry.oldFile());
                 Path finalBackup = safeResolve(gameRoot, entry.finalBackup());
                 Path oldBackup = safeResolve(gameRoot, entry.oldBackup());
-                Files.deleteIfExists(target);
                 if (Files.exists(finalBackup)) {
+                    Files.deleteIfExists(target);
                     Files.createDirectories(target.getParent());
                     move(finalBackup, target);
+                } else if (Boolean.FALSE.equals(entry.finalFileExisted())) {
+                    Files.deleteIfExists(target);
                 }
                 if (old != null && Files.exists(oldBackup)) {
                     Files.createDirectories(old.getParent());
@@ -357,7 +362,8 @@ public final class FileModInstallationTransaction implements ModInstallationTran
             String finalFile,
             String oldFile,
             String finalBackup,
-            String oldBackup
+            String oldBackup,
+            Boolean finalFileExisted
     ) {
     }
 }

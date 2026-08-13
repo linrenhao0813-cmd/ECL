@@ -11,6 +11,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,6 +28,33 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpUtilTest {
+
+    @Test
+    void readsStandardHttpsProxyDefinition() {
+        ProxySelector selector = HttpUtil.proxySelectorFor(
+                "http://127.0.0.1:7897", "", "").orElseThrow();
+        Proxy proxy = selector.select(URI.create("https://api.modrinth.com/v2/search")).getFirst();
+
+        assertEquals(Proxy.Type.HTTP, proxy.type());
+        InetSocketAddress address = (InetSocketAddress) proxy.address();
+        assertEquals("127.0.0.1", address.getHostString());
+        assertEquals(7897, address.getPort());
+    }
+
+    @Test
+    void ignoresInvalidProxyDefinitions() {
+        assertTrue(HttpUtil.proxySelectorFor("not a uri", "", "").isEmpty());
+    }
+
+    @Test
+    void toleratesNullProxyEnvironmentVariables() {
+        // Regression: System.getenv returns null for unset proxy variables and
+        // List.of(...) rejects null elements, crashing startup with NPE.
+        assertTrue(HttpUtil.proxySelectorFor(null, null, null).isEmpty());
+        assertTrue(HttpUtil.proxySelectorFor("http://127.0.0.1:7897", null, null).isPresent());
+        assertTrue(HttpUtil.proxySelectorFor(null, "http://127.0.0.1:7897", null).isPresent());
+        assertTrue(HttpUtil.proxySelectorFor(null, null, "http://127.0.0.1:7897").isPresent());
+    }
     private HttpServer server;
     private String baseUrl;
 
@@ -57,6 +87,22 @@ class HttpUtilTest {
         server.createContext("/multiline", exchange -> respond(exchange, 200, body));
 
         assertEquals(body, HttpUtil.get(baseUrl + "/multiline"));
+    }
+
+    @Test
+    void binaryRequestsPreserveBytesAndEnforceTheMemoryLimit() throws IOException {
+        byte[] body = new byte[]{0, 1, 2, 3, (byte) 255};
+        server.createContext("/icon", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "image/png");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+
+        assertArrayEquals(body, HttpUtil.getBytes(baseUrl + "/icon", body.length));
+        IOException tooLarge = assertThrows(IOException.class,
+                () -> HttpUtil.getBytes(baseUrl + "/icon", body.length - 1));
+        assertTrue(tooLarge.getMessage().contains("exceeds"));
     }
 
     @Test

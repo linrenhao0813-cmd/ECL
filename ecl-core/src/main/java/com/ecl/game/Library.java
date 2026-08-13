@@ -115,6 +115,14 @@ public final class Library {
         return !natives.isEmpty() && !classifiers.isEmpty();
     }
 
+    /** Libraries marked local are resolved from {@code <instance>/libraries/}. */
+    public boolean isLocal() {
+        return raw != null && ((raw.has("hint") && "local".equalsIgnoreCase(
+                JsonUtil.getString(raw, "hint", "")))
+                || (raw.has("eclHint") && "local".equalsIgnoreCase(
+                JsonUtil.getString(raw, "eclHint", ""))));
+    }
+
     /** The raw library object; kept for rule evaluation by the launch pipeline. */
     public JsonObject raw() {
         return raw;

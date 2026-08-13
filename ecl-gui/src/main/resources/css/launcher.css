@@ -1152,6 +1152,94 @@
     -fx-letter-spacing: 0;
 }
 
+.mod-detail-scroll,
+.mod-detail-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
+.mod-detail-section {
+    -fx-background-color: transparent;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+}
+
+.mod-detail-section > .title {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 10;
+    -fx-padding: 8 10;
+}
+
+.mod-detail-section > .content {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-padding: 10;
+}
+
+.mod-dependency-heading {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 10px;
+    -fx-font-weight: 700;
+}
+
+.mod-dependency-item {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 10;
+    -fx-padding: 8 10;
+    -fx-cursor: hand;
+}
+
+.mod-dependency-item:hover {
+    -fx-background-color: #eaf3ff;
+}
+
+.mod-dependency-incompatible {
+    -fx-background-color: #fff1f2;
+    -fx-border-color: #fecdd3;
+    -fx-border-radius: 10;
+}
+
+.mod-version-number {
+    -fx-text-fill: -ecl-text;
+    -fx-font-weight: 700;
+}
+
+.mod-version-badge {
+    -fx-background-radius: 8;
+    -fx-padding: 2 6;
+    -fx-font-size: 9px;
+    -fx-font-weight: 700;
+}
+
+.mod-channel-release {
+    -fx-background-color: #dcfce7;
+    -fx-text-fill: #166534;
+}
+
+.mod-channel-beta {
+    -fx-background-color: #ffedd5;
+    -fx-text-fill: #9a3412;
+}
+
+.mod-channel-alpha {
+    -fx-background-color: #fee2e2;
+    -fx-text-fill: #991b1b;
+}
+
+.mod-loader-badge {
+    -fx-background-color: #e0e7ff;
+    -fx-text-fill: #3730a3;
+}
+
+.mod-recommended {
+    -fx-background-color: #dbeafe;
+    -fx-text-fill: #1d4ed8;
+}
+
+.mod-changelog {
+    -fx-font-family: "Cascadia Mono", "Consolas", monospace;
+}
+
 /* ---------- Runtime dark theme overrides (kept last to win the cascade) ---------- */
 .scene-root.theme-dark,
 .scene-root.theme-dark.root-pane,

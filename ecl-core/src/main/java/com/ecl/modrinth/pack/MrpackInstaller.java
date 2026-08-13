@@ -367,6 +367,7 @@ public final class MrpackInstaller {
         profile.addProperty("type", "release");
         profile.addProperty("eclMinecraftVersion", minecraftVersion);
         profile.addProperty("eclModLoader", loader == null ? "" : loader.loader.id());
+        profile.addProperty("eclModLoaderVersion", loader == null ? "" : loader.version);
         profile.addProperty("eclModpackName", packName);
         profile.addProperty("eclModpackVersion", packVersion);
         Path root = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();

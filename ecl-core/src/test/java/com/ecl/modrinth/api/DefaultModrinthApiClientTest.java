@@ -71,6 +71,7 @@ class DefaultModrinthApiClientTest {
                         "description":"Renderer optimization",
                         "downloads":42,
                         "follows":7,
+                        "license":"Apache-2.0",
                         "categories":["fabric","optimization"],
                         "versions":["1.21.1"],
                         "date_modified":"2025-01-02T03:04:05Z",
@@ -90,6 +91,7 @@ class DefaultModrinthApiClientTest {
 
         assertEquals(1, result.totalHits());
         assertEquals("Sodium", result.hits().getFirst().title());
+        assertEquals("Apache-2.0", result.hits().getFirst().license());
         assertEquals(List.of("fabric"), result.hits().getFirst().loaders());
         assertTrue(query.get().contains("project_type:mod"));
         assertTrue(query.get().contains("versions:1.21.1"));

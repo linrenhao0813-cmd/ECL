@@ -56,10 +56,6 @@ public final class BoundedLogBuffer {
         }
         int capacity = chars.length;
         int wrappedDest = destOffset % capacity;
-        if (text instanceof String string) {
-            string.getChars(textOffset, textOffset + length, chars, wrappedDest);
-            return;
-        }
         int contiguous = capacity - wrappedDest;
         if (length <= contiguous) {
             for (int i = 0; i < length; i++) {

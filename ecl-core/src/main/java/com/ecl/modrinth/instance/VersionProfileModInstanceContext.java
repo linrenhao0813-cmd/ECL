@@ -36,6 +36,12 @@ public final class VersionProfileModInstanceContext implements ModInstanceContex
 
     public static VersionProfileModInstanceContext load(String profileId, Path versionMetadataDirectory,
                                                         Path configuredGameRoot) throws IOException {
+        return load(profileId, versionMetadataDirectory, configuredGameRoot, null);
+    }
+
+    public static VersionProfileModInstanceContext load(String profileId, Path versionMetadataDirectory,
+                                                        Path configuredGameRoot,
+                                                        Path resolvedRunDirectory) throws IOException {
         String normalizedProfileId = requireText(profileId, "profileId");
         Path metadataRoot = Objects.requireNonNull(versionMetadataDirectory, "versionMetadataDirectory")
                 .toAbsolutePath().normalize();
@@ -49,13 +55,15 @@ public final class VersionProfileModInstanceContext implements ModInstanceContex
         if (safeDirectoryName.isBlank()) {
             throw new IOException("Invalid version profile id: " + profileId);
         }
-        Path gameDirectory = gameRoot.resolve("versions").resolve(safeDirectoryName).normalize();
+        Path instanceRoot = gameRoot.resolve("versions").resolve(safeDirectoryName).normalize();
         Path instancesRoot = gameRoot.resolve("versions").normalize();
-        if (!gameDirectory.startsWith(instancesRoot)) {
+        if (!instanceRoot.startsWith(instancesRoot)) {
             throw new IOException("Version profile directory escapes game root: " + profileId);
         }
+        Path gameDirectory = resolvedRunDirectory == null ? instanceRoot
+                : resolvedRunDirectory.toAbsolutePath().normalize();
 
-        String identityPath = gameDirectory.toString();
+        String identityPath = instanceRoot.toString();
         if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
             identityPath = identityPath.toLowerCase(Locale.ROOT);
         }

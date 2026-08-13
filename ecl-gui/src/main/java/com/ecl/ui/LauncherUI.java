@@ -13,6 +13,10 @@ import com.ecl.diagnostic.DiagnosticBundleService;
 import com.ecl.download.DownloadService;
 import com.ecl.download.GameDownloader;
 import com.ecl.download.ModrinthDownloader;
+import com.ecl.game.DefaultGameRepository;
+import com.ecl.game.DefaultIsolationType;
+import com.ecl.game.InstanceGameSettings;
+import com.ecl.game.InstanceGameSettingsStore;
 import com.ecl.launcher.CrashAnalyzer;
 import com.ecl.launcher.LaunchService;
 import com.ecl.launcher.ModLoaderInstaller;
@@ -145,6 +149,9 @@ public class LauncherUI extends javafx.application.Application {
     private ComboBox<String> versionCombo;
     private String lastContentVersion;
     private ComboBox<VersionManager.VersionCategory> versionTypeCombo;
+    private ComboBox<LoaderChoice> loaderChoiceCombo;
+    private Button installSelectedLoaderButton;
+    private boolean syncingLoaderChoice;
     private TextField usernameField;
     private PasswordField passwordField;
     private ProgressBar downloadProgress;
@@ -444,6 +451,31 @@ public class LauncherUI extends javafx.application.Application {
         }
         if (controller != null) {
             controller.close();
+        }
+    }
+
+    private enum LoaderChoice {
+        VANILLA(null, "原版"),
+        FABRIC(ModLoaderInstaller.Loader.FABRIC, "Fabric"),
+        QUILT(ModLoaderInstaller.Loader.QUILT, "Quilt"),
+        FORGE(ModLoaderInstaller.Loader.FORGE, "Forge"),
+        NEOFORGE(ModLoaderInstaller.Loader.NEOFORGE, "NeoForge");
+
+        private final ModLoaderInstaller.Loader loader;
+        private final String displayName;
+
+        LoaderChoice(ModLoaderInstaller.Loader loader, String displayName) {
+            this.loader = loader;
+            this.displayName = displayName;
+        }
+
+        private boolean vanilla() {
+            return loader == null;
+        }
+
+        @Override
+        public String toString() {
+            return displayName;
         }
     }
 
@@ -1587,6 +1619,7 @@ public class LauncherUI extends javafx.application.Application {
                                             updateProgress(downloadProgress, downloaded, total));
                                 }
                             });
+                    gameRepository().applyDefaultIsolationSettingForNewInstance(result.profileId());
                     Platform.runLater(() -> {
                         stopProgressAnimation(downloadProgress, true);
                         setControlsBusy(false);
@@ -1749,6 +1782,7 @@ public class LauncherUI extends javafx.application.Application {
                                         updateProgress(downloadProgress, downloaded, total));
                             }
                         });
+                gameRepository().applyDefaultIsolationSettingForNewInstance(result.profileId());
                 Platform.runLater(() -> {
                     stopProgressAnimation(downloadProgress, true);
                     setControlsBusy(false);
@@ -1845,20 +1879,24 @@ public class LauncherUI extends javafx.application.Application {
             ));
             return page;
         }
+        Path selectedMetadata = ECLConfig.getVersionsDir().toPath()
+                .resolve(selectedVersion).resolve(selectedVersion + ".json");
+        if (!Files.isRegularFile(selectedMetadata)) {
+            try {
+                String minecraftVersion = versionManager.resolveMinecraftVersionId(selectedVersion);
+                return createLoaderSelectionPage(selectedVersion, minecraftVersion);
+            } catch (IOException ignored) {
+                // Fall through to the detailed error state below.
+            }
+        }
         try {
             ModInstanceContext instance = VersionProfileModInstanceContext.load(
                     selectedVersion,
                     ECLConfig.getVersionsDir().toPath(),
-                    getConfiguredGameRootDir().toPath());
+                    getConfiguredGameRootDir().toPath(),
+                    resolveVersionGameDir(selectedVersion).toPath());
             if (!instance.loader().supportsMods()) {
-                VBox page = createMainPage();
-                page.getChildren().add(createSurface(
-                        "// 当前版本没有模组加载器",
-                        versionManager.getVersionDisplayName(selectedVersion),
-                        createBodyText("请选择带有 Fabric、Quilt、Forge 或 NeoForge 标记的版本。"
-                                + " 原版与不同加载器使用各自独立的版本文件夹，模组不会混用。")
-                ));
-                return page;
+                return createLoaderSelectionPage(selectedVersion, instance.minecraftVersion());
             }
             activeModBrowserView = new ModBrowserView(
                     controller,
@@ -2156,6 +2194,7 @@ public class LauncherUI extends javafx.application.Application {
             }
             updateRuntimeSummary();
             updateSelectedVersionWikiButton();
+            syncLoaderChoiceFromProfile(newValue);
         });
 
         versionTypeCombo = new ComboBox<>();
@@ -2172,6 +2211,20 @@ public class LauncherUI extends javafx.application.Application {
             refreshVersions();
         });
         applyFieldStyle(versionTypeCombo);
+
+        loaderChoiceCombo = new ComboBox<>();
+        loaderChoiceCombo.getItems().setAll(LoaderChoice.values());
+        loaderChoiceCombo.setValue(LoaderChoice.VANILLA);
+        loaderChoiceCombo.setPrefWidth(160);
+        loaderChoiceCombo.setTooltip(new Tooltip(
+                "选择 Fabric、Quilt、Forge 或 NeoForge 后，可直接安装对应实例"));
+        loaderChoiceCombo.setOnAction(event -> handleLoaderChoiceChanged());
+        applyFieldStyle(loaderChoiceCombo);
+        installSelectedLoaderButton = new Button("当前为原版");
+        installSelectedLoaderButton.getStyleClass().addAll(
+                "app-button", "secondary-button", "compact-button");
+        installSelectedLoaderButton.setDisable(true);
+        installSelectedLoaderButton.setOnAction(event -> installSelectedLoader(null));
 
         selectedVersionWikiButton = createSelectedVersionWikiButton();
         restoreVersionComboItems(previousVersion);
@@ -2238,6 +2291,10 @@ public class LauncherUI extends javafx.application.Application {
         HBox versionBox = new HBox(10, versionTypeCombo, versionCombo, selectedVersionWikiButton);
         versionBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(versionCombo, Priority.ALWAYS);
+        Label loaderHint = new Label("安装后会自动切换到独立模组实例");
+        loaderHint.getStyleClass().add("status-detail");
+        HBox loaderBox = new HBox(10, loaderChoiceCombo, installSelectedLoaderButton, loaderHint);
+        loaderBox.setAlignment(Pos.CENTER_LEFT);
         versionCombo.valueProperty().addListener((obs, oldValue, newValue) ->
                 gameDirField.setText(abbreviate(getActiveGameDir().getAbsolutePath(), 72)));
 
@@ -2251,6 +2308,11 @@ public class LauncherUI extends javafx.application.Application {
         gameVersionLabel.getStyleClass().add("field-label");
         grid.add(gameVersionLabel, 0, row);
         grid.add(versionBox, 1, row++);
+
+        Label modLoaderLabel = new Label("模组加载器");
+        modLoaderLabel.getStyleClass().add("field-label");
+        grid.add(modLoaderLabel, 0, row);
+        grid.add(loaderBox, 1, row++);
 
         Label accountModeLabel = new Label("账号模式");
         accountModeLabel.getStyleClass().add("field-label");
@@ -2299,6 +2361,199 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
+    private VBox createLoaderSelectionPage(String profileId, String minecraftVersion) {
+        VBox page = createMainPage();
+        VBox guidance = new VBox(12,
+                createBodyText("为 Minecraft " + minecraftVersion
+                        + " 选择加载器，安装完成后会自动进入对应的独立模组实例。"),
+                createLoaderQuickActions(profileId));
+        page.getChildren().add(createSurface(
+                "// 当前版本没有模组加载器",
+                versionManager.getVersionDisplayName(profileId),
+                guidance
+        ));
+        return page;
+    }
+
+    private HBox createLoaderQuickActions(String profileId) {
+        Button fabric = createActionButton("安装 Fabric", "primary-button",
+                () -> installLoaderForProfile(profileId, ModLoaderInstaller.Loader.FABRIC,
+                        this::renderActiveView));
+        Button quilt = createActionButton("安装 Quilt", "secondary-button",
+                () -> installLoaderForProfile(profileId, ModLoaderInstaller.Loader.QUILT,
+                        this::renderActiveView));
+        Button forge = createActionButton("安装 Forge", "secondary-button",
+                () -> installLoaderForProfile(profileId, ModLoaderInstaller.Loader.FORGE,
+                        this::renderActiveView));
+        Button neoForge = createActionButton("安装 NeoForge", "secondary-button",
+                () -> installLoaderForProfile(profileId, ModLoaderInstaller.Loader.NEOFORGE,
+                        this::renderActiveView));
+        HBox actions = new HBox(10, fabric, quilt, forge, neoForge);
+        actions.setAlignment(Pos.CENTER_LEFT);
+        return actions;
+    }
+
+    private void syncLoaderChoiceFromProfile(String profileId) {
+        if (loaderChoiceCombo == null || syncingLoaderChoice) {
+            return;
+        }
+        LoaderChoice detected = loaderChoiceForProfile(profileId);
+        syncingLoaderChoice = true;
+        try {
+            loaderChoiceCombo.setValue(detected);
+        } finally {
+            syncingLoaderChoice = false;
+        }
+        updateLoaderControls();
+    }
+
+    private LoaderChoice loaderChoiceForProfile(String profileId) {
+        if (profileId == null || profileId.isBlank()) {
+            return LoaderChoice.VANILLA;
+        }
+        return versionManager.getLocalVersionProfiles().stream()
+                .filter(profile -> profile.profileId().equals(profileId))
+                .map(profile -> loaderChoiceForId(profile.loader()))
+                .findFirst()
+                .orElse(LoaderChoice.VANILLA);
+    }
+
+    private static LoaderChoice loaderChoiceForId(String loaderId) {
+        if (loaderId == null || loaderId.isBlank()) {
+            return LoaderChoice.VANILLA;
+        }
+        for (LoaderChoice choice : LoaderChoice.values()) {
+            if (!choice.vanilla() && choice.loader.id().equalsIgnoreCase(loaderId)) {
+                return choice;
+            }
+        }
+        return LoaderChoice.VANILLA;
+    }
+
+    private void handleLoaderChoiceChanged() {
+        if (syncingLoaderChoice || loaderChoiceCombo == null || versionCombo == null) {
+            return;
+        }
+        LoaderChoice requested = loaderChoiceCombo.getValue();
+        String selectedProfile = versionCombo.getValue();
+        if (requested == null || selectedProfile == null || selectedProfile.isBlank()) {
+            updateLoaderControls();
+            return;
+        }
+        String minecraftVersion;
+        try {
+            minecraftVersion = versionManager.resolveMinecraftVersionId(selectedProfile);
+        } catch (IOException error) {
+            setStatus("无法识别 Minecraft 版本", cleanMessage(error));
+            updateLoaderControls();
+            return;
+        }
+        if (requested.vanilla()) {
+            if (!versionCombo.getItems().contains(minecraftVersion)) {
+                versionCombo.getItems().add(0, minecraftVersion);
+            }
+            versionCombo.setValue(minecraftVersion);
+            updateLoaderControls();
+            return;
+        }
+        versionManager.getLocalVersionProfiles().stream()
+                .filter(profile -> profile.minecraftVersion().equals(minecraftVersion))
+                .filter(profile -> profile.loader().equalsIgnoreCase(requested.loader.id()))
+                .findFirst()
+                .ifPresent(profile -> versionCombo.setValue(profile.profileId()));
+        updateLoaderControls();
+    }
+
+    private void updateLoaderControls() {
+        if (loaderChoiceCombo == null) {
+            return;
+        }
+        LoaderChoice requested = loaderChoiceCombo.getValue();
+        String selectedProfile = versionCombo == null ? null : versionCombo.getValue();
+        LoaderChoice installed = loaderChoiceForProfile(selectedProfile);
+        boolean requiresInstall = requested != null && !requested.vanilla() && requested != installed;
+        if (installSelectedLoaderButton != null) {
+            installSelectedLoaderButton.setDisable(selectedProfile == null || selectedProfile.isBlank()
+                    || !requiresInstall);
+            if (requested == null || requested.vanilla()) {
+                installSelectedLoaderButton.setText("当前为原版");
+            } else if (requiresInstall) {
+                installSelectedLoaderButton.setText("安装 " + requested.displayName);
+            } else {
+                installSelectedLoaderButton.setText(requested.displayName + " 已安装");
+            }
+        }
+        if (launchBtn != null) {
+            launchBtn.setText(requiresInstall ? "安装并启动" : "启动游戏");
+        }
+    }
+
+    private void installSelectedLoader(Runnable afterSuccess) {
+        LoaderChoice requested = loaderChoiceCombo == null ? null : loaderChoiceCombo.getValue();
+        String selectedProfile = versionCombo == null ? null : versionCombo.getValue();
+        if (requested == null || requested.vanilla()) {
+            setStatus("请选择模组加载器", "可选择 Fabric、Quilt、Forge 或 NeoForge。");
+            return;
+        }
+        installLoaderForProfile(selectedProfile, requested.loader, afterSuccess);
+    }
+
+    private void installLoaderForProfile(String selectedProfile, ModLoaderInstaller.Loader loader,
+                                         Runnable afterSuccess) {
+        if (selectedProfile == null || selectedProfile.isBlank()) {
+            setStatus("请选择 Minecraft 版本", "安装加载器前需要先选择游戏版本。");
+            return;
+        }
+        String minecraftVersion;
+        try {
+            minecraftVersion = versionManager.resolveMinecraftVersionId(selectedProfile);
+        } catch (IOException error) {
+            setStatus("无法识别 Minecraft 版本", cleanMessage(error));
+            return;
+        }
+        setControlsBusy(true);
+        startProgressAnimation(downloadProgress);
+        setStatus("正在安装加载器", loader.displayName() + " / Minecraft " + minecraftVersion);
+        runAsync("ecl-install-" + loader.id(), () -> {
+            try {
+                ModLoaderInstaller.InstallResult result = modLoaderInstaller.install(
+                        minecraftVersion, loader, "", new ModLoaderInstaller.Listener() {
+                            @Override
+                            public void onStatus(String message) {
+                                Platform.runLater(() -> setStatus("正在安装加载器", message));
+                            }
+
+                            @Override
+                            public void onProgress(long downloaded, long total) {
+                                Platform.runLater(() -> updateProgress(downloadProgress, downloaded, total));
+                            }
+                        });
+                gameRepository().applyDefaultIsolationSettingForNewInstance(result.profileId());
+                Platform.runLater(() -> {
+                    stopProgressAnimation(downloadProgress, true);
+                    setControlsBusy(false);
+                    restoreVersionComboItems(result.profileId());
+                    versionCombo.setValue(result.profileId());
+                    syncLoaderChoiceFromProfile(result.profileId());
+                    setStatus("加载器安装完成", result.loader().displayName() + " "
+                            + result.loaderVersion() + " / Minecraft " + result.minecraftVersion());
+                    if (afterSuccess != null) {
+                        afterSuccess.run();
+                    } else if (activeView != AppView.HOME) {
+                        renderActiveView();
+                    }
+                });
+            } catch (Exception error) {
+                Platform.runLater(() -> {
+                    stopProgressAnimation(downloadProgress, true);
+                    setControlsBusy(false);
+                    updateLoaderControls();
+                    setStatus("加载器安装失败", cleanMessage(error));
+                });
+            }
+        });
+    }
+
     private ListCell<String> createVersionCell() {
         return new ListCell<>() {
             @Override
@@ -2339,9 +2594,10 @@ public class LauncherUI extends javafx.application.Application {
         launchBtn.getStyleClass().addAll("app-button", "launch-button");
         launchBtn.setDefaultButton(true);
         launchBtn.setOnAction(e -> launchGame());
+        updateLoaderControls();
 
         Button switchInstanceButton = createLinkButton(
-                "切换实例  ›",
+                "选择版本 / 加载器  ›",
                 () -> expandInstanceSettings(versionCombo));
 
         refreshBtn = new Button("刷新版本");
@@ -2691,6 +2947,13 @@ public class LauncherUI extends javafx.application.Application {
             setStatus("请选择游戏版本", "先刷新并选择一个可启动的 Minecraft 版本。 ");
             return;
         }
+        LoaderChoice requestedLoader = loaderChoiceCombo == null
+                ? LoaderChoice.VANILLA : loaderChoiceCombo.getValue();
+        if (requestedLoader != null && !requestedLoader.vanilla()
+                && loaderChoiceForProfile(selectedVersion) != requestedLoader) {
+            installSelectedLoader(this::launchGame);
+            return;
+        }
 
         if (lastContentVersion != null && !lastContentVersion.equals(selectedVersion)
                 && versionManager.isVersionDownloaded(lastContentVersion)) {
@@ -2796,6 +3059,11 @@ public class LauncherUI extends javafx.application.Application {
                     }
                     setStatus("下载完成",
                             downloadVersion + " 已就绪，准备启动 " + version + "。");
+                    try {
+                        gameRepository().applyDefaultIsolationSettingForNewInstance(version);
+                    } catch (IOException error) {
+                        LOGGER.warn("Cannot persist default isolation for {}", version, error);
+                    }
                     startGame(version);
                 });
             }
@@ -2826,6 +3094,7 @@ public class LauncherUI extends javafx.application.Application {
                 gameLauncher.setVersion(version);
                 gameLauncher.setMaxMemory(getEffectiveMaxMemoryMb());
                 gameLauncher.setGameDir(launchDir);
+                gameLauncher.setInstanceDir(resolveVersionInstanceRoot(version));
                 gameLauncher.setJvmArgs(extraJvmArgs == null ? "" : extraJvmArgs);
                 gameLauncher.setJavaPath(javaPath);
                 gameLauncher.setGameResolution(gameWidth, gameHeight);
@@ -2888,7 +3157,8 @@ public class LauncherUI extends javafx.application.Application {
             ModInstanceContext instance = VersionProfileModInstanceContext.load(
                     version,
                     ECLConfig.getVersionsDir().toPath(),
-                    getConfiguredGameRootDir().toPath());
+                    getConfiguredGameRootDir().toPath(),
+                    resolveVersionGameDir(version).toPath());
             controller.registerModInstance(instance);
             controller.setInstanceRunning(instance.instanceId(), true);
             return instance.instanceId();
@@ -3254,20 +3524,32 @@ public class LauncherUI extends javafx.application.Application {
         }
         versionCombo.setDisable(busy);
         versionTypeCombo.setDisable(busy);
+        if (loaderChoiceCombo != null) {
+            loaderChoiceCombo.setDisable(busy);
+        }
+        if (installSelectedLoaderButton != null) {
+            installSelectedLoaderButton.setDisable(busy);
+        }
         updateSelectedVersionWikiButton();
         authTypeCombo.setDisable(busy);
         usernameField.setDisable(busy || AUTH_MICROSOFT.equals(authTypeCombo.getValue()));
         yggdrasilServerField.setDisable(busy);
         passwordField.setDisable(busy);
+        if (!busy) {
+            updateLoaderControls();
+        }
     }
 
     private void showContentDownloadDialog(ContentTarget target) {
         List<String> profileIds = availableContentProfiles(target);
         if (profileIds.isEmpty()) {
             String detail = target.usesLoader()
-                    ? "请先安装并选择一个 Fabric、Forge、NeoForge 或 Quilt 实例。"
+                    ? "请选择并安装 Fabric、Forge、NeoForge 或 Quilt 实例。"
                     : "请先在启动器中加载可用的 Minecraft 版本。";
             setStatus("没有可用目标实例", detail);
+            if (target.usesLoader()) {
+                showLoaderInstallDialog();
+            }
             return;
         }
         String activeProfile = getSelectedVersion();
@@ -3728,6 +4010,7 @@ public class LauncherUI extends javafx.application.Application {
                                     });
                                 }
                             });
+                    gameRepository().applyDefaultIsolationSettingForNewInstance(packResult.profileId());
                 }
 
                 MrpackInstaller.InstallResult completedPack = packResult;
@@ -3837,7 +4120,25 @@ public class LauncherUI extends javafx.application.Application {
         if (gameVersion == null || gameVersion.isBlank()) {
             return rootDir;
         }
-        return new File(new File(rootDir, "versions"), sanitizeVersionDirectoryName(gameVersion));
+        try {
+            return gameRepository().runDirectory(gameVersion).toFile();
+        } catch (IOException error) {
+            LOGGER.warn("Cannot resolve run directory for {}; using isolated fallback", gameVersion, error);
+            return resolveVersionInstanceRoot(gameVersion);
+        }
+    }
+
+    private File resolveVersionInstanceRoot(String gameVersion) {
+        if (gameVersion == null || gameVersion.isBlank()) {
+            return getConfiguredGameRootDir();
+        }
+        return gameRepository().instanceRoot(sanitizeVersionDirectoryName(gameVersion)).toFile();
+    }
+
+    private DefaultGameRepository gameRepository() {
+        return new DefaultGameRepository(ECLConfig.getVersionsDir().toPath(),
+                getConfiguredGameRootDir().toPath(), DefaultIsolationType.parse(
+                        settingsManager.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE)));
     }
 
     private void ensureVersionGameDirs(String gameVersion) throws IOException {
@@ -3936,6 +4237,68 @@ public class LauncherUI extends javafx.application.Application {
         HBox dirBox = new HBox(10, dirField, dirBrowseBtn);
         HBox.setHgrow(dirField, Priority.ALWAYS);
 
+        ComboBox<String> isolationPolicyField = new ComboBox<>();
+        isolationPolicyField.getItems().setAll("始终隔离", "仅 Mod/加载器实例隔离", "全部共享");
+        isolationPolicyField.getSelectionModel().select(switch (DefaultIsolationType.parse(
+                settingsManager.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE))) {
+            case ALWAYS -> 0;
+            case MODDED -> 1;
+            case NEVER -> 2;
+        });
+        applyFieldStyle(isolationPolicyField);
+
+        String selectedInstanceId = getSelectedVersion();
+        ComboBox<String> instanceDirectoryModeField = new ComboBox<>();
+        instanceDirectoryModeField.getItems().setAll("跟随默认策略", "使用独立实例目录", "使用自定义目录");
+        TextField customInstanceDirectoryField = new TextField();
+        customInstanceDirectoryField.setPromptText("选择此实例的自定义运行目录");
+        applyFieldStyle(customInstanceDirectoryField);
+        if (selectedInstanceId == null || selectedInstanceId.isBlank()) {
+            instanceDirectoryModeField.getSelectionModel().select(0);
+            instanceDirectoryModeField.setDisable(true);
+            customInstanceDirectoryField.setDisable(true);
+        } else {
+            try {
+                InstanceGameSettings currentInstanceSettings = new InstanceGameSettingsStore().load(
+                        gameRepository().instanceRoot(selectedInstanceId));
+                if (!currentInstanceSettings.overridesRunningDirectory()) {
+                    instanceDirectoryModeField.getSelectionModel().select(0);
+                } else if (currentInstanceSettings.hasCustomDirectory()) {
+                    instanceDirectoryModeField.getSelectionModel().select(2);
+                    customInstanceDirectoryField.setText(currentInstanceSettings.runningDirectory());
+                } else {
+                    instanceDirectoryModeField.getSelectionModel().select(1);
+                }
+            } catch (IOException error) {
+                LOGGER.warn("Cannot load instance directory settings for {}", selectedInstanceId, error);
+                instanceDirectoryModeField.getSelectionModel().select(0);
+            }
+        }
+        customInstanceDirectoryField.setDisable(
+                instanceDirectoryModeField.getSelectionModel().getSelectedIndex() != 2);
+        instanceDirectoryModeField.setOnAction(event -> customInstanceDirectoryField.setDisable(
+                instanceDirectoryModeField.getSelectionModel().getSelectedIndex() != 2));
+        Button customInstanceBrowseButton = new Button("浏览");
+        customInstanceBrowseButton.getStyleClass().addAll("app-button", "secondary-button");
+        customInstanceBrowseButton.disableProperty().bind(customInstanceDirectoryField.disabledProperty());
+        customInstanceBrowseButton.setOnAction(event -> {
+            DirectoryChooser chooser = new DirectoryChooser();
+            chooser.setTitle("选择实例运行目录");
+            File initial = prepareChooserDir(customInstanceDirectoryField.getText());
+            if (initial != null) {
+                chooser.setInitialDirectory(initial);
+            }
+            File selected = chooser.showDialog(dialog);
+            if (selected != null) {
+                customInstanceDirectoryField.setText(selected.getAbsolutePath());
+            }
+        });
+        HBox customInstanceDirectoryBox = new HBox(10,
+                customInstanceDirectoryField, customInstanceBrowseButton);
+        HBox.setHgrow(customInstanceDirectoryField, Priority.ALWAYS);
+        VBox instanceDirectoryBox = new VBox(10,
+                instanceDirectoryModeField, customInstanceDirectoryBox);
+
         TextField memoryField = new TextField(maxMemoryMb == ECLConfig.AUTO_MEMORY_MB ? "" : Integer.toString(maxMemoryMb));
         memoryField.setPromptText("自动（当前 " + ECLConfig.calculateAutoMemoryMb() + " MB）");
         applyFieldStyle(memoryField);
@@ -3998,6 +4361,13 @@ public class LauncherUI extends javafx.application.Application {
         VBox dialogRoot = new VBox(18,
                 createSurface("Java 路径", "指向 java.exe 或 JDK 根目录", javaBox),
                 createSurface("游戏目录", "Minecraft 实例根目录", dirBox),
+                createSurface("默认版本隔离", "推荐仅隔离带加载器的实例；整合包始终隔离",
+                        isolationPolicyField),
+                createSurface("当前实例运行目录",
+                        selectedInstanceId == null || selectedInstanceId.isBlank()
+                                ? "选择一个已安装版本后可配置实例级覆盖"
+                                : "当前实例：" + selectedInstanceId,
+                        instanceDirectoryBox),
                 createSurface("最大内存", "留空使用自动分配（MB）", memoryField),
                 createSurface("JVM 参数", "追加到默认启动参数之后", jvmField),
                 createSurface("窗口分辨率", "窗口模式下的宽度和高度", resolutionBox),
@@ -4068,6 +4438,13 @@ public class LauncherUI extends javafx.application.Application {
             backupKeepCount = configuredBackupKeepCount;
             backupIncludeMods = backupIncludeModsField.isSelected();
 
+            DefaultIsolationType configuredIsolationType = switch (
+                    isolationPolicyField.getSelectionModel().getSelectedIndex()) {
+                case 0 -> DefaultIsolationType.ALWAYS;
+                case 2 -> DefaultIsolationType.NEVER;
+                default -> DefaultIsolationType.MODDED;
+            };
+
             settingsManager.set(ECLConfig.KEY_JAVA_PATH, javaPath);
             settingsManager.set(ECLConfig.KEY_GAME_DIR, gameDir.getAbsolutePath());
             settingsManager.set(ECLConfig.KEY_JVM_ARGS, extraJvmArgs);
@@ -4082,6 +4459,8 @@ public class LauncherUI extends javafx.application.Application {
             settingsManager.set(ECLConfig.KEY_BACKUP_ON_LAUNCH, backupOnLaunch);
             settingsManager.set(ECLConfig.KEY_BACKUP_KEEP_COUNT, backupKeepCount);
             settingsManager.set(ECLConfig.KEY_BACKUP_INCLUDE_MODS, backupIncludeMods);
+            settingsManager.set(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE,
+                    configuredIsolationType.name());
             ReleaseChannel modReleaseChannel = switch (
                     modReleaseChannelField.getSelectionModel().getSelectedIndex()) {
                 case 0 -> ReleaseChannel.RELEASE_ONLY;
@@ -4089,13 +4468,34 @@ public class LauncherUI extends javafx.application.Application {
                 default -> ReleaseChannel.RELEASE_AND_BETA;
             };
             settingsManager.set(ECLConfig.KEY_MOD_RELEASE_CHANNEL, modReleaseChannel.name());
+            if (selectedInstanceId != null && !selectedInstanceId.isBlank()) {
+                try {
+                    DefaultGameRepository repository = gameRepository();
+                    switch (instanceDirectoryModeField.getSelectionModel().getSelectedIndex()) {
+                        case 1 -> repository.setIsolated(selectedInstanceId);
+                        case 2 -> {
+                            String customDirectory = customInstanceDirectoryField.getText().trim();
+                            if (customDirectory.isBlank()) {
+                                setStatus("实例目录无效", "选择自定义目录时必须填写路径。");
+                                return;
+                            }
+                            repository.setCustomRunDirectory(selectedInstanceId,
+                                    Path.of(customDirectory));
+                        }
+                        default -> repository.inheritRunDirectoryPolicy(selectedInstanceId);
+                    }
+                } catch (IOException | RuntimeException directoryError) {
+                    setStatus("实例目录保存失败", directoryError.getMessage());
+                    return;
+                }
+            }
             if (!settingsManager.save()) {
                 setStatus("保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
                 return;
             }
 
             updateRuntimeSummary();
-            setStatus("设置已保存", "新的运行环境和 Modrinth 发布通道已经生效。");
+            setStatus("设置已保存", "新的运行环境、版本隔离与 Modrinth 发布通道已经生效。");
             dialog.close();
         });
 

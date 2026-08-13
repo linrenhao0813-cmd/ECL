@@ -13,6 +13,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -81,6 +83,33 @@ class LocalModScannerTest {
         assertEquals(2, repeated.installedMods().size());
         assertEquals(firstCache, Files.readString(cache));
         assertEquals(2, api.hashLookups);
+    }
+
+    @Test
+    void readsFabricMetadataWithoutOnlineHashMatch() throws Exception {
+        Path local = instance.modsDirectory().resolve("offline.jar");
+        writeJarEntry(local, "fabric.mod.json", """
+                {"schemaVersion":1,"id":"offline-tools","name":"Offline Tools","version":"2.4.1"}
+                """);
+
+        LocalModScanResult result = scanner().scan(instance).join();
+
+        assertEquals(1, result.installedMods().size());
+        assertEquals("Offline Tools", result.installedMods().get(0).displayName());
+        assertEquals("2.4.1", result.installedMods().get(0).versionNumber());
+        assertEquals("fabric", result.installedMods().get(0).loader());
+        assertTrue(result.items().get(0).message().contains("JAR 元数据识别"));
+        assertTrue(Files.readString(instance.gameDirectory().resolve("launcher-mod-scan.json"))
+                .contains("offline-tools"));
+    }
+
+    private static void writeJarEntry(Path jar, String entryName, String content) throws Exception {
+        Files.createDirectories(jar.getParent());
+        try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(jar))) {
+            output.putNextEntry(new ZipEntry(entryName));
+            output.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            output.closeEntry();
+        }
     }
 
     private DefaultLocalModScanner scanner() {

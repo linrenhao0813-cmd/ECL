@@ -3,6 +3,7 @@ package com.ecl.modrinth.api.dto;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Map;
@@ -24,12 +25,9 @@ public record ModProjectDto(
         @JsonProperty("display_categories") List<String> displayCategories,
         @JsonProperty("client_side") String clientSide,
         @JsonProperty("server_side") String serverSide,
-        LicenseDto license,
+        JsonNode license,
         Map<String, String> links,
         @JsonProperty("source_url") String sourceUrl,
         @JsonProperty("issues_url") String issuesUrl
 ) {
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public record LicenseDto(String id, String name, String url) {
-    }
 }

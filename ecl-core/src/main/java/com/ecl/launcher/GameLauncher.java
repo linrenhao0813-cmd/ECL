@@ -48,6 +48,7 @@ public class GameLauncher implements LaunchService {
     private int maxMemory = 2048;
     private int minMemory = 512;
     private File gameDir;
+    private File instanceDir;
     private String jvmArgs = "";
     private String javaPath = "";
     private int gameWidth = 1280;
@@ -79,6 +80,11 @@ public class GameLauncher implements LaunchService {
 
     public void setGameDir(File dir) {
         this.gameDir = dir;
+    }
+
+    @Override
+    public void setInstanceDir(File dir) {
+        this.instanceDir = dir;
     }
 
     public void setJvmArgs(String args) {
@@ -123,6 +129,9 @@ public class GameLauncher implements LaunchService {
         File launchDirectory = gameDir == null ? ECLConfig.getGameDir() : gameDir;
         launchDirectory.mkdirs();
         gameDir = launchDirectory;
+        if (instanceDir == null) {
+            instanceDir = launchDirectory;
+        }
 
         int requiredJavaMajor = determineRequiredJavaMajor(versionJson);
         String resolvedJavaPath = JavaRuntimeUtil.resolveOrDownloadJavaExecutable(
@@ -138,6 +147,8 @@ public class GameLauncher implements LaunchService {
         if (appDataDir != null) {
             pb.environment().put("APPDATA", appDataDir.getAbsolutePath());
         }
+        pb.environment().put("INST_DIR", instanceDir.getAbsolutePath());
+        pb.environment().put("INST_MC_DIR", launchDirectory.getAbsolutePath());
         pb.redirectErrorStream(true);
 
         return pb.start();
@@ -406,7 +417,7 @@ public class GameLauncher implements LaunchService {
         vars.put("${assets_root}", ECLConfig.getAssetsDir().getAbsolutePath());
         vars.put("${assets_index_name}", getAssetIndexName(versionJson));
         vars.put("${user_type}", auth.getType().name().toLowerCase());
-        vars.put("${natives_directory}", new File(ECLConfig.getVersionsDir(), versionId + "/natives").getAbsolutePath());
+        vars.put("${natives_directory}", nativesDirectory().getAbsolutePath());
         vars.put("${library_directory}", ECLConfig.getLibrariesDir().getAbsolutePath());
         vars.put("${classpath_separator}", File.pathSeparator);
         vars.put("${launcher_name}", ECLConfig.LAUNCHER_NAME);
@@ -443,7 +454,7 @@ public class GameLauncher implements LaunchService {
                     if (downloads.has("artifact")) {
                         JsonObject artifact = downloads.getAsJsonObject("artifact");
                         String path = artifact.get("path").getAsString();
-                        File file = new File(ECLConfig.getLibrariesDir(), path);
+                        File file = new File(libraryDirectory(lib), path);
                         if (!file.exists()) {
                             throw new IOException("缺少依赖库: " + path);
                         }
@@ -465,7 +476,7 @@ public class GameLauncher implements LaunchService {
     }
 
     private void extractNatives(JsonObject versionJson, String nativeClassifier) throws IOException {
-        File nativesDir = new File(ECLConfig.getVersionsDir(), versionId + "/natives");
+        File nativesDir = nativesDirectory();
         Files.createDirectories(nativesDir.toPath());
 
         JsonArray libraries = versionJson.getAsJsonArray("libraries");
@@ -498,7 +509,7 @@ public class GameLauncher implements LaunchService {
                     JsonObject nativeArtifact = classifiers.getAsJsonObject(key);
                     if (nativeArtifact.has("path")) {
                         String path = nativeArtifact.get("path").getAsString();
-                        File nativeFile = new File(ECLConfig.getLibrariesDir(), path);
+                        File nativeFile = new File(libraryDirectory(lib), path);
                         nativeFiles.add(nativeFile);
                     }
                     break;
@@ -526,6 +537,20 @@ public class GameLauncher implements LaunchService {
         } catch (IOException e) {
             LOGGER.warn("Failed to write natives extraction marker for version {}", versionId, e);
         }
+    }
+
+    private File nativesDirectory() {
+        File root = instanceDir == null ? new File(ECLConfig.getVersionsDir(), versionId) : instanceDir;
+        return new File(root, "natives-" + PlatformUtil.current().minecraftName());
+    }
+
+    private File libraryDirectory(JsonObject library) {
+        String hint = library.has("hint") ? library.get("hint").getAsString()
+                : library.has("eclHint") ? library.get("eclHint").getAsString() : "";
+        if ("local".equalsIgnoreCase(hint) && instanceDir != null) {
+            return new File(instanceDir, "libraries");
+        }
+        return ECLConfig.getLibrariesDir();
     }
 
     private String getOsArch(String nativeClassifier) {

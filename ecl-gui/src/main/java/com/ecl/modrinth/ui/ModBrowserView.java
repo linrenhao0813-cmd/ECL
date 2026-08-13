@@ -3,10 +3,13 @@ package com.ecl.modrinth.ui;
 import com.ecl.modrinth.api.ModSearchIndex;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.InstalledMod;
+import com.ecl.modrinth.model.DependencyType;
 import com.ecl.modrinth.model.ModProject;
 import com.ecl.modrinth.model.ModUpdate;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
+import com.ecl.modrinth.provider.ContentSource;
+import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.service.ResolvedMod;
 import com.ecl.modrinth.service.SequentialBatchRunner;
 import com.ecl.modrinth.transaction.ModInstallationPlan;
@@ -31,12 +34,13 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Separator;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
-import javafx.scene.image.Image;
+import javafx.scene.control.TitledPane;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -59,6 +63,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 public final class ModBrowserView extends VBox implements AutoCloseable {
@@ -70,6 +75,11 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     private final Label detailTitle = new Label("选择一个模组查看详情");
     private final Label detailMeta = new Label();
     private final TextArea detailBody = new TextArea();
+    private final TextArea changelogBody = new TextArea();
+    private final VBox dependencyContent = new VBox(8);
+    private final TitledPane dependencyPane = new TitledPane();
+    private final TitledPane changelogPane = new TitledPane();
+    private final Label recommendationLabel = new Label();
     private final ComboBox<ModVersion> versionChoice = new ComboBox<>();
     private final Button installButton = new Button("安装");
     private final Button projectPageButton = new Button("项目主页");
@@ -78,6 +88,9 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     private final ListView<ModProject> resultList = new ListView<>();
     private final ListView<InstalledMod> installedList = new ListView<>();
     private final PauseTransition searchDebounce = new PauseTransition(Duration.millis(400));
+    private final AtomicLong detailGeneration = new AtomicLong();
+    private Tab installedTab;
+    private String recommendedVersionId = "";
 
     private ModProject selectedProject;
     private ModProject detailedProject;
@@ -90,7 +103,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         this.controller = controller;
         this.statusConsumer = statusConsumer == null ? ignored -> { } : statusConsumer;
         this.viewModel = new ModBrowserViewModel(
-                controller.modrinthApi(),
+                controller.metadataProvider(ContentSource.MODRINTH),
                 controller.modDependencyResolver(),
                 controller.installationPlanBuilder(),
                 controller.modInstallationService(),
@@ -120,12 +133,17 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         VBox heading = new VBox(4, eyebrow, instanceLabel, scope);
 
         Tab browserTab = new Tab("浏览模组", createBrowserPane());
-        Tab installedTab = new Tab("已安装", createInstalledPane());
+        installedTab = new Tab("已安装", createInstalledPane());
         browserTab.setClosable(false);
         installedTab.setClosable(false);
         TabPane tabs = new TabPane(browserTab, installedTab);
         tabs.getStyleClass().add("mod-tabs");
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.getSelectionModel().selectedItemProperty().addListener((observable, oldTab, newTab) -> {
+            if (newTab == installedTab) {
+                viewModel.ensureUpdatesChecked(preferredReleaseChannel());
+            }
+        });
         VBox.setVgrow(tabs, Priority.ALWAYS);
 
         ProgressBar progress = new ProgressBar();
@@ -185,9 +203,25 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             viewModel.search(false);
         });
 
+        ComboBox<ModMetadataProvider> source = new ComboBox<>();
+        source.getItems().setAll(controller.metadataProviders());
+        source.setCellFactory(list -> providerCell());
+        source.setButtonCell(providerCell());
+        source.getSelectionModel().select(controller.metadataProvider(viewModel.contentSource()));
+        source.setPrefWidth(112);
+        source.setOnAction(event -> {
+            ModMetadataProvider selected = source.getValue();
+            if (selected != null) {
+                MainController.ModSourceServices services = controller.modSourceServices(selected);
+                viewModel.setMetadataProvider(selected, services.dependencyResolver(),
+                        services.localScanner(), services.updateService());
+                viewModel.search(false);
+            }
+        });
+
         Button searchButton = button("搜索", "primary-button");
         searchButton.setOnAction(event -> viewModel.search(false));
-        HBox searchBar = new HBox(8, search, category, sort, searchButton);
+        HBox searchBar = new HBox(8, search, category, sort, source, searchButton);
         searchBar.setAlignment(Pos.CENTER_LEFT);
 
         searchDebounce.setOnFinished(event -> viewModel.search(false));
@@ -233,7 +267,23 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         detailBody.setWrapText(true);
         detailBody.setPrefRowCount(10);
         detailBody.getStyleClass().add("mod-detail-body");
-        VBox.setVgrow(detailBody, Priority.ALWAYS);
+        detailBody.setMinHeight(110);
+
+        dependencyPane.setText("依赖");
+        dependencyPane.setContent(dependencyContent);
+        dependencyPane.setExpanded(true);
+        dependencyPane.getStyleClass().add("mod-detail-section");
+        changelogBody.setEditable(false);
+        changelogBody.setWrapText(false);
+        changelogBody.setPrefRowCount(8);
+        changelogBody.getStyleClass().addAll("mod-detail-body", "mod-changelog");
+        changelogPane.setText("更新日志");
+        changelogPane.setContent(changelogBody);
+        changelogPane.setExpanded(false);
+        changelogPane.getStyleClass().add("mod-detail-section");
+        recommendationLabel.getStyleClass().addAll("mod-version-badge", "mod-recommended");
+        recommendationLabel.setVisible(false);
+        recommendationLabel.setManaged(false);
 
         versionChoice.setPromptText("选择兼容版本");
         versionChoice.setMaxWidth(Double.MAX_VALUE);
@@ -267,8 +317,16 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         HBox.setHgrow(installButton, Priority.ALWAYS);
         installButton.setMaxWidth(Double.MAX_VALUE);
 
-        VBox detail = new VBox(10, detailTitle, detailMeta, new Separator(),
-                detailBody, new Label("兼容版本"), versionChoice, actions);
+        VBox detailSections = new VBox(10, detailTitle, detailMeta, new Separator(),
+                detailBody, dependencyPane, changelogPane);
+        ScrollPane detailsScroll = new ScrollPane(detailSections);
+        detailsScroll.setFitToWidth(true);
+        detailsScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        detailsScroll.getStyleClass().add("mod-detail-scroll");
+        VBox.setVgrow(detailsScroll, Priority.ALWAYS);
+        HBox versionHeading = new HBox(8, new Label("兼容版本"), recommendationLabel);
+        versionHeading.setAlignment(Pos.CENTER_LEFT);
+        VBox detail = new VBox(10, detailsScroll, versionHeading, versionChoice, actions);
         detail.setPadding(new Insets(4, 0, 0, 12));
         return detail;
     }
@@ -329,11 +387,18 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             resultList.refresh();
             installedList.refresh();
         });
+        viewModel.updateCountProperty().addListener((observable, oldValue, newValue) -> {
+            int count = newValue == null ? 0 : newValue.intValue();
+            installedTab.setText(count > 0 ? "已安装 (" + count + ")" : "已安装");
+            installedList.refresh();
+            resultList.refresh();
+        });
     }
 
     private void showProject(ModProject project) {
         selectedProject = project;
         detailedProject = project;
+        recommendedVersionId = "";
         versionChoice.getItems().clear();
         installButton.setDisable(true);
         projectPageButton.setDisable(project == null);
@@ -343,6 +408,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             detailTitle.setText("选择一个模组查看详情");
             detailMeta.setText("");
             detailBody.clear();
+            dependencyContent.getChildren().clear();
+            changelogBody.setText(MinimalMarkdown.format(""));
             return;
         }
         detailTitle.setText(project.title());
@@ -362,6 +429,11 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                     versionChoice.getItems().setAll(result.versions());
                     ModVersion preferred = preferredVersion(result.versions());
                     if (preferred != null) {
+                        recommendedVersionId = preferred.id();
+                        List<ModVersion> ordered = new ArrayList<>(result.versions());
+                        ordered.removeIf(candidate -> candidate.id().equals(preferred.id()));
+                        ordered.add(0, preferred);
+                        versionChoice.getItems().setAll(ordered);
                         versionChoice.setValue(preferred);
                     } else {
                         renderDetails(result.project(), null);
@@ -376,25 +448,113 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         if (project == null) {
             return;
         }
+        long generation = detailGeneration.incrementAndGet();
         StringBuilder text = new StringBuilder(project.body().isBlank()
                 ? project.description() : project.body());
         if (version != null) {
             text.append("\n\n版本 ").append(version.versionNumber())
                     .append(" · ").append(version.versionType());
-            if (!version.dependencies().isEmpty()) {
-                text.append("\n依赖：");
-                version.dependencies().forEach(dependency -> text.append("\n- ")
-                        .append(dependency.type().name().toLowerCase())
-                        .append(": ")
-                        .append(dependency.projectId().isBlank()
-                                ? dependency.versionId() : dependency.projectId()));
-            }
-            if (!version.changelog().isBlank()) {
-                text.append("\n\n更新日志\n").append(version.changelog());
-            }
         }
         detailBody.setText(text.toString());
         detailBody.positionCaret(0);
+        boolean recommended = version != null && version.id().equals(recommendedVersionId);
+        recommendationLabel.setText(recommended ? "推荐" : "");
+        recommendationLabel.setVisible(recommended);
+        recommendationLabel.setManaged(recommended);
+        changelogBody.setText(MinimalMarkdown.format(version == null ? "" : version.changelog()));
+        changelogBody.positionCaret(0);
+        dependencyContent.getChildren().setAll(new Label(version == null
+                ? "请选择兼容版本查看依赖。" : "正在加载依赖…"));
+        if (version == null) {
+            return;
+        }
+        viewModel.loadDependencyGroups(version).whenComplete((groups, error) ->
+                Platform.runLater(() -> {
+                    if (generation != detailGeneration.get()) {
+                        return;
+                    }
+                    if (error != null) {
+                        dependencyContent.getChildren().setAll(
+                                dependencyMessage("依赖加载失败：" + errorMessage(error), true));
+                    } else {
+                        renderDependencyGroups(groups);
+                    }
+                }));
+    }
+
+    private void renderDependencyGroups(List<ModBrowserViewModel.DependencyGroup> groups) {
+        dependencyContent.getChildren().clear();
+        if (groups.isEmpty()) {
+            dependencyContent.getChildren().add(dependencyMessage("此版本没有外部依赖。", false));
+            return;
+        }
+        for (ModBrowserViewModel.DependencyGroup group : groups) {
+            Label heading = new Label(dependencyTypeLabel(group.type())
+                    + "  " + group.projects().size());
+            heading.getStyleClass().add("mod-dependency-heading");
+            dependencyContent.getChildren().add(heading);
+            for (ModBrowserViewModel.DependencyProject item : group.projects()) {
+                dependencyContent.getChildren().add(dependencyItem(item, group.type()));
+            }
+        }
+    }
+
+    private Node dependencyItem(ModBrowserViewModel.DependencyProject item, DependencyType type) {
+        ModProject project = item.project();
+        ImageView icon = new ImageView(RemoteImageLoader.loadingPlaceholder());
+        icon.setFitWidth(32);
+        icon.setFitHeight(32);
+        icon.setPreserveRatio(true);
+        if (project != null && project.iconUrl() != null) {
+            RemoteImageLoader.load(project.iconUrl()).thenAccept(image ->
+                    Platform.runLater(() -> icon.setImage(image)));
+        } else if (project == null) {
+            icon.setImage(RemoteImageLoader.brokenPlaceholder());
+        }
+        String identity = dependencyIdentity(item);
+        Label title = new Label(project == null ? identity : project.title());
+        title.getStyleClass().add("mod-item-title");
+        Label meta = new Label(item.errorMessage().isBlank()
+                ? (project == null ? identity : project.description()) : item.errorMessage());
+        meta.getStyleClass().add("status-detail");
+        meta.setWrapText(true);
+        VBox labels = new VBox(2, title, meta);
+        HBox row = new HBox(9, icon, labels);
+        row.setAlignment(Pos.CENTER_LEFT);
+        row.getStyleClass().add("mod-dependency-item");
+        if (type == DependencyType.INCOMPATIBLE) {
+            row.getStyleClass().add("mod-dependency-incompatible");
+        }
+        if (project != null) {
+            row.setOnMouseClicked(event -> showProject(project));
+        }
+        return row;
+    }
+
+    private static String dependencyIdentity(ModBrowserViewModel.DependencyProject item) {
+        String projectId = item.dependency().projectId();
+        if (projectId != null && !projectId.isBlank()) {
+            return projectId;
+        }
+        String versionId = item.dependency().versionId();
+        return versionId == null || versionId.isBlank() ? "未知依赖" : versionId;
+    }
+
+    private static Label dependencyMessage(String text, boolean error) {
+        Label label = new Label(text);
+        label.setWrapText(true);
+        label.getStyleClass().add(error ? "mod-error" : "status-detail");
+        return label;
+    }
+
+    private static String dependencyTypeLabel(DependencyType type) {
+        return switch (type) {
+            case REQUIRED -> "必需依赖";
+            case OPTIONAL -> "可选依赖";
+            case EMBEDDED -> "内嵌依赖";
+            case INCOMPATIBLE -> "不兼容";
+            case UNKNOWN -> "其他依赖";
+        };
     }
 
     private ModVersion preferredVersion(List<ModVersion> versions) {
@@ -727,15 +887,78 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         };
     }
 
-    private static ListCell<ModVersion> versionCell() {
+    private ListCell<ModVersion> versionCell() {
         return new ListCell<>() {
             @Override
             protected void updateItem(ModVersion item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? null
-                        : item.versionNumber() + " · " + item.versionType()
-                        + (item.featured() ? " · featured" : ""));
+                setText(null);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    return;
+                }
+                Label version = new Label(item.versionNumber());
+                version.getStyleClass().add("mod-version-number");
+                HBox badges = new HBox(5, version,
+                        versionBadge(channelLabel(item.versionType()),
+                                "mod-channel-" + normalizedChannel(item.versionType())));
+                item.loaders().stream().limit(2).forEach(loader ->
+                        badges.getChildren().add(versionBadge(loaderDisplay(loader), "mod-loader-badge")));
+                if (item.featured() || item.id().equals(recommendedVersionId)) {
+                    badges.getChildren().add(versionBadge("★ 推荐", "mod-recommended"));
+                }
+                badges.setAlignment(Pos.CENTER_LEFT);
+                setGraphic(badges);
             }
+        };
+    }
+
+    private static ListCell<ModMetadataProvider> providerCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(ModMetadataProvider item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : switch (item.source()) {
+                    case MODRINTH -> "Modrinth";
+                    case CURSEFORGE -> "CurseForge";
+                });
+            }
+        };
+    }
+
+    private static Label versionBadge(String text, String styleClass) {
+        Label label = new Label(text);
+        label.getStyleClass().addAll("mod-version-badge", styleClass);
+        return label;
+    }
+
+    private static String normalizedChannel(String type) {
+        String value = type == null ? "release" : type.toLowerCase(java.util.Locale.ROOT);
+        return switch (value) {
+            case "beta" -> "beta";
+            case "alpha" -> "alpha";
+            default -> "release";
+        };
+    }
+
+    private static String channelLabel(String type) {
+        return switch (normalizedChannel(type)) {
+            case "beta" -> "Beta";
+            case "alpha" -> "Alpha";
+            default -> "Release";
+        };
+    }
+
+    private static String loaderDisplay(String loader) {
+        if (loader == null || loader.isBlank()) {
+            return "通用";
+        }
+        return switch (loader.toLowerCase(java.util.Locale.ROOT)) {
+            case "fabric" -> "Fabric";
+            case "forge" -> "Forge";
+            case "neoforge" -> "NeoForge";
+            case "quilt" -> "Quilt";
+            default -> loader;
         };
     }
 
@@ -754,12 +977,19 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                 setText(null);
                 return;
             }
-            ImageView icon = new ImageView();
+            ImageView icon = new ImageView(RemoteImageLoader.loadingPlaceholder());
             icon.setFitWidth(42);
             icon.setFitHeight(42);
             icon.setPreserveRatio(true);
             if (project.iconUrl() != null) {
-                icon.setImage(new Image(project.iconUrl().toString(), 42, 42, true, true, true));
+                RemoteImageLoader.load(project.iconUrl()).thenAccept(image ->
+                        Platform.runLater(() -> {
+                            if (getItem() == project) {
+                                icon.setImage(image);
+                            }
+                        }));
+            } else {
+                icon.setImage(RemoteImageLoader.brokenPlaceholder());
             }
             Label title = new Label(project.title());
             title.getStyleClass().add("mod-item-title");
@@ -814,6 +1044,12 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     }
 
     private record DetailResult(ModProject project, List<ModVersion> versions) {
+    }
+
+    private static String errorMessage(Throwable error) {
+        Throwable cause = unwrap(error);
+        return cause.getMessage() == null || cause.getMessage().isBlank()
+                ? "未知错误" : cause.getMessage();
     }
 
     private record CategoryChoice(String label, String id) {

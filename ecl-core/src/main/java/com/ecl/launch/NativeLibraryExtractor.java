@@ -54,7 +54,15 @@ public final class NativeLibraryExtractor {
      */
     public static void extract(VersionMetadata metadata, LaunchEnvironment environment, String versionId)
             throws IOException {
-        Path nativesDir = environment.nativesDirectory(versionId).toPath();
+        extract(metadata, environment, versionId, null);
+    }
+
+    public static void extract(VersionMetadata metadata, LaunchEnvironment environment, String versionId,
+                               File instanceDirectory) throws IOException {
+        Path nativesDir = instanceDirectory == null
+                ? environment.nativesDirectory(versionId).toPath()
+                : instanceDirectory.toPath().resolve("natives-"
+                        + com.ecl.util.PlatformUtil.current().minecraftName());
         Files.createDirectories(nativesDir);
         if (metadata.libraries().isEmpty()) {
             return;
@@ -64,7 +72,8 @@ public final class NativeLibraryExtractor {
         String osArch = nativeClassifier.indexOf('-') >= 0
                 ? nativeClassifier.substring(0, nativeClassifier.indexOf('-'))
                 : com.ecl.util.PlatformUtil.current().minecraftName();
-        Set<File> nativeFiles = collectNativeFiles(metadata, environment, nativeClassifier, osArch);
+        Set<File> nativeFiles = collectNativeFiles(metadata, environment, nativeClassifier, osArch,
+                instanceDirectory);
         if (nativeFiles.isEmpty()) {
             return;
         }
@@ -91,7 +100,8 @@ public final class NativeLibraryExtractor {
     }
 
     private static Set<File> collectNativeFiles(VersionMetadata metadata, LaunchEnvironment environment,
-                                               String nativeClassifier, String osArch) {
+                                               String nativeClassifier, String osArch,
+                                               File instanceDirectory) {
         Set<DownloadObject> chosen = new LinkedHashSet<>();
         for (Library library : metadata.libraries()) {
             if (!libraryHasAllowedRules(library) || library.classifiers().isEmpty()) {
@@ -107,7 +117,12 @@ public final class NativeLibraryExtractor {
         }
         Set<File> files = new LinkedHashSet<>();
         for (DownloadObject object : chosen) {
-            File nativeFile = new File(environment.librariesDirectory(), object.path());
+            Library owner = metadata.libraries().stream()
+                    .filter(library -> library.classifiers().containsValue(object))
+                    .findFirst().orElse(null);
+            File base = owner != null && owner.isLocal() && instanceDirectory != null
+                    ? new File(instanceDirectory, "libraries") : environment.librariesDirectory();
+            File nativeFile = new File(base, object.path());
             files.add(nativeFile);
         }
         return files;

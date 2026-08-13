@@ -7,6 +7,8 @@ import com.ecl.config.SettingsManager;
 import javafx.animation.PauseTransition;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.scene.Node;
+import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ScrollPane;
@@ -19,6 +21,7 @@ import javafx.util.Duration;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -45,10 +48,13 @@ public final class LauncherUiSnapshot {
     private static void capture(Scene scene) throws Exception {
         scene.getRoot().applyCss();
         scene.getRoot().layout();
-        if ("settings".equalsIgnoreCase(System.getProperty("ecl.snapshot.mode"))
-                && scene.getRoot() instanceof ScrollPane scrollPane) {
-            scrollPane.setVvalue(1.0);
-            scene.getRoot().layout();
+        String mode = System.getProperty("ecl.snapshot.mode");
+        if ("settings".equalsIgnoreCase(mode) || "loader-choice".equalsIgnoreCase(mode)) {
+            ScrollPane scrollPane = findScrollPane(scene.getRoot());
+            if (scrollPane != null) {
+                scrollPane.setVvalue(1.0);
+                scene.getRoot().layout();
+            }
         }
 
         int width = Math.max(1, (int) Math.ceil(scene.getWidth()));
@@ -81,6 +87,21 @@ public final class LauncherUiSnapshot {
         System.out.println("ECL_UI_SNAPSHOT=" + file.getAbsolutePath());
     }
 
+    private static ScrollPane findScrollPane(Node node) {
+        if (node instanceof ScrollPane scrollPane) {
+            return scrollPane;
+        }
+        if (node instanceof Parent parent) {
+            for (Node child : parent.getChildrenUnmodifiable()) {
+                ScrollPane found = findScrollPane(child);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
     public static final class SnapshotApplication extends LauncherUI {
         @Override
         public void start(Stage stage) {
@@ -104,7 +125,9 @@ public final class LauncherUiSnapshot {
                 return;
             }
 
-            PauseTransition settle = new PauseTransition(Duration.millis(900));
+            String mode = System.getProperty("ecl.snapshot.mode", "home");
+            long settleMillis = "modrinth-online".equalsIgnoreCase(mode) ? 4_000 : 900;
+            PauseTransition settle = new PauseTransition(Duration.millis(settleMillis));
             settle.setOnFinished(event -> {
                 try {
                     capture(captureScene);
@@ -131,6 +154,40 @@ public final class LauncherUiSnapshot {
             }
             if ("versions".equalsIgnoreCase(mode)) {
                 showAppView("VERSIONS");
+                return primaryStage.getScene();
+            }
+            if ("loader-choice".equalsIgnoreCase(mode)) {
+                String profileId = createVisualProfile(
+                        "visual-vanilla-loader-choice", "", "1.20.6");
+                ComboBox<String> versionCombo = versionCombo();
+                if (!versionCombo.getItems().contains(profileId)) versionCombo.getItems().add(profileId);
+                versionCombo.setValue(profileId);
+                Field loaderField = LauncherUI.class.getDeclaredField("loaderChoiceCombo");
+                loaderField.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                ComboBox<Object> loaderCombo = (ComboBox<Object>) loaderField.get(this);
+                loaderCombo.getItems().stream()
+                        .filter(item -> "Fabric".equals(item.toString()))
+                        .findFirst().ifPresent(loaderCombo::setValue);
+                Field settingsPaneField = LauncherUI.class.getDeclaredField("instanceSettingsPane");
+                settingsPaneField.setAccessible(true);
+                ((javafx.scene.control.TitledPane) settingsPaneField.get(this)).setExpanded(true);
+                return primaryStage.getScene();
+            }
+            if ("modrinth-vanilla".equalsIgnoreCase(mode)) {
+                String profileId = createVisualProfile("visual-vanilla-instance", "");
+                ComboBox<String> combo = versionCombo();
+                if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
+                combo.setValue(profileId);
+                showAppView("MODRINTH");
+                return primaryStage.getScene();
+            }
+            if ("modrinth".equalsIgnoreCase(mode) || "modrinth-online".equalsIgnoreCase(mode)) {
+                String profileId = createVisualProfile("visual-fabric-instance", "fabric");
+                ComboBox<String> combo = versionCombo();
+                if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
+                combo.setValue(profileId);
+                showAppView("MODRINTH");
                 return primaryStage.getScene();
             }
             if ("settings-page".equalsIgnoreCase(mode)) {
@@ -186,6 +243,32 @@ public final class LauncherUiSnapshot {
                 return findSecondaryScene(primaryStage, "Backup dialog did not open");
             }
             return primaryStage.getScene();
+        }
+
+        private String createVisualProfile(String profileId, String loader) throws IOException {
+            return createVisualProfile(profileId, loader, "1.21.4");
+        }
+
+        private String createVisualProfile(String profileId, String loader,
+                                           String minecraftVersion) throws IOException {
+            Path profileDirectory = ECLConfig.getVersionsDir().toPath().resolve(profileId);
+            Files.createDirectories(profileDirectory);
+            String loaderProperty = loader.isBlank() ? ""
+                    : ",\n  \"eclModLoader\": \"" + loader + "\"";
+            Files.writeString(profileDirectory.resolve(profileId + ".json"), """
+                    {
+                      "id": "%s",
+                      "eclMinecraftVersion": "%s"%s
+                    }
+                    """.formatted(profileId, minecraftVersion, loaderProperty));
+            return profileId;
+        }
+
+        @SuppressWarnings("unchecked")
+        private ComboBox<String> versionCombo() throws ReflectiveOperationException {
+            Field comboField = LauncherUI.class.getDeclaredField("versionCombo");
+            comboField.setAccessible(true);
+            return (ComboBox<String>) comboField.get(this);
         }
 
         private Scene findSecondaryScene(Stage primaryStage, String failureMessage) {

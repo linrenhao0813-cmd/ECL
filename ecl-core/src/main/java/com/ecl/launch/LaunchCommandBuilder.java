@@ -55,6 +55,12 @@ public final class LaunchCommandBuilder {
         if (parent != null) {
             additions.put("APPDATA", parent.getAbsolutePath());
         }
+        if (options.instanceDirectory() != null) {
+            additions.put("INST_DIR", options.instanceDirectory().getAbsolutePath());
+        }
+        if (options.gameDirectory() != null) {
+            additions.put("INST_MC_DIR", options.gameDirectory().getAbsolutePath());
+        }
         return additions;
     }
 
@@ -155,7 +161,9 @@ public final class LaunchCommandBuilder {
             if (artifact == null || !libraryAllowed(library)) {
                 continue;
             }
-            File file = new File(librariesDir, artifact.path());
+            File libraryRoot = library.isLocal() && options.instanceDirectory() != null
+                    ? new File(options.instanceDirectory(), "libraries") : librariesDir;
+            File file = new File(libraryRoot, artifact.path());
             if (!file.exists()) {
                 throw new LaunchException(LaunchException.Kind.MISSING_FILES,
                         "缺少依赖库: " + artifact.path() + "（版本 " + version.id() + "）");

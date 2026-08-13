@@ -122,6 +122,7 @@ public final class ModLoaderInstaller {
             profile.addProperty("id", profileId);
         }
         profile.addProperty("eclModLoader", loader.id());
+        profile.addProperty("eclModLoaderVersion", loaderVersion);
         profile.addProperty("eclMinecraftVersion", minecraftVersion);
         Path profileDir = safeProfileDirectory(profileId);
         Files.createDirectories(profileDir);
@@ -216,7 +217,8 @@ public final class ModLoaderInstaller {
             String profileId = installedProfile.getFileName().toString();
             Path targetProfile = safeProfileDirectory(profileId);
             mergeDirectory(installedProfile, targetProfile);
-            annotateProfile(targetProfile.resolve(profileId + ".json"), minecraftVersion, loader);
+            annotateProfile(targetProfile.resolve(profileId + ".json"), minecraftVersion,
+                    loader, loaderVersion);
             listener.onStatus(loader.displayName() + " " + loaderVersion + " 安装完成");
             return new InstallResult(profileId, minecraftVersion, loader, loaderVersion);
         } finally {
@@ -282,12 +284,14 @@ public final class ModLoaderInstaller {
         }
     }
 
-    private void annotateProfile(Path jsonFile, String minecraftVersion, Loader loader) throws IOException {
+    private void annotateProfile(Path jsonFile, String minecraftVersion, Loader loader,
+                                 String loaderVersion) throws IOException {
         if (!Files.isRegularFile(jsonFile)) {
             throw new IOException("加载器版本缺少 JSON: " + jsonFile);
         }
         JsonObject json = HttpUtil.readJson(jsonFile.toFile());
         json.addProperty("eclModLoader", loader.id());
+        json.addProperty("eclModLoaderVersion", loaderVersion);
         json.addProperty("eclMinecraftVersion", minecraftVersion);
         HttpUtil.writeJson(jsonFile.toFile(), json);
     }

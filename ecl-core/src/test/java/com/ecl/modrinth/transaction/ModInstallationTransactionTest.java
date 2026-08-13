@@ -53,6 +53,21 @@ class ModInstallationTransactionTest {
     }
 
     @Test
+    void failedCommitPreservesExistingTargetThatWasNeverApplied() throws Exception {
+        Path target = game.resolve("mods/existing.jar");
+        Files.createDirectories(target.getParent());
+        Files.writeString(target, "original");
+
+        try (FileModInstallationTransaction transaction = new FileModInstallationTransaction(game)) {
+            Path missing = transaction.temporaryDirectory().resolve("missing.part");
+            transaction.stageDownloadedFile(missing, target);
+            assertThrows(IOException.class, transaction::commit);
+        }
+
+        assertEquals("original", Files.readString(target));
+    }
+
+    @Test
     void rejectsEscapingAndDuplicateTargets() throws Exception {
         try (FileModInstallationTransaction transaction = new FileModInstallationTransaction(game)) {
             Path staged = Files.writeString(transaction.temporaryDirectory().resolve("one.part"), "one");
@@ -73,5 +88,32 @@ class ModInstallationTransactionTest {
         FileModInstallationTransaction.recoverIncompleteTransactions(game);
         assertFalse(Files.exists(directory));
         abandoned.close();
+    }
+
+    @Test
+    void recoveryPreservesExistingTargetWithoutBackup() throws Exception {
+        Path target = game.resolve("mods/existing.jar");
+        Files.createDirectories(target.getParent());
+        Files.writeString(target, "original");
+        Path transaction = game.resolve(".ecl-mod-transactions/crashed");
+        Files.createDirectories(transaction.resolve("backups"));
+        Files.writeString(transaction.resolve("journal.json"), """
+                {
+                  "status": "APPLYING",
+                  "entries": [{
+                    "stagedFile": ".ecl-mod-transactions/crashed/missing.part",
+                    "finalFile": "mods/existing.jar",
+                    "oldFile": null,
+                    "finalBackup": ".ecl-mod-transactions/crashed/backups/0-final.bak",
+                    "oldBackup": ".ecl-mod-transactions/crashed/backups/0-old.bak",
+                    "finalFileExisted": true
+                  }]
+                }
+                """);
+
+        FileModInstallationTransaction.recoverIncompleteTransactions(game);
+
+        assertEquals("original", Files.readString(target));
+        assertFalse(Files.exists(transaction));
     }
 }
