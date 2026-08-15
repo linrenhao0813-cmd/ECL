@@ -123,7 +123,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         setPadding(new Insets(16));
         setFillWidth(true);
 
-        Label eyebrow = new Label("MODRINTH / MODS");
+        Label eyebrow = new Label("MODRINTH + CURSEFORGE / MODS");
         eyebrow.getStyleClass().add("eyebrow");
         instanceLabel.setText(instanceText(context));
         instanceLabel.getStyleClass().add("mod-instance-badge");
@@ -1052,7 +1052,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                     + (mod.dependency() ? " · 依赖" : "")
                     + (mod.requiredByProjectId().isBlank() ? "" : " · 被 " + mod.requiredByProjectId() + " 依赖")
                     + (mod.installedAt() == null ? "" : " · " + mod.installedAt().toString().substring(0, 10))
-                    + (mod.projectId().startsWith("local:") ? " · 本地/未知来源" : " · Modrinth")
+                    + (mod.projectId().startsWith("local:") ? " · 本地/未知来源" : " · 在线来源")
                     + (viewModel.healthMessage(mod.projectId()).isBlank()
                             ? "" : " · " + viewModel.healthMessage(mod.projectId()))
                     + (viewModel.hasUpdate(mod.projectId()) ? " · 可更新" : "");

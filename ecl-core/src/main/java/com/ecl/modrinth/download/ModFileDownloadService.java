@@ -4,6 +4,7 @@ import com.ecl.modrinth.api.HashMismatchException;
 import com.ecl.util.HttpUtil;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -21,10 +22,17 @@ import java.util.function.Consumer;
 public final class ModFileDownloadService {
     private final ExecutorService executor;
     private final HashVerifier hashVerifier;
+    private final DownloadUriResolver uriResolver;
 
     public ModFileDownloadService(ExecutorService executor, HashVerifier hashVerifier) {
+        this(executor, hashVerifier, uri -> uri);
+    }
+
+    public ModFileDownloadService(ExecutorService executor, HashVerifier hashVerifier,
+                                  DownloadUriResolver uriResolver) {
         this.executor = Objects.requireNonNull(executor, "executor");
         this.hashVerifier = Objects.requireNonNull(hashVerifier, "hashVerifier");
+        this.uriResolver = Objects.requireNonNull(uriResolver, "uriResolver");
     }
 
     public CompletableFuture<List<DownloadedModFile>> downloadAll(
@@ -84,6 +92,16 @@ public final class ModFileDownloadService {
             long overallTotal,
             Consumer<ModDownloadProgress> listener
     ) {
+        URI downloadUri;
+        try {
+            downloadUri = uriResolver.resolve(request.uri());
+        } catch (IOException error) {
+            throw new java.util.concurrent.CompletionException(error);
+        }
+        if (downloadUri == null || downloadUri.getScheme() == null) {
+            throw new java.util.concurrent.CompletionException(
+                    new IOException("无法解析模组下载地址: " + request.fileName()));
+        }
         RuntimeException failure = null;
         for (int attempt = 1; attempt <= 2; attempt++) {
             throwIfInterrupted(request);
@@ -93,7 +111,7 @@ public final class ModFileDownloadService {
                 long startedAt = System.nanoTime();
                 AtomicLong previousFileBytes = new AtomicLong();
                 HttpUtil.downloadFileWithProgress(
-                        request.uri().toString(),
+                        downloadUri.toString(),
                         request.temporaryFile().toFile(),
                         new HttpUtil.ProgressCallback() {
                             @Override

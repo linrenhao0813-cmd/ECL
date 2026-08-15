@@ -13,6 +13,7 @@ import com.ecl.backup.WorldBackupService;
 import com.ecl.config.SettingsManager;
 import com.ecl.diagnostic.DiagnosticBundleService;
 import com.ecl.download.DownloadService;
+import com.ecl.download.ContentDownloader;
 import com.ecl.download.GameDownloader;
 import com.ecl.download.ModrinthDownloader;
 import com.ecl.game.DefaultGameRepository;
@@ -27,6 +28,7 @@ import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.pack.MrpackInstaller;
+import com.ecl.modrinth.provider.ContentSource;
 import com.ecl.modrinth.ui.ChineseDescriptionService;
 import com.ecl.modrinth.ui.ModBrowserView;
 import com.ecl.modrinth.ui.RemoteImageLoader;
@@ -1889,7 +1891,7 @@ public class LauncherUI extends javafx.application.Application {
 
         Label pageTitle = new Label("内容库");
         pageTitle.getStyleClass().add("page-title");
-        Label pageSubtitle = new Label("从 Modrinth 查找并安装适配当前 Minecraft 实例的内容");
+        Label pageSubtitle = new Label("从 Modrinth 或 CurseForge 查找并安装适配当前 Minecraft 实例的内容");
         pageSubtitle.getStyleClass().add("page-subtitle");
         VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
         pageHeading.getStyleClass().add("content-library-heading");
@@ -2029,7 +2031,8 @@ public class LauncherUI extends javafx.application.Application {
         String initialProfile = profileIds.contains(activeProfile) ? activeProfile : profileIds.getFirst();
         ContentInstance initialInstance = resolveContentInstance(initialProfile);
 
-        Label eyebrow = new Label("MODRINTH / " + target.projectType.toUpperCase(Locale.ROOT));
+        Label eyebrow = new Label("MODRINTH + CURSEFORGE / "
+                + target.projectType.toUpperCase(Locale.ROOT));
         eyebrow.getStyleClass().add("eyebrow");
         Label title = new Label(target.title);
         title.getStyleClass().add("content-library-section-title");
@@ -2053,7 +2056,8 @@ public class LauncherUI extends javafx.application.Application {
         applyFieldStyle(searchField);
         HBox.setHgrow(searchField, Priority.ALWAYS);
         Button searchButton = createActionButton("搜索", "primary-button", () -> { });
-        HBox searchBar = new HBox(8, searchField, searchButton);
+        ComboBox<ContentSource> sourceCombo = createContentSourceCombo();
+        HBox searchBar = new HBox(8, sourceCombo, searchField, searchButton);
 
         ListView<ModrinthDownloader.Project> resultList = new ListView<>();
         resultList.getStyleClass().add("mod-result-list");
@@ -2119,7 +2123,7 @@ public class LauncherUI extends javafx.application.Application {
             if (selected != null) {
                 setTranslatedProjectDescription(selected, projectDescription,
                         descriptionGeneration, selectedDescriptionGeneration);
-                loadProjectVersions(target, selected,
+                loadProjectVersions(sourceCombo.getValue(), target, selected,
                         resolveContentInstance(targetProfileCombo.getValue()), versionComboBox,
                         status, downloadButton, versionGeneration);
             }
@@ -2128,11 +2132,19 @@ public class LauncherUI extends javafx.application.Application {
                 downloadButton.setDisable(selected == null
                         || resultList.getSelectionModel().getSelectedItem() == null));
 
-        Runnable search = () -> searchModrinthContent(target,
+        Runnable search = () -> searchModrinthContent(sourceCombo.getValue(), target,
                 resolveContentInstance(targetProfileCombo.getValue()), searchField, resultList,
                 status, searchButton, downloadButton, searchGeneration);
         searchButton.setOnAction(event -> search.run());
         searchField.setOnAction(event -> search.run());
+        sourceCombo.setOnAction(event -> {
+            versionGeneration.incrementAndGet();
+            versionComboBox.getItems().clear();
+            versionComboBox.setDisable(true);
+            resultList.getItems().clear();
+            downloadButton.setDisable(true);
+            search.run();
+        });
         targetProfileCombo.setOnAction(event -> {
             ContentInstance instance = resolveContentInstance(targetProfileCombo.getValue());
             updateContentTargetLabel(target, instance, targetLabel);
@@ -2152,7 +2164,8 @@ public class LauncherUI extends javafx.application.Application {
                 status.setText("无法创建目录: " + cleanMessage(error));
                 return;
             }
-            downloadSelectedContent(target, resultList.getSelectionModel().getSelectedItem(),
+            downloadSelectedContent(sourceCombo.getValue(), target,
+                    resultList.getSelectionModel().getSelectedItem(),
                     versionComboBox.getValue(), instance, directory, status, progress,
                     searchButton, downloadButton, targetProfileCombo, downloadGeneration);
         });
@@ -4093,7 +4106,8 @@ public class LauncherUI extends javafx.application.Application {
         HBox.setHgrow(targetProfileCombo, Priority.ALWAYS);
         loaderCombo.setPrefWidth(132);
 
-        HBox searchBar = new HBox(10, searchField, searchBtn);
+        ComboBox<ContentSource> sourceCombo = createContentSourceCombo();
+        HBox searchBar = new HBox(10, sourceCombo, searchField, searchBtn);
         HBox.setHgrow(searchField, Priority.ALWAYS);
 
         ListView<ModrinthDownloader.Project> resultList = new ListView<>();
@@ -4169,7 +4183,7 @@ public class LauncherUI extends javafx.application.Application {
                         descriptionGeneration, selectedDescriptionGeneration);
                 ContentInstance selectedInstance = resolveContentInstance(targetProfileCombo.getValue());
                 loadProjectVersions(
-                        target,
+                        sourceCombo.getValue(), target,
                         selected,
                         selectedInstance,
                         projectVersionCombo,
@@ -4184,7 +4198,7 @@ public class LauncherUI extends javafx.application.Application {
                                 || resultList.getSelectionModel().getSelectedItem() == null));
 
         searchBtn.setOnAction(e -> searchModrinthContent(
-                target,
+                sourceCombo.getValue(), target,
                 resolveContentInstance(targetProfileCombo.getValue()),
                 searchField,
                 resultList,
@@ -4193,6 +4207,14 @@ public class LauncherUI extends javafx.application.Application {
                 importBtn,
                 searchGeneration));
         searchField.setOnAction(e -> searchBtn.fire());
+        sourceCombo.setOnAction(e -> {
+            versionGeneration.incrementAndGet();
+            projectVersionCombo.getItems().clear();
+            projectVersionCombo.setDisable(true);
+            resultList.getItems().clear();
+            importBtn.setDisable(true);
+            searchBtn.fire();
+        });
         targetProfileCombo.setOnAction(e -> {
             ContentInstance selectedInstance = resolveContentInstance(targetProfileCombo.getValue());
             if (target.usesLoader()) {
@@ -4207,7 +4229,7 @@ public class LauncherUI extends javafx.application.Application {
             importBtn.setDisable(true);
             descriptionLabel.setText("正在加载所选实例的兼容内容...");
             searchModrinthContent(
-                    target, selectedInstance, searchField, resultList, dialogStatus,
+                    sourceCombo.getValue(), target, selectedInstance, searchField, resultList, dialogStatus,
                     searchBtn, importBtn, searchGeneration);
         });
 
@@ -4221,7 +4243,7 @@ public class LauncherUI extends javafx.application.Application {
                 return;
             }
             downloadSelectedContent(
-                    target,
+                    sourceCombo.getValue(), target,
                     resultList.getSelectionModel().getSelectedItem(),
                     projectVersionCombo.getValue(),
                     selectedInstance,
@@ -4258,7 +4280,7 @@ public class LauncherUI extends javafx.application.Application {
         applyThemeToScene(scene, settingsManager.get(ECLConfig.KEY_THEME));
         dialog.show();
         searchModrinthContent(
-                target, initialInstance, searchField, resultList, dialogStatus,
+                sourceCombo.getValue(), target, initialInstance, searchField, resultList, dialogStatus,
                 searchBtn, importBtn, searchGeneration);
     }
 
@@ -4317,6 +4339,7 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private void loadProjectVersions(
+            ContentSource source,
             ContentTarget target,
             ModrinthDownloader.Project project,
             ContentInstance instance,
@@ -4331,10 +4354,10 @@ public class LauncherUI extends javafx.application.Application {
         importBtn.setDisable(true);
         dialogStatus.setText("正在加载 " + project.getTitle() + " 的兼容版本...");
 
-        runAsync("ecl-load-modrinth-versions", () -> {
+        runAsync("ecl-load-" + source.id() + "-versions", () -> {
             try {
                 List<ModrinthDownloader.ProjectVersion> versions =
-                        modrinthDownloader.listProjectVersions(
+                        controller.contentDownloader(source).listProjectVersions(
                                 project, instance.minecraftVersion(), loader).stream()
                                 .filter(version -> controller.preferredModReleaseChannel()
                                         .allows(version.versionType()))
@@ -4370,7 +4393,8 @@ public class LauncherUI extends javafx.application.Application {
         });
     }
 
-    private void searchModrinthContent(ContentTarget target, ContentInstance instance, TextField searchField,
+    private void searchModrinthContent(ContentSource source, ContentTarget target,
+                                       ContentInstance instance, TextField searchField,
                                        ListView<ModrinthDownloader.Project> resultList, Label dialogStatus,
                                        Button searchBtn, Button importBtn, AtomicLong searchGeneration) {
         long generation = searchGeneration.incrementAndGet();
@@ -4378,22 +4402,26 @@ public class LauncherUI extends javafx.application.Application {
         String gameVersion = instance.minecraftVersion();
         String loader = target.usesLoader() ? instance.loader() : null;
         String loaderLabel = loader == null ? "" : " / " + loader;
+        String sourceName = source == ContentSource.CURSEFORGE ? "CurseForge" : "Modrinth";
         boolean officialList = query == null || query.trim().isBlank();
 
         searchBtn.setDisable(true);
         importBtn.setDisable(true);
         resultList.getItems().clear();
         dialogStatus.setText(officialList
-                ? "正在加载 Modrinth 官网" + target.title + "下载列表..."
+                ? "正在加载 " + sourceName + " " + target.title + "下载列表..."
                 : "正在搜索 " + gameVersion + loaderLabel + " 的兼容" + target.title + "...");
         setStatus(officialList ? "正在加载官网列表" : "正在搜索" + target.title,
-                officialList ? "Modrinth " + target.title + " · 下载量排序" : query.trim());
+                officialList ? sourceName + " " + target.title + " · 下载量排序" : query.trim());
 
-        runAsync("ecl-search-modrinth-" + target.projectType, () -> {
+        runAsync("ecl-search-" + source.id() + "-" + target.projectType, () -> {
             try {
+                ContentDownloader contentDownloader = controller.contentDownloader(source);
                 List<ModrinthDownloader.Project> projects = officialList
-                        ? modrinthDownloader.listOfficialProjects(gameVersion, target.projectType, loader, 24)
-                        : modrinthDownloader.searchProjects(query, gameVersion, target.projectType, loader, 24);
+                        ? contentDownloader.listOfficialProjects(
+                                gameVersion, target.projectType, loader, 24)
+                        : contentDownloader.searchProjects(
+                                query, gameVersion, target.projectType, loader, 24);
                 Platform.runLater(() -> {
                     if (generation != searchGeneration.get()) {
                         return;
@@ -4410,7 +4438,8 @@ public class LauncherUI extends javafx.application.Application {
                     }
                     dialogStatus.setText(projects.isEmpty()
                             ? "没有找到兼容 " + gameVersion + loaderLabel + " 的" + target.title + "。"
-                            : (officialList ? "已加载 Modrinth 官网列表 " : "找到 ") + projects.size() + " 个结果，选择一个后下载。");
+                            : (officialList ? "已加载 " + sourceName + " 列表 " : "找到 ")
+                                    + projects.size() + " 个结果，选择一个后下载。");
                     setStatus(officialList ? "官网列表已加载" : target.title + "搜索完成",
                             projects.isEmpty() ? "没有找到匹配结果。" : projects.size() + " 个兼容结果。");
                     searchBtn.setDisable(false);
@@ -4481,6 +4510,30 @@ public class LauncherUI extends javafx.application.Application {
         };
     }
 
+    private ComboBox<ContentSource> createContentSourceCombo() {
+        ComboBox<ContentSource> combo = new ComboBox<>();
+        combo.getItems().setAll(ContentSource.MODRINTH, ContentSource.CURSEFORGE);
+        combo.setValue(ContentSource.MODRINTH);
+        combo.setPrefWidth(132);
+        combo.setCellFactory(list -> contentSourceCell());
+        combo.setButtonCell(contentSourceCell());
+        applyFieldStyle(combo);
+        return combo;
+    }
+
+    private static ListCell<ContentSource> contentSourceCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(ContentSource item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : switch (item) {
+                    case MODRINTH -> "Modrinth";
+                    case CURSEFORGE -> "CurseForge";
+                });
+            }
+        };
+    }
+
     private URI safeUri(String value) {
         if (value == null || value.isBlank()) return null;
         try {
@@ -4510,6 +4563,7 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private void downloadSelectedContent(
+            ContentSource source,
             ContentTarget target,
             ModrinthDownloader.Project project,
             ModrinthDownloader.ProjectVersion selectedVersion,
@@ -4543,13 +4597,13 @@ public class LauncherUI extends javafx.application.Application {
                 project.getTitle() + " " + selectedVersion.versionNumber()
                         + " -> " + gameVersion + loaderLabel);
 
-        runAsync("ecl-download-modrinth-" + target.projectType, () -> {
+        runAsync("ecl-download-" + source.id() + "-" + target.projectType, () -> {
             if (generation != downloadGeneration.get()) {
                 // The download dialog was closed; do not start the transfer or touch the UI.
                 return;
             }
             try {
-                ModrinthDownloader.DownloadResult result = modrinthDownloader.downloadVersion(
+                ModrinthDownloader.DownloadResult result = controller.contentDownloader(source).downloadVersion(
                         project,
                         selectedVersion,
                         gameVersion,
@@ -4584,13 +4638,21 @@ public class LauncherUI extends javafx.application.Application {
                 MrpackInstaller.InstallResult packResult = null;
                 if ("modpack".equals(target.projectType)) {
                     if (result.getMainFile() == null) {
-                        throw new IOException("整合包下载完成，但没有找到 .mrpack 文件");
+                        throw new IOException("整合包下载完成，但没有找到安装文件");
                     }
-                    packResult = mrpackInstaller.install(
-                            result.getMainFile(),
-                            getConfiguredGameRootDir(),
-                            project.getTitle(),
-                            new MrpackInstaller.Listener() {
+                    File installArchive = result.getMainFile();
+                    boolean converted = source == ContentSource.CURSEFORGE;
+                    if (converted) {
+                        dialogStatus.setText("正在解析 CurseForge 整合包清单...");
+                        installArchive = controller.curseForgeDownloader()
+                                .convertModpackToMrpack(result.getMainFile());
+                    }
+                    try {
+                        packResult = mrpackInstaller.install(
+                                installArchive,
+                                getConfiguredGameRootDir(),
+                                project.getTitle(),
+                                new MrpackInstaller.Listener() {
                                 @Override
                                 public void onStatus(String message) {
                                     Platform.runLater(() -> {
@@ -4612,7 +4674,10 @@ public class LauncherUI extends javafx.application.Application {
                                         updateProgress(downloadProgress, downloaded, total);
                                     });
                                 }
-                            });
+                                });
+                    } finally {
+                        if (converted) Files.deleteIfExists(installArchive.toPath());
+                    }
                     gameRepository().applyDefaultIsolationSettingForNewInstance(packResult.profileId());
                 }
 
@@ -4970,6 +5035,13 @@ public class LauncherUI extends javafx.application.Application {
         });
         applyFieldStyle(modReleaseChannelField);
 
+        PasswordField curseForgeApiKeyField = new PasswordField();
+        String storedCurseForgeKey = settingsManager.getEncrypted(
+                ECLConfig.SETTING_CURSEFORGE_API_KEY);
+        curseForgeApiKeyField.setText(storedCurseForgeKey == null ? "" : storedCurseForgeKey);
+        curseForgeApiKeyField.setPromptText("可留空，或使用 CURSEFORGE_API_KEY 环境变量");
+        applyFieldStyle(curseForgeApiKeyField);
+
         VBox dialogRoot = new VBox(18,
                 createSurface("Java 路径", "指向 java.exe 或 JDK 根目录", javaBox),
                 createSurface("游戏目录", "Minecraft 实例根目录", dirBox),
@@ -4991,7 +5063,10 @@ public class LauncherUI extends javafx.application.Application {
                         backupBehaviorBox),
                 createSurface("Modrinth 发布通道",
                         "控制默认版本、依赖版本和更新版本的稳定性范围",
-                        modReleaseChannelField)
+                        modReleaseChannelField),
+                createSurface("CurseForge API Key",
+                        "用于 CurseForge 模组、光影、材质包和整合包搜索下载；保存时加密存储",
+                        curseForgeApiKeyField)
         );
         dialogRoot.getStyleClass().add("root-pane");
         dialogRoot.setPadding(new Insets(24));
@@ -5080,6 +5155,8 @@ public class LauncherUI extends javafx.application.Application {
                 default -> ReleaseChannel.RELEASE_AND_BETA;
             };
             settingsManager.set(ECLConfig.KEY_MOD_RELEASE_CHANNEL, modReleaseChannel.name());
+            settingsManager.setEncrypted(ECLConfig.SETTING_CURSEFORGE_API_KEY,
+                    curseForgeApiKeyField.getText().trim());
             if (selectedInstanceId != null && !selectedInstanceId.isBlank()) {
                 try {
                     DefaultGameRepository repository = gameRepository();

@@ -112,15 +112,15 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             Map<String, ScanCacheEntry> cache = readCache(instance);
             List<ScannedFile> scanned = scanFiles(instance, cache);
 
-            List<String> hashes = scanned.stream()
+            List<Path> scannableFiles = scanned.stream()
                     .filter(file -> !file.damaged)
-                    .map(file -> file.hashes.sha1())
+                    .map(file -> file.path)
                     .distinct()
                     .toList();
-            Map<String, ModVersion> recognized;
+            Map<Path, ModVersion> recognized;
             try {
-                recognized = hashes.isEmpty() ? Map.of()
-                        : metadataProvider.getVersionsFromHashes(hashes, "sha1").join();
+                recognized = scannableFiles.isEmpty() ? Map.of()
+                        : metadataProvider.getVersionsByFiles(scannableFiles).join();
             } catch (RuntimeException lookupFailure) {
                 LOGGER.warn("Online mod hash lookup failed; continuing with local metadata",
                         lookupFailure);
@@ -142,7 +142,7 @@ public final class DefaultLocalModScanner implements LocalModScanner {
                     warnings.add(file.path.getFileName() + ": " + file.message);
                     continue;
                 }
-                ModVersion version = recognized.get(file.hashes.sha1());
+                ModVersion version = recognized.get(file.path);
                 boolean enabled = file.path.getParent().equals(instance.modsDirectory());
                 InstalledMod record;
                 if (version != null) {
@@ -152,7 +152,8 @@ public final class DefaultLocalModScanner implements LocalModScanner {
                             .orElseGet(() -> versionSelector.selectInstallFile(version).orElse(null));
                     record = recognizedRecord(instance, version, file, relative, enabled, old, matchedFile);
                     projectCounts.merge(record.projectId(), 1, Integer::sum);
-                    items.add(new LocalModScanItem(file.path, record, true, false, "Modrinth 已识别"));
+                    items.add(new LocalModScanItem(file.path, record, true, false,
+                            metadataProvider.source().displayName() + " 已识别"));
                 } else {
                     record = unknownRecord(instance, file, relative, enabled, old);
                     String message = file.metadata.modded()

@@ -90,6 +90,7 @@ public class ECLConfig {
     public static final SettingKey<String> KEY_YGGDRASIL_SERVER = new SettingKey<>("yggdrasilServer", String.class, DEFAULT_YGGDRASIL_SERVER);
     public static final SettingKey<String> KEY_MOD_RELEASE_CHANNEL =
             new SettingKey<>("modReleaseChannel", String.class, "RELEASE_AND_BETA");
+    public static final String SETTING_CURSEFORGE_API_KEY = "curseForgeApiKey";
     public static final SettingKey<String> KEY_DEFAULT_ISOLATION_TYPE =
             new SettingKey<>("defaultIsolationType", String.class, "MODDED");
     public static final SettingKey<Integer> KEY_GAME_WIDTH =

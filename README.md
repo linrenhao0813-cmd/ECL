@@ -1,6 +1,6 @@
 # ECL
 
-ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle 构建，支持版本与 Mod 加载器安装、Modrinth 整合包安装、游戏启动、Java 运行时自动准备、离线登录、正版 Microsoft 登录和外置 Yggdrasil 登录。
+ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle 构建，支持版本与 Mod 加载器安装、Modrinth/CurseForge 整合包安装、游戏启动、Java 运行时自动准备、离线登录、正版 Microsoft 登录和外置 Yggdrasil 登录。
 
 ## 功能特性
 
@@ -14,8 +14,8 @@ ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle �
 - 支持始终隔离、仅 Mod 实例隔离和全部共享三种策略（默认仅 Mod 实例隔离），并可为单个实例指定独立或自定义运行目录
 - 自动解析 Minecraft 版本 JSON、依赖库、原生库、平台规则与启动参数
 - 下载和启动前校验客户端、依赖库、原生库与资源索引，缺失或损坏时自动补齐
-- Modrinth 模组、光影包、材质包和整合包内置搜索下载
-- 模组、光影包和材质包自动导入对应实例目录；`.mrpack` 自动安装依赖、覆盖文件和所需加载器并生成可启动实例
+- Modrinth 与 CurseForge 模组、光影包、材质包和整合包双源搜索下载
+- 模组、光影包和材质包自动导入对应实例目录；Modrinth `.mrpack` 与 CurseForge 清单整合包会自动安装依赖、覆盖文件和所需加载器并生成可启动实例
 - 游戏输出实时显示在日志页，可选择启动后自动打开控制台
 - 可选择游戏启动后隐藏启动器，并在游戏退出后恢复
 - 游戏异常退出后自动分析英文日志，输出中文解释和修复建议
@@ -52,29 +52,32 @@ ECL 是一个基于 JavaFX 的轻量 Minecraft 启动器。项目使用 Gradle �
 
 首页“选择版本 / 加载器”和版本页均可安装 Fabric、Quilt、Forge 或 NeoForge。首页选择 Minecraft 版本与加载器后可直接“安装并启动”；进入模组中心时如果当前还是原版，也可一键安装加载器。加载器版本默认自动选择最新兼容版本，安装完成后会自动切换到独立模组实例。
 
-模组中心按当前 Minecraft 版本与加载器筛选 Modrinth 内容，并会读取标准 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 环境变量，以兼容本地代理网络。
+模组中心按当前 Minecraft 版本与加载器筛选 Modrinth 或 CurseForge 内容，并会读取标准 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 环境变量，以兼容本地代理网络。
 
 同一页面还提供版本删除和重装：
 
 - 删除会同时移除启动器版本文件和对应独立实例，包括模组、存档、设置与日志，操作前会二次确认
 - 重装会重建版本元数据和依赖；加载器实例会重新安装对应加载器，同时保留独立实例中的模组、存档与设置
 
-## Modrinth 内容下载
+## Modrinth / CurseForge 内容下载
 
-启动器内置 Modrinth 内容下载入口，支持按当前选择的 Minecraft 版本筛选兼容内容：
+启动器内置双数据源选择器，支持按当前选择的 Minecraft 版本筛选兼容内容：
 
 - 模组：支持 Fabric、Forge、NeoForge、Quilt 加载器筛选，下载 `.jar` 并导入 `mods`
 - 光影包：下载 `.zip` 并导入 `shaderpacks`
 - 材质包：下载 `.zip` 并导入 `resourcepacks`
-- 整合包：下载 `.mrpack`，校验并下载客户端依赖，解压 overrides，自动准备所需加载器，并生成独立的可启动版本
+- 整合包：Modrinth `.mrpack` 和 CurseForge `manifest.json` 包都会校验并下载客户端依赖、解压 overrides、自动准备所需加载器，并生成独立的可启动版本
 
 搜索结果支持异步图标与失败占位，点击后可查看推荐版本、发布渠道、加载器标签和格式化更新日志。依赖按必需、可选、内嵌与不兼容分组展示，并可点击进入依赖项目；下载完成后会事务安装到对应实例。
 
 进入“已安装”页会自动检查兼容更新并显示数量角标，30 分钟内不会重复请求。本地 JAR 即使离线也会尝试从 `fabric.mod.json`、`quilt.mod.json`、Forge/NeoForge TOML 或 `mcmod.info` 读取名称、版本和加载器。
 
-模组元数据通过可扩展 Provider 接口提供，当前内置 Modrinth；搜索栏的数据源选择器会自动列出通过 `ServiceLoader` 注册的其他实现。CurseForge Provider 尚未内置。
+模组元数据通过可扩展 Provider 接口提供，当前内置 Modrinth 与 CurseForge；模组页和其他三类资源页均可在搜索栏切换数据源。
+本地模组识别会按数据源使用 Modrinth SHA-1 或 CurseForge Murmur2 指纹；CurseForge 更新检查复用安装索引中的项目 ID，不会把 SHA-1 误当作 CurseForge 指纹。
 
-没有输入关键词时，下载窗口会自动加载 Modrinth 官网下载量排序列表，便于直接浏览热门模组、光影包、材质包和整合包。
+没有输入关键词时，下载窗口会按所选数据源加载下载量排序列表，便于直接浏览热门模组、光影包、材质包和整合包。
+
+CurseForge 官方 REST API 要求 API Key。可在“设置 → 高级设置 → CurseForge API Key”填写（加密保存），或设置 `CURSEFORGE_API_KEY` 环境变量；也可通过 JVM 参数 `-Decl.curseforge.apiKey=...` 临时提供。未配置时 Modrinth 仍可正常使用，选择 CurseForge 会显示明确提示。
 
 ## 启动可靠性与运行环境
 
@@ -117,7 +120,7 @@ Java 查找顺序包括用户配置路径、当前运行时、`JAVA_HOME`、启�
 
 - JDK 21
 - Gradle Wrapper 已包含在项目中，无需单独安装 Gradle
-- 网络连接，用于下载 Gradle 依赖、Minecraft 资源、Microsoft 登录令牌和 Modrinth 内容
+- 网络连接，用于下载 Gradle 依赖、Minecraft 资源、Microsoft 登录令牌和 Modrinth/CurseForge 内容
 
 ## 快速开始
 

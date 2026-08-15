@@ -5,6 +5,7 @@ import com.ecl.modrinth.api.ModrinthApiClient;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.InstalledMod;
 import com.ecl.modrinth.model.ModFile;
+import com.ecl.modrinth.model.ModCompatibility;
 import com.ecl.modrinth.model.ModUpdate;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
@@ -16,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -65,20 +67,51 @@ public final class DefaultModUpdateService implements ModUpdateService {
     ) {
         List<InstalledMod> candidates = installedMods == null ? List.of()
                 : installedMods.stream()
-                .filter(mod -> mod.sha1() != null && !mod.sha1().isBlank())
-                .filter(mod -> mod.projectId() != null && !mod.projectId().startsWith("local:"))
+                .filter(metadataProvider::canCheckUpdates)
+                .filter(mod -> mod.projectId() != null && !mod.projectId().isBlank())
+                .filter(mod -> !mod.projectId().startsWith("local:"))
                 .toList();
         if (candidates.isEmpty()) {
             return CompletableFuture.completedFuture(List.of());
         }
-        List<String> hashes = candidates.stream().map(InstalledMod::sha1).distinct().toList();
+        if (!metadataProvider.supportsSha1HashLookup()) {
+            return checkUpdatesByProject(instance, candidates, channel);
+        }
+        List<InstalledMod> hashedCandidates = candidates.stream()
+                .filter(mod -> mod.sha1() != null && !mod.sha1().isBlank())
+                .toList();
+        if (hashedCandidates.isEmpty()) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        List<String> hashes = hashedCandidates.stream().map(InstalledMod::sha1).distinct().toList();
         return metadataProvider.getLatestVersionsFromHashes(
                         hashes, "sha1", List.of(instance.loaderName()),
                         List.of(instance.minecraftVersion()))
-                .thenApply(latest -> buildUpdates(candidates, latest, channel));
+                .thenApply(latest -> buildUpdatesByHash(hashedCandidates, latest, channel));
     }
 
-    private List<ModUpdate> buildUpdates(
+    private CompletableFuture<List<ModUpdate>> checkUpdatesByProject(
+            ModInstanceContext instance,
+            List<InstalledMod> candidates,
+            ReleaseChannel channel
+    ) {
+        ReleaseChannel effectiveChannel = channel == null ? ReleaseChannel.RELEASE_ONLY : channel;
+        ModCompatibility compatibility = new ModCompatibility(instance.minecraftVersion(), instance.loader());
+        Map<String, CompletableFuture<List<ModVersion>>> requests = new LinkedHashMap<>();
+        candidates.stream().map(InstalledMod::projectId).distinct().forEach(projectId ->
+                requests.put(projectId, metadataProvider.getVersions(
+                        projectId, instance.minecraftVersion(), instance.loaderName())));
+        return CompletableFuture.allOf(requests.values().toArray(CompletableFuture[]::new))
+                .thenApply(ignored -> {
+                    Map<String, ModVersion> latest = new LinkedHashMap<>();
+                    requests.forEach((projectId, request) -> selector.selectBestVersion(
+                                    request.join(), compatibility, effectiveChannel)
+                            .ifPresent(version -> latest.put(projectId, version)));
+                    return buildUpdatesByProject(candidates, latest, effectiveChannel);
+                });
+    }
+
+    private List<ModUpdate> buildUpdatesByHash(
             List<InstalledMod> installed,
             Map<String, ModVersion> latest,
             ReleaseChannel channel
@@ -95,6 +128,23 @@ public final class DefaultModUpdateService implements ModUpdateService {
             if (file != null) {
                 updates.add(new ModUpdate(current, version, file, effectiveChannel));
             }
+        }
+        return List.copyOf(updates);
+    }
+
+    private List<ModUpdate> buildUpdatesByProject(
+            List<InstalledMod> installed,
+            Map<String, ModVersion> latest,
+            ReleaseChannel channel
+    ) {
+        List<ModUpdate> updates = new ArrayList<>();
+        for (InstalledMod current : installed) {
+            ModVersion version = latest.get(current.projectId());
+            if (version == null || version.id().equals(current.versionId())) {
+                continue;
+            }
+            selector.selectInstallFile(version).ifPresent(file ->
+                    updates.add(new ModUpdate(current, version, file, channel)));
         }
         return List.copyOf(updates);
     }

@@ -14,7 +14,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
-/** Asynchronous Chinese translation for public Modrinth summaries with shared session caching. */
+/** Asynchronous Chinese translation for public content summaries with shared session caching. */
 public final class ChineseDescriptionService {
     private static final int MAX_SOURCE_LENGTH = 450;
     private static final Pattern HAN = Pattern.compile("[\\p{IsHan}]");

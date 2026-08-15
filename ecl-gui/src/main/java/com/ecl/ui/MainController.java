@@ -4,6 +4,8 @@ import com.ecl.ECLConfig;
 import com.ecl.config.SettingsManager;
 import com.ecl.download.DownloadService;
 import com.ecl.download.GameDownloader;
+import com.ecl.download.ContentDownloader;
+import com.ecl.download.CurseForgeDownloader;
 import com.ecl.download.ModrinthDownloader;
 import com.ecl.launcher.GameLauncher;
 import com.ecl.launcher.LaunchService;
@@ -15,6 +17,7 @@ import com.ecl.modrinth.download.ModFileDownloadService;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.provider.ContentSource;
+import com.ecl.modrinth.provider.CurseForgeMetadataProvider;
 import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.provider.ModMetadataProviderRegistry;
 import com.ecl.modrinth.provider.ModrinthMetadataProvider;
@@ -53,6 +56,7 @@ public final class MainController implements AutoCloseable {
     private final VersionManager versionManager;
     private final DownloadService gameDownloader;
     private final ModrinthDownloader modrinthDownloader;
+    private final CurseForgeDownloader curseForgeDownloader;
     private final ModrinthApiClient modrinthApiClient;
     private final ModMetadataProviderRegistry metadataProviders;
     private final LaunchService gameLauncher;
@@ -78,9 +82,11 @@ public final class MainController implements AutoCloseable {
         versionManager = new VersionManager();
         gameDownloader = new GameDownloader();
         modrinthDownloader = new ModrinthDownloader();
+        curseForgeDownloader = new CurseForgeDownloader(this::curseForgeApiKey);
         modrinthApiClient = new DefaultModrinthApiClient();
         metadataProviders = new ModMetadataProviderRegistry(
-                new ModrinthMetadataProvider(modrinthApiClient, false));
+                new ModrinthMetadataProvider(modrinthApiClient, false),
+                new CurseForgeMetadataProvider(curseForgeDownloader.api()));
         ModMetadataProvider metadataProvider = metadataProviders.require(ContentSource.MODRINTH);
         gameLauncher = new GameLauncher();
         AtomicInteger threadNumber = new AtomicInteger();
@@ -110,7 +116,16 @@ public final class MainController implements AutoCloseable {
         installationPlanBuilder = new InstallationPlanBuilder();
         HashVerifier hashVerifier = new HashVerifier();
         ModFileDownloadService fileDownloadService =
-                new ModFileDownloadService(modDownloadExecutor, hashVerifier);
+                new ModFileDownloadService(modDownloadExecutor, hashVerifier, uri -> {
+                    if (!"curseforge".equalsIgnoreCase(uri.getScheme())) {
+                        return uri;
+                    }
+                    String projectId = uri.getHost();
+                    String path = uri.getPath();
+                    String fileId = path == null ? "" : path.replaceFirst("^/", "");
+                    return java.net.URI.create(curseForgeDownloader.api()
+                            .getDownloadUrl(projectId, fileId));
+                });
         modInstallationService = new ModInstallationService(
                 installedModRepository, fileDownloadService, modOperationLock,
                 backgroundExecutor, runningInstances::contains);
@@ -131,6 +146,10 @@ public final class MainController implements AutoCloseable {
     public VersionManager versions() { return versionManager; }
     public DownloadService gameDownloader() { return gameDownloader; }
     public ModrinthDownloader modrinthDownloader() { return modrinthDownloader; }
+    public CurseForgeDownloader curseForgeDownloader() { return curseForgeDownloader; }
+    public ContentDownloader contentDownloader(ContentSource source) {
+        return source == ContentSource.CURSEFORGE ? curseForgeDownloader : modrinthDownloader;
+    }
     public ModrinthApiClient modrinthApi() { return modrinthApiClient; }
     public ModMetadataProvider metadataProvider(ContentSource source) {
         return metadataProviders.require(source);
@@ -174,6 +193,15 @@ public final class MainController implements AutoCloseable {
         } catch (IllegalArgumentException | NullPointerException ignored) {
             return ReleaseChannel.RELEASE_AND_BETA;
         }
+    }
+
+    private String curseForgeApiKey() {
+        String stored = settingsManager.getEncrypted(ECLConfig.SETTING_CURSEFORGE_API_KEY);
+        if (stored != null && !stored.isBlank()) return stored;
+        String property = System.getProperty("ecl.curseforge.apiKey", "");
+        if (!property.isBlank()) return property;
+        String environment = System.getenv("CURSEFORGE_API_KEY");
+        return environment == null ? "" : environment;
     }
 
     public void registerModInstance(ModInstanceContext instance) {

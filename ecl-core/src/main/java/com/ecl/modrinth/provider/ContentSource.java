@@ -10,4 +10,8 @@ public enum ContentSource {
     public String id() {
         return name().toLowerCase(Locale.ROOT);
     }
+
+    public String displayName() {
+        return this == CURSEFORGE ? "CurseForge" : "Modrinth";
+    }
 }

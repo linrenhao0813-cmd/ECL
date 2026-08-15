@@ -1,6 +1,6 @@
 # ECL 模组下载界面升级方案（对标 HMCL 设计思路）
 
-> 落地状态（2026-08）：P0-1 至 P0-4、P1-1 至 P1-4 已完成。当前内置数据源为 Modrinth；P2 CurseForge 实现与动态分类/多选筛选仍为可选后续项。
+> 落地状态（2026-08）：P0-1 至 P0-4、P1-1 至 P1-4、P2 CurseForge Provider 已完成；模组、光影、材质与整合包均已接入 Modrinth/CurseForge 双源。动态分类/多选筛选仍为可选后续项。
 
 > 依据：HMCL 模组下载界面的设计思路（统一抽象 Repository + 实例上下文跟随 + 列表防抖/竞态 + 详情页推荐版本置顶 + 依赖分组与钻取 + 本地管理闭环）与本项目 ECL 现状盘点。
 > 范围：ecl-gui 的 ModBrowserView / ModBrowserViewModel 及 ecl-core 的 com.ecl.modrinth 服务层。
@@ -28,7 +28,7 @@ HMCL 模组下载页面的核心设计可浓缩为六点：① 统一抽象、UI
 | 递归依赖解析 + 环检测 + 冲突 | ✅ 已实现 | `service/DefaultModDependencyResolver` |
 | 事务化安装 + 备份回滚 + 崩溃恢复 | ✅ 已实现 | `transaction/FileModInstallationTransaction` |
 | 下载哈希校验（SHA-512/1） | ✅ 已实现 | `download/ModFileDownloadService` + `HashVerifier` |
-| 更新检查 / 批量更新 | ✅ 已实现（仅手动触发） | `service/DefaultModUpdateService` |
+| 更新检查 / 批量更新 | ✅ 已实现（仅手动触发；Modrinth 按 SHA-1、CurseForge 按项目 ID） | `service/DefaultModUpdateService` |
 | 本地管理（启停/卸载/导入） | ✅ 已实现 | `service/DefaultModManagementService` |
 | 多源抽象（Provider + Registry） | ⚠️ 存在但闲置，VM 直接注入 `ModrinthApiClient` | `provider/`、`ModBrowserViewModel` L44 |
 | 依赖分组展示 + 钻取 | ❌ 纯文本 `- type: projectId`，不可点击 | `ModBrowserView` L384-391 |
@@ -181,7 +181,7 @@ record LocalModMeta(String id, String name, String version, ModLoader loader, bo
 
 ### 4.8 CurseForge 源（P2，可选）
 
-在 4.5 完成后实现 `CurseForgeContentProvider`（对照 Modrinth 实现映射：CF 的 addon/file API、gameVersion 筛选、loader 判定、hash 反查 CF 无 → 降级）。**前置依赖：4.5 必须完成**，否则无从谈起。
+在 4.5 完成后实现 `CurseForgeContentProvider`（对照 Modrinth 实现映射：CF 的 addon/file API、gameVersion 筛选、loader 判定；本地文件使用官方 Murmur2 指纹接口识别，更新检查使用安装索引中的项目 ID）。**前置依赖：4.5 必须完成**，否则无从谈起。
 
 ### 4.9 分类树动态化 + 加载器/渠道筛选 UI（P2，可选）
 

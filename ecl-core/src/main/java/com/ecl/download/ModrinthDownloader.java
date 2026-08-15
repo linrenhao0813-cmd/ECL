@@ -23,7 +23,7 @@ import static com.ecl.util.JsonUtil.getString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class ModrinthDownloader {
+public class ModrinthDownloader implements ContentDownloader {
     private static final Logger LOGGER = LoggerFactory.getLogger(ModrinthDownloader.class);
     private static final String API_BASE = "https://api.modrinth.com/v2";
 
@@ -41,6 +41,7 @@ public class ModrinthDownloader {
         private final String iconUrl;
         private final long downloads;
         private final long follows;
+        private final String projectType;
 
         public Project(String projectId, String slug, String title, String author, String description, long downloads, long follows) {
             this(projectId, slug, title, author, description, null, downloads, follows);
@@ -48,6 +49,11 @@ public class ModrinthDownloader {
 
         public Project(String projectId, String slug, String title, String author, String description,
                        String iconUrl, long downloads, long follows) {
+            this(projectId, slug, title, author, description, iconUrl, downloads, follows, "");
+        }
+
+        public Project(String projectId, String slug, String title, String author, String description,
+                       String iconUrl, long downloads, long follows, String projectType) {
             this.projectId = projectId;
             this.slug = slug;
             this.title = title;
@@ -56,6 +62,7 @@ public class ModrinthDownloader {
             this.iconUrl = iconUrl;
             this.downloads = downloads;
             this.follows = follows;
+            this.projectType = projectType == null ? "" : projectType;
         }
 
         public String getProjectId() {
@@ -84,6 +91,10 @@ public class ModrinthDownloader {
 
         public long getFollows() {
             return follows;
+        }
+
+        public String getProjectType() {
+            return projectType;
         }
 
         @Override
@@ -190,7 +201,8 @@ public class ModrinthDownloader {
                     getString(hit, "description"),
                     getString(hit, "icon_url"),
                     getLong(hit, "downloads"),
-                    getLong(hit, "follows")
+                    getLong(hit, "follows"),
+                    projectType
             ));
         }
         return projects;
