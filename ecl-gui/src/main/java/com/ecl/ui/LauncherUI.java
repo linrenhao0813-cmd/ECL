@@ -6,6 +6,7 @@ import com.ecl.auth.MicrosoftAuth;
 import com.ecl.auth.MicrosoftAccountStore;
 import com.ecl.auth.MinecraftSkinService;
 import com.ecl.auth.OfflineAuth;
+import com.ecl.auth.OfflineSkinStore;
 import com.ecl.auth.YggdrasilAuth;
 import com.ecl.backup.BackupEntry;
 import com.ecl.backup.WorldBackupService;
@@ -170,6 +171,7 @@ public class LauncherUI extends javafx.application.Application {
     private Button microsoftAddAccountBtn;
     private Button skinUploadBtn;
     private Button homeSkinUploadButton;
+    private Button offlineSkinRemoveBtn;
     private ComboBox<MicrosoftAccountStore.Account> microsoftAccountCombo;
     private volatile MicrosoftAccountStore.Account selectedMicrosoftAccount;
     private volatile boolean lastMicrosoftAccountPersisted = true;
@@ -2415,7 +2417,10 @@ public class LauncherUI extends javafx.application.Application {
         usernameField = new TextField(previousUsername);
         usernameField.setPromptText("输入玩家名称");
         applyFieldStyle(usernameField);
-        usernameField.textProperty().addListener((obs, oldValue, newValue) -> updateRuntimeSummary());
+        usernameField.textProperty().addListener((obs, oldValue, newValue) -> {
+            updateRuntimeSummary();
+            updateOfflineSkinControls();
+        });
 
         passwordField = new PasswordField();
         passwordField.setPromptText("外置登录时需要");
@@ -2509,6 +2514,11 @@ public class LauncherUI extends javafx.application.Application {
         skinUploadBtn.getStyleClass().addAll("app-button", "ghost-button", "compact-button");
         skinUploadBtn.setTooltip(new Tooltip("上传 PNG 皮肤到当前 Minecraft Java 正版账号"));
         skinUploadBtn.setOnAction(e -> chooseAndUploadSkin());
+        offlineSkinRemoveBtn = new Button("清除皮肤");
+        offlineSkinRemoveBtn.getStyleClass().addAll("app-button", "ghost-button", "compact-button");
+        offlineSkinRemoveBtn.setTooltip(new Tooltip("移除当前离线账号已导入的本地皮肤"));
+        offlineSkinRemoveBtn.setOnAction(e -> removeOfflineSkin());
+        setFieldVisible(offlineSkinRemoveBtn, false);
         microsoftAccountCombo = new ComboBox<>();
         microsoftAccountCombo.setPromptText("选择已保存账号");
         microsoftAccountCombo.getItems().setAll(microsoftAccountStore.list());
@@ -2534,7 +2544,7 @@ public class LauncherUI extends javafx.application.Application {
         selectedMicrosoftAccount = microsoftAccountCombo.getValue();
         applyFieldStyle(microsoftAccountCombo);
         HBox authBox = new HBox(10, authTypeCombo, usernameField, microsoftAccountCombo,
-                microsoftLoginBtn, microsoftAddAccountBtn, skinUploadBtn);
+                microsoftLoginBtn, microsoftAddAccountBtn, skinUploadBtn, offlineSkinRemoveBtn);
         authBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(usernameField, Priority.ALWAYS);
         HBox.setHgrow(microsoftAccountCombo, Priority.ALWAYS);
@@ -2871,6 +2881,7 @@ public class LauncherUI extends javafx.application.Application {
         String authType = authTypeCombo.getValue();
         boolean microsoft = AUTH_MICROSOFT.equals(authType);
         boolean yggdrasil = AUTH_YGGDRASIL.equals(authType);
+        boolean offline = AUTH_OFFLINE.equals(authType);
 
         // 切换到非 Yggdrasil 认证方式时清除密码
         if (!yggdrasil) {
@@ -2882,8 +2893,8 @@ public class LauncherUI extends javafx.application.Application {
         setFieldVisible(microsoftAccountCombo, microsoft);
         setFieldVisible(microsoftLoginBtn, microsoft);
         setFieldVisible(microsoftAddAccountBtn, microsoft);
-        setFieldVisible(skinUploadBtn, microsoft);
-        setFieldVisible(homeSkinUploadButton, microsoft);
+        setFieldVisible(skinUploadBtn, microsoft || offline);
+        setFieldVisible(homeSkinUploadButton, microsoft || offline);
         setFieldVisible(serverLabel, yggdrasil);
         setFieldVisible(yggdrasilServerField, yggdrasil);
         setFieldVisible(passwordLabel, yggdrasil);
@@ -2893,6 +2904,10 @@ public class LauncherUI extends javafx.application.Application {
             usernameField.setPromptText("授权后自动读取正版玩家名");
             authSummaryLabel.setText("微软正版登录");
             authHintLabel.setText("会优先静默恢复已保存的登录状态；仅在缓存和刷新令牌失效时显示设备码。 ");
+            skinUploadBtn.setText("上传皮肤");
+            skinUploadBtn.setTooltip(new Tooltip("上传 PNG 皮肤到当前 Minecraft Java 正版账号"));
+            homeSkinUploadButton.setText("上传皮肤  ›");
+            homeSkinUploadButton.setTooltip(new Tooltip("上传 PNG 皮肤到当前 Minecraft Java 正版账号"));
         } else if (yggdrasil) {
             usernameField.setPromptText("输入外置登录用户名或邮箱");
             authSummaryLabel.setText("外置登录 / Yggdrasil");
@@ -2901,9 +2916,33 @@ public class LauncherUI extends javafx.application.Application {
             usernameField.setPromptText("输入玩家名称");
             authSummaryLabel.setText("离线登录");
             authHintLabel.setText("会为当前用户名生成本地 UUID，适合单机和快速调试。 ");
+            skinUploadBtn.setText("导入皮肤");
+            skinUploadBtn.setTooltip(new Tooltip("为离线账号导入本地 PNG 皮肤，启动游戏时自动注入，无需正版账号"));
+            homeSkinUploadButton.setText("导入皮肤  ›");
+            homeSkinUploadButton.setTooltip(new Tooltip("为离线账号导入本地 PNG 皮肤，启动游戏时自动注入，无需正版账号"));
         }
 
+        updateOfflineSkinControls();
         updateRuntimeSummary();
+    }
+
+    private void updateOfflineSkinControls() {
+        if (offlineSkinRemoveBtn == null) {
+            return;
+        }
+        boolean offline = AUTH_OFFLINE.equals(authTypeCombo.getValue());
+        setFieldVisible(offlineSkinRemoveBtn, offline && offlineSkinExists());
+        offlineSkinRemoveBtn.setDisable(false);
+    }
+
+    private boolean offlineSkinExists() {
+        String username = usernameField.getText() == null ? "" : usernameField.getText().trim();
+        if (username.isBlank()) {
+            return false;
+        }
+        return new OfflineSkinStore()
+                .find(OfflineSkinStore.identityForOffline(username))
+                .isPresent();
     }
 
     private void updateRuntimeSummary() {
@@ -3344,6 +3383,13 @@ public class LauncherUI extends javafx.application.Application {
                 AuthProvider auth = buildAuthProvider(authType, server, username, password);
                 password = null;
                 gameLauncher.setAuth(auth);
+                if (auth.getType() == com.ecl.auth.AuthType.OFFLINE) {
+                    gameLauncher.setOfflineSkin(new OfflineSkinStore()
+                            .find(OfflineSkinStore.identityForOffline(auth.getUsername()))
+                            .orElse(null));
+                } else {
+                    gameLauncher.setOfflineSkin(null);
+                }
                 gameLauncher.setVersion(version);
                 gameLauncher.setMaxMemory(getEffectiveMaxMemoryMb());
                 gameLauncher.setGameDir(launchDir);
@@ -3571,8 +3617,14 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private void chooseAndUploadSkin() {
-        if (!AUTH_MICROSOFT.equals(authTypeCombo.getValue())) {
-            setStatus("仅支持正版皮肤上传", "请先将登录方式切换为 Microsoft 正版登录。");
+        String authType = authTypeCombo.getValue();
+        if (AUTH_OFFLINE.equals(authType)) {
+            chooseAndImportOfflineSkin();
+            return;
+        }
+        if (!AUTH_MICROSOFT.equals(authType)) {
+            setStatus("当前登录方式不支持皮肤操作",
+                    "请切换到 Microsoft 正版登录上传官方皮肤，或切换到离线登录导入本地皮肤。");
             return;
         }
         FileChooser chooser = new FileChooser();
@@ -3636,7 +3688,7 @@ public class LauncherUI extends javafx.application.Application {
             try {
                 MicrosoftAuth auth = authenticateMicrosoftAccount(false);
                 MinecraftSkinService.UploadResult result = minecraftSkinService.upload(
-                        auth.getAccessToken(), skin, variant);
+                        auth, skin, variant);
                 Platform.runLater(() -> {
                     String account = result.profileName() == null || result.profileName().isBlank()
                             ? auth.getUsername() : result.profileName();
@@ -3650,6 +3702,112 @@ public class LauncherUI extends javafx.application.Application {
                 });
             }
         });
+    }
+
+    /**
+     * Offline account path: pick a PNG, confirm the model, and copy it into the launcher data
+     * directory. The skin is injected at launch time through the built-in Yggdrasil skin service,
+     * so it works in single player and on offline-mode servers without any mods or premium login.
+     */
+    private void chooseAndImportOfflineSkin() {
+        String username = usernameField.getText() == null ? "" : usernameField.getText().trim();
+        if (username.isBlank()) {
+            setStatus("请输入玩家名称", "离线皮肤需要绑定到具体的离线玩家名，请先在“账号模式”中填写玩家名称。");
+            return;
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("选择离线账号皮肤（PNG）");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("PNG 皮肤图片 (*.png)", "*.png"));
+        File selected = chooser.showOpenDialog(primaryStage);
+        if (selected == null) return;
+
+        MinecraftSkinService.SkinImage skin;
+        try {
+            skin = minecraftSkinService.inspect(selected.toPath());
+        } catch (IOException error) {
+            setStatus("皮肤文件无效", cleanMessage(error));
+            return;
+        }
+
+        Dialog<MinecraftSkinService.Variant> dialog = new Dialog<>();
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("导入离线皮肤");
+        dialog.setHeaderText("确认皮肤模型");
+        dialog.setOnShown(event -> {
+            if (dialog.getDialogPane().getScene().getWindow() instanceof Stage stage) {
+                applyWindowIcon(stage);
+            }
+        });
+
+        ImageView preview = new ImageView(new Image(selected.toURI().toString()));
+        preview.setFitWidth(192);
+        preview.setFitHeight(192);
+        preview.setPreserveRatio(true);
+        preview.setSmooth(false);
+        preview.getStyleClass().add("skin-preview");
+
+        ComboBox<MinecraftSkinService.Variant> variant = new ComboBox<>();
+        variant.getItems().setAll(MinecraftSkinService.Variant.values());
+        variant.setValue(MinecraftSkinService.Variant.CLASSIC);
+        variant.setMaxWidth(Double.MAX_VALUE);
+        applyFieldStyle(variant);
+
+        Label fileInfo = createBodyText(selected.getName() + " · "
+                + skin.width() + "×" + skin.height() + " · " + formatBytes(skin.fileSize()));
+        Label accountInfo = createBodyText("应用到离线账号：" + username
+                + "\n皮肤与玩家名（含大小写）绑定；改名后需要重新导入。"
+                + "\n本地皮肤服务会在启动游戏时自动注入，无需正版账号。");
+        VBox content = new VBox(12, preview, fileInfo, accountInfo,
+                new Label("角色模型"), variant);
+        content.setAlignment(Pos.CENTER);
+        dialog.getDialogPane().setContent(content);
+        ButtonType importButton = new ButtonType("导入并使用", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(importButton, ButtonType.CANCEL);
+        dialog.setResultConverter(button -> button == importButton ? variant.getValue() : null);
+        dialog.showAndWait().ifPresent(selectedVariant ->
+                importOfflineSkin(selected.toPath(), username, selectedVariant));
+    }
+
+    private void importOfflineSkin(Path skin, String username, MinecraftSkinService.Variant variant) {
+        setControlsBusy(true);
+        setStatus("正在导入皮肤", "正在校验并复制皮肤到本地数据目录…");
+        runAsync("ecl-import-offline-skin", () -> {
+            try {
+                String identity = OfflineSkinStore.identityForOffline(username);
+                new OfflineSkinStore().importSkin(identity, skin, variant);
+                Platform.runLater(() -> {
+                    setStatus("皮肤导入成功",
+                            "离线账号 " + username + " 已使用本地皮肤，重新启动游戏后生效。");
+                    setControlsBusy(false);
+                    updateOfflineSkinControls();
+                });
+            } catch (Exception error) {
+                Platform.runLater(() -> {
+                    setStatus("皮肤导入失败", cleanMessage(error));
+                    setControlsBusy(false);
+                });
+            }
+        });
+    }
+
+    private void removeOfflineSkin() {
+        String username = usernameField.getText() == null ? "" : usernameField.getText().trim();
+        if (username.isBlank()) {
+            return;
+        }
+        String identity = OfflineSkinStore.identityForOffline(username);
+        try {
+            boolean removed = new OfflineSkinStore().remove(identity);
+            if (removed) {
+                setStatus("皮肤已清除", "离线账号 " + username + " 已恢复默认皮肤。");
+            } else {
+                setStatus("皮肤未找到", "该账号当前没有导入本地皮肤。");
+            }
+        } catch (RuntimeException failure) {
+            setStatus("清除皮肤失败", cleanMessage(failure));
+        }
+        updateOfflineSkinControls();
     }
 
     private MicrosoftAuth authenticateMicrosoftAccount(boolean forceNew) {
@@ -3859,6 +4017,9 @@ public class LauncherUI extends javafx.application.Application {
         }
         if (homeSkinUploadButton != null) {
             homeSkinUploadButton.setDisable(busy);
+        }
+        if (offlineSkinRemoveBtn != null) {
+            offlineSkinRemoveBtn.setDisable(busy);
         }
         if (microsoftAccountCombo != null) {
             microsoftAccountCombo.setDisable(busy);

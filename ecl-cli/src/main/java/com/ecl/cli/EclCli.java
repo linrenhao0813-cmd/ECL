@@ -5,7 +5,10 @@ import com.ecl.auth.AuthAccount;
 import com.ecl.auth.AuthProvider;
 import com.ecl.auth.DefaultAccountService;
 import com.ecl.auth.MicrosoftAuth;
+import com.ecl.auth.MinecraftSkinService;
 import com.ecl.auth.OfflineAuth;
+import com.ecl.auth.OfflineSkin;
+import com.ecl.auth.OfflineSkinStore;
 import com.ecl.auth.YggdrasilAuth;
 import com.ecl.config.SettingsManager;
 import com.ecl.diagnostic.DiagnosticBundleService;
@@ -251,7 +254,8 @@ public final class EclCli implements Runnable {
 
     @Command(name = "account", description = "Manage launcher accounts.",
             subcommands = {AccountListCommand.class, AccountAddOfflineCommand.class,
-                    AccountRemoveCommand.class, AccountDefaultCommand.class})
+                    AccountRemoveCommand.class, AccountDefaultCommand.class,
+                    AccountSkinCommand.class, AccountSkinRemoveCommand.class})
     static final class AccountCommand implements Runnable {
         @Override
         public void run() {
@@ -318,6 +322,48 @@ public final class EclCli implements Runnable {
         }
     }
 
+    @Command(name = "skin", description = "Import a local PNG skin for an offline account.")
+    static final class AccountSkinCommand implements Callable<Integer> {
+        @Parameters(index = "0", description = "Offline player name")
+        private String username;
+        @Parameters(index = "1", description = "PNG skin file (64x64 or 64x32)")
+        private File pngFile;
+        @Option(names = "--slim", description = "Use the slim (Alex) model")
+        private boolean slim;
+        @CommandLine.Spec
+        private CommandLine.Model.CommandSpec spec;
+
+        @Override
+        public Integer call() throws IOException {
+            OfflineSkinStore store = new OfflineSkinStore();
+            String identity = OfflineSkinStore.identityForOffline(username);
+            OfflineSkin skin = store.importSkin(identity, pngFile.toPath(),
+                    slim ? MinecraftSkinService.Variant.SLIM : MinecraftSkinService.Variant.CLASSIC);
+            root(spec).print(Map.of(
+                    "username", username,
+                    "variant", slim ? "slim" : "classic",
+                    "skinFile", skin.pngFile().toAbsolutePath().toString(),
+                    "imported", true));
+            return 0;
+        }
+    }
+
+    @Command(name = "skin-remove", description = "Remove the imported skin of an offline account.")
+    static final class AccountSkinRemoveCommand implements Callable<Integer> {
+        @Parameters(index = "0", description = "Offline player name")
+        private String username;
+        @CommandLine.Spec
+        private CommandLine.Model.CommandSpec spec;
+
+        @Override
+        public Integer call() {
+            boolean removed = new OfflineSkinStore()
+                    .remove(OfflineSkinStore.identityForOffline(username));
+            root(spec).print(Map.of("username", username, "removed", removed));
+            return removed ? 0 : 2;
+        }
+    }
+
     @Command(name = "launch", description = "Prepare or start an installed version.")
     static final class LaunchCommandLine implements Callable<Integer> {
         @Parameters(index = "0", description = "Installed version id")
@@ -347,6 +393,12 @@ public final class EclCli implements Runnable {
             Path instanceRoot = games.instanceRoot(versionId);
             Path instance = games.runDirectory(versionId);
             AuthProvider auth = selectAuth(accountIdentity, username, !dryRun);
+            OfflineSkin offlineSkin = null;
+            if (auth.getType() == com.ecl.auth.AuthType.OFFLINE) {
+                offlineSkin = new OfflineSkinStore()
+                        .find(OfflineSkinStore.identityForOffline(auth.getUsername()))
+                        .orElse(null);
+            }
             LaunchEnvironment environment = new LaunchEnvironment(ECLConfig.getVersionsDir(),
                     ECLConfig.getLibrariesDir(), ECLConfig.getAssetsDir(),
                     ECLConfig.LAUNCHER_NAME, ECLConfig.LAUNCHER_VERSION);
@@ -354,6 +406,7 @@ public final class EclCli implements Runnable {
             LaunchOptions options = LaunchOptions.builder()
                     .versionId(versionId)
                     .auth(auth)
+                    .offlineSkin(offlineSkin)
                     .gameDirectory(instance.toFile())
                     .instanceDirectory(instanceRoot.toFile())
                     .environment(environment)

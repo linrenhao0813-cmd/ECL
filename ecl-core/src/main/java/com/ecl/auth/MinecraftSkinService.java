@@ -6,7 +6,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -35,23 +38,33 @@ public final class MinecraftSkinService {
             throw new IOException("请选择有效的 PNG 皮肤文件");
         }
         long size = Files.size(file);
-        if (size <= 0 || size > MAX_SKIN_BYTES) {
-            throw new IOException("皮肤文件必须小于 1 MB");
+        if (size <= 0) {
+            throw new IOException("皮肤文件不能为空");
+        }
+        if (size > MAX_SKIN_BYTES) {
+            throw new IOException("皮肤文件不得超过 1 MB");
         }
         byte[] bytes = Files.readAllBytes(file);
+        if (bytes.length == 0 || bytes.length > MAX_SKIN_BYTES) {
+            throw new IOException("皮肤文件在读取过程中发生变化，请重新选择");
+        }
         if (bytes.length < 8 || bytes[0] != (byte) 0x89 || bytes[1] != 0x50
                 || bytes[2] != 0x4E || bytes[3] != 0x47) {
             throw new IOException("皮肤必须是 PNG 图片");
         }
-        BufferedImage image = ImageIO.read(file.toFile());
-        if (image == null || !((image.getWidth() == 64 && image.getHeight() == 64)
-                || (image.getWidth() == 64 && image.getHeight() == 32))) {
-            throw new IOException("皮肤尺寸必须为 64×64，旧版皮肤也支持 64×32");
-        }
-        return new SkinImage(file, image.getWidth(), image.getHeight(), size, bytes);
+        int[] dimensions = inspectDimensions(bytes);
+        return new SkinImage(file, dimensions[0], dimensions[1], bytes.length, bytes);
     }
 
-    public UploadResult upload(String accessToken, Path file, Variant variant) throws IOException {
+    /** Upload a skin only for a Microsoft-authenticated Minecraft profile. */
+    public UploadResult upload(AuthProvider auth, Path file, Variant variant) throws IOException {
+        if (auth == null || auth.getType() != AuthType.MICROSOFT) {
+            throw new IOException("当前账号不是 Microsoft 正版账号，不能使用官方皮肤上传接口");
+        }
+        return upload(auth.getAccessToken(), file, variant);
+    }
+
+    UploadResult upload(String accessToken, Path file, Variant variant) throws IOException {
         if (accessToken == null || accessToken.isBlank()) {
             throw new IOException("Microsoft 登录已失效，请重新登录后上传皮肤");
         }
@@ -70,6 +83,36 @@ public final class MinecraftSkinService {
             throw new IOException("皮肤上传失败：Minecraft 服务返回 HTTP " + response.statusCode());
         }
         return parseResult(response.body(), selectedVariant);
+    }
+
+    private static int[] inspectDimensions(byte[] bytes) throws IOException {
+        try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
+            if (input == null) {
+                throw new IOException("无法读取 PNG 皮肤文件");
+            }
+            var readers = ImageIO.getImageReaders(input);
+            if (!readers.hasNext()) {
+                throw new IOException("皮肤必须是有效的 PNG 图片");
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(input, true, true);
+                int width = reader.getWidth(0);
+                int height = reader.getHeight(0);
+                if (width != 64 || height != 64 && height != 32) {
+                    throw new IOException("皮肤尺寸必须为 64×64，旧版皮肤也支持 64×32");
+                }
+                BufferedImage decoded = reader.read(0);
+                if (decoded == null || decoded.getWidth() != width || decoded.getHeight() != height) {
+                    throw new IOException("皮肤 PNG 数据不完整或已损坏");
+                }
+                return new int[]{width, height};
+            } finally {
+                reader.dispose();
+            }
+        } catch (RuntimeException malformed) {
+            throw new IOException("皮肤 PNG 数据无效", malformed);
+        }
     }
 
     static byte[] multipartBody(String boundary, String variant, byte[] png) throws IOException {

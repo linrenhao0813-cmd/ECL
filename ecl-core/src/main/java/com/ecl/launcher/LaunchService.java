@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 
 import com.ecl.auth.AuthProvider;
+import com.ecl.auth.OfflineSkin;
 
 /**
  * Service interface for launching the Minecraft game process.
@@ -35,6 +36,10 @@ public interface LaunchService {
     void setServerAddress(String serverAddress);
 
     void setProcessorCount(int processorCount);
+
+    /** Locally imported skin to inject for an offline account; no-op by default. */
+    default void setOfflineSkin(OfflineSkin skin) {
+    }
 
     Process launch() throws IOException;
 }

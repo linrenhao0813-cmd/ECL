@@ -247,6 +247,22 @@ class LaunchCommandBuilderTest {
         return count;
     }
 
+    @Test
+    void includesExtraJvmArgsInCommandOrder() throws Exception {
+        LaunchOptions options = options().build();
+        LaunchCommand command = new LaunchCommandBuilder().build(
+                options, repository.resolve("1.21"), "java",
+                List.of("-javaagent:agent.jar=http://127.0.0.1:9999", "-Dauthlibinjector.side=client"));
+
+        List<String> args = command.arguments();
+        assertTrue(args.contains("-javaagent:agent.jar=http://127.0.0.1:9999"));
+        assertTrue(args.contains("-Dauthlibinjector.side=client"));
+        // Extra JVM arguments must land before -cp / mainClass and not break argument order
+        int agentIndex = args.indexOf("-javaagent:agent.jar=http://127.0.0.1:9999");
+        int cpIndex = args.indexOf("-cp");
+        assertTrue(agentIndex >= 0 && agentIndex < cpIndex);
+    }
+
     private LaunchOptions.Builder options() {
         return LaunchOptions.builder()
                 .versionId("1.21")

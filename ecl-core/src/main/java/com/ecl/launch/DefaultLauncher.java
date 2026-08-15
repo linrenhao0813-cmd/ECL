@@ -1,5 +1,6 @@
 package com.ecl.launch;
 
+import com.ecl.auth.offline.OfflineSkinInjector;
 import com.ecl.event.EventBus;
 import com.ecl.event.GameLifecycleEvent;
 import com.ecl.game.VersionChainException;
@@ -9,6 +10,7 @@ import com.ecl.util.JavaRuntimeUtil;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,7 +50,7 @@ public final class DefaultLauncher implements Launcher {
 
     @Override
     public LaunchCommand prepare(LaunchOptions options) throws LaunchException {
-        return prepare(options, true);
+        return prepare(options, true, List.of());
     }
 
     /**
@@ -56,10 +58,11 @@ public final class DefaultLauncher implements Launcher {
      * or extracts natives, so callers can safely use it for a dry-run preview.
      */
     public LaunchCommand preview(LaunchOptions options) throws LaunchException {
-        return prepare(options, false);
+        return prepare(options, false, List.of());
     }
 
-    private LaunchCommand prepare(LaunchOptions options, boolean allowWrites) throws LaunchException {
+    private LaunchCommand prepare(LaunchOptions options, boolean allowWrites,
+                                  List<String> extraJvmArgs) throws LaunchException {
         String versionId = options.versionId();
         try {
             VersionMetadata metadata = repository.resolve(versionId);
@@ -84,7 +87,7 @@ public final class DefaultLauncher implements Launcher {
                 NativeLibraryExtractor.extract(metadata, environment, versionId,
                         options.instanceDirectory());
             }
-            return commandBuilder.build(options, metadata, javaExecutable);
+            return commandBuilder.build(options, metadata, javaExecutable, extraJvmArgs);
         } catch (LaunchException alreadyClassified) {
             throw alreadyClassified;
         } catch (VersionChainException chainBroken) {
@@ -98,7 +101,23 @@ public final class DefaultLauncher implements Launcher {
     @Override
     public GameProcess launch(LaunchOptions options) throws LaunchException {
         String versionId = options.versionId();
-        LaunchCommand command = prepare(options);
+        OfflineSkinInjector.Injection skinInjection = null;
+        LaunchCommand command;
+        try {
+            skinInjection = OfflineSkinInjector.prepare(options.auth(), options.offlineSkin());
+            command = prepare(options, true, skinInjection.jvmArgs());
+        } catch (LaunchException prepareFailure) {
+            if (skinInjection != null) {
+                skinInjection.close();
+            }
+            throw prepareFailure;
+        } catch (IOException skinFailure) {
+            if (skinInjection != null) {
+                skinInjection.close();
+            }
+            throw new LaunchException(LaunchException.Kind.UNKNOWN,
+                    "无法准备离线皮肤服务: " + skinFailure.getMessage(), skinFailure);
+        }
         ProcessBuilder builder = new ProcessBuilder(command.commandLine());
         if (command.workingDirectory() != null) {
             builder.directory(command.workingDirectory());
@@ -111,9 +130,11 @@ public final class DefaultLauncher implements Launcher {
         try {
             process = builder.start();
         } catch (IOException startFailure) {
+            skinInjection.close();
             throw new LaunchException(LaunchException.Kind.PROCESS_CREATION,
                     "无法启动游戏进程: " + startFailure.getMessage(), startFailure);
         }
+        skinInjection.closeWhen(process);
 
         Path workingDirectory = command.workingDirectory() == null
                 ? null : command.workingDirectory().toPath();

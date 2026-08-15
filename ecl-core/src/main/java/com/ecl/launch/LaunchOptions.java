@@ -1,6 +1,7 @@
 package com.ecl.launch;
 
 import com.ecl.auth.AuthProvider;
+import com.ecl.auth.OfflineSkin;
 
 import java.io.File;
 import java.util.List;
@@ -25,6 +26,7 @@ public final class LaunchOptions {
     private final boolean fullscreen;
     private final String serverAddress;
     private final int processorCount;
+    private final OfflineSkin offlineSkin;
 
     private LaunchOptions(Builder builder) {
         this.versionId = builder.versionId;
@@ -43,6 +45,7 @@ public final class LaunchOptions {
         this.fullscreen = builder.fullscreen;
         this.serverAddress = builder.serverAddress == null ? "" : builder.serverAddress.trim();
         this.processorCount = Math.max(0, builder.processorCount);
+        this.offlineSkin = builder.offlineSkin;
     }
 
     public String versionId() {
@@ -107,6 +110,11 @@ public final class LaunchOptions {
         return processorCount;
     }
 
+    /** Locally imported skin for an offline account, or {@code null} when not applicable. */
+    public OfflineSkin offlineSkin() {
+        return offlineSkin;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -126,6 +134,7 @@ public final class LaunchOptions {
         private boolean fullscreen;
         private String serverAddress = "";
         private int processorCount;
+        private OfflineSkin offlineSkin;
 
         public Builder versionId(String versionId) {
             this.versionId = versionId;
@@ -190,6 +199,11 @@ public final class LaunchOptions {
 
         public Builder processorCount(int processorCount) {
             this.processorCount = processorCount;
+            return this;
+        }
+
+        public Builder offlineSkin(OfflineSkin offlineSkin) {
+            this.offlineSkin = offlineSkin;
             return this;
         }
 

@@ -33,9 +33,18 @@ public final class LaunchCommandBuilder {
      */
     public LaunchCommand build(LaunchOptions options, VersionMetadata version, String javaExecutable)
             throws IOException {
+        return build(options, version, javaExecutable, List.of());
+    }
+
+    /**
+     * Build the full process command, additionally inserting {@code extraJvmArgs} (e.g. the
+     * offline-skin javaagent arguments) after the user-configured JVM arguments.
+     */
+    public LaunchCommand build(LaunchOptions options, VersionMetadata version, String javaExecutable,
+                               List<String> extraJvmArgs) throws IOException {
         String mainClass = requireMainClass(options, version);
         Map<String, String> variables = LaunchVariables.of(options, version);
-        List<String> arguments = buildArguments(options, version, mainClass, variables);
+        List<String> arguments = buildArguments(options, version, mainClass, variables, extraJvmArgs);
         arguments.addAll(gameArguments(version, variables));
         appendResolutionAndServer(options, arguments);
 
@@ -66,7 +75,8 @@ public final class LaunchCommandBuilder {
     }
 
     private List<String> buildArguments(LaunchOptions options, VersionMetadata version,
-                                        String mainClass, Map<String, String> variables) throws IOException {
+                                        String mainClass, Map<String, String> variables,
+                                        List<String> extraJvmArgs) throws IOException {
         List<String> args = new ArrayList<>();
         args.add("-Xms" + options.minMemoryMb() + "m");
         args.add("-Xmx" + options.maxMemoryMb() + "m");
@@ -76,6 +86,13 @@ public final class LaunchCommandBuilder {
         for (String userArgument : options.jvmArguments()) {
             if (!userArgument.isBlank()) {
                 args.add(LaunchVariables.substitute(userArgument, variables));
+            }
+        }
+        if (extraJvmArgs != null) {
+            for (String extra : extraJvmArgs) {
+                if (!extra.isBlank()) {
+                    args.add(LaunchVariables.substitute(extra, variables));
+                }
             }
         }
         args.addAll(jvmArgumentsFromVersion(version, variables));

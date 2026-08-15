@@ -3,6 +3,8 @@ package com.ecl.launcher;
 import com.ecl.ECLConfig;
 import com.ecl.auth.AuthProvider;
 import com.ecl.auth.OfflineAuth;
+import com.ecl.auth.OfflineSkin;
+import com.ecl.auth.offline.OfflineSkinInjector;
 import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
@@ -58,6 +60,7 @@ public class GameLauncher implements LaunchService {
     private boolean fullscreen;
     private String serverAddress = "";
     private int processorCount;
+    private OfflineSkin offlineSkin;
 
     public GameLauncher() {
         this.auth = new OfflineAuth("Player");
@@ -118,6 +121,11 @@ public class GameLauncher implements LaunchService {
         this.processorCount = Math.max(0, processorCount);
     }
 
+    @Override
+    public void setOfflineSkin(OfflineSkin skin) {
+        this.offlineSkin = skin;
+    }
+
     public Process launch() throws IOException {
         if (versionId == null || versionId.isBlank()) {
             throw new IOException("未选择游戏版本");
@@ -140,7 +148,14 @@ public class GameLauncher implements LaunchService {
                 javaPath, requiredJavaMajor,
                 message -> LOGGER.info("{}", message),
                 (downloaded, total) -> { });
-        List<String> command = buildCommand(resolvedJavaPath, versionJson);
+        OfflineSkinInjector.Injection skinInjection = OfflineSkinInjector.prepare(auth, offlineSkin);
+        List<String> command;
+        try {
+            command = buildCommand(resolvedJavaPath, versionJson, skinInjection.jvmArgs());
+        } catch (IOException | RuntimeException failure) {
+            skinInjection.close();
+            throw failure;
+        }
 
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(launchDirectory);
@@ -153,7 +168,14 @@ public class GameLauncher implements LaunchService {
         pb.environment().put("INST_MC_DIR", launchDirectory.getAbsolutePath());
         pb.redirectErrorStream(true);
 
-        return pb.start();
+        try {
+            Process process = pb.start();
+            skinInjection.closeWhen(process);
+            return process;
+        } catch (IOException | RuntimeException failure) {
+            skinInjection.close();
+            throw failure;
+        }
     }
 
     private int determineRequiredJavaMajor(JsonObject versionJson) {
@@ -232,7 +254,8 @@ public class GameLauncher implements LaunchService {
         return new int[]{Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2))};
     }
 
-    private List<String> buildCommand(String javaExecutable, JsonObject versionJson) throws IOException {
+    private List<String> buildCommand(String javaExecutable, JsonObject versionJson,
+                                      List<String> extraJvmArgs) throws IOException {
         String mainClass = requireMainClass(versionJson);
         List<String> cmd = new ArrayList<>();
         Map<String, String> variables = buildLaunchVariables(versionJson);
@@ -250,6 +273,8 @@ public class GameLauncher implements LaunchService {
                 }
             }
         }
+
+        cmd.addAll(extraJvmArgs);
 
         cmd.addAll(parseJVMArguments(versionJson, variables));
         cmd.add("-cp");
