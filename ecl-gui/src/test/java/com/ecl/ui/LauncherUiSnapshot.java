@@ -157,6 +157,20 @@ public final class LauncherUiSnapshot {
                 showAppView("VERSIONS");
                 return primaryStage.getScene();
             }
+            if ("servers".equalsIgnoreCase(mode)
+                    || "servers-dark".equalsIgnoreCase(mode)) {
+                if ("servers-dark".equalsIgnoreCase(mode)) {
+                    Field settingsField = LauncherUI.class.getDeclaredField("settingsManager");
+                    settingsField.setAccessible(true);
+                    SettingsManager settings = (SettingsManager) settingsField.get(this);
+                    settings.set(ECLConfig.KEY_THEME, "DARK");
+                    Method applyTheme = LauncherUI.class.getDeclaredMethod("applyTheme", String.class);
+                    applyTheme.setAccessible(true);
+                    applyTheme.invoke(this, "DARK");
+                }
+                showAppView("SERVERS");
+                return primaryStage.getScene();
+            }
             if ("loader-choice".equalsIgnoreCase(mode)) {
                 String profileId = createVisualProfile(
                         "visual-vanilla-loader-choice", "", "1.20.6");

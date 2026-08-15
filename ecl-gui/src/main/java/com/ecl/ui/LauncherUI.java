@@ -32,6 +32,7 @@ import com.ecl.modrinth.provider.ContentSource;
 import com.ecl.modrinth.ui.ChineseDescriptionService;
 import com.ecl.modrinth.ui.ModBrowserView;
 import com.ecl.modrinth.ui.RemoteImageLoader;
+import com.ecl.server.ServerBrowserView;
 import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.Messages;
 import com.ecl.util.PlatformUtil;
@@ -235,12 +236,14 @@ public class LauncherUI extends javafx.application.Application {
     private VBox navButtonColumn;
     private Animation contentTransition;
     private ModBrowserView activeModBrowserView;
+    private ServerBrowserView activeServerBrowserView;
     private AppView activeView = AppView.HOME;
 
     private enum AppView {
         HOME(ICON_HOME, "⌂", "nav.home"),
         VERSIONS(ICON_STONE_BLOCK, "□", "nav.versions"),
         MODRINTH(ICON_MODRINTH, "◎", "nav.modrinth"),
+        SERVERS(ICON_SIGNAL, "◈", "nav.servers"),
         LOGS(ICON_LOG, "▤", "nav.logs"),
         SETTINGS(ICON_GEAR, "⚙", "nav.settings");
 
@@ -459,6 +462,7 @@ public class LauncherUI extends javafx.application.Application {
     public void stop() {
         stopAllProgressAnimations();
         closeActiveModBrowserView();
+        closeActiveServerBrowserView();
         if (contentTransition != null) {
             contentTransition.stop();
         }
@@ -821,6 +825,7 @@ public class LauncherUI extends javafx.application.Application {
             case HOME -> Messages.get("nav.short.home");
             case VERSIONS -> Messages.get("nav.short.versions");
             case MODRINTH -> Messages.get("nav.short.modrinth");
+            case SERVERS -> Messages.get("nav.short.servers");
             case LOGS -> Messages.get("nav.short.logs");
             case SETTINGS -> Messages.get("nav.short.settings");
         };
@@ -831,6 +836,7 @@ public class LauncherUI extends javafx.application.Application {
             case HOME -> Messages.get("nav.subtitle.home");
             case VERSIONS -> Messages.get("nav.subtitle.versions");
             case MODRINTH -> Messages.get("nav.subtitle.modrinth");
+            case SERVERS -> Messages.get("nav.subtitle.servers");
             case SETTINGS -> Messages.get("nav.subtitle.settings");
             case LOGS -> Messages.get("nav.subtitle.logs");
         };
@@ -870,12 +876,14 @@ public class LauncherUI extends javafx.application.Application {
             return;
         }
         closeActiveModBrowserView();
+        closeActiveServerBrowserView();
         workspacePane.getChildren().clear();
 
         switch (activeView) {
             case HOME -> addMainContent(getOrCreateHomePage(), null);
             case VERSIONS -> addMainContent(createVersionsPage(), null);
             case MODRINTH -> addMainContent(createModrinthPage(), null);
+            case SERVERS -> addMainContent(createServersPage(), null);
             case SETTINGS -> addMainContent(createSettingsPage(), null);
             case LOGS -> addMainContent(createLogsPage(), null);
         }
@@ -2191,6 +2199,42 @@ public class LauncherUI extends javafx.application.Application {
             activeModBrowserView.close();
             activeModBrowserView = null;
         }
+    }
+
+    private void closeActiveServerBrowserView() {
+        if (activeServerBrowserView != null) {
+            activeServerBrowserView.close();
+            activeServerBrowserView = null;
+        }
+    }
+
+    private VBox createServersPage() {
+        VBox page = createMainPage();
+
+        Label pageTitle = new Label(Messages.get("nav.servers"));
+        pageTitle.getStyleClass().add("page-title");
+        Label pageSubtitle = new Label("浏览全球公开 Java 版服务器，按玩法分类筛选并搜索");
+        pageSubtitle.getStyleClass().add("page-subtitle");
+        VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
+        pageHeading.getStyleClass().add("content-library-heading");
+
+        activeServerBrowserView = new ServerBrowserView(
+                message -> setStatus("服务器", message), this::setQuickServer);
+        activeServerBrowserView.setMaxWidth(Double.MAX_VALUE);
+        VBox.setVgrow(activeServerBrowserView, Priority.ALWAYS);
+
+        page.getChildren().addAll(pageHeading, activeServerBrowserView);
+        return page;
+    }
+
+    /** 将地址写入直连服务器配置并持久化，供服务器浏览页“设为直连”调用。 */
+    private void setQuickServer(String address) {
+        quickServer = address == null ? "" : address.trim();
+        settingsManager.set(ECLConfig.KEY_QUICK_SERVER, quickServer);
+        settingsManager.save();
+        setStatus("已设为直连服务器", quickServer.isBlank()
+                ? "已清空直连服务器地址"
+                : "下次启动将直接连接 " + quickServer);
     }
 
     private VBox createSettingsPage() {
