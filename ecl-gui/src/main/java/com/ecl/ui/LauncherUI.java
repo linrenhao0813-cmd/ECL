@@ -116,6 +116,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
 import java.util.function.Function;
 import org.slf4j.Logger;
@@ -691,7 +692,7 @@ public class LauncherUI extends javafx.application.Application {
         HBox.setHgrow(leftSpacer, Priority.ALWAYS);
         HBox.setHgrow(rightSpacer, Priority.ALWAYS);
 
-        topTaskLabel = new Label("暂无下载任务");
+        topTaskLabel = new Label(Messages.get("download.none"));
         topTaskLabel.getStyleClass().add("task-chip");
         topTaskLabel.setOnMouseClicked(event -> setActiveView(AppView.DOWNLOADS));
         topTaskLabel.setCursor(javafx.scene.Cursor.HAND);
@@ -758,15 +759,15 @@ public class LauncherUI extends javafx.application.Application {
         header.getStyleClass().add("hero-header");
         header.setAlignment(Pos.CENTER_LEFT);
 
-        Label title = new Label("▶ ECL 启动器");
+        Label title = new Label(Messages.get("app.launcherTitle"));
         title.getStyleClass().add("app-title");
-        Label subtitle = new Label("轻量 Minecraft 启动器 v1.0.0");
+        Label subtitle = new Label(Messages.format("app.subtitleVersion", Messages.get("app.version")));
         subtitle.getStyleClass().add("app-subtitle");
 
         topAuthBadgeLabel = createValueLabel("Steve");
-        topVersionBadgeLabel = createValueLabel("未选择");
-        runtimeBadgeLabel = createValueLabel("检查中");
-        topMemoryBadgeLabel = createValueLabel("自动");
+        topVersionBadgeLabel = createValueLabel(Messages.get("label.notSelected"));
+        runtimeBadgeLabel = createValueLabel(Messages.get("status.checking"));
+        topMemoryBadgeLabel = createValueLabel(Messages.get("label.auto"));
 
         header.getChildren().addAll(title, subtitle);
         return header;
@@ -794,9 +795,9 @@ public class LauncherUI extends javafx.application.Application {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Label version = new Label("ECL 1.0.0");
+        Label version = new Label("ECL " + Messages.get("app.version"));
         version.getStyleClass().add("footer-info");
-        Label state = new Label("所有启动检查会在启动前自动完成");
+        Label state = new Label(Messages.get("footer.ready"));
         state.getStyleClass().add("footer-info");
 
         HBox footer = new HBox(8, version, spacer, state);
@@ -812,7 +813,7 @@ public class LauncherUI extends javafx.application.Application {
         rail.setMinWidth(NAV_WIDTH);
         rail.setMaxWidth(NAV_WIDTH);
 
-        Label header = new Label("// 命令");
+        Label header = new Label(Messages.get("nav.command"));
         header.getStyleClass().add("nav-rail-header");
         header.setMaxWidth(Double.MAX_VALUE);
 
@@ -837,7 +838,7 @@ public class LauncherUI extends javafx.application.Application {
         VBox box = new VBox(8);
         box.getStyleClass().add("nav-rail-footer");
 
-        Label cpuLabel = new Label("CPU");
+        Label cpuLabel = new Label(Messages.get("telemetry.cpu"));
         cpuLabel.getStyleClass().add("telemetry-label");
         ProgressBar cpuBar = new ProgressBar(0.12);
         cpuBar.setMaxWidth(Double.MAX_VALUE);
@@ -847,7 +848,7 @@ public class LauncherUI extends javafx.application.Application {
         HBox cpuRow = new HBox(8, cpuLabel, cpuBar, cpuValue);
         cpuRow.setAlignment(Pos.CENTER_LEFT);
 
-        Label ramLabel = new Label("内存");
+        Label ramLabel = new Label(Messages.get("telemetry.memory"));
         ramLabel.getStyleClass().add("telemetry-label");
         ProgressBar ramBar = new ProgressBar(0.42);
         ramBar.setMaxWidth(Double.MAX_VALUE);
@@ -1002,26 +1003,26 @@ public class LauncherUI extends javafx.application.Application {
     private List<ContentTarget> createContentTargets() {
         return List.of(
                 new ContentTarget(
-                        "模组", "Fabric / Forge / NeoForge / Quilt", "M", "mod",
+                        Messages.get("content.mods.title"), Messages.get("content.mods.subtitle"), "M", "mod",
                         new String[]{"fabric", "forge", "neoforge", "quilt"}, new String[]{".jar"},
-                        true, "搜索模组名称，例如 sodium、journeymap", this::resolveModsDir),
+                        true, Messages.get("content.mods.searchHint"), this::resolveModsDir),
                 new ContentTarget(
-                        "光影包", "Iris / OptiFine shaderpacks", "S", "shader",
+                        Messages.get("content.shaders.title"), Messages.get("content.shaders.subtitle"), "S", "shader",
                         new String[0], new String[]{".zip"},
-                        false, "搜索光影名称，例如 complementary、bsl", version -> new File(resolveVersionGameDir(version), "shaderpacks")),
+                        false, Messages.get("content.shaders.searchHint"), version -> new File(resolveVersionGameDir(version), "shaderpacks")),
                 new ContentTarget(
-                        "材质包", "resourcepacks 目录资源包", "R", "resourcepack",
+                        Messages.get("content.resourcepacks.title"), Messages.get("content.resourcepacks.subtitle"), "R", "resourcepack",
                         new String[0], new String[]{".zip"},
-                        false, "搜索材质包名称，例如 fresh animations、faithful", version -> new File(resolveVersionGameDir(version), "resourcepacks")),
+                        false, Messages.get("content.resourcepacks.searchHint"), version -> new File(resolveVersionGameDir(version), "resourcepacks")),
                 new ContentTarget(
-                        "整合包", "完整玩法包与客户端预设", "P", "modpack",
+                        Messages.get("content.modpacks.title"), Messages.get("content.modpacks.subtitle"), "P", "modpack",
                         new String[0], new String[]{".mrpack"},
-                        false, "搜索整合包名称，例如 fabulously optimized",
+                        false, Messages.get("content.modpacks.searchHint"),
                         version -> new File(resolveVersionGameDir(version), "modpacks")),
                 new ContentTarget(
-                        "服务端", "官方 server.jar 与国内镜像", "V", "server",
+                        Messages.get("content.server.title"), Messages.get("content.server.subtitle"), "V", "server",
                         new String[0], new String[]{".jar"},
-                        false, "选择 Minecraft 服务端版本",
+                        false, Messages.get("content.server.searchHint"),
                         version -> new File(getConfiguredGameRootDir(), "server-downloads"))
         );
     }
@@ -1033,12 +1034,12 @@ public class LauncherUI extends javafx.application.Application {
         pane.setMinWidth(UTILITY_WIDTH);
         pane.setMaxWidth(UTILITY_WIDTH);
 
-        statusLabel = new Label("等待任务");
+        statusLabel = new Label(Messages.get("home.noTasks"));
         statusLabel.getStyleClass().add("status-title");
         detailLabel = new Label();
         detailLabel.getStyleClass().add("status-detail");
         detailLabel.setWrapText(true);
-        detailLabel.setText("没有正在进行的下载");
+        detailLabel.setText(Messages.get("progress.idle"));
 
         downloadProgress = new ProgressBar(0);
         downloadProgress.getStyleClass().add("download-progress");
@@ -1046,7 +1047,7 @@ public class LauncherUI extends javafx.application.Application {
         downloadProgress.setVisible(true);
 
         VBox statusCard = createSurface(
-                "下载队列",
+                Messages.get("download.center.title"),
                 null,
                 statusLabel,
                 detailLabel,
@@ -1066,14 +1067,14 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private VBox createDiagnosticPane() {
-        HBox okRow = createDiagnosticRow(ICON_CHECK, "✓", "状态", "");
-        HBox crashRow = createDiagnosticRow(ICON_LOG, "▤", "崩溃报告", String.valueOf(countCrashReports()));
+        HBox okRow = createDiagnosticRow(ICON_CHECK, "✓", Messages.get("diagnostic.status"), "");
+        HBox crashRow = createDiagnosticRow(ICON_LOG, "▤", Messages.get("label.crashReports"), String.valueOf(countCrashReports()));
 
         VBox rows = new VBox(0, okRow, crashRow);
         rows.getStyleClass().add("sidebar-list");
 
         return createSurface(
-                "诊断",
+                Messages.get("diagnostic.title"),
                 null,
                 rows
         );
@@ -1097,11 +1098,11 @@ public class LauncherUI extends javafx.application.Application {
         VBox rows = new VBox(0);
         rows.getStyleClass().add("sidebar-list");
         rows.getChildren().addAll(
-                createSidebarModrinthRow(contentTargets.get(0), "性能优化"),
-                createSidebarModrinthRow(contentTargets.get(1), "着色器兼容"),
-                createSidebarModrinthRow(contentTargets.get(2), "资源包")
+                createSidebarModrinthRow(contentTargets.get(0), Messages.get("content.sidebar.mods")),
+                createSidebarModrinthRow(contentTargets.get(1), Messages.get("content.sidebar.shaders")),
+                createSidebarModrinthRow(contentTargets.get(2), Messages.get("content.sidebar.resourcepacks"))
         );
-        return createSurface("Modrinth 推荐", null, rows);
+        return createSurface(Messages.get("content.recommended.title"), null, rows);
     }
 
     private HBox createSidebarModrinthRow(ContentTarget target, String subtitle) {
@@ -1144,9 +1145,9 @@ public class LauncherUI extends javafx.application.Application {
         pane.setFillWidth(true);
         HBox.setHgrow(pane, Priority.ALWAYS);
 
-        Label pageTitle = new Label("一切就绪。");
+        Label pageTitle = new Label(Messages.get("home.title"));
         pageTitle.getStyleClass().add("page-title");
-        Label pageSubtitle = new Label("选择当前实例，然后开始。");
+        Label pageSubtitle = new Label(Messages.get("home.subtitle"));
         pageSubtitle.getStyleClass().add("page-subtitle");
         VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
         pageHeading.getStyleClass().add("page-heading");
@@ -1156,7 +1157,7 @@ public class LauncherUI extends javafx.application.Application {
         GridPane launchForm = createForm();
         HBox summaryCards = createHomeSummaryCards();
 
-        instanceSettingsPane = new TitledPane("实例与账号", launchForm);
+        instanceSettingsPane = new TitledPane(Messages.get("home.instanceAccount"), launchForm);
         instanceSettingsPane.getStyleClass().add("instance-settings");
         instanceSettingsPane.setExpanded(false);
         instanceSettingsPane.setAnimated(false);
@@ -1167,17 +1168,17 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private HBox createLaunchHero() {
-        Label eyebrow = new Label("当前实例");
+        Label eyebrow = new Label(Messages.get("home.currentInstance"));
         eyebrow.getStyleClass().add("launch-eyebrow");
 
-        selectedVersionTitleLabel = new Label("选择游戏版本");
+        selectedVersionTitleLabel = new Label(Messages.get("home.selectVersion"));
         selectedVersionTitleLabel.getStyleClass().add("launch-version-big");
 
-        selectedRuntimeMetaLabel = new Label("启动器 Java "
-                + Runtime.version().feature() + "  ·  " + getMemoryDisplayText());
+        selectedRuntimeMetaLabel = new Label(Messages.format("home.runtimeMeta",
+                Runtime.version().feature(), getMemoryDisplayText()));
         selectedRuntimeMetaLabel.getStyleClass().add("launch-version-meta");
 
-        launchReadinessLabel = new Label("●  启动时自动检查");
+        launchReadinessLabel = new Label(Messages.get("home.autoCheck"));
         launchReadinessLabel.getStyleClass().add("ready-pill");
 
         VBox details = new VBox(16,
@@ -1218,21 +1219,21 @@ public class LauncherUI extends javafx.application.Application {
     private HBox createHomeSummaryCards() {
         VBox accountCard = new VBox(14);
         accountCard.getStyleClass().addAll("home-card", "account-card");
-        Label accountLabel = new Label("账号");
+        Label accountLabel = new Label(Messages.get("home.account"));
         accountLabel.getStyleClass().add("card-kicker");
         homeAccountAvatarLabel = new Label("S");
         homeAccountAvatarLabel.getStyleClass().add("account-avatar");
         homeAccountNameLabel = new Label(getAuthDisplayName());
         homeAccountNameLabel.getStyleClass().add("card-title");
-        homeAccountTypeLabel = new Label("离线登录");
+        homeAccountTypeLabel = new Label(Messages.get("auth.offline"));
         homeAccountTypeLabel.getStyleClass().add("card-subtitle");
         VBox accountText = new VBox(3, homeAccountNameLabel, homeAccountTypeLabel);
         HBox accountProfile = new HBox(14, homeAccountAvatarLabel, accountText);
         accountProfile.setAlignment(Pos.CENTER_LEFT);
         Region accountSpacer = new Region();
         VBox.setVgrow(accountSpacer, Priority.ALWAYS);
-        Button manageAccount = createLinkButton("管理账号  ›", () -> expandInstanceSettings(authTypeCombo));
-        homeSkinUploadButton = createLinkButton("上传皮肤  ›", this::chooseAndUploadSkin);
+        Button manageAccount = createLinkButton(Messages.get("home.manageAccount"), () -> expandInstanceSettings(authTypeCombo));
+        homeSkinUploadButton = createLinkButton(Messages.get("home.uploadSkin"), this::chooseAndUploadSkin);
         Region accountActionSpacer = new Region();
         HBox.setHgrow(accountActionSpacer, Priority.ALWAYS);
         HBox accountActions = new HBox(8, manageAccount, accountActionSpacer, homeSkinUploadButton);
@@ -1241,9 +1242,9 @@ public class LauncherUI extends javafx.application.Application {
 
         VBox environmentCard = new VBox(12);
         environmentCard.getStyleClass().addAll("home-card", "environment-card");
-        Label environmentLabel = new Label("运行环境");
+        Label environmentLabel = new Label(Messages.get("home.environment"));
         environmentLabel.getStyleClass().add("card-kicker");
-        homeEnvironmentStatusLabel = new Label("启动时检查");
+        homeEnvironmentStatusLabel = new Label(Messages.get("home.environmentStatus"));
         homeEnvironmentStatusLabel.getStyleClass().add("card-title");
         Label environmentCheck = new Label("✓");
         environmentCheck.getStyleClass().add("environment-check");
@@ -1254,23 +1255,23 @@ public class LauncherUI extends javafx.application.Application {
                 environmentTitleSpacer,
                 environmentCheck);
         environmentTitle.setAlignment(Pos.CENTER_LEFT);
-        javaSummaryLabel = createValueLabel("启动器 Java " + Runtime.version().feature());
+        javaSummaryLabel = createValueLabel(Messages.format("home.javaSummary", Runtime.version().feature()));
         memorySummaryLabel = createValueLabel(getMemoryDisplayText());
-        versionSummaryLabel = createValueLabel("等待选择");
+        versionSummaryLabel = createValueLabel(Messages.get("home.versionPending"));
         environmentCard.getChildren().addAll(
                 environmentLabel,
                 environmentTitle,
-                createSummaryRow("Java", javaSummaryLabel),
-                createSummaryRow("内存", memorySummaryLabel),
-                createSummaryRow("实例", versionSummaryLabel));
+                createSummaryRow(Messages.get("info.java"), javaSummaryLabel),
+                createSummaryRow(Messages.get("home.memory"), memorySummaryLabel),
+                createSummaryRow(Messages.get("home.instance"), versionSummaryLabel));
 
         VBox taskCard = new VBox(12);
         taskCard.getStyleClass().addAll("home-card", "task-card");
-        Label taskLabel = new Label("当前活动");
+        Label taskLabel = new Label(Messages.get("home.currentActivity"));
         taskLabel.getStyleClass().add("card-kicker");
-        statusLabel = new Label("暂无任务");
+        statusLabel = new Label(Messages.get("home.noTasks"));
         statusLabel.getStyleClass().add("card-title");
-        detailLabel = new Label("下载和启动状态会显示在这里。");
+        detailLabel = new Label(Messages.get("home.taskDetail"));
         detailLabel.getStyleClass().add("card-subtitle");
         detailLabel.setWrapText(true);
         downloadProgress = new ProgressBar(0);
@@ -1278,7 +1279,7 @@ public class LauncherUI extends javafx.application.Application {
         downloadProgress.setMaxWidth(Double.MAX_VALUE);
         Region taskSpacer = new Region();
         VBox.setVgrow(taskSpacer, Priority.ALWAYS);
-        Button viewTasks = createLinkButton("查看下载任务  ›", () -> setActiveView(AppView.DOWNLOADS));
+        Button viewTasks = createLinkButton(Messages.get("home.viewTasks"), () -> setActiveView(AppView.DOWNLOADS));
         taskCard.getChildren().addAll(
                 taskLabel,
                 statusLabel,
@@ -1492,17 +1493,17 @@ public class LauncherUI extends javafx.application.Application {
     private VBox createVersionsPage() {
         VBox page = createMainPage();
 
-        Button refreshVersionsButton = createActionButton("刷新", "primary-button", this::refreshVersions);
-        Button installLoaderButton = createActionButton("安装加载器", "primary-button",
+        Button refreshVersionsButton = createActionButton(Messages.get("button.refresh"), "primary-button", this::refreshVersions);
+        Button installLoaderButton = createActionButton(Messages.get("loader.install"), "primary-button",
                 this::showLoaderInstallDialog);
-        Button reinstallButton = createActionButton("重装当前版本", "secondary-button",
+        Button reinstallButton = createActionButton(Messages.get("version.reinstall"), "secondary-button",
                 this::reinstallSelectedVersion);
-        Button deleteButton = createActionButton("删除当前版本", "secondary-button",
+        Button deleteButton = createActionButton(Messages.get("version.delete"), "secondary-button",
                 this::deleteSelectedVersion);
-        Button chooseVersionButton = createActionButton("返回", "secondary-button", () -> setActiveView(AppView.HOME));
-        Button openVersionsDirButton = createActionButton("打开目录", "ghost-button",
+        Button chooseVersionButton = createActionButton(Messages.get("button.back"), "secondary-button", () -> setActiveView(AppView.HOME));
+        Button openVersionsDirButton = createActionButton(Messages.get("button.openDir"), "ghost-button",
                 () -> openLocalFolder(ECLConfig.getVersionsDir(), "版本目录"));
-        Button backupManagerButton = createActionButton("备份管理", "ghost-button",
+        Button backupManagerButton = createActionButton(Messages.get("backup.manage"), "ghost-button",
                 this::showBackupManagerDialog);
         Button desktopShortcutButton = createActionButton(Messages.get("shortcut.desktop"), "ghost-button",
                 () -> createInstanceShortcut(false));
@@ -1515,11 +1516,11 @@ public class LauncherUI extends javafx.application.Application {
         actions.setAlignment(Pos.CENTER_LEFT);
 
         VBox versionCard = createSurface(
-                "// 版本清单",
+                Messages.get("version.page.title"),
                 null,
-                createInfoRow("当前筛选", createStaticValueLabel(getSelectedVersionCategory().getLabel())),
-                createInfoRow("当前版本", createStaticValueLabel(getSelectedVersion() == null ? "未选择" : getSelectedVersion())),
-                createInfoRow("本地目录", createStaticValueLabel(ECLConfig.getVersionsDir().getAbsolutePath())),
+                createInfoRow(Messages.get("label.currentFilter"), createStaticValueLabel(getSelectedVersionCategory().getLabel())),
+                createInfoRow(Messages.get("label.currentVersion"), createStaticValueLabel(getSelectedVersion() == null ? Messages.get("label.notSelected") : getSelectedVersion())),
+                createInfoRow(Messages.get("info.localDir"), createStaticValueLabel(ECLConfig.getVersionsDir().getAbsolutePath())),
                 actions
         );
 
@@ -1947,9 +1948,11 @@ public class LauncherUI extends javafx.application.Application {
                                     Platform.runLater(() ->
                                             updateProgress(downloadProgress, downloaded, total));
                                 }
-                            });
+                    });
                     gameRepository().applyDefaultIsolationSettingForNewInstance(result.profileId());
+                    if (context.isCancelled()) return null;
                     Platform.runLater(() -> {
+                        if (context.isCancelled()) return;
                         stopProgressAnimation(downloadProgress, true);
                         setControlsBusy(false);
                         restoreVersionComboItems(result.profileId());
@@ -1961,14 +1964,20 @@ public class LauncherUI extends javafx.application.Application {
                         renderActiveView();
                     });
                 } catch (Exception error) {
+                    boolean cancelled = context.isCancelled() || isCancellation(error);
                     Platform.runLater(() -> {
                         stopProgressAnimation(downloadProgress, true);
                         setControlsBusy(false);
                         install.setDisable(false);
                         cancel.setDisable(false);
-                        String message = cleanMessage(error);
-                        installStatus.setText("安装失败: " + message);
-                        setStatus("加载器安装失败", message);
+                        if (cancelled) {
+                            installStatus.setText(Messages.get("download.status.cancelled"));
+                            setStatus(Messages.get("download.status.cancelled"), "");
+                        } else {
+                            String message = cleanMessage(error);
+                            installStatus.setText(Messages.format("download.status.failed", message));
+                            setStatus(Messages.get("status.downloadFailed"), message);
+                        }
                     });
                     throw error;
                 }
@@ -1999,13 +2008,25 @@ public class LauncherUI extends javafx.application.Application {
             setStatus("没有可删除的版本", "请先选择一个版本。");
             return;
         }
+        try {
+            com.ecl.util.FileUtil.requireSafeVersionId(profileId);
+        } catch (IOException error) {
+            setStatus("版本 ID 无效", cleanMessage(error));
+            return;
+        }
         if (isGameProcessRunning()) {
             setStatus("游戏运行中不能删除版本",
                     activeGameVersion + " 正在运行，请退出游戏后再删除。");
             return;
         }
-        boolean localMetadata = Files.isDirectory(
-                ECLConfig.getVersionsDir().toPath().resolve(profileId));
+        boolean localMetadata;
+        try {
+            localMetadata = com.ecl.util.FileUtil.safeVersionDirectory(
+                    ECLConfig.getVersionsDir(), profileId).isDirectory();
+        } catch (IOException error) {
+            setStatus("版本 ID 无效", cleanMessage(error));
+            return;
+        }
         boolean localInstance = Files.isDirectory(
                 getConfiguredGameRootDir().toPath().resolve("versions").resolve(profileId));
         if (!localMetadata && !localInstance) {
@@ -2140,8 +2161,7 @@ public class LauncherUI extends javafx.application.Application {
 
     private String detectInstalledLoaderVersion(String profileId,
                                                 ModLoaderInstaller.Loader loader) throws IOException {
-        File jsonFile = new File(ECLConfig.getVersionsDir(),
-                profileId + "/" + profileId + ".json");
+        File jsonFile = com.ecl.util.FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), profileId);
         com.google.gson.JsonObject json = com.ecl.util.HttpUtil.readJson(jsonFile);
         com.google.gson.JsonArray libraries = json.has("libraries") && json.get("libraries").isJsonArray()
                 ? json.getAsJsonArray("libraries") : new com.google.gson.JsonArray();
@@ -2203,9 +2223,9 @@ public class LauncherUI extends javafx.application.Application {
     private VBox createModrinthPage() {
         VBox page = createMainPage();
 
-        Label pageTitle = new Label("内容库");
+        Label pageTitle = new Label(Messages.get("content.page.title"));
         pageTitle.getStyleClass().add("page-title");
-        Label pageSubtitle = new Label("从 Modrinth 或 CurseForge 查找并安装适配当前 Minecraft 实例的内容");
+        Label pageSubtitle = new Label(Messages.get("content.page.subtitle"));
         pageSubtitle.getStyleClass().add("page-subtitle");
         VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
         pageHeading.getStyleClass().add("content-library-heading");
@@ -2216,9 +2236,9 @@ public class LauncherUI extends javafx.application.Application {
         navigation.setMinWidth(210);
         navigation.setMaxWidth(210);
 
-        Label navigationTitle = new Label("下载分类");
+        Label navigationTitle = new Label(Messages.get("content.category.title"));
         navigationTitle.getStyleClass().add("content-library-nav-title");
-        Label navigationHint = new Label("选择要浏览的内容类型");
+        Label navigationHint = new Label(Messages.get("content.category.hint"));
         navigationHint.getStyleClass().add("content-library-nav-hint");
         navigation.getChildren().addAll(navigationTitle, navigationHint);
 
@@ -2264,11 +2284,11 @@ public class LauncherUI extends javafx.application.Application {
         Label title = new Label(target.title);
         title.getStyleClass().add("content-library-nav-item-title");
         Label detail = new Label(switch (target.projectType) {
-            case "mod" -> "扩展玩法与功能";
-            case "shader" -> "改善光照与画面";
-            case "resourcepack" -> "替换纹理与音效";
-            case "modpack" -> "完整客户端与玩法配置";
-            case "server" -> "各版本官方服务端文件";
+            case "mod" -> Messages.get("content.detail.mods");
+            case "shader" -> Messages.get("content.detail.shaders");
+            case "resourcepack" -> Messages.get("content.detail.resourcepacks");
+            case "modpack" -> Messages.get("content.detail.modpacks");
+            case "server" -> Messages.get("content.detail.server");
             default -> target.subtitle;
         });
         detail.getStyleClass().add("content-library-nav-item-detail");
@@ -2286,14 +2306,20 @@ public class LauncherUI extends javafx.application.Application {
     private Node createModLibraryContent() {
         String selectedVersion = getSelectedVersion();
         if (selectedVersion == null || selectedVersion.isBlank()) {
-            Button choose = createActionButton("返回首页选择实例", "primary-button",
+            Button choose = createActionButton(Messages.get("content.chooseInstance"), "primary-button",
                     () -> setActiveView(AppView.HOME));
-            return createSurface("模组", "请先选择一个 Minecraft 实例",
-                    createBodyText("模组必须同时匹配 Minecraft 版本以及 Fabric、Quilt、Forge 或 NeoForge 加载器。"),
+            return createSurface(Messages.get("content.mods.title"), Messages.get("content.noInstance"),
+                    createBodyText(Messages.get("content.mods.requirement")),
                     choose);
         }
-        Path selectedMetadata = ECLConfig.getVersionsDir().toPath()
-                .resolve(selectedVersion).resolve(selectedVersion + ".json");
+        Path selectedMetadata;
+        try {
+            selectedMetadata = com.ecl.util.FileUtil.safeVersionJson(
+                    ECLConfig.getVersionsDir(), selectedVersion).toPath();
+        } catch (IOException error) {
+            return createSurface(Messages.get("content.openFailed"), selectedVersion,
+                    createBodyText(Messages.format("content.openFailed.detail", error.getMessage())));
+        }
         if (!Files.isRegularFile(selectedMetadata)) {
             try {
                 String minecraftVersion = versionManager.resolveMinecraftVersionId(selectedVersion);
@@ -2319,26 +2345,25 @@ public class LauncherUI extends javafx.application.Application {
             return activeModBrowserView;
         } catch (Exception e) {
             LOGGER.warn("Cannot open mod browser for version {}", selectedVersion, e);
-            return createSurface("无法打开模组下载", selectedVersion,
-                    createBodyText("无法识别该版本的 Minecraft 版本或模组加载器：" + e.getMessage()));
+            return createSurface(Messages.get("content.openFailed"), selectedVersion,
+                    createBodyText(Messages.format("content.openFailed.detail", e.getMessage())));
         }
     }
 
     private VBox createContentLibraryLoaderPrompt(String profileId, String minecraftVersion) {
-        Button install = createActionButton("为此实例安装加载器", "primary-button",
+        Button install = createActionButton(Messages.get("content.loader.install"), "primary-button",
                 this::showLoaderInstallDialog);
-        return createSurface("模组", versionManager.getVersionDisplayName(profileId),
-                createBodyText("当前实例是 Minecraft " + minecraftVersion
-                        + " 原版。安装 Fabric、Quilt、Forge 或 NeoForge 后即可浏览兼容模组。"),
+        return createSurface(Messages.get("content.mods.title"), versionManager.getVersionDisplayName(profileId),
+                createBodyText(Messages.format("content.loader.prompt", minecraftVersion)),
                 install);
     }
 
     private Node createServerJarLibraryContent() {
-        Label eyebrow = new Label("MINECRAFT SERVER / OFFICIAL + MIRROR");
+        Label eyebrow = new Label(Messages.get("server.library.eyebrow"));
         eyebrow.getStyleClass().add("eyebrow");
-        Label title = new Label("服务端文件");
+        Label title = new Label(Messages.get("server.library.title"));
         title.getStyleClass().add("content-library-section-title");
-        Label description = new Label("选择任意 Minecraft Java 版本，下载官方 server.jar；官方源失败时自动切换国内镜像");
+        Label description = new Label(Messages.get("server.library.description"));
         description.getStyleClass().add("status-detail");
         description.setWrapText(true);
         VBox heading = new VBox(4, eyebrow, title, description);
@@ -2359,14 +2384,15 @@ public class LauncherUI extends javafx.application.Application {
         applyFieldStyle(serverVersionCombo);
         HBox.setHgrow(serverVersionCombo, Priority.ALWAYS);
 
-        Button refreshButton = createActionButton("刷新版本", "secondary-button", () -> { });
+        Button refreshButton = createActionButton(Messages.get("server.download.refresh"),
+                "secondary-button", () -> { });
         HBox versionRow = new HBox(8, categoryCombo, serverVersionCombo, refreshButton);
 
-        Label artifactInfo = new Label("选择版本后会读取官方服务端文件信息");
+        Label artifactInfo = new Label(Messages.get("server.download.artifactPrompt"));
         artifactInfo.getStyleClass().add("content-library-description");
         artifactInfo.setWrapText(true);
 
-        Label channelsLabel = new Label("下载渠道：等待读取");
+        Label channelsLabel = new Label(Messages.get("server.download.channelsPending"));
         channelsLabel.getStyleClass().add("content-library-target");
         channelsLabel.setWrapText(true);
 
@@ -2376,7 +2402,7 @@ public class LauncherUI extends javafx.application.Application {
         targetLabel.getStyleClass().add("content-library-target");
         targetLabel.setWrapText(true);
 
-        Label status = new Label("请选择一个 Minecraft 版本");
+        Label status = new Label(Messages.get("server.download.selectVersion"));
         status.getStyleClass().add("status-detail");
         status.setWrapText(true);
 
@@ -2386,14 +2412,17 @@ public class LauncherUI extends javafx.application.Application {
         progress.setVisible(false);
         progress.managedProperty().bind(progress.visibleProperty());
 
-        Button downloadButton = createActionButton("下载服务端 JAR", "primary-button", () -> { });
+        Button downloadButton = createActionButton(Messages.get("server.download.action.download"),
+                "primary-button", () -> { });
         downloadButton.setDisable(true);
-        Button chooseFolderButton = createActionButton("更改保存目录", "secondary-button", () -> { });
-        Button openFolderButton = createActionButton("打开保存目录", "secondary-button", () -> { });
+        Button chooseFolderButton = createActionButton(Messages.get("server.download.action.changeFolder"),
+                "secondary-button", () -> { });
+        Button openFolderButton = createActionButton(Messages.get("server.download.action.openFolder"),
+                "secondary-button", () -> { });
         HBox actions = new HBox(8, downloadButton, chooseFolderButton, openFolderButton);
         actions.setAlignment(Pos.CENTER_RIGHT);
 
-        Label eulaNotice = new Label("提示：首次运行服务端前，请阅读并同意 Minecraft EULA。服务端文件版权归 Mojang Studios 所有。");
+        Label eulaNotice = new Label(Messages.get("server.download.eula"));
         eulaNotice.getStyleClass().add("status-detail");
         eulaNotice.setWrapText(true);
 
@@ -2404,7 +2433,8 @@ public class LauncherUI extends javafx.application.Application {
         Runnable updateTarget = () -> {
             String version = serverVersionCombo.getValue();
             String fileName = ServerJarDownloader.suggestedFileName(version);
-            targetLabel.setText("保存到：" + new File(directory.get(), fileName).getAbsolutePath());
+            targetLabel.setText(Messages.format("server.download.target",
+                    new File(directory.get(), fileName).getAbsolutePath()));
         };
 
         Runnable loadArtifact = () -> loadServerJarArtifact(
@@ -2429,9 +2459,9 @@ public class LauncherUI extends javafx.application.Application {
                 serverVersionCombo.setValue(versions.getFirst());
             } else {
                 artifact.set(null);
-                artifactInfo.setText("版本列表为空，请点击“刷新版本”联网获取最新清单");
-                channelsLabel.setText("下载渠道：等待版本列表");
-                status.setText("没有可选版本");
+                artifactInfo.setText(Messages.get("server.download.listEmpty"));
+                channelsLabel.setText(Messages.get("server.download.channelsWaitingVersions"));
+                status.setText(Messages.get("server.download.noVersions"));
                 downloadButton.setDisable(true);
                 updateTarget.run();
             }
@@ -2448,7 +2478,7 @@ public class LauncherUI extends javafx.application.Application {
             refreshButton.setDisable(true);
             categoryCombo.setDisable(true);
             serverVersionCombo.setDisable(true);
-            status.setText("正在刷新 Minecraft 版本列表…");
+            status.setText(Messages.get("server.download.refreshingVersions"));
             runAsync("ecl-refresh-server-versions", () -> {
                 try {
                     versionManager.refresh();
@@ -2457,14 +2487,15 @@ public class LauncherUI extends javafx.application.Application {
                         refreshButton.setDisable(false);
                         categoryCombo.setDisable(false);
                         serverVersionCombo.setDisable(false);
-                        status.setText("版本列表已更新");
+                        status.setText(Messages.get("server.download.versionsUpdated"));
                     });
                 } catch (Exception error) {
                     Platform.runLater(() -> {
                         refreshButton.setDisable(false);
                         categoryCombo.setDisable(false);
                         serverVersionCombo.setDisable(false);
-                        status.setText("版本列表刷新失败：" + cleanMessage(error));
+                        status.setText(Messages.format(
+                                "server.download.versionsFailed", cleanMessage(error)));
                     });
                 }
             });
@@ -2472,22 +2503,23 @@ public class LauncherUI extends javafx.application.Application {
 
         chooseFolderButton.setOnAction(event -> {
             DirectoryChooser chooser = new DirectoryChooser();
-            chooser.setTitle("选择服务端文件保存目录");
+            chooser.setTitle(Messages.get("server.download.chooseDirectory"));
             File current = directory.get();
             if (current.isDirectory()) chooser.setInitialDirectory(current);
             File selected = chooser.showDialog(primaryStage);
             if (selected != null) {
                 directory.set(selected);
                 updateTarget.run();
-                status.setText("保存目录已更改");
+                status.setText(Messages.get("server.download.directoryChanged"));
             }
         });
         openFolderButton.setOnAction(event -> {
             try {
                 ensureDirectory(directory.get());
-                openLocalFolder(directory.get(), "服务端文件目录");
+                openLocalFolder(directory.get(), Messages.get("server.download.directoryName"));
             } catch (IOException error) {
-                status.setText("无法打开保存目录：" + cleanMessage(error));
+                status.setText(Messages.format(
+                        "server.download.openDirectoryFailed", cleanMessage(error)));
             }
         });
 
@@ -2499,7 +2531,8 @@ public class LauncherUI extends javafx.application.Application {
             try {
                 ensureDirectory(directory.get());
             } catch (IOException error) {
-                status.setText("无法创建保存目录：" + cleanMessage(error));
+                status.setText(Messages.format(
+                        "server.download.createDirectoryFailed", cleanMessage(error)));
                 return;
             }
             long generation = downloadGeneration.incrementAndGet();
@@ -2510,27 +2543,37 @@ public class LauncherUI extends javafx.application.Application {
             refreshButton.setDisable(true);
             progress.setProgress(0);
             progress.setVisible(true);
-            status.setText("准备下载 Minecraft " + selectedArtifact.versionId() + " 服务端…");
-            setStatus("正在下载服务端", selectedArtifact.versionId() + " · " + target.getName());
+            status.setText(Messages.format(
+                    "server.download.preparing", selectedArtifact.versionId()));
+            setStatus(Messages.get("server.download.statusTitle"),
+                    selectedArtifact.versionId() + " · " + target.getName());
 
             DownloadTaskCenter.TaskHandle<Void> serverTask = downloadTaskCenter.submit(
                     "Server JAR " + selectedArtifact.versionId(), context -> {
                 try {
                     serverJarDownloader.download(selectedArtifact, target,
                             createServerDownloadListener(status, progress, generation, downloadGeneration, context));
+                    if (context.isCancelled()) return null;
                     Platform.runLater(() -> {
-                        if (generation != downloadGeneration.get()) return;
+                        if (generation != downloadGeneration.get() || context.isCancelled()) return;
                         progress.setProgress(1);
-                        status.setText("下载完成并通过校验：" + target.getAbsolutePath());
-                        setStatus("服务端下载完成", target.getAbsolutePath());
+                        status.setText(Messages.format(
+                                "server.download.completedVerified", target.getAbsolutePath()));
+                        setStatus(Messages.get("server.download.completedTitle"), target.getAbsolutePath());
                         setServerDownloadControlsBusy(false, downloadButton, chooseFolderButton,
                                 serverVersionCombo, categoryCombo, refreshButton);
                     });
                 } catch (Exception error) {
+                    boolean cancelled = context.isCancelled() || isCancellation(error);
                     Platform.runLater(() -> {
                         if (generation != downloadGeneration.get()) return;
-                        status.setText("服务端下载失败：" + cleanMessage(error));
-                        setStatus("服务端下载失败", cleanMessage(error));
+                        if (cancelled) {
+                            status.setText(Messages.get("download.status.cancelled"));
+                            setStatus(Messages.get("download.status.cancelled"), "");
+                        } else {
+                            status.setText(Messages.format("download.status.failed", cleanMessage(error)));
+                            setStatus(Messages.get("status.downloadFailed"), cleanMessage(error));
+                        }
                         setServerDownloadControlsBusy(false, downloadButton, chooseFolderButton,
                                 serverVersionCombo, categoryCombo, refreshButton);
                     });
@@ -2566,11 +2609,11 @@ public class LauncherUI extends javafx.application.Application {
             protected void updateItem(VersionManager.VersionCategory item, boolean empty) {
                 super.updateItem(item, empty);
                 setText(empty || item == null ? null : switch (item) {
-                    case FEATURED -> "精选版本";
-                    case RELEASE -> "正式版";
-                    case PREVIEW -> "预览版 / 快照";
-                    case APRIL_FOOLS -> "愚人节版";
-                    case ALL -> "全部版本";
+                    case FEATURED -> Messages.get("server.download.category.featured");
+                    case RELEASE -> Messages.get("version.release");
+                    case PREVIEW -> Messages.get("version.preview");
+                    case APRIL_FOOLS -> Messages.get("version.aprilFools");
+                    case ALL -> Messages.get("version.all");
                 });
             }
         };
@@ -2602,9 +2645,9 @@ public class LauncherUI extends javafx.application.Application {
         downloadButton.setDisable(true);
         progress.setVisible(false);
         if (version == null || version.isBlank()) return;
-        artifactInfo.setText("正在读取 Minecraft " + version + " 服务端元数据…");
-        channelsLabel.setText("下载渠道：正在解析");
-        status.setText("正在查询官方版本清单…");
+        artifactInfo.setText(Messages.format("server.download.metadataReading", version));
+        channelsLabel.setText(Messages.get("server.download.channelsResolving"));
+        status.setText(Messages.get("server.download.manifestQuery"));
 
         runAsync("ecl-resolve-server-" + version, () -> {
             try {
@@ -2614,7 +2657,8 @@ public class LauncherUI extends javafx.application.Application {
                             public void onSource(String sourceName, String candidateUrl, boolean mirror) {
                                 Platform.runLater(() -> {
                                     if (generation == metadataGeneration.get()) {
-                                        status.setText("正在通过" + sourceName + "读取版本元数据…");
+                                        status.setText(Messages.format(
+                                                "server.download.metadataSource", sourceName));
                                     }
                                 });
                             }
@@ -2623,7 +2667,8 @@ public class LauncherUI extends javafx.application.Application {
                             public void onSourceFailure(String candidateUrl, IOException error) {
                                 Platform.runLater(() -> {
                                     if (generation == metadataGeneration.get()) {
-                                        status.setText("元数据源响应失败，正在尝试下一渠道…");
+                                        status.setText(Messages.get(
+                                                "server.download.metadataSourceFailed"));
                                     }
                                 });
                             }
@@ -2631,25 +2676,26 @@ public class LauncherUI extends javafx.application.Application {
                 Platform.runLater(() -> {
                     if (generation != metadataGeneration.get()) return;
                     artifact.set(resolved);
-                    String size = resolved.size() < 0 ? "未知" : formatBytes(resolved.size());
+                    String size = resolved.size() < 0
+                            ? Messages.get("server.download.sizeUnknown") : formatBytes(resolved.size());
                     String sha1 = resolved.sha1() == null || resolved.sha1().isBlank()
-                            ? "未提供" : resolved.sha1();
-                    artifactInfo.setText("Minecraft " + resolved.versionId()
-                            + " · 文件大小 " + size + "\nSHA-1：" + sha1);
-                    channelsLabel.setText("下载渠道：" + resolved.channels().stream()
+                            ? Messages.get("server.download.shaUnavailable") : resolved.sha1();
+                    artifactInfo.setText(Messages.format("server.download.artifactDetails",
+                            resolved.versionId(), size, sha1));
+                    channelsLabel.setText(Messages.format("server.download.channels",
+                            resolved.channels().stream()
                             .map(ServerJarDownloader.DownloadChannel::name)
                             .distinct()
-                            .collect(java.util.stream.Collectors.joining(" → "))
-                            + "（失败时自动切换）");
-                    status.setText("服务端文件可下载");
+                            .collect(java.util.stream.Collectors.joining(" → "))));
+                    status.setText(Messages.get("server.download.available"));
                     downloadButton.setDisable(false);
                     updateTarget.run();
                 });
             } catch (Exception error) {
                 Platform.runLater(() -> {
                     if (generation != metadataGeneration.get()) return;
-                    artifactInfo.setText("Minecraft " + version + " 没有可用的官方服务端文件");
-                    channelsLabel.setText("下载渠道：不可用");
+                    artifactInfo.setText(Messages.format("server.download.noArtifact", version));
+                    channelsLabel.setText(Messages.get("server.download.channelsUnavailable"));
                     status.setText(cleanMessage(error));
                 });
             }
@@ -2679,8 +2725,10 @@ public class LauncherUI extends javafx.application.Application {
                     if (generation != downloadGeneration.get()) return;
                     progress.setProgress(total > 0 ? (double) downloaded / total : -1);
                     status.setText(total > 0
-                            ? "正在下载：" + formatBytes(downloaded) + " / " + formatBytes(total)
-                            : "正在下载：" + formatBytes(downloaded));
+                            ? Messages.format("server.download.progressKnown",
+                                    formatBytes(downloaded), formatBytes(total))
+                            : Messages.format("server.download.progressUnknown",
+                                    formatBytes(downloaded)));
                 });
             }
 
@@ -2688,7 +2736,7 @@ public class LauncherUI extends javafx.application.Application {
             public void onSource(String sourceName, String candidateUrl, boolean mirror) {
                 Platform.runLater(() -> {
                     if (generation == downloadGeneration.get()) {
-                        status.setText("正在使用" + sourceName + "下载…");
+                        status.setText(Messages.format("server.download.usingSource", sourceName));
                     }
                 });
             }
@@ -2697,7 +2745,7 @@ public class LauncherUI extends javafx.application.Application {
             public void onSourceFailure(String candidateUrl, IOException error) {
                 Platform.runLater(() -> {
                     if (generation == downloadGeneration.get()) {
-                        status.setText("当前下载渠道失败，正在切换下一渠道…");
+                        status.setText(Messages.get("server.download.sourceFailed"));
                     }
                 });
             }
@@ -2908,13 +2956,13 @@ public class LauncherUI extends javafx.application.Application {
 
         Label pageTitle = new Label(Messages.get("nav.servers"));
         pageTitle.getStyleClass().add("page-title");
-        Label pageSubtitle = new Label("浏览全球公开 Java 版服务器，按玩法分类筛选并搜索");
+        Label pageSubtitle = new Label(Messages.get("server.page.subtitle"));
         pageSubtitle.getStyleClass().add("page-subtitle");
         VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
         pageHeading.getStyleClass().add("content-library-heading");
 
         activeServerBrowserView = new ServerBrowserView(
-                message -> setStatus("服务器", message), this::setQuickServer);
+                message -> setStatus(Messages.get("nav.servers"), message), this::setQuickServer);
         activeServerBrowserView.setMaxWidth(Double.MAX_VALUE);
         VBox.setVgrow(activeServerBrowserView, Priority.ALWAYS);
 
@@ -3007,13 +3055,13 @@ public class LauncherUI extends javafx.application.Application {
 
         File crashDir = new File(getActiveGameDir(), "crash-reports");
         File logsDir = new File(getActiveGameDir(), "logs");
-        Button crashButton = createActionButton("打开崩溃日志", "primary-button",
+        Button crashButton = createActionButton(Messages.get("logs.openCrash"), "primary-button",
                 () -> openLocalFolder(crashDir, "崩溃报告目录"));
-        Button logsButton = createActionButton("打开日志", "secondary-button",
+        Button logsButton = createActionButton(Messages.get("logs.openLogs"), "secondary-button",
                 () -> openLocalFolder(logsDir, "日志目录"));
-        Button modsButton = createActionButton("打开 mods", "ghost-button",
+        Button modsButton = createActionButton(Messages.get("logs.openMods"), "ghost-button",
                 () -> openLocalFolder(resolveModsDir(getSelectedVersion()), "模组目录"));
-        Button clearConsoleButton = createActionButton("清空控制台", "ghost-button", () -> {
+        Button clearConsoleButton = createActionButton(Messages.get("logs.clearConsole"), "ghost-button", () -> {
             liveGameLog.clear();
             if (liveConsoleArea != null) liveConsoleArea.clear();
         });
@@ -3030,11 +3078,11 @@ public class LauncherUI extends javafx.application.Application {
         liveConsoleArea.setStyle("-fx-font-family: 'Consolas'; -fx-font-size: 12px;");
 
         VBox logsCard = createSurface(
-                "// 诊断日志",
-                "游戏运行输出会实时显示在下方，并保留最近的日志尾部",
-                createInfoRow("诊断状态", createStaticValueLabel("正常")),
-                createInfoRow("崩溃报告", createStaticValueLabel(countCrashReports() + " 个")),
-                createInfoRow("游戏目录", createStaticValueLabel(abbreviate(getActiveGameDir().getAbsolutePath(), 72))),
+                Messages.get("logs.title"),
+                Messages.get("logs.subtitle"),
+                createInfoRow(Messages.get("label.diagStatus"), createStaticValueLabel(Messages.get("info.normal"))),
+                createInfoRow(Messages.get("label.crashReports"), createStaticValueLabel(Messages.format("crash.count", countCrashReports()))),
+                createInfoRow(Messages.get("info.gameDir"), createStaticValueLabel(abbreviate(getActiveGameDir().getAbsolutePath(), 72))),
                 actions,
                 liveConsoleArea
         );
@@ -3088,7 +3136,8 @@ public class LauncherUI extends javafx.application.Application {
                 region.setMaxWidth(Double.MAX_VALUE);
             }
         }
-        return createSurface("Modrinth 推荐", "下载后自动导入对应目录", contentRows);
+        return createSurface(Messages.get("content.recommended.title"),
+                Messages.get("content.recommended.subtitle"), contentRows);
     }
 
     private HBox createContentRow(ContentTarget target) {
@@ -3714,7 +3763,7 @@ public class LauncherUI extends javafx.application.Application {
 
         String selectedVersion = versionCombo == null ? null : versionCombo.getValue();
         String versionDisplay = selectedVersion == null || selectedVersion.isBlank()
-                ? "等待选择"
+                ? Messages.get("home.versionPending")
                 : versionManager.getVersionDisplayName(selectedVersion);
         if (versionSummaryLabel != null) {
             versionSummaryLabel.setText(abbreviate(versionDisplay, 26));
@@ -3722,16 +3771,16 @@ public class LauncherUI extends javafx.application.Application {
         }
         if (selectedVersionTitleLabel != null) {
             selectedVersionTitleLabel.setText(selectedVersion == null || selectedVersion.isBlank()
-                    ? "选择游戏版本"
+                    ? Messages.get("home.selectVersion")
                     : versionDisplay);
         }
         String memoryText = getMemoryDisplayText();
         if (selectedRuntimeMetaLabel != null) {
-            selectedRuntimeMetaLabel.setText(launcherJava + "  ·  " + memoryText);
+            selectedRuntimeMetaLabel.setText(Messages.format("home.runtimeMeta", launcherJava, memoryText));
         }
         if (topVersionBadgeLabel != null) {
             topVersionBadgeLabel.setText(selectedVersion == null || selectedVersion.isBlank()
-                    ? "未选择"
+                    ? Messages.get("label.notSelected")
                     : abbreviate(versionDisplay, 16));
         }
         String accountName = getAuthDisplayName();
@@ -3756,7 +3805,8 @@ public class LauncherUI extends javafx.application.Application {
             topMemoryBadgeLabel.setText(memoryText);
         }
         if (jvmArgsSummaryLabel != null) {
-            jvmArgsSummaryLabel.setText(extraJvmArgs == null || extraJvmArgs.isBlank() ? "未设置" : abbreviate(extraJvmArgs, 68));
+            jvmArgsSummaryLabel.setText(extraJvmArgs == null || extraJvmArgs.isBlank()
+                    ? Messages.get("label.notSet") : abbreviate(extraJvmArgs, 68));
             jvmArgsSummaryLabel.setTooltip(extraJvmArgs == null || extraJvmArgs.isBlank() ? null : new Tooltip(extraJvmArgs));
         }
 
@@ -3764,19 +3814,20 @@ public class LauncherUI extends javafx.application.Application {
         if (runtimeBadgeLabel != null) {
             runtimeBadgeLabel.setText(configuredJava
                     ? String.valueOf(Runtime.version().feature())
-                    : "自动");
+                    : Messages.get("label.auto"));
         }
         if (homeEnvironmentStatusLabel != null) {
-            homeEnvironmentStatusLabel.setText(configuredJava ? "已配置" : "自动准备");
+            homeEnvironmentStatusLabel.setText(configuredJava
+                    ? Messages.get("home.envConfigured") : Messages.get("home.envAutoPrepare"));
         }
 
-        String readiness = "等待选择实例";
+        String readiness = Messages.get("home.readiness.pendingInstance");
         if (isGameProcessRunning()) {
-            readiness = "游戏运行中";
+            readiness = Messages.get("home.readiness.running");
         } else if (selectedVersion != null && !selectedVersion.isBlank()) {
             readiness = versionManager.isVersionDownloaded(selectedVersion)
-                    ? "本地实例已安装"
-                    : "首次启动将准备文件";
+                    ? Messages.get("home.readiness.installed")
+                    : Messages.get("home.readiness.prepareFirst");
         }
         if (launchReadinessLabel != null) {
             launchReadinessLabel.setText("●  " + readiness);
@@ -4135,6 +4186,7 @@ public class LauncherUI extends javafx.application.Application {
                         public void onError(String message) {
                             downloadFailure.set(message);
                             Platform.runLater(() -> {
+                                if (context.isCancelled()) return;
                                 setStatus("下载失败", message);
                                 stopProgressAnimation(downloadProgress, true);
                                 setControlsBusy(false);
@@ -4144,6 +4196,7 @@ public class LauncherUI extends javafx.application.Application {
                         @Override
                         public void onComplete() {
                             Platform.runLater(() -> {
+                                if (context.isCancelled()) return;
                                 downloadProgress.setProgress(1);
                                 stopProgressAnimation(downloadProgress, true);
                                 if (!versionManager.isVersionDownloaded(version)) {
@@ -4172,8 +4225,14 @@ public class LauncherUI extends javafx.application.Application {
                     return null;
                 });
         task.completion().whenComplete((ignored, error) -> Platform.runLater(() -> {
-            if (error != null) setStatus(Messages.get("download.status.failedTitle"), cleanMessage(error));
-            if (error != null) setControlsBusy(false);
+            if (error == null) return;
+            stopProgressAnimation(downloadProgress, true);
+            if (isCancellation(error)) {
+                setStatus(Messages.get("download.status.cancelled"), cleanMessage(error));
+            } else {
+                setStatus(Messages.get("download.status.failedTitle"), cleanMessage(error));
+            }
+            setControlsBusy(false);
         }));
     }
 
@@ -4304,7 +4363,9 @@ public class LauncherUI extends javafx.application.Application {
 
     private void monitorGameProcess(Process process, String version, File launchDir, long launchStartedAt,
                                     UUID runningInstanceId, boolean restoreLauncher) {
-        Thread.ofPlatform().name("ecl-monitor-game-" + version).daemon(false).start(() -> {
+        // 守护线程：关闭启动器窗口后进程能立即退出，不会被该监控线程拖住；
+        // 游戏本体是独立进程，启动器退出不影响其继续运行。
+        Thread.ofPlatform().name("ecl-monitor-game-" + version).daemon(true).start(() -> {
             BoundedLogBuffer output = new BoundedLogBuffer(ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
@@ -6370,6 +6431,20 @@ public class LauncherUI extends javafx.application.Application {
             return String.format(Locale.ROOT, "%.1f MB", mb);
         }
         return String.format(Locale.ROOT, "%.2f GB", mb / 1024.0);
+    }
+
+    private boolean isCancellation(Throwable throwable) {
+        Throwable cursor = throwable;
+        while (cursor != null) {
+            if (cursor instanceof CancellationException || cursor instanceof InterruptedException) {
+                return true;
+            }
+            if (cursor.getCause() == cursor) {
+                break;
+            }
+            cursor = cursor.getCause();
+        }
+        return false;
     }
 
     private String cleanMessage(Throwable throwable) {

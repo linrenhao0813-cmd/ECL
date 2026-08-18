@@ -191,6 +191,13 @@ class VersionRepositoryTest {
     }
 
     @Test
+    void rejectsVersionIdsThatCouldEscapeTheVersionsDirectory() {
+        VersionRepository repository = repository();
+        assertThrows(IOException.class, () -> repository.resolve("../outside"));
+        assertThrows(IOException.class, () -> repository.resolve("..\\outside"));
+    }
+
+    @Test
     void invalidateForcesReReadAfterMetadataChanges() throws Exception {
         writeVersion("1.21", """
                 {"mainClass":"first.Main","downloads":{"client":{"url":"https://example/a.jar","path":"1.21/1.21.jar"}}}

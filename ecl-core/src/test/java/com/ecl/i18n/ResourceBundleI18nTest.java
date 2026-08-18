@@ -2,7 +2,10 @@ package com.ecl.i18n;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,5 +38,25 @@ class ResourceBundleI18nTest {
 
         i18n.setLocale(ResourceBundleI18n.TRADITIONAL_CHINESE);
         assertEquals("伺服器分類", i18n.text("server.category.title"));
+    }
+
+    @Test
+    void everySupportedBundleContainsExactlyTheSameKeys() throws Exception {
+        Properties simplified = load("i18n/messages.properties");
+        Properties english = load("i18n/messages_en.properties");
+        Properties traditional = load("i18n/messages_zh_TW.properties");
+
+        assertEquals(simplified.stringPropertyNames(), english.stringPropertyNames());
+        assertEquals(simplified.stringPropertyNames(), traditional.stringPropertyNames());
+    }
+
+    private static Properties load(String resource) throws Exception {
+        Properties properties = new Properties();
+        try (var input = ResourceBundleI18nTest.class.getClassLoader()
+                .getResourceAsStream(resource)) {
+            if (input == null) throw new IllegalStateException("Missing resource: " + resource);
+            properties.load(new InputStreamReader(input, StandardCharsets.UTF_8));
+        }
+        return properties;
     }
 }

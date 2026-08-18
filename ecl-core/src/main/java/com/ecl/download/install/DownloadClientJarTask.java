@@ -2,6 +2,7 @@ package com.ecl.download.install;
 
 import com.ecl.ECLConfig;
 import com.ecl.task.Task;
+import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.google.gson.JsonObject;
 
@@ -35,7 +36,7 @@ public final class DownloadClientJarTask extends Task<Void> {
             state.setProgressActive(true);
             String clientUrl = client.get("url").getAsString();
             String clientSha1 = client.has("sha1") ? client.get("sha1").getAsString() : null;
-            File clientJar = new File(ECLConfig.getVersionsDir(), versionId + "/" + versionId + ".jar");
+            File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
             if (InstallHelpers.needsDownload(clientJar, clientSha1, true)) {
                 HttpUtil.downloadFileWithProgress(clientUrl, clientJar, new HttpUtil.ProgressCallback() {
                     @Override
@@ -71,18 +72,18 @@ public final class DownloadClientJarTask extends Task<Void> {
         String current = versionJson.get("inheritsFrom").getAsString();
         java.util.Set<String> visited = new java.util.HashSet<>();
         while (current != null && !current.isBlank() && visited.add(current)) {
-            File jar = new File(ECLConfig.getVersionsDir(), current + "/" + current + ".jar");
+            File jar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), current);
             if (jar.isFile()) {
                 return true;
             }
-            File jsonFile = new File(ECLConfig.getVersionsDir(), current + "/" + current + ".json");
+            File jsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), current);
             if (!jsonFile.isFile()) {
                 return false;
             }
             JsonObject parentJson = HttpUtil.readJson(jsonFile);
             if (parentJson.has("jar")) {
                 String jarId = parentJson.get("jar").getAsString();
-                return new File(ECLConfig.getVersionsDir(), jarId + "/" + jarId + ".jar").isFile();
+                return FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), jarId).isFile();
             }
             current = parentJson.has("inheritsFrom")
                     ? parentJson.get("inheritsFrom").getAsString() : null;

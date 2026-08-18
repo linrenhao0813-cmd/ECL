@@ -5,10 +5,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,7 +18,6 @@ import java.util.Comparator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
@@ -181,34 +178,9 @@ final class JavaRuntimeDownloader {
     }
 
     private static void extractTar(Path archive, Path target) throws IOException {
-        Process process = new ProcessBuilder("tar", "-xzf", archive.toString(), "-C", target.toString())
-                .redirectErrorStream(true)
-                .start();
-        StringBuffer output = new StringBuffer();
-        Thread drain = Thread.ofVirtual().name("ecl-tar-output").start(() -> {
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null && output.length() < 8_192) {
-                    output.append(line).append('\n');
-                }
-            } catch (IOException ignored) {
-            }
-        });
-        try {
-            if (!process.waitFor(5, TimeUnit.MINUTES)) {
-                process.destroyForcibly();
-                throw new IOException("Java 运行时解压超过 5 分钟，已终止");
-            }
-            drain.join(1_000);
-            if (process.exitValue() != 0) {
-                throw new IOException("无法解压 Java 运行时: " + output);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            process.destroyForcibly();
-            throw new IOException("Java 运行时解压被中断", e);
-        }
+        // 使用自带的安全解压器：逐条目校验路径，拒绝绝对路径、../、符号链接与硬链接，
+        // 避免恶意/损坏的归档越出解压目录（系统 tar -xzf 不具备该安全边界）。
+        TarUtil.extractGzipTar(archive, target);
     }
 
     private static Path findJava(Path root) throws IOException {

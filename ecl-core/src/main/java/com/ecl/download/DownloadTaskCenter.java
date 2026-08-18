@@ -25,6 +25,12 @@ public final class DownloadTaskCenter implements AutoCloseable {
     private static final int MIN_CONCURRENCY = 1;
     private static final int MAX_CONCURRENCY = 8;
 
+    /**
+     * 保留在任务列表中的最大已结束任务数。排队和进行中的任务不会被丢弃；每次任务
+     * 结束时都会裁剪最旧历史，防止长期运行后 entries 与 UI 刷新成本无限增长。
+     */
+    static final int MAX_RETAINED_FINISHED_TASKS = 200;
+
     public enum Status {
         QUEUED, RUNNING, CANCELLING, COMPLETED, FAILED, CANCELLED
     }
@@ -137,9 +143,41 @@ public final class DownloadTaskCenter implements AutoCloseable {
             entries.put(id, entry);
             queue.addLast(entry);
         }
+        // Always notify: when the concurrency limit is reached the new task remains queued and
+        // pump() does not emit a second state change for it.
         fireChanged();
         pump();
         return new TaskHandle<>(this, entry);
+    }
+
+    /**
+     * 从最旧的条目开始裁剪已结束历史。活跃任务不计入历史上限，因而不会因队列较长
+     * 而被静默丢弃。
+     *
+     * @return 是否移除了任何条目
+     */
+    private boolean pruneRetainedLocked() {
+        int finished = 0;
+        for (Entry<?> entry : entries.values()) {
+            if (isTerminal(entry.status)) {
+                finished++;
+            }
+        }
+        if (finished <= MAX_RETAINED_FINISHED_TASKS) {
+            return false;
+        }
+        boolean pruned = false;
+        var iterator = entries.entrySet().iterator();
+        while (iterator.hasNext() && finished > MAX_RETAINED_FINISHED_TASKS) {
+            Entry<?> entry = iterator.next().getValue();
+            if (!isTerminal(entry.status)) {
+                continue;
+            }
+            iterator.remove();
+            finished--;
+            pruned = true;
+        }
+        return pruned;
     }
 
     public List<TaskSnapshot> snapshots() {
@@ -207,6 +245,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
                 entry.detail = "已取消";
                 entry.updatedAtMillis = System.currentTimeMillis();
                 entry.completion.cancel(false);
+                pruneRetainedLocked();
             } else {
                 entry.status = Status.CANCELLING;
                 entry.detail = "正在取消";
@@ -328,6 +367,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
                 entry.updatedAtMillis = System.currentTimeMillis();
                 runningCount--;
             }
+            if (changed) pruneRetainedLocked();
         }
         if (!changed) return;
         if (cancelled) entry.completion.cancel(false);
@@ -359,6 +399,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
                 entry.updatedAtMillis = System.currentTimeMillis();
                 runningCount--;
             }
+            if (changed) pruneRetainedLocked();
         }
         if (!changed) return;
         if (cancelled) entry.completion.cancel(false);
@@ -376,6 +417,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
                 entry.detail = "已取消";
                 entry.updatedAtMillis = System.currentTimeMillis();
                 runningCount--;
+                pruneRetainedLocked();
             }
         }
         if (!changed) return;

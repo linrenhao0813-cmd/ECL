@@ -101,12 +101,84 @@ public class FileUtil {
         if (relativePath == null || relativePath.isBlank()) {
             throw new IOException("依赖路径为空");
         }
-        Path rootPath = root.toPath().toAbsolutePath().normalize();
-        // Normalize backslashes so Windows-style separators cannot smuggle in ".." escapes.
-        Path candidate = rootPath.resolve(relativePath.replace('\\', '/')).normalize();
+        // Canonical paths also account for existing junctions/symbolic links. A purely lexical
+        // startsWith check would allow <root>/linked-dir/file to reach outside the managed root.
+        Path rootPath = root.getCanonicalFile().toPath();
+        Path candidate;
+        try {
+            // Normalize backslashes so Windows-style separators cannot smuggle in ".." escapes.
+            candidate = rootPath.resolve(relativePath.replace('\\', '/')).normalize()
+                    .toFile().getCanonicalFile().toPath();
+        } catch (InvalidPathException error) {
+            throw new IOException("依赖路径无效: " + relativePath, error);
+        }
         if (!candidate.startsWith(rootPath)) {
             throw new IOException("依赖路径越界: " + relativePath);
         }
         return candidate.toFile();
+    }
+
+    /**
+     * Validates a version id before it is used to build file paths.  A version id must be a
+     * single path segment: no separators, no drive letters / ADS colons, no NUL, and no leading
+     * dot (which rules out {@code .} and {@code ..}).  This is the unified gate that keeps
+     * {@code versionId}, {@code inheritsFrom} and {@code jar} fields from escaping the
+     * {@code versions} directory, even when the version JSON is malicious or corrupted.
+     *
+     * @throws IOException when the id is blank or not a safe single path segment
+     */
+    public static void requireSafeVersionId(String versionId) throws IOException {
+        if (versionId == null || versionId.isBlank()) {
+            throw new IOException("版本 ID 为空");
+        }
+        if (versionId.indexOf('/') >= 0 || versionId.indexOf('\\') >= 0
+                || versionId.indexOf(':') >= 0 || versionId.indexOf('\0') >= 0
+                || versionId.chars().anyMatch(Character::isISOControl)) {
+            throw new IOException("非法的版本 ID: " + versionId);
+        }
+        if (versionId.equals(".") || versionId.equals("..") || versionId.startsWith(".")
+                || versionId.endsWith(".") || versionId.endsWith(" ")) {
+            throw new IOException("非法的版本 ID: " + versionId);
+        }
+        String stem = versionId.substring(0, versionId.indexOf('.') >= 0
+                ? versionId.indexOf('.') : versionId.length()).toUpperCase(java.util.Locale.ROOT);
+        if (stem.equals("CON") || stem.equals("PRN") || stem.equals("AUX") || stem.equals("NUL")
+                || stem.matches("COM[1-9]") || stem.matches("LPT[1-9]")) {
+            throw new IOException("非法的版本 ID: " + versionId);
+        }
+    }
+
+    /**
+     * Validates {@code versionId} and returns its directory inside {@code versionsDir}
+     * ({@code <versionsDir>/<versionId>}).  The result is guaranteed to stay under
+     * {@code versionsDir}.
+     *
+     * @throws IOException when the id is invalid or resolves outside the versions directory
+     */
+    public static File safeVersionDirectory(File versionsDir, String versionId) throws IOException {
+        requireSafeVersionId(versionId);
+        return safeResolveUnder(versionsDir, versionId);
+    }
+
+    /**
+     * Validates {@code versionId} and returns its JSON metadata file
+     * ({@code <versionsDir>/<versionId>/<versionId>.json}).
+     *
+     * @throws IOException when the id is invalid or resolves outside the versions directory
+     */
+    public static File safeVersionJson(File versionsDir, String versionId) throws IOException {
+        requireSafeVersionId(versionId);
+        return safeResolveUnder(versionsDir, versionId + "/" + versionId + ".json");
+    }
+
+    /**
+     * Validates {@code versionId} and returns its client jar
+     * ({@code <versionsDir>/<versionId>/<versionId>.jar}).
+     *
+     * @throws IOException when the id is invalid or resolves outside the versions directory
+     */
+    public static File safeVersionJar(File versionsDir, String versionId) throws IOException {
+        requireSafeVersionId(versionId);
+        return safeResolveUnder(versionsDir, versionId + "/" + versionId + ".jar");
     }
 }

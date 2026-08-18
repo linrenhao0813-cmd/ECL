@@ -447,7 +447,7 @@ public class GameLauncher implements LaunchService {
         return !argObj.has("rules") || RuleEvaluator.isAllowed(argObj.getAsJsonArray("rules"));
     }
 
-    private Map<String, String> buildLaunchVariables(JsonObject versionJson) {
+    private Map<String, String> buildLaunchVariables(JsonObject versionJson) throws IOException {
         Map<String, String> vars = new HashMap<>();
         vars.put("${auth_player_name}", auth.getUsername());
         vars.put("${auth_session}", auth.getAccessToken());
@@ -518,7 +518,7 @@ public class GameLauncher implements LaunchService {
         }
 
         String clientJarId = getEffectiveClientJarId(versionJson);
-        File clientJar = new File(ECLConfig.getVersionsDir(), clientJarId + "/" + clientJarId + ".jar");
+        File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), clientJarId);
         if (!clientJar.exists()) {
             throw new IOException("Missing client JAR for version " + versionId + ": " + clientJar.getAbsolutePath());
         }
@@ -562,7 +562,7 @@ public class GameLauncher implements LaunchService {
                     JsonObject nativeArtifact = classifiers.getAsJsonObject(key);
                     if (nativeArtifact.has("path")) {
                         String path = nativeArtifact.get("path").getAsString();
-                        File nativeFile = new File(libraryDirectory(lib), path);
+                        File nativeFile = FileUtil.safeResolveUnder(libraryDirectory(lib), path);
                         nativeFiles.add(nativeFile);
                     }
                     break;
@@ -592,9 +592,11 @@ public class GameLauncher implements LaunchService {
         }
     }
 
-    private File nativesDirectory() {
-        File root = instanceDir == null ? new File(ECLConfig.getVersionsDir(), versionId) : instanceDir;
-        return new File(root, "natives-" + PlatformUtil.current().minecraftName());
+    private File nativesDirectory() throws IOException {
+        File root = instanceDir == null
+                ? FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), versionId) : instanceDir;
+        return FileUtil.safeResolveUnder(root,
+                "natives-" + PlatformUtil.current().minecraftName());
     }
 
     private File libraryDirectory(JsonObject library) {
@@ -636,6 +638,7 @@ public class GameLauncher implements LaunchService {
         if (versionId == null || versionId.isBlank()) {
             throw new IOException("未选择游戏版本");
         }
+        FileUtil.requireSafeVersionId(versionId);
         JsonObject versionJson = loadVersionJsonWithInheritance();
         if (versionJson == null) {
             throw new IOException("无法加载版本JSON: " + versionId);
@@ -820,7 +823,7 @@ public class GameLauncher implements LaunchService {
                     + String.join(" -> ", inheritanceChain) + " -> " + vid);
         }
 
-        File file = new File(ECLConfig.getVersionsDir(), vid + "/" + vid + ".json");
+        File file = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), vid);
         if (!file.isFile()) {
             throw new IOException("Missing version JSON in inheritance chain: " + file.getAbsolutePath());
         }

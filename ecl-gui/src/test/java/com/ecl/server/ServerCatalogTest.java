@@ -1,9 +1,13 @@
 package com.ecl.server;
 
+import com.ecl.util.Messages;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,6 +16,19 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ServerCatalogTest {
+    private Locale originalLocale;
+
+    @BeforeEach
+    void selectDeterministicLocale() {
+        originalLocale = Messages.locale();
+        Messages.setLocale(Locale.forLanguageTag("zh-CN"));
+    }
+
+    @AfterEach
+    void restoreLocale() {
+        Messages.setLocale(originalLocale);
+    }
+
     @Test
     void bundledCatalogCoversEveryRequestedCategory() {
         ServerCatalog catalog = ServerCatalog.load();
@@ -78,8 +95,32 @@ class ServerCatalogTest {
         assertNull(serverWithWebsite("https://user@example.org").websiteUri());
     }
 
+    @Test
+    void bundledDescriptionsRegionsAndTagsFollowTheSelectedLocale() {
+        try {
+            Messages.setLocale(Locale.ENGLISH);
+            PublicServer english = named(ServerCatalog.load(), "Hypixel");
+            assertTrue(english.description().startsWith("The world's largest"));
+            assertEquals("International", english.region());
+            assertTrue(english.tags().contains("Minigames"));
+
+            Messages.setLocale(Locale.forLanguageTag("zh-TW"));
+            PublicServer traditional = named(ServerCatalog.load(), "Hypixel");
+            assertTrue(traditional.description().startsWith("全球規模最大"));
+            assertEquals("國際", traditional.region());
+            assertTrue(traditional.tags().contains("小遊戲"));
+        } finally {
+            Messages.setLocale(Locale.forLanguageTag("zh-CN"));
+        }
+    }
+
     private static List<String> names(List<PublicServer> servers) {
         return servers.stream().map(PublicServer::name).toList();
+    }
+
+    private static PublicServer named(ServerCatalog catalog, String name) {
+        return catalog.servers().stream().filter(server -> server.name().equals(name))
+                .findFirst().orElseThrow();
     }
 
     private static PublicServer server(String host, int port) {

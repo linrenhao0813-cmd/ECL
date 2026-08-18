@@ -1,8 +1,8 @@
 package com.ecl.modrinth.instance;
 
+import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
-import com.ecl.util.TextUtil;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -43,6 +43,7 @@ public final class VersionProfileModInstanceContext implements ModInstanceContex
                                                         Path configuredGameRoot,
                                                         Path resolvedRunDirectory) throws IOException {
         String normalizedProfileId = requireText(profileId, "profileId");
+        FileUtil.requireSafeVersionId(normalizedProfileId);
         Path metadataRoot = Objects.requireNonNull(versionMetadataDirectory, "versionMetadataDirectory")
                 .toAbsolutePath().normalize();
         Path gameRoot = Objects.requireNonNull(configuredGameRoot, "configuredGameRoot")
@@ -51,10 +52,7 @@ public final class VersionProfileModInstanceContext implements ModInstanceContex
 
         String minecraftVersion = resolveMinecraftVersion(metadataRoot, normalizedProfileId, profile, new HashSet<>());
         ModLoader loader = resolveLoader(profile);
-        String safeDirectoryName = TextUtil.replaceInvalidFilenameChars(normalizedProfileId.trim());
-        if (safeDirectoryName.isBlank()) {
-            throw new IOException("Invalid version profile id: " + profileId);
-        }
+        String safeDirectoryName = normalizedProfileId.trim();
         Path instanceRoot = gameRoot.resolve("versions").resolve(safeDirectoryName).normalize();
         Path instancesRoot = gameRoot.resolve("versions").normalize();
         if (!instanceRoot.startsWith(instancesRoot)) {
@@ -74,8 +72,8 @@ public final class VersionProfileModInstanceContext implements ModInstanceContex
     }
 
     private static JsonObject readProfile(Path metadataRoot, String profileId) throws IOException {
-        Path profileFile = metadataRoot.resolve(profileId).resolve(profileId + ".json").normalize();
-        if (!profileFile.startsWith(metadataRoot) || !profileFile.toFile().isFile()) {
+        Path profileFile = FileUtil.safeVersionJson(metadataRoot.toFile(), profileId).toPath();
+        if (!profileFile.toFile().isFile()) {
             throw new IOException("Missing version profile JSON: " + profileFile);
         }
         return HttpUtil.readJson(profileFile.toFile());

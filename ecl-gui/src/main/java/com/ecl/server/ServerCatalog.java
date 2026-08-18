@@ -1,5 +1,6 @@
 package com.ecl.server;
 
+import com.ecl.util.Messages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -135,18 +136,20 @@ public final class ServerCatalog {
         if (json.has("tags") && json.get("tags").isJsonArray()) {
             for (JsonElement tag : json.getAsJsonArray("tags")) {
                 if (tag.isJsonPrimitive()) {
-                    tags.add(tag.getAsString());
+                    tags.add(localizedTag(tag.getAsString()));
                 }
             }
         }
+        String description = localized("server.bundled." + keyPart(name) + ".description",
+                text(json, "description"));
         return new PublicServer(
                 name,
                 text(json, "category"),
                 ip,
                 port,
                 text(json, "version"),
-                text(json, "description"),
-                text(json, "region"),
+                description,
+                localizedRegion(text(json, "region")),
                 text(json, "website"),
                 tags,
                 text(json, "iconText")
@@ -156,5 +159,55 @@ public final class ServerCatalog {
     private static String text(JsonObject json, String key) {
         JsonElement value = json.get(key);
         return value == null || value.isJsonNull() ? "" : value.getAsString();
+    }
+
+    private static String localized(String key, String fallback) {
+        String value = Messages.get(key);
+        return key.equals(value) ? fallback : value;
+    }
+
+    private static String localizedRegion(String region) {
+        return switch (region) {
+            case "国际" -> Messages.get("server.region.international");
+            case "北美" -> Messages.get("server.region.northAmerica");
+            case "欧洲" -> Messages.get("server.region.europe");
+            default -> region;
+        };
+    }
+
+    private static String localizedTag(String tag) {
+        String key = switch (tag) {
+            case "小游戏" -> "minigames";
+            case "竞技" -> "competitive";
+            case "冒险" -> "adventure";
+            case "免正版" -> "offline";
+            case "无政府" -> "anarchy";
+            case "原版" -> "vanilla";
+            case "老服" -> "longRunning";
+            case "生存" -> "survival";
+            case "领地" -> "claims";
+            case "经济" -> "economy";
+            case "地球地图" -> "earth";
+            case "城镇" -> "towns";
+            case "政治" -> "politics";
+            case "社区" -> "community";
+            case "空岛" -> "skyblock";
+            case "监狱" -> "prison";
+            case "自定义" -> "custom";
+            case "PvP练习" -> "pvpPractice";
+            case "红石" -> "redstone";
+            case "计算" -> "computing";
+            case "教学" -> "education";
+            case "创造" -> "creative";
+            case "地块" -> "plots";
+            default -> null;
+        };
+        return key == null ? tag : Messages.get("server.tag." + key);
+    }
+
+    private static String keyPart(String name) {
+        return name.toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-+|-+$)", "");
     }
 }

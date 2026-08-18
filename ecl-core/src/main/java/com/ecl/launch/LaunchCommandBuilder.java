@@ -189,8 +189,8 @@ public final class LaunchCommandBuilder {
             classpath.add(file.getAbsolutePath());
         }
 
-        File clientJar = new File(options.environment().versionsDirectory(),
-                version.clientJarId() + "/" + version.clientJarId() + ".jar");
+        File clientJar = FileUtil.safeVersionJar(
+                options.environment().versionsDirectory(), version.clientJarId());
         if (!clientJar.exists()) {
             throw new LaunchException(LaunchException.Kind.MISSING_FILES,
                     "Missing client JAR for version " + version.id() + ": "

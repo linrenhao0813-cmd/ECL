@@ -3,6 +3,9 @@
 build/
 build-*/
 
+# Eclipse / module-level compiler output (ecl-boot/bin/, ecl-cli/bin/, ...)
+bin/
+
 # Packaged distributions
 dist/
 

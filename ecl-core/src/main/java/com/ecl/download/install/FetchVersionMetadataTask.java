@@ -2,6 +2,7 @@ package com.ecl.download.install;
 
 import com.ecl.ECLConfig;
 import com.ecl.task.Task;
+import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.google.gson.JsonObject;
 
@@ -27,12 +28,12 @@ public final class FetchVersionMetadataTask extends Task<JsonObject> {
     @Override
     protected JsonObject execute() throws Exception {
         state.setStatus("正在下载版本信息...");
-        File versionDir = new File(ECLConfig.getVersionsDir(), versionId);
+        File versionDir = FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), versionId);
         versionDir.mkdirs();
 
         JsonObject versionJson = HttpUtil.getJsonWithMirrors(
                 versionUrl, InstallHelpers.sourceCallback("版本信息", state));
-        File versionJsonFile = new File(versionDir, versionId + ".json");
+        File versionJsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
         HttpUtil.writeJson(versionJsonFile, versionJson);
         InstallHelpers.checkCancelled();
         state.setVersionJson(versionJson);

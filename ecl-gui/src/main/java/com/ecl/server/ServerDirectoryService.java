@@ -88,6 +88,9 @@ public final class ServerDirectoryService {
         try {
             JsonObject root = JsonParser.parseString(
                     Files.readString(cacheFile, StandardCharsets.UTF_8)).getAsJsonObject();
+            if (!Messages.locale().toLanguageTag().equalsIgnoreCase(text(root, "locale"))) {
+                return null;
+            }
             JsonArray data = array(root, "data");
             if (data == null) {
                 return null;
@@ -101,6 +104,7 @@ public final class ServerDirectoryService {
     private void writeCache(DirectorySnapshot snapshot) {
         JsonObject root = new JsonObject();
         root.addProperty("fetchedAtEpochMillis", snapshot.fetchedAtEpochMillis());
+        root.addProperty("locale", Messages.locale().toLanguageTag());
         JsonArray data = new JsonArray();
         snapshot.servers().forEach(server -> data.add(toJson(
                 server, snapshot.statuses().get(server.address()))));
@@ -305,7 +309,7 @@ public final class ServerDirectoryService {
             return country;
         }
         return new Locale("", country.toUpperCase(Locale.ROOT))
-                .getDisplayCountry(Locale.SIMPLIFIED_CHINESE);
+                .getDisplayCountry(Messages.locale());
     }
 
     private static String clean(String value) {

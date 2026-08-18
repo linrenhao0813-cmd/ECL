@@ -96,11 +96,11 @@ public class GameDownloader implements DownloadService {
         try {
             if (runListener != null) runListener.onStatus("正在下载版本信息...");
 
-            File versionDir = new File(ECLConfig.getVersionsDir(), versionId);
+            File versionDir = FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), versionId);
             versionDir.mkdirs();
 
             JsonObject versionJson = HttpUtil.getJsonWithMirrors(versionUrl, sourceCallback("版本信息", runListener));
-            File versionJsonFile = new File(versionDir, versionId + ".json");
+            File versionJsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
             HttpUtil.writeJson(versionJsonFile, versionJson);
             checkCancelled();
 
@@ -111,22 +111,22 @@ public class GameDownloader implements DownloadService {
                 if (runListener != null) runListener.onStatus("正在下载游戏主文件...");
                 String clientUrl = client.get("url").getAsString();
                 String clientSha1 = client.has("sha1") ? client.get("sha1").getAsString() : null;
-                File clientJar = new File(versionDir, versionId + ".jar");
+                File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
                 if (needsDownload(clientJar, clientSha1)) {
-                HttpUtil.downloadFileWithProgress(clientUrl, clientJar, new HttpUtil.ProgressCallback() {
-                    @Override
-                    public void onStart(long total) {
-                        if (runListener != null) runListener.onProgress(0, total);
-                    }
+                    HttpUtil.downloadFileWithProgress(clientUrl, clientJar, new HttpUtil.ProgressCallback() {
+                        @Override
+                        public void onStart(long total) {
+                            if (runListener != null) runListener.onProgress(0, total);
+                        }
 
-                    @Override
-                    public void onProgress(long downloaded, long total) {
-                        if (runListener != null) runListener.onProgress(downloaded, total);
-                    }
+                        @Override
+                        public void onProgress(long downloaded, long total) {
+                            if (runListener != null) runListener.onProgress(downloaded, total);
+                        }
 
-                    @Override
-                    public void onComplete(File file) {}
-                }, sourceCallback("游戏主文件", runListener));
+                        @Override
+                        public void onComplete(File file) {}
+                    }, sourceCallback("游戏主文件", runListener));
                     verifyDownloadedFile(clientJar, clientSha1);
                 }
             } else if (!hasUsableInheritedClient(versionJson)) {
@@ -173,15 +173,21 @@ public class GameDownloader implements DownloadService {
         String current = versionJson.get("inheritsFrom").getAsString();
         java.util.Set<String> visited = new java.util.HashSet<>();
         while (current != null && !current.isBlank() && visited.add(current)) {
-            File jar = new File(ECLConfig.getVersionsDir(), current + "/" + current + ".jar");
+            File jar;
+            File jsonFile;
+            try {
+                jar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), current);
+                jsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), current);
+            } catch (IOException e) {
+                return false;
+            }
             if (jar.isFile()) return true;
-            File jsonFile = new File(ECLConfig.getVersionsDir(), current + "/" + current + ".json");
             if (!jsonFile.isFile()) return false;
             try {
                 JsonObject parentJson = HttpUtil.readJson(jsonFile);
                 if (parentJson.has("jar")) {
                     String jarId = parentJson.get("jar").getAsString();
-                    return new File(ECLConfig.getVersionsDir(), jarId + "/" + jarId + ".jar").isFile();
+                    return FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), jarId).isFile();
                 }
                 current = parentJson.has("inheritsFrom")
                         ? parentJson.get("inheritsFrom").getAsString() : null;
@@ -256,7 +262,7 @@ public class GameDownloader implements DownloadService {
         String assetId = assetIndex.get("id").getAsString();
         String assetUrl = assetIndex.get("url").getAsString();
         File assetDir = new File(ECLConfig.getAssetsDir(), "objects");
-        File indexFile = new File(ECLConfig.getAssetsDir(), "indexes/" + assetId + ".json");
+        File indexFile = FileUtil.safeResolveUnder(ECLConfig.getAssetsDir(), "indexes/" + assetId + ".json");
 
         String indexSha1 = assetIndex.has("sha1") ? assetIndex.get("sha1").getAsString() : null;
         if (needsDownload(indexFile, indexSha1)) {
@@ -270,8 +276,11 @@ public class GameDownloader implements DownloadService {
         for (String name : objects.keySet()) {
             JsonObject obj = objects.getAsJsonObject(name);
             String hash = obj.get("hash").getAsString();
+            if (!hash.matches("[0-9a-fA-F]{40}")) {
+                throw new IOException("资源对象哈希无效: " + hash);
+            }
             String subPath = hash.substring(0, 2) + "/" + hash;
-            File target = new File(assetDir, subPath);
+            File target = FileUtil.safeResolveUnder(assetDir, subPath);
             if (needsDownload(target, hash)) {
                 tasks.add(new FileDownloadTask(
                         "https://resources.download.minecraft.net/" + subPath,

@@ -2,6 +2,7 @@ package com.ecl.launcher;
 
 import com.ecl.ECLConfig;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.FileUtil;
 import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.JsonUtil;
 import com.google.gson.JsonElement;
@@ -297,9 +298,12 @@ public final class ModLoaderInstaller {
     }
 
     private void copyBaseVersionIfPresent(String minecraftVersion, Path targetVersions) throws IOException {
-        Path source = ECLConfig.getVersionsDir().toPath().resolve(minecraftVersion).normalize();
+        FileUtil.requireSafeVersionId(minecraftVersion);
+        Path source = FileUtil.safeVersionDirectory(
+                ECLConfig.getVersionsDir(), minecraftVersion).toPath();
         if (Files.isDirectory(source)) {
-            mergeDirectory(source, targetVersions.resolve(minecraftVersion));
+            mergeDirectory(source,
+                    FileUtil.safeResolveUnder(targetVersions.toFile(), minecraftVersion).toPath());
         }
     }
 
@@ -398,16 +402,7 @@ public final class ModLoaderInstaller {
     }
 
     private static Path safeProfileDirectory(String profileId) throws IOException {
-        if (profileId == null || profileId.isBlank()
-                || profileId.contains("/") || profileId.contains("\\") || profileId.contains("..")) {
-            throw new IOException("加载器返回了无效版本 ID: " + profileId);
-        }
-        Path root = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
-        Path result = root.resolve(profileId).normalize();
-        if (!result.startsWith(root)) {
-            throw new IOException("加载器版本目录越界: " + profileId);
-        }
-        return result;
+        return FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), profileId).toPath();
     }
 
     private static void mergeDirectory(Path source, Path target) throws IOException {

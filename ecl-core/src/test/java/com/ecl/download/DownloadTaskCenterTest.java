@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -99,6 +100,44 @@ class DownloadTaskCenterTest {
             second.completion().get(5, TimeUnit.SECONDS);
             assertEquals(DownloadTaskCenter.Status.CANCELLED, first.snapshot().status());
             assertEquals(DownloadTaskCenter.Status.COMPLETED, second.snapshot().status());
+        }
+    }
+
+    @Test
+    void notifiesListenersWhenTaskIsQueuedBehindTheConcurrencyLimit() throws Exception {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+            CountDownLatch release = new CountDownLatch(1);
+            AtomicBoolean queuedWasPublished = new AtomicBoolean();
+            center.submit("blocker", context -> {
+                release.await(5, TimeUnit.SECONDS);
+                return null;
+            });
+            center.addListener(tasks -> {
+                if (tasks.stream().anyMatch(task -> "queued".equals(task.title())
+                        && task.status() == DownloadTaskCenter.Status.QUEUED)) {
+                    queuedWasPublished.set(true);
+                }
+            });
+
+            var queued = center.submit("queued", context -> null);
+            assertEquals(DownloadTaskCenter.Status.QUEUED, queued.snapshot().status());
+            assertTrue(queuedWasPublished.get());
+            release.countDown();
+        }
+    }
+
+    @Test
+    void automaticallyPrunesOldFinishedTaskHistory() throws Exception {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+            int submitted = DownloadTaskCenter.MAX_RETAINED_FINISHED_TASKS + 5;
+            for (int i = 0; i < submitted; i++) {
+                center.submit("completed-" + i, context -> null)
+                        .completion().get(5, TimeUnit.SECONDS);
+            }
+
+            assertEquals(DownloadTaskCenter.MAX_RETAINED_FINISHED_TASKS,
+                    center.snapshots().size());
+            assertEquals("completed-5", center.snapshots().getFirst().title());
         }
     }
 }

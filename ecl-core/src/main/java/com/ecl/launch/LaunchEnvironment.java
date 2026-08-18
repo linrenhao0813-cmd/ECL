@@ -1,6 +1,9 @@
 package com.ecl.launch;
 
+import com.ecl.util.FileUtil;
+
 import java.io.File;
+import java.io.IOException;
 
 /**
  * Fixed paths and identity the launch pipeline reads from. Kept as one value so the pipeline can
@@ -21,6 +24,11 @@ public record LaunchEnvironment(
 
     /** Native libraries staging directory for a given version. */
     public File nativesDirectory(String versionId) {
-        return new File(new File(versionsDirectory, versionId), "natives");
+        try {
+            FileUtil.requireSafeVersionId(versionId);
+            return FileUtil.safeResolveUnder(versionsDirectory, versionId + "/natives");
+        } catch (IOException error) {
+            throw new IllegalArgumentException("Invalid version id: " + versionId, error);
+        }
     }
 }

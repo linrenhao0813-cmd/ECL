@@ -59,4 +59,16 @@ class FileUtilTest {
         assertEquals("x86_64", FileUtil.nativeArchitecture("x86_64"));
         assertEquals("x86", FileUtil.nativeArchitecture("x86"));
     }
+
+    @Test
+    void validatesVersionIdsAsSafePlatformIndependentPathSegments() throws Exception {
+        FileUtil.requireSafeVersionId("1.21.4");
+        FileUtil.requireSafeVersionId("3D Shareware v1.34");
+
+        assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("../outside"));
+        assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("..\\outside"));
+        assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("CON"));
+        assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("version."));
+        assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("version\u0000"));
+    }
 }

@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -313,7 +314,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
         activeRequest = request;
         request.whenComplete((ignored, error) -> Platform.runLater(() -> {
             finishBusy();
-            if (error != null) {
+            if (error != null && !isCancellation(error)) {
                 errorMessage.set(userMessage(error));
             }
         }));
@@ -332,11 +333,11 @@ public final class ModBrowserViewModel implements AutoCloseable {
         activeRequest = request;
         request.whenComplete((result, error) -> Platform.runLater(() -> {
             finishBusy();
-            if (error != null) {
-                errorMessage.set(userMessage(error));
-            } else {
+            if (error == null) {
                 currentOperation.set(result.updated() ? "模组更新完成" : "模组安装完成");
                 refreshInstalled();
+            } else if (!isCancellation(error)) {
+                errorMessage.set(userMessage(error));
             }
         }));
         return request;
@@ -594,12 +595,32 @@ public final class ModBrowserViewModel implements AutoCloseable {
         overallProgress.set(0);
     }
 
+    private static boolean isCancellation(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof CancellationException
+                    || current instanceof InterruptedException) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
     private static String userMessage(Throwable error) {
         Throwable current = error;
         while ((current instanceof CompletionException
                 || current instanceof java.util.concurrent.ExecutionException)
                 && current.getCause() != null) {
             current = current.getCause();
+        }
+        // 用户主动取消不是失败：清空错误提示而不是显示“操作失败/下载失败”
+        if (current instanceof CancellationException
+                || current instanceof InterruptedException) {
+            return "";
         }
         if (current instanceof ModrinthApiException apiError && apiError.retryable()) {
             return "无法连接 Modrinth，请检查网络或代理设置后点击“重试”。";

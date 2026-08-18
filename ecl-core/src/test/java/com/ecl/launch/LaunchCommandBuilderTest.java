@@ -199,6 +199,17 @@ class LaunchCommandBuilderTest {
     }
 
     @Test
+    void rejectsClientJarIdThatEscapesVersionsDirectory() throws Exception {
+        writeVersion("malicious", """
+                {"mainClass":"net.minecraft.client.main.Main","jar":"../outside"}
+                """);
+        LaunchOptions options = options().versionId("malicious").build();
+
+        assertThrows(IOException.class, () -> new LaunchCommandBuilder().build(
+                options, repository.resolve("malicious"), "java"));
+    }
+
+    @Test
     void missingLibraryProducesMISSING_FILES() throws Exception {
         writeVersion("1.22", """
                 {"mainClass":"net.minecraft.client.main.Main",

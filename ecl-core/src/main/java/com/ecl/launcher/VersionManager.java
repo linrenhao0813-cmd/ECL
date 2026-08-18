@@ -345,13 +345,18 @@ public class VersionManager {
     }
 
     public boolean isVersionDownloaded(String versionId) {
-        File json = new File(ECLConfig.getVersionsDir(), versionId + "/" + versionId + ".json");
+        File json;
+        try {
+            json = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
+        } catch (IOException e) {
+            return false;
+        }
         if (!json.isFile()) {
             return false;
         }
         try {
             String jarVersion = resolveClientJarVersion(versionId, new java.util.HashSet<>());
-            File jar = new File(ECLConfig.getVersionsDir(), jarVersion + "/" + jarVersion + ".jar");
+            File jar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), jarVersion);
             return jar.isFile();
         } catch (IOException e) {
             return false;
@@ -419,7 +424,7 @@ public class VersionManager {
     }
 
     public JsonObject loadVersionJson(String versionId) throws IOException {
-        File json = new File(ECLConfig.getVersionsDir(), versionId + "/" + versionId + ".json");
+        File json = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
         if (json.exists()) {
             return HttpUtil.readJson(json);
         }

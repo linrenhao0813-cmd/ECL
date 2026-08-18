@@ -1,5 +1,6 @@
 package com.ecl.game;
 
+import com.ecl.util.FileUtil;
 import com.ecl.util.JsonUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -62,12 +63,23 @@ public class VersionRepository {
 
     /** True when {@code id}/{@code id}.json exists in the versions directory. */
     public boolean contains(String versionId) {
-        return versionJsonFile(versionId).isFile();
+        try {
+            return versionJsonFile(versionId).isFile();
+        } catch (IOException e) {
+            LOGGER.warn("Skipping version check for unsafe version id: {}", versionId);
+            return false;
+        }
     }
 
     /** Read the raw JSON of a single version without inheritance resolution, or null if absent. */
     public JsonObject loadRaw(String versionId) {
-        File file = versionJsonFile(versionId);
+        File file;
+        try {
+            file = versionJsonFile(versionId);
+        } catch (IOException e) {
+            LOGGER.warn("Skipping load of unsafe version id: {}", versionId);
+            return null;
+        }
         if (!file.isFile()) {
             return null;
         }
@@ -130,7 +142,7 @@ public class VersionRepository {
             JsonObject json = loadRaw(versionId);
             if (json == null) {
                 throw new VersionChainException(
-                        "Missing version JSON in inheritance chain: " + versionJsonFile(versionId));
+                        "Missing version JSON in inheritance chain: " + versionId);
             }
             if (!json.has("inheritsFrom") || !json.get("inheritsFrom").isJsonPrimitive()) {
                 return new Chain(json, versionId);
@@ -264,7 +276,8 @@ public class VersionRepository {
 
     // ------------------------------------------------------------------ typed conversion
 
-    private static VersionMetadata parseEffective(String requestedId, JsonObject effective, String baseId) {
+    private static VersionMetadata parseEffective(String requestedId, JsonObject effective, String baseId)
+            throws IOException {
         int javaMajor = 0;
         JsonElement javaVersion = effective.get("javaVersion");
         if (javaVersion != null && javaVersion.isJsonObject()) {
@@ -307,11 +320,16 @@ public class VersionRepository {
             }
         }
 
+        String clientJarId = effectiveJarOf(effective);
+        if (clientJarId != null) {
+            FileUtil.requireSafeVersionId(clientJarId);
+        }
+
         return new VersionMetadata(
                 requestedId,
                 JsonUtil.getString(effective, "inheritsFrom", null),
                 JsonUtil.getString(effective, "mainClass", ""),
-                effectiveJarOf(effective),
+                clientJarId,
                 firstNonBlank(JsonUtil.getString(effective, "eclMinecraftVersion", null), baseId),
                 firstNonBlank(JsonUtil.getString(effective, "eclModLoader", null), null),
                 JsonUtil.getString(effective, "eclModLoaderVersion", ""),
@@ -328,7 +346,7 @@ public class VersionRepository {
         return primary == null || primary.isBlank() ? fallback : primary;
     }
 
-    private File versionJsonFile(String versionId) {
-        return new File(new File(versionsDirectory, versionId), versionId + ".json");
+    private File versionJsonFile(String versionId) throws IOException {
+        return FileUtil.safeVersionJson(versionsDirectory, versionId);
     }
 }
