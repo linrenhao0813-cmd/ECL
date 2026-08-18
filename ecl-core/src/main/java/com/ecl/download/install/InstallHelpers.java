@@ -4,6 +4,7 @@ import com.ecl.ECLConfig;
 import com.ecl.task.TaskCancellationException;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.MinecraftRuleUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -64,6 +65,20 @@ public final class InstallHelpers {
             }
         }
         return "natives-" + osName;
+    }
+
+    public static String nativeClassifierKey(com.google.gson.JsonObject library,
+                                             com.google.gson.JsonObject classifiers,
+                                             String osName, String archBits,
+                                             String nativeClassifier) {
+        java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
+        boolean arm = nativeClassifier != null && nativeClassifier.endsWith("-arm64");
+        if (arm) {
+            candidates.addAll(java.util.Arrays.asList(MinecraftRuleUtil.nativeKeys(nativeClassifier)));
+        }
+        candidates.add(nativeClassifierKey(library, osName, archBits));
+        candidates.addAll(java.util.Arrays.asList(MinecraftRuleUtil.nativeKeys(nativeClassifier)));
+        return candidates.stream().filter(classifiers::has).findFirst().orElse(null);
     }
 
     public static HttpUtil.SourceCallback sourceCallback(String label, InstallState state) {

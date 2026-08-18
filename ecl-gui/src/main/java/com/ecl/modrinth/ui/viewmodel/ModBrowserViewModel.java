@@ -1,5 +1,7 @@
 package com.ecl.modrinth.ui.viewmodel;
 
+import com.ecl.download.DownloadTaskCenter;
+
 import com.ecl.modrinth.api.ModSearchIndex;
 import com.ecl.modrinth.api.ModSearchQuery;
 import com.ecl.modrinth.api.ModrinthApiException;
@@ -47,6 +49,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.nio.file.Path;
 import java.time.Duration;
 
@@ -57,6 +60,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
     private final InstallationPlanBuilder planBuilder;
     private final ModInstallationService installationService;
     private final ModManagementService managementService;
+    private final DownloadTaskCenter downloadTaskCenter;
     private LocalModScanner localScanner;
     private ModUpdateService updateService;
 
@@ -78,6 +82,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
     private final Map<String, CompletableFuture<ModProject>> projectRequests = new ConcurrentHashMap<>();
 
     private volatile CompletableFuture<?> activeRequest;
+    private volatile DownloadTaskCenter.TaskHandle<?> activeDownloadHandle;
     private volatile CompletableFuture<?> updateRequest;
     private volatile long lastUpdateCheckNanos;
     private volatile boolean installedLoaded;
@@ -93,6 +98,20 @@ public final class ModBrowserViewModel implements AutoCloseable {
             LocalModScanner localScanner,
             ModUpdateService updateService
     ) {
+        this(metadataProvider, dependencyResolver, planBuilder, installationService,
+                managementService, localScanner, updateService, null);
+    }
+
+    public ModBrowserViewModel(
+            ModMetadataProvider metadataProvider,
+            ModDependencyResolver dependencyResolver,
+            InstallationPlanBuilder planBuilder,
+            ModInstallationService installationService,
+            ModManagementService managementService,
+            LocalModScanner localScanner,
+            ModUpdateService updateService,
+            DownloadTaskCenter downloadTaskCenter
+    ) {
         this.metadataProvider = Objects.requireNonNull(metadataProvider, "metadataProvider");
         this.dependencyResolver = Objects.requireNonNull(dependencyResolver, "dependencyResolver");
         this.planBuilder = Objects.requireNonNull(planBuilder, "planBuilder");
@@ -100,6 +119,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
         this.managementService = Objects.requireNonNull(managementService, "managementService");
         this.localScanner = Objects.requireNonNull(localScanner, "localScanner");
         this.updateService = Objects.requireNonNull(updateService, "updateService");
+        this.downloadTaskCenter = downloadTaskCenter;
     }
 
     public void setInstance(ModInstanceContext value) {
@@ -303,7 +323,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
     public CompletableFuture<ModInstallationResult> install(ModInstallationPlan plan) {
         setBusy("正在下载并事务安装…", true);
         overallProgress.set(0);
-        CompletableFuture<ModInstallationResult> request = installationService.install(plan, progress ->
+        CompletableFuture<ModInstallationResult> request = queueInstallation(plan, progress ->
                 Platform.runLater(() -> {
                     overallProgress.set(progress.overallTotal() <= 0 ? -1
                             : Math.min(1, (double) progress.overallDownloaded() / progress.overallTotal()));
@@ -320,6 +340,28 @@ public final class ModBrowserViewModel implements AutoCloseable {
             }
         }));
         return request;
+    }
+
+    private CompletableFuture<ModInstallationResult> queueInstallation(
+            ModInstallationPlan plan,
+            java.util.function.Consumer<com.ecl.modrinth.download.ModDownloadProgress> progressListener) {
+        if (downloadTaskCenter == null) {
+            return installationService.install(plan, progressListener);
+        }
+        AtomicReference<CompletableFuture<ModInstallationResult>> underlying = new AtomicReference<>();
+        DownloadTaskCenter.TaskHandle<ModInstallationResult> task = downloadTaskCenter.submit(
+                "Mod installation", context -> {
+                    CompletableFuture<ModInstallationResult> inner = installationService.install(plan, progress -> {
+                        context.updateStatus("Downloading " + progress.fileName());
+                        context.updateProgress(progress.overallDownloaded(), progress.overallTotal());
+                        progressListener.accept(progress);
+                    });
+                    underlying.set(inner);
+                    context.registerCancellation(() -> inner.cancel(true));
+                    return inner.join();
+                });
+        activeDownloadHandle = task;
+        return task.completion();
     }
 
     public void refreshInstalled() {
@@ -459,7 +501,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
             return CompletableFuture.failedFuture(new IllegalArgumentException("该模组没有可用更新"));
         }
         setBusy("正在更新 " + update.installedMod().displayName() + "…", true);
-        CompletableFuture<?> request = updateService.applyUpdate(update)
+        CompletableFuture<?> request = queueUpdate(update)
                 .whenComplete((result, error) -> Platform.runLater(() -> {
                     finishBusy();
                     if (error != null) {
@@ -473,6 +515,20 @@ public final class ModBrowserViewModel implements AutoCloseable {
                 }));
         activeRequest = request;
         return request;
+    }
+
+    private CompletableFuture<?> queueUpdate(ModUpdate update) {
+        if (downloadTaskCenter == null) {
+            return updateService.applyUpdate(update);
+        }
+        DownloadTaskCenter.TaskHandle<Object> task = downloadTaskCenter.submit(
+                "Mod update", context -> {
+                    CompletableFuture<?> inner = updateService.applyUpdate(update);
+                    context.registerCancellation(() -> inner.cancel(true));
+                    return inner.join();
+                });
+        activeDownloadHandle = task;
+        return task.completion();
     }
 
     public CompletableFuture<?> importLocalJar(Path jarFile) {
@@ -504,6 +560,10 @@ public final class ModBrowserViewModel implements AutoCloseable {
     }
 
     public void cancelActiveRequest() {
+        DownloadTaskCenter.TaskHandle<?> downloadTask = activeDownloadHandle;
+        if (downloadTask != null) {
+            downloadTask.cancel();
+        }
         CompletableFuture<?> request = activeRequest;
         if (request != null && !request.isDone()) {
             request.cancel(true);
@@ -528,6 +588,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
     }
 
     private void finishBusy() {
+        activeDownloadHandle = null;
         loading.set(false);
         operationCancellable.set(false);
         overallProgress.set(0);

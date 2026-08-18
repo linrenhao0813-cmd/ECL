@@ -70,9 +70,24 @@ public class FileUtil {
     }
 
     public static String getNativeClassifier() {
-        String arch = System.getProperty("os.arch").toLowerCase();
-        String osArch = arch.contains("64") ? "x86_64" : "x86";
-        return PlatformUtil.current().minecraftName() + "-" + osArch;
+        return PlatformUtil.current().minecraftName() + "-"
+                + nativeArchitecture(System.getProperty("os.arch", ""));
+    }
+
+    /** Normalize JVM architecture names to the suffixes used by Minecraft native classifiers. */
+    public static String nativeArchitecture(String architecture) {
+        String normalized = architecture == null ? "" : architecture.toLowerCase(java.util.Locale.ROOT);
+        if (normalized.contains("aarch64") || normalized.contains("arm64")) {
+            return "arm64";
+        }
+        if (normalized.contains("x86_64") || normalized.contains("amd64")
+                || normalized.equals("x64")) {
+            return "x86_64";
+        }
+        if (normalized.contains("arm")) {
+            return "arm32";
+        }
+        return "x86";
     }
 
     /**

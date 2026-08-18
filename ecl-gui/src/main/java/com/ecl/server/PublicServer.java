@@ -1,6 +1,8 @@
 package com.ecl.server;
 
+import java.net.URI;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 一条公开 Minecraft 服务器的静态描述，配合 {@link ServerCatalog} 从内置 JSON 目录加载。
@@ -33,7 +35,7 @@ public record PublicServer(
         ip = ip == null ? "" : ip.trim();
         description = description == null ? "" : description;
         region = region == null ? "" : region;
-        website = website == null ? "" : website;
+        website = website == null ? "" : website.trim();
         iconText = iconText == null || iconText.isBlank() ? "◈" : iconText;
     }
 
@@ -47,5 +49,24 @@ public record PublicServer(
 
     public ServerCategory categoryEnum() {
         return ServerCategory.fromId(category);
+    }
+
+    /** Returns a browser-safe website URI, or {@code null} for invalid/non-web schemes. */
+    public URI websiteUri() {
+        if (website.isBlank()) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(website);
+            String scheme = uri.getScheme();
+            if (scheme == null || uri.getHost() == null || uri.getUserInfo() != null) {
+                return null;
+            }
+            String normalizedScheme = scheme.toLowerCase(Locale.ROOT);
+            return normalizedScheme.equals("https") || normalizedScheme.equals("http")
+                    ? uri : null;
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 }

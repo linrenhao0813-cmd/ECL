@@ -113,6 +113,11 @@ public class ECLConfig {
             new SettingKey<>("backupKeepCount", Integer.class, 10);
     public static final SettingKey<Boolean> KEY_BACKUP_INCLUDE_MODS =
             new SettingKey<>("backupIncludeMods", Boolean.class, false);
+    public static final SettingKey<Integer> KEY_DOWNLOAD_MAX_CONCURRENT =
+            new SettingKey<>("downloadMaxConcurrent", Integer.class, 2);
+    /** A value of zero means unlimited download speed. */
+    public static final SettingKey<Integer> KEY_DOWNLOAD_RATE_LIMIT_KB =
+            new SettingKey<>("downloadRateLimitKb", Integer.class, 0);
     public static final SettingKey<String> KEY_LANGUAGE =
             new SettingKey<>("language", String.class, "zh-CN");
     public static final SettingKey<String> KEY_THEME =

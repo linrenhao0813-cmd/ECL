@@ -109,7 +109,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                 controller.modInstallationService(),
                 controller.modManagementService(),
                 controller.localModScanner(),
-                controller.modUpdateService());
+                controller.modUpdateService(),
+                controller.downloadTasks());
         controller.registerModInstance(initialInstance);
         viewModel.setInstance(initialInstance);
         buildView(initialInstance);

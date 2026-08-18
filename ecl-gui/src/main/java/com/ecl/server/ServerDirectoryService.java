@@ -3,6 +3,7 @@ package com.ecl.server;
 import com.ecl.ECLConfig;
 import com.ecl.util.GsonProvider;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.Messages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -156,8 +157,8 @@ public final class ServerDirectoryService {
         String category = classify(types).id();
         String region = countryName(text(json, "country"));
         String description = types.isEmpty()
-                ? "公开 Minecraft Java 版服务器"
-                : "玩法：" + String.join(" · ", types);
+                ? Messages.get("server.description.public")
+                : Messages.format("server.description.types", String.join(" · ", types));
         PublicServer server = new PublicServer(
                 name,
                 category,

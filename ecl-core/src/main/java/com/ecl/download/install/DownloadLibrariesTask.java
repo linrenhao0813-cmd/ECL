@@ -72,8 +72,9 @@ public final class DownloadLibrariesTask extends Task<Void> {
             }
             if (downloads.has("classifiers")) {
                 JsonObject classifiers = downloads.getAsJsonObject("classifiers");
-                String nativeKey = InstallHelpers.nativeClassifierKey(library, platform.osName, platform.archBits);
-                if (nativeKey != null && classifiers.has(nativeKey)) {
+                String nativeKey = InstallHelpers.nativeClassifierKey(library, classifiers,
+                        platform.osName, platform.archBits, platform.nativeClassifier);
+                if (nativeKey != null) {
                     addIfNeeded(tasks, classifiers.getAsJsonObject(nativeKey), "原生库");
                 }
             }
@@ -133,11 +134,13 @@ public final class DownloadLibrariesTask extends Task<Void> {
         }
     }
 
-    private record PlatformBits(String osName, String archBits) {
+    private record PlatformBits(String osName, String archBits, String nativeClassifier) {
         private static PlatformBits current() {
             String architecture = System.getProperty("os.arch", "").toLowerCase();
             String bits = architecture.contains("64") || architecture.contains("aarch64") ? "64" : "32";
-            return new PlatformBits(PlatformUtil.current().minecraftName(), bits);
+            String osName = PlatformUtil.current().minecraftName();
+            return new PlatformBits(osName, bits,
+                    osName + "-" + FileUtil.nativeArchitecture(architecture));
         }
     }
 }

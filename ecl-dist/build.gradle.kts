@@ -24,6 +24,11 @@ tasks.register<Exec>("packageWindowsApp") {
 
     val outputDir = rootProject.file(providers.gradleProperty("windowsPackageDir").orElse("dist/windows").get())
     doFirst {
+        val allowedRoot = rootProject.file("dist").canonicalFile.toPath()
+        val resolvedOutput = outputDir.canonicalFile.toPath()
+        if (resolvedOutput == allowedRoot || !resolvedOutput.startsWith(allowedRoot)) {
+            throw GradleException("windowsPackageDir must be a child directory of $allowedRoot")
+        }
         normalizeForDelete(outputDir)
         delete(outputDir)
         outputDir.mkdirs()

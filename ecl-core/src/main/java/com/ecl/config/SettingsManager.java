@@ -255,7 +255,12 @@ public class SettingsManager {
         if (encrypted == null) {
             return null;
         }
-        return CryptoUtil.decrypt(encrypted);
+        try {
+            return CryptoUtil.decrypt(encrypted);
+        } catch (RuntimeException error) {
+            LOGGER.warn("Ignoring unreadable encrypted setting '{}'", key, error);
+            return null;
+        }
     }
 
     /**

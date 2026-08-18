@@ -22,4 +22,13 @@ class DownloadSourceUtilTest {
         String url = "https://example.com/file";
         assertEquals(List.of(url), DownloadSourceUtil.candidates(url));
     }
+
+    @Test
+    void addsBmclapiFallbackForPistonServerFiles() {
+        String official = "https://piston-data.mojang.com/v1/objects/hash/server.jar";
+        assertEquals(List.of(
+                        official,
+                        "https://bmclapi2.bangbang93.com/v1/objects/hash/server.jar"),
+                DownloadSourceUtil.candidates(official));
+    }
 }

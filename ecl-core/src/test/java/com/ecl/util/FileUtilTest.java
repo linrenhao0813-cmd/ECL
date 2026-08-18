@@ -50,4 +50,13 @@ class FileUtilTest {
         assertThrows(IOException.class, () -> FileUtil.safeResolveUnder(root, "   "));
         assertThrows(IOException.class, () -> FileUtil.safeResolveUnder(root, null));
     }
+
+    @Test
+    void normalizesArmAndX64NativeArchitecturesWithoutConflatingThem() {
+        assertEquals("arm64", FileUtil.nativeArchitecture("aarch64"));
+        assertEquals("arm64", FileUtil.nativeArchitecture("ARM64"));
+        assertEquals("x86_64", FileUtil.nativeArchitecture("amd64"));
+        assertEquals("x86_64", FileUtil.nativeArchitecture("x86_64"));
+        assertEquals("x86", FileUtil.nativeArchitecture("x86"));
+    }
 }

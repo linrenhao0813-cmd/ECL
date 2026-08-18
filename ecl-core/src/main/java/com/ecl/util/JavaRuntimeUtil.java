@@ -152,6 +152,24 @@ public final class JavaRuntimeUtil {
         return resolveJavaCandidate(path) != null;
     }
 
+    /** Returns whether launch preparation would need to download a managed Java runtime. */
+    public static boolean requiresManagedJavaDownload(String configuredPath, int requiredMajorVersion) {
+        if (requiredMajorVersion <= 0) {
+            return false;
+        }
+        File explicitlyConfigured = resolveJavaCandidate(configuredPath);
+        if (explicitlyConfigured != null
+                && detectJavaFeatureVersion(explicitlyConfigured) >= requiredMajorVersion) {
+            return false;
+        }
+        try {
+            resolveExactJavaExecutable(configuredPath, requiredMajorVersion);
+            return false;
+        } catch (IOException missing) {
+            return true;
+        }
+    }
+
     /** Snapshot all currently discoverable Java executables in priority order. */
     public static List<String> discoverJavaExecutables(String configuredPath) {
         Set<File> candidates = new LinkedHashSet<>();

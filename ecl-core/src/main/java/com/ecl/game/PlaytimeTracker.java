@@ -5,26 +5,107 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
+import java.util.Objects;
 
 /** Persists total and latest-session play duration alongside an instance. */
 public final class PlaytimeTracker {
-    public synchronized void recordSession(Path instanceRoot, long startedAtMillis, long endedAtMillis) throws IOException {
-        long seconds = Math.max(0, (endedAtMillis - startedAtMillis) / 1000);
-        Path file = instanceRoot.toAbsolutePath().normalize().resolve(".ecl/config/playtime.json");
+    /** Records a successful game process start immediately, before the process exits. */
+    public synchronized void recordLaunch(Path instanceRoot, long startedAtMillis) throws IOException {
+        Path file = statsFile(instanceRoot);
         Files.createDirectories(file.getParent());
-        JsonObject value = Files.isRegularFile(file) ? JsonParser.parseString(Files.readString(file)).getAsJsonObject() : new JsonObject();
-        value.addProperty("totalSeconds", value.has("totalSeconds") ? value.get("totalSeconds").getAsLong() + seconds : seconds);
-        value.addProperty("sessionSeconds", seconds);
-        value.addProperty("lastPlayedAt", Instant.ofEpochMilli(endedAtMillis).toString());
-        Files.writeString(file, GsonProvider.pretty().toJson(value), StandardCharsets.UTF_8);
+        JsonObject value = read(file);
+        value.addProperty("launchCount", number(value, "launchCount") + 1);
+        value.addProperty("lastLaunchedAt", Instant.ofEpochMilli(startedAtMillis).toString());
+        write(file, value);
     }
+
+    public synchronized void recordSession(Path instanceRoot, long startedAtMillis, long endedAtMillis)
+            throws IOException {
+        long seconds = Math.max(0, (endedAtMillis - startedAtMillis) / 1000);
+        Path file = statsFile(instanceRoot);
+        Files.createDirectories(file.getParent());
+        JsonObject value = read(file);
+        value.addProperty("totalSeconds", number(value, "totalSeconds") + seconds);
+        value.addProperty("sessionSeconds", seconds);
+        value.addProperty("lastExitedAt", Instant.ofEpochMilli(endedAtMillis).toString());
+        write(file, value);
+    }
+
     public synchronized long totalSeconds(Path instanceRoot) throws IOException {
-        Path file = instanceRoot.toAbsolutePath().normalize().resolve(".ecl/config/playtime.json");
-        if (!Files.isRegularFile(file)) return 0;
-        JsonObject value = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
-        return value.has("totalSeconds") ? value.get("totalSeconds").getAsLong() : 0;
+        return stats(instanceRoot).totalSeconds();
+    }
+
+    public synchronized PlaytimeStats stats(Path instanceRoot) throws IOException {
+        JsonObject value = read(statsFile(instanceRoot));
+        return new PlaytimeStats(
+                number(value, "totalSeconds"),
+                number(value, "sessionSeconds"),
+                number(value, "launchCount"),
+                text(value, "lastLaunchedAt", text(value, "lastPlayedAt", "")),
+                text(value, "lastExitedAt", ""));
+    }
+
+    private static Path statsFile(Path instanceRoot) {
+        return Objects.requireNonNull(instanceRoot, "instanceRoot")
+                .toAbsolutePath().normalize().resolve(".ecl/config/playtime.json");
+    }
+
+    private static JsonObject read(Path file) throws IOException {
+        if (!Files.isRegularFile(file)) return new JsonObject();
+        try {
+            return JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+        } catch (RuntimeException error) {
+            throw new IOException("游玩统计文件格式无效: " + file, error);
+        }
+    }
+
+    private static void write(Path file, JsonObject value) throws IOException {
+        Path temporary = Files.createTempFile(file.getParent(), "playtime-", ".json.tmp");
+        try {
+            Files.writeString(temporary, GsonProvider.pretty().toJson(value), StandardCharsets.UTF_8,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            try {
+                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static long number(JsonObject value, String key) {
+        try {
+            return value.has(key) ? Math.max(0, value.get(key).getAsLong()) : 0;
+        } catch (RuntimeException ignored) {
+            return 0;
+        }
+    }
+
+    private static String text(JsonObject value, String key, String fallback) {
+        try {
+            return value.has(key) && value.get(key).isJsonPrimitive()
+                    ? value.get(key).getAsString() : fallback;
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    public record PlaytimeStats(long totalSeconds, long sessionSeconds, long launchCount,
+                                String lastLaunchedAt, String lastExitedAt) {
+        public PlaytimeStats {
+            totalSeconds = Math.max(0, totalSeconds);
+            sessionSeconds = Math.max(0, sessionSeconds);
+            launchCount = Math.max(0, launchCount);
+            lastLaunchedAt = lastLaunchedAt == null ? "" : lastLaunchedAt;
+            lastExitedAt = lastExitedAt == null ? "" : lastExitedAt;
+        }
     }
 }

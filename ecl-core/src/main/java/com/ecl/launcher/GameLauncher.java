@@ -9,9 +9,11 @@ import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
+import com.ecl.util.MinecraftRuleUtil;
 import com.ecl.util.RuleEvaluator;
 import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.PlatformUtil;
+import com.ecl.util.TextUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -33,6 +35,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.regex.Matcher;
@@ -61,6 +65,7 @@ public class GameLauncher implements LaunchService {
     private String serverAddress = "";
     private int processorCount;
     private OfflineSkin offlineSkin;
+    private String preparedJavaPath = "";
 
     public GameLauncher() {
         this.auth = new OfflineAuth("Player");
@@ -73,6 +78,7 @@ public class GameLauncher implements LaunchService {
 
     public void setVersion(String versionId) {
         this.versionId = versionId;
+        this.preparedJavaPath = "";
     }
 
     public void setMaxMemory(int mb) {
@@ -98,6 +104,7 @@ public class GameLauncher implements LaunchService {
 
     public void setJavaPath(String javaPath) {
         this.javaPath = javaPath == null ? "" : javaPath.trim();
+        this.preparedJavaPath = "";
     }
 
     @Override
@@ -126,15 +133,24 @@ public class GameLauncher implements LaunchService {
         this.offlineSkin = skin;
     }
 
-    public Process launch() throws IOException {
-        if (versionId == null || versionId.isBlank()) {
-            throw new IOException("未选择游戏版本");
-        }
+    @Override
+    public boolean requiresJavaRuntimeDownload() throws IOException {
+        JsonObject versionJson = requireVersionJson();
+        return JavaRuntimeUtil.requiresManagedJavaDownload(
+                javaPath, determineRequiredJavaMajor(versionJson));
+    }
 
-        JsonObject versionJson = loadVersionJsonWithInheritance();
-        if (versionJson == null) {
-            throw new IOException("无法加载版本JSON: " + versionId);
-        }
+    @Override
+    public String prepareJavaRuntime(Consumer<String> status,
+                                     BiConsumer<Long, Long> progress) throws IOException {
+        JsonObject versionJson = requireVersionJson();
+        preparedJavaPath = JavaRuntimeUtil.resolveOrDownloadJavaExecutable(
+                javaPath, determineRequiredJavaMajor(versionJson), status, progress);
+        return preparedJavaPath;
+    }
+
+    public Process launch() throws IOException {
+        JsonObject versionJson = requireVersionJson();
 
         File launchDirectory = gameDir == null ? ECLConfig.getGameDir() : gameDir;
         launchDirectory.mkdirs();
@@ -143,11 +159,14 @@ public class GameLauncher implements LaunchService {
             instanceDir = launchDirectory;
         }
 
-        int requiredJavaMajor = determineRequiredJavaMajor(versionJson);
-        String resolvedJavaPath = JavaRuntimeUtil.resolveOrDownloadJavaExecutable(
-                javaPath, requiredJavaMajor,
-                message -> LOGGER.info("{}", message),
-                (downloaded, total) -> { });
+        String resolvedJavaPath = preparedJavaPath;
+        if (resolvedJavaPath == null || resolvedJavaPath.isBlank()) {
+            int requiredJavaMajor = determineRequiredJavaMajor(versionJson);
+            resolvedJavaPath = JavaRuntimeUtil.resolveOrDownloadJavaExecutable(
+                    javaPath, requiredJavaMajor,
+                    message -> LOGGER.info("{}", message),
+                    (downloaded, total) -> { });
+        }
         OfflineSkinInjector.Injection skinInjection = OfflineSkinInjector.prepare(auth, offlineSkin);
         List<String> command;
         try {
@@ -267,11 +286,7 @@ public class GameLauncher implements LaunchService {
         }
 
         if (jvmArgs != null && !jvmArgs.isEmpty()) {
-            for (String arg : jvmArgs.split("\\s+")) {
-                if (!arg.isEmpty()) {
-                    cmd.add(arg);
-                }
-            }
+            cmd.addAll(TextUtil.parseCommandLine(jvmArgs));
         }
 
         cmd.addAll(extraJvmArgs);
@@ -613,12 +628,19 @@ public class GameLauncher implements LaunchService {
                 keys.add(natives.get(osArch).getAsString().replace("${arch}", architectureBits));
             }
         }
-        keys.add("natives-" + osArch);
-        if (nativeClassifier != null && !nativeClassifier.isBlank()) {
-            keys.add(nativeClassifier);
-        }
-        keys.add(osArch);
+        keys.addAll(java.util.Arrays.asList(MinecraftRuleUtil.nativeKeys(nativeClassifier)));
         return keys;
+    }
+
+    private JsonObject requireVersionJson() throws IOException {
+        if (versionId == null || versionId.isBlank()) {
+            throw new IOException("未选择游戏版本");
+        }
+        JsonObject versionJson = loadVersionJsonWithInheritance();
+        if (versionJson == null) {
+            throw new IOException("无法加载版本JSON: " + versionId);
+        }
+        return versionJson;
     }
 
     private boolean isNativesExtractionCurrent(File marker, String sourceFingerprint, Path nativesDir) {

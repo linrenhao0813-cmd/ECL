@@ -172,6 +172,13 @@ class SettingsManagerTest {
     }
 
     @Test
+    void getEncryptedReturnsNullForCorruptValue() {
+        manager.setString("_enc_broken", "not-valid-base64");
+
+        assertNull(manager.getEncrypted("broken"));
+    }
+
+    @Test
     void migrateToEncryptedMovesAndClearsPlaintext() {
         manager.setString("oldToken", "secret-value");
         manager.migrateToEncrypted("oldToken");

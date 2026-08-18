@@ -39,9 +39,13 @@ public class GameDownloader implements DownloadService {
     private volatile boolean verifyExistingFiles = true;
 
     public GameDownloader() {
+        this(ECLConfig.DOWNLOAD_THREADS);
+    }
+
+    public GameDownloader(int downloadThreads) {
         versionDownloadExecutor = Executors.newSingleThreadExecutor(daemonThreadFactory("ecl-version-download"));
         fileDownloadExecutor = Executors.newFixedThreadPool(
-                Math.max(1, ECLConfig.DOWNLOAD_THREADS), daemonThreadFactory("ecl-file-download"));
+                Math.max(1, Math.min(8, downloadThreads)), daemonThreadFactory("ecl-file-download"));
     }
 
     public void setListener(DownloadListener listener) {
@@ -223,8 +227,9 @@ public class GameDownloader implements DownloadService {
 
             if (artifacts != null && artifacts.has("classifiers")) {
                 JsonObject classifiers = artifacts.getAsJsonObject("classifiers");
-                String nativeKey = nativeClassifierKey(lib, nativePlatform.osName(), nativePlatform.archBits());
-                if (nativeKey != null && classifiers.has(nativeKey)) {
+                String nativeKey = nativeClassifierKey(lib, classifiers, nativePlatform.osName(),
+                        nativePlatform.archBits(), nativePlatform.nativeClassifier());
+                if (nativeKey != null) {
                     addDownloadIfNeeded(tasks, classifiers.getAsJsonObject(nativeKey), "原生库");
                 }
             }
@@ -300,6 +305,20 @@ public class GameDownloader implements DownloadService {
             }
         }
         return "natives-" + osName;
+    }
+
+    static String nativeClassifierKey(JsonObject library, JsonObject classifiers, String osName,
+                                      String archBits, String nativeClassifier) {
+        java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
+        boolean arm = nativeClassifier != null && nativeClassifier.endsWith("-arm64");
+        if (arm) {
+            candidates.addAll(java.util.Arrays.asList(
+                    com.ecl.util.MinecraftRuleUtil.nativeKeys(nativeClassifier)));
+        }
+        candidates.add(nativeClassifierKey(library, osName, archBits));
+        candidates.addAll(java.util.Arrays.asList(
+                com.ecl.util.MinecraftRuleUtil.nativeKeys(nativeClassifier)));
+        return candidates.stream().filter(classifiers::has).findFirst().orElse(null);
     }
 
     private void downloadConcurrently(List<FileDownloadTask> tasks, String phase,
@@ -431,11 +450,13 @@ public class GameDownloader implements DownloadService {
         };
     }
 
-    private record NativePlatform(String osName, String archBits) {
+    private record NativePlatform(String osName, String archBits, String nativeClassifier) {
         private static NativePlatform current() {
             String architecture = System.getProperty("os.arch", "").toLowerCase();
             String bits = architecture.contains("64") || architecture.contains("aarch64") ? "64" : "32";
-            return new NativePlatform(PlatformUtil.current().minecraftName(), bits);
+            String osName = PlatformUtil.current().minecraftName();
+            return new NativePlatform(osName, bits,
+                    osName + "-" + FileUtil.nativeArchitecture(architecture));
         }
     }
 

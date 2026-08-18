@@ -41,6 +41,10 @@ public class HttpUtil {
     private static final Gson PRETTY_GSON = GsonProvider.pretty();
 
     private static final HttpClient HTTP_CLIENT = createHttpClient();
+    private static final Object RATE_LIMIT_LOCK = new Object();
+    private static long downloadRateLimitBytesPerSecond;
+    private static double availableRateTokens;
+    private static long rateTokensUpdatedAt;
 
     private static final int DEFAULT_READ_TIMEOUT_MS = 30_000;
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes (\\d+)-(\\d+)/(\\d+)");
@@ -52,6 +56,21 @@ public class HttpUtil {
         proxySelectorFor(System.getenv("HTTPS_PROXY"), System.getenv("HTTP_PROXY"),
                 System.getenv("ALL_PROXY")).ifPresent(builder::proxy);
         return builder.build();
+    }
+
+    /** Configure a process-wide download limit. Zero disables throttling. */
+    public static void setDownloadRateLimitBytesPerSecond(long bytesPerSecond) {
+        synchronized (RATE_LIMIT_LOCK) {
+            downloadRateLimitBytesPerSecond = Math.max(0, bytesPerSecond);
+            availableRateTokens = downloadRateLimitBytesPerSecond;
+            rateTokensUpdatedAt = System.nanoTime();
+        }
+    }
+
+    public static long getDownloadRateLimitBytesPerSecond() {
+        synchronized (RATE_LIMIT_LOCK) {
+            return downloadRateLimitBytesPerSecond;
+        }
     }
 
     static Optional<ProxySelector> proxySelectorFor(String httpsProxy, String httpProxy,
@@ -595,6 +614,7 @@ public class HttpUtil {
             if (read > maxBytes - totalRead) {
                 throw new DownloadLimitExceededException("Download exceeded byte limit while streaming");
             }
+            throttleDownload(read);
             output.write(buffer, 0, read);
             totalRead += read;
             if (progressCallback != null) {
@@ -611,6 +631,35 @@ public class HttpUtil {
         }
         if (progressCallback != null && totalRead != lastReportedBytes) {
             progressCallback.onProgress(totalRead, contentLength);
+        }
+    }
+
+    private static void throttleDownload(int bytes) throws IOException {
+        while (true) {
+            long waitNanos;
+            synchronized (RATE_LIMIT_LOCK) {
+                long rate = downloadRateLimitBytesPerSecond;
+                if (rate <= 0) return;
+                long now = System.nanoTime();
+                if (rateTokensUpdatedAt == 0) rateTokensUpdatedAt = now;
+                long elapsed = Math.max(0, now - rateTokensUpdatedAt);
+                availableRateTokens = Math.min(rate,
+                        availableRateTokens + elapsed * (double) rate / 1_000_000_000d);
+                rateTokensUpdatedAt = now;
+                if (availableRateTokens >= bytes) {
+                    availableRateTokens -= bytes;
+                    return;
+                }
+                waitNanos = (long) Math.ceil((bytes - availableRateTokens)
+                        * 1_000_000_000d / rate);
+            }
+            try {
+                long boundedWait = Math.min(waitNanos, 200_000_000L);
+                Thread.sleep(boundedWait / 1_000_000L, (int) (boundedWait % 1_000_000L));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Download interrupted", interrupted);
+            }
         }
     }
 

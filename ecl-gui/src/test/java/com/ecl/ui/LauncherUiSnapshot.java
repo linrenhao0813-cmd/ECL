@@ -157,8 +157,13 @@ public final class LauncherUiSnapshot {
                 showAppView("VERSIONS");
                 return primaryStage.getScene();
             }
+            if ("downloads".equalsIgnoreCase(mode)) {
+                showAppView("DOWNLOADS");
+                return primaryStage.getScene();
+            }
             if ("servers".equalsIgnoreCase(mode)
-                    || "servers-dark".equalsIgnoreCase(mode)) {
+                    || "servers-dark".equalsIgnoreCase(mode)
+                    || "servers-en".equalsIgnoreCase(mode)) {
                 if ("servers-dark".equalsIgnoreCase(mode)) {
                     Field settingsField = LauncherUI.class.getDeclaredField("settingsManager");
                     settingsField.setAccessible(true);
@@ -167,6 +172,12 @@ public final class LauncherUiSnapshot {
                     Method applyTheme = LauncherUI.class.getDeclaredMethod("applyTheme", String.class);
                     applyTheme.setAccessible(true);
                     applyTheme.invoke(this, "DARK");
+                }
+                if ("servers-en".equalsIgnoreCase(mode)) {
+                    Method switchLanguage = LauncherUI.class.getDeclaredMethod(
+                            "switchLanguage", String.class);
+                    switchLanguage.setAccessible(true);
+                    switchLanguage.invoke(this, "en");
                 }
                 showAppView("SERVERS");
                 return primaryStage.getScene();
@@ -219,6 +230,7 @@ public final class LauncherUiSnapshot {
             if ("content-shader".equalsIgnoreCase(mode)
                     || "content-resourcepack".equalsIgnoreCase(mode)
                     || "content-modpack".equalsIgnoreCase(mode)
+                    || "content-server".equalsIgnoreCase(mode)
                     || "content-shader-online".equalsIgnoreCase(mode)
                     || "content-resourcepack-online".equalsIgnoreCase(mode)
                     || "content-modpack-online".equalsIgnoreCase(mode)) {
@@ -230,7 +242,11 @@ public final class LauncherUiSnapshot {
                 primaryStage.getScene().getRoot().applyCss();
                 String normalizedMode = mode.toLowerCase(java.util.Locale.ROOT);
                 int categoryIndex = normalizedMode.startsWith("content-shader") ? 1
-                        : normalizedMode.startsWith("content-resourcepack") ? 2 : 3;
+                        : normalizedMode.startsWith("content-resourcepack") ? 2
+                        : normalizedMode.startsWith("content-server") ? 4 : 3;
+                if (categoryIndex == 4) {
+                    createVisualServerVersion("1.21.4");
+                }
                 Button category = primaryStage.getScene().getRoot()
                         .lookupAll(".content-library-nav-item").stream()
                         .filter(Button.class::isInstance)
@@ -311,6 +327,21 @@ public final class LauncherUiSnapshot {
                     }
                     """.formatted(profileId, minecraftVersion, loaderProperty));
             return profileId;
+        }
+
+        private void createVisualServerVersion(String versionId) throws IOException {
+            Path versionDirectory = ECLConfig.getVersionsDir().toPath().resolve(versionId);
+            Files.createDirectories(versionDirectory);
+            Files.writeString(versionDirectory.resolve(versionId + ".json"), """
+                    {
+                      "id":"%s",
+                      "downloads":{"server":{
+                        "url":"https://piston-data.mojang.com/v1/objects/visual/server.jar",
+                        "sha1":"0123456789abcdef0123456789abcdef01234567",
+                        "size":52142812
+                      }}
+                    }
+                    """.formatted(versionId));
         }
 
         @SuppressWarnings("unchecked")

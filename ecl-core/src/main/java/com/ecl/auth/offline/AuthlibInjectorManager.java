@@ -16,6 +16,8 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.jar.JarFile;
 
 /**
@@ -49,19 +51,31 @@ public final class AuthlibInjectorManager {
      * @throws IOException if neither download source succeeds
      */
     public Path ensureJar() throws IOException {
+        return ensureJar(null, null);
+    }
+
+    public Path ensureJar(Consumer<String> status, BiConsumer<Long, Long> progress) throws IOException {
         synchronized (CACHE_LOCK) {
-            return ensureJarLocked();
+            return ensureJarLocked(status == null ? message -> { } : status,
+                    progress == null ? (downloaded, total) -> { } : progress);
         }
     }
 
-    private Path ensureJarLocked() throws IOException {
+    public boolean requiresDownload() {
+        synchronized (CACHE_LOCK) {
+            return !isCachedJarValid();
+        }
+    }
+
+    private Path ensureJarLocked(Consumer<String> status,
+                                 BiConsumer<Long, Long> progress) throws IOException {
         if (isCachedJarValid()) {
             return jarFile;
         }
         Files.createDirectories(jarFile.getParent());
         Path temp = Files.createTempFile(jarFile.getParent(), "authlib-injector-", ".jar");
         try {
-            String checksum = downloadTo(temp);
+            String checksum = downloadTo(temp, status, progress);
             Files.move(temp, jarFile, StandardCopyOption.REPLACE_EXISTING);
             writeChecksum(checksum);
         } finally {
@@ -82,7 +96,8 @@ public final class AuthlibInjectorManager {
         }
     }
 
-    private String downloadTo(Path target) throws IOException {
+    private String downloadTo(Path target, Consumer<String> status,
+                              BiConsumer<Long, Long> progress) throws IOException {
         IOException lastFailure = null;
         for (String latestJsonUrl : List.of(LATEST_JSON_URL, BMCLAPI_MIRROR_URL)) {
             try {
@@ -96,7 +111,22 @@ public final class AuthlibInjectorManager {
                 if (checksum == null) {
                     throw new IOException("authlib-injector metadata has no valid SHA-256 checksum");
                 }
-                HttpUtil.downloadFile(url, target.toFile());
+                status.accept("正在下载离线皮肤支持组件...");
+                HttpUtil.downloadFileWithProgress(url, target.toFile(), new HttpUtil.ProgressCallback() {
+                    @Override
+                    public void onStart(long total) {
+                        progress.accept(0L, total);
+                    }
+
+                    @Override
+                    public void onProgress(long downloaded, long total) {
+                        progress.accept(downloaded, total);
+                    }
+
+                    @Override
+                    public void onComplete(java.io.File file) {
+                    }
+                });
                 if (!isUsableJar(target, checksum)) {
                     throw new IOException("authlib-injector download failed integrity validation");
                 }

@@ -1,5 +1,6 @@
 package com.ecl.server;
 
+import com.ecl.util.Messages;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -25,6 +26,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -37,6 +39,7 @@ import java.util.function.Consumer;
  * 支持实时在线状态探测，以及把选中的服务器设为启动直连地址。
  */
 public final class ServerBrowserView extends VBox implements AutoCloseable {
+    private static final int MAX_STATUS_PROBES = 32;
     private final ServerCatalog bundledCatalog = ServerCatalog.load();
     private final ServerDirectoryService directoryService = new ServerDirectoryService();
     private final Consumer<String> statusConsumer;
@@ -50,6 +53,12 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
                 thread.setDaemon(true);
                 return thread;
             });
+    private final ExecutorService statusExecutor = Executors.newFixedThreadPool(4, runnable -> {
+        Thread thread = new Thread(runnable, "ecl-server-status");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final Set<String> probingAddresses = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean refreshing = new AtomicBoolean();
 
     private ServerCatalog catalog = bundledCatalog;
@@ -63,7 +72,7 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
     private Button connectButton;
     private Button copyButton;
     private Button websiteButton;
-    private String directorySource = "内置目录";
+    private String directorySource = Messages.get("server.source.bundled");
     private volatile boolean closed;
 
     public ServerBrowserView(Consumer<String> statusConsumer, Consumer<String> connectConsumer) {
@@ -72,6 +81,7 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         buildView();
         refreshList();
         if (!Boolean.getBoolean("ecl.snapshot")) {
+            probeMissingStatuses();
             startDirectoryRefresh(false);
         }
     }
@@ -108,9 +118,9 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         navigation.setMinWidth(180);
         navigation.setMaxWidth(180);
 
-        Label title = new Label("服务器分类");
+        Label title = new Label(Messages.get("server.category.title"));
         title.getStyleClass().add("server-category-nav-title");
-        Label hint = new Label("按玩法筛选服务器");
+        Label hint = new Label(Messages.get("server.category.hint"));
         hint.getStyleClass().add("server-category-nav-hint");
         navigation.getChildren().addAll(title, hint);
 
@@ -148,7 +158,8 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         button.setGraphic(graphic);
         graphic.prefWidthProperty().bind(button.widthProperty().subtract(24));
         button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
-        button.setAccessibleText(category.label() + "，" + count.getText() + " 个服务器");
+        button.setAccessibleText(Messages.format(
+                "server.category.accessible", category.label(), count.getText()));
         button.getStyleClass().add("server-category-item");
         if (category == activeCategory) {
             button.getStyleClass().add("server-category-item-active");
@@ -163,12 +174,12 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
 
     private Node buildSearchBar() {
         searchField = new TextField();
-        searchField.setPromptText("搜索名称、地址、玩法、标签或地区");
-        searchField.setAccessibleText("搜索公开服务器");
+        searchField.setPromptText(Messages.get("server.search.prompt"));
+        searchField.setAccessibleText(Messages.get("server.search.accessible"));
         searchField.getStyleClass().add("field-control");
         HBox.setHgrow(searchField, Priority.ALWAYS);
 
-        clearSearchButton = new Button("清除");
+        clearSearchButton = new Button(Messages.get("server.search.clear"));
         clearSearchButton.getStyleClass().addAll(
                 "app-button", "ghost-button", "compact-button", "server-search-clear");
         clearSearchButton.setVisible(false);
@@ -184,10 +195,13 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
             refreshList();
         });
 
-        refreshStatusButton = new Button("刷新列表");
+        refreshStatusButton = new Button(Messages.get("server.refresh"));
         refreshStatusButton.getStyleClass().addAll(
                 "app-button", "secondary-button", "compact-button");
-        refreshStatusButton.setOnAction(event -> startDirectoryRefresh(true));
+        refreshStatusButton.setOnAction(event -> {
+            probeMissingStatuses();
+            startDirectoryRefresh(true);
+        });
 
         HBox searchBar = new HBox(8, searchField, clearSearchButton, refreshStatusButton);
         searchBar.getStyleClass().add("server-search-bar");
@@ -203,7 +217,7 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         resultList.getStyleClass().add("server-result-list");
         resultList.setMinHeight(300);
         resultList.setPrefHeight(480);
-        resultList.setPlaceholder(new Label("没有找到匹配的服务器"));
+        resultList.setPlaceholder(new Label(Messages.get("server.result.empty")));
         resultList.setCellFactory(list -> new ServerCell());
         resultList.getSelectionModel().selectedItemProperty().addListener(
                 (observable, oldValue, selected) -> updateActionRow(selected));
@@ -216,22 +230,22 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
     }
 
     private Node buildActionRow() {
-        selectedAddressLabel = new Label("选择一个服务器查看操作");
+        selectedAddressLabel = new Label(Messages.get("server.action.select"));
         selectedAddressLabel.getStyleClass().add("server-selected-address");
         selectedAddressLabel.setWrapText(true);
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        connectButton = actionButton("设为启动直连", "primary-button");
+        connectButton = actionButton(Messages.get("server.action.connect"), "primary-button");
         connectButton.setOnAction(event -> {
             PublicServer selected = resultList.getSelectionModel().getSelectedItem();
             if (selected != null) {
                 connectConsumer.accept(selected.address());
             }
         });
-        copyButton = actionButton("复制地址", "ghost-button");
+        copyButton = actionButton(Messages.get("server.action.copy"), "ghost-button");
         copyButton.setOnAction(event -> copySelectedAddress());
-        websiteButton = actionButton("打开详情", "ghost-button");
+        websiteButton = actionButton(Messages.get("server.action.website"), "ghost-button");
         websiteButton.setOnAction(event -> openSelectedWebsite());
 
         HBox actions = new HBox(8, connectButton, copyButton, websiteButton);
@@ -253,20 +267,20 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         boolean hasSelection = selected != null;
         connectButton.setDisable(!hasSelection);
         copyButton.setDisable(!hasSelection);
-        websiteButton.setDisable(!hasSelection
-                || selected.website() == null || selected.website().isBlank());
+        websiteButton.setDisable(!hasSelection || selected.websiteUri() == null);
         selectedAddressLabel.setText(hasSelection
-                ? selected.name() + " · " + selected.address()
-                : "选择一个服务器查看操作");
+                ? Messages.format("server.action.selected", selected.name(), selected.address())
+                : Messages.get("server.action.select"));
     }
 
     private void refreshList() {
         List<PublicServer> filtered = catalog.filter(activeCategory, searchField.getText());
         resultList.getItems().setAll(filtered);
-        resultCountLabel.setText("共 " + filtered.size() + " 个服务器"
-                + (activeCategory == ServerCategory.ALL
-                ? "" : "（" + activeCategory.label() + "）")
-                + " · " + directorySource);
+        String resultCount = activeCategory == ServerCategory.ALL
+                ? Messages.format("server.result.count", filtered.size())
+                : Messages.format("server.result.count.category",
+                        filtered.size(), activeCategory.label());
+        resultCountLabel.setText(resultCount + " · " + directorySource);
         resultList.getSelectionModel().clearSelection();
         updateActionRow(null);
     }
@@ -276,7 +290,7 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
             return;
         }
         refreshStatusButton.setDisable(true);
-        refreshStatusButton.setText("正在加载…");
+        refreshStatusButton.setText(Messages.get("server.status.loading"));
         CompletableFuture.supplyAsync(
                         () -> directoryService.load(forceRefresh), directoryExecutor)
                 .whenComplete(this::finishDirectoryRefresh);
@@ -289,23 +303,61 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
             return;
         }
         Platform.runLater(() -> {
-            refreshStatusButton.setText("刷新列表");
+            refreshStatusButton.setText(Messages.get("server.refresh"));
             refreshStatusButton.setDisable(false);
             if (error != null || snapshot == null || snapshot.servers().isEmpty()) {
                 resultList.refresh();
-                statusConsumer.accept("在线目录暂时不可用，正在显示内置服务器");
+                statusConsumer.accept(Messages.get("server.status.directoryUnavailable"));
+                probeMissingStatuses();
                 return;
             }
             catalog = bundledCatalog.withDiscoveredServers(snapshot.servers());
             statusMap.clear();
             statusMap.putAll(snapshot.statuses());
-            directorySource = snapshot.cached() ? "缓存目录" : "minecraft-java-servers.com";
+            directorySource = snapshot.cached()
+                    ? Messages.get("server.source.cache")
+                    : "minecraft-java-servers.com";
             updateCategoryCounts();
             refreshList();
-            String source = snapshot.cached() ? "缓存" : "在线目录";
-            statusConsumer.accept("已从" + source + "加载 " + catalog.servers().size()
-                    + " 个公开服务器");
+            String source = snapshot.cached()
+                    ? Messages.get("server.source.cacheShort")
+                    : Messages.get("server.source.onlineShort");
+            statusConsumer.accept(Messages.format(
+                    "server.status.loaded", source, catalog.servers().size()));
+            probeMissingStatuses();
         });
+    }
+
+    private void probeMissingStatuses() {
+        if (closed || Boolean.getBoolean("ecl.snapshot")) {
+            return;
+        }
+        int scheduled = 0;
+        for (PublicServer server : catalog.servers()) {
+            ServerStatus existing = statusMap.get(server.address());
+            if ((existing != null && existing.state() != ServerStatusState.UNKNOWN)
+                    || server.address().isBlank()
+                    || !probingAddresses.add(server.address())) {
+                continue;
+            }
+            scheduled++;
+            statusExecutor.execute(() -> {
+                ServerStatus status = ServerStatusService.fetch(server);
+                if (!closed) {
+                    statusMap.put(server.address(), status);
+                }
+                probingAddresses.remove(server.address());
+                if (!closed) {
+                    Platform.runLater(resultList::refresh);
+                }
+            });
+            if (scheduled >= MAX_STATUS_PROBES) {
+                break;
+            }
+        }
+        if (scheduled > 0) {
+            resultList.refresh();
+        }
     }
 
     private void updateCategoryCounts() {
@@ -321,23 +373,27 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         ClipboardContent content = new ClipboardContent();
         content.putString(selected.address());
         Clipboard.getSystemClipboard().setContent(content);
-        statusConsumer.accept("已复制服务器地址：" + selected.address());
+        statusConsumer.accept(Messages.format("server.status.copied", selected.address()));
     }
 
     private void openSelectedWebsite() {
         PublicServer selected = resultList.getSelectionModel().getSelectedItem();
-        if (selected == null || selected.website().isBlank()) {
+        if (selected == null) {
+            return;
+        }
+        URI website = selected.websiteUri();
+        if (website == null) {
             return;
         }
         try {
             if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().browse(URI.create(selected.website()));
+                Desktop.getDesktop().browse(website);
             } else {
-                statusConsumer.accept("当前系统无法打开浏览器，请复制官网地址："
-                        + selected.website());
+                statusConsumer.accept(Messages.format(
+                        "server.status.browserUnsupported", website));
             }
-        } catch (IOException | IllegalArgumentException | SecurityException error) {
-            statusConsumer.accept("无法打开官网：" + selected.website());
+        } catch (IOException | SecurityException error) {
+            statusConsumer.accept(Messages.format("server.status.browserFailed", website));
         }
     }
 
@@ -345,6 +401,7 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
     public void close() {
         closed = true;
         directoryExecutor.shutdownNow();
+        statusExecutor.shutdownNow();
     }
 
     private final class ServerCell extends ListCell<PublicServer> {
@@ -372,7 +429,9 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
 
             String meta = String.join(" · ", nonEmpty(
                     server.categoryEnum().label(), server.region(),
-                    "版本 " + server.version(), server.address()));
+                    server.version().isBlank() ? ""
+                            : Messages.format("server.meta.version", server.version()),
+                    server.address()));
             Label metaLabel = new Label(meta);
             metaLabel.getStyleClass().add("server-item-address");
 
@@ -394,22 +453,26 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         private Node statusBadge(PublicServer server) {
             ServerStatus status = statusMap.get(server.address());
             Label badge = new Label();
-            if (status == null) {
-                badge.setText(refreshing.get() ? "检测中…" : "待检测");
+            if (probingAddresses.contains(server.address())) {
+                badge.setText(Messages.get("server.status.checking"));
+                badge.getStyleClass().add("server-status-unknown");
+            } else if (status == null) {
+                badge.setText(Messages.get("server.status.pending"));
                 badge.getStyleClass().add("server-status-unknown");
             } else {
                 switch (status.state()) {
                     case ONLINE -> {
-                        badge.setText("在线 · " + formatPlayerCount(status.playersOnline())
-                                + " / " + formatPlayerCount(status.playersMax()));
+                        badge.setText(Messages.format("server.status.online",
+                                formatPlayerCount(status.playersOnline()),
+                                formatPlayerCount(status.playersMax())));
                         badge.getStyleClass().add("server-status-online");
                     }
                     case OFFLINE -> {
-                        badge.setText("离线");
+                        badge.setText(Messages.get("server.status.offline"));
                         badge.getStyleClass().add("server-status-offline");
                     }
                     default -> {
-                        badge.setText("状态未知");
+                        badge.setText(Messages.get("server.status.unknown"));
                         badge.getStyleClass().add("server-status-unknown");
                     }
                 }

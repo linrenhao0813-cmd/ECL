@@ -9,18 +9,26 @@ import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReadParam;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.net.URI;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.util.Comparator;
 import java.util.Collection;
 import java.util.HexFormat;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -28,12 +36,17 @@ import java.util.concurrent.Executors;
 public final class RemoteImageLoader {
     private static final int ICON_SIZE = 48;
     private static final int MAX_ICON_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_SOURCE_DIMENSION = 8_192;
+    private static final long MAX_SOURCE_PIXELS = 16_000_000L;
+    private static final int MAX_MEMORY_CACHE_ENTRIES = 256;
+    private static final int MAX_DISK_CACHE_ENTRIES = 512;
     private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(8, runnable -> {
         Thread thread = new Thread(runnable, "ecl-remote-image");
         thread.setDaemon(true);
         return thread;
     });
     private static final Map<String, CompletableFuture<Image>> CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentLinkedQueue<String> CACHE_ORDER = new ConcurrentLinkedQueue<>();
     private static final Image LOADING = placeholder(Color.web("#E5E7EB"), Color.web("#9CA3AF"));
     private static final Image MISSING = placeholder(Color.web("#F3F4F6"), Color.web("#CBD5E1"));
 
@@ -52,12 +65,6 @@ public final class RemoteImageLoader {
         CompletableFuture<Image> created = CompletableFuture.supplyAsync(() -> {
             try {
                 byte[] bytes = cachedBytes(key);
-                try (ByteArrayInputStream input = new ByteArrayInputStream(bytes)) {
-                    Image image = new Image(input, ICON_SIZE, ICON_SIZE, true, true);
-                    if (!image.isError()) {
-                        return image;
-                    }
-                }
                 return decodeWithImageIo(bytes);
             } catch (Exception ignored) {
                 return MISSING;
@@ -67,6 +74,8 @@ public final class RemoteImageLoader {
         if (selected != null) {
             return selected;
         }
+        CACHE_ORDER.add(key);
+        trimMemoryCache();
         return created;
     }
 
@@ -96,16 +105,35 @@ public final class RemoteImageLoader {
             if (size > 0 && size <= MAX_ICON_BYTES) {
                 return Files.readAllBytes(file);
             }
+            try {
+                Files.deleteIfExists(file);
+            } catch (Exception ignored) {
+                // A stale read-only cache entry must not block a fresh request.
+            }
         }
         byte[] bytes = HttpUtil.getBytes(key, MAX_ICON_BYTES);
+        Path temporary = null;
         try {
             Files.createDirectories(directory);
-            Path temporary = Files.createTempFile(directory, "icon-", ".tmp");
+            temporary = Files.createTempFile(directory, "icon-", ".tmp");
             Files.write(temporary, bytes);
-            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
+            try {
+                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+            }
+            trimDiskCache(directory);
         } catch (Exception ignored) {
             // A read-only or busy cache must never prevent the cover from being displayed.
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (Exception ignored) {
+                    // Best-effort cleanup only.
+                }
+            }
         }
         return bytes;
     }
@@ -117,9 +145,33 @@ public final class RemoteImageLoader {
     }
 
     private static Image decodeWithImageIo(byte[] bytes) {
-        try (ByteArrayInputStream input = new ByteArrayInputStream(bytes)) {
-            BufferedImage buffered = ImageIO.read(input);
-            if (buffered == null || buffered.getWidth() <= 0 || buffered.getHeight() <= 0) {
+        try (ByteArrayInputStream input = new ByteArrayInputStream(bytes);
+             ImageInputStream imageInput = ImageIO.createImageInputStream(input)) {
+            if (imageInput == null) {
+                return MISSING;
+            }
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(imageInput);
+            if (!readers.hasNext()) {
+                return MISSING;
+            }
+            ImageReader reader = readers.next();
+            BufferedImage buffered;
+            try {
+                reader.setInput(imageInput, true, true);
+                int sourceWidth = reader.getWidth(0);
+                int sourceHeight = reader.getHeight(0);
+                if (!isSourceSizeAllowed(sourceWidth, sourceHeight)) {
+                    return MISSING;
+                }
+                int sample = Math.max(1,
+                        (Math.max(sourceWidth, sourceHeight) + ICON_SIZE - 1) / ICON_SIZE);
+                ImageReadParam parameters = reader.getDefaultReadParam();
+                parameters.setSourceSubsampling(sample, sample, 0, 0);
+                buffered = reader.read(0, parameters);
+            } finally {
+                reader.dispose();
+            }
+            if (buffered == null || !isDecodedSizeAllowed(buffered.getWidth(), buffered.getHeight())) {
                 return MISSING;
             }
             int width = buffered.getWidth();
@@ -131,6 +183,49 @@ public final class RemoteImageLoader {
             return image;
         } catch (Exception ignored) {
             return MISSING;
+        }
+    }
+
+    static boolean isSourceSizeAllowed(int width, int height) {
+        return width > 0 && height > 0
+                && width <= MAX_SOURCE_DIMENSION && height <= MAX_SOURCE_DIMENSION
+                && (long) width * height <= MAX_SOURCE_PIXELS;
+    }
+
+    private static boolean isDecodedSizeAllowed(int width, int height) {
+        return width > 0 && height > 0 && width <= ICON_SIZE && height <= ICON_SIZE;
+    }
+
+    private static void trimMemoryCache() {
+        while (CACHE.size() > MAX_MEMORY_CACHE_ENTRIES) {
+            String oldest = CACHE_ORDER.poll();
+            if (oldest == null) {
+                return;
+            }
+            CACHE.remove(oldest);
+        }
+    }
+
+    private static void trimDiskCache(Path directory) {
+        try (var files = Files.list(directory)) {
+            List<Path> cachedFiles = files
+                    .filter(path -> path.getFileName().toString().endsWith(".img"))
+                    .sorted(Comparator.comparingLong(RemoteImageLoader::lastModified))
+                    .toList();
+            int excess = cachedFiles.size() - MAX_DISK_CACHE_ENTRIES;
+            for (int index = 0; index < excess; index++) {
+                Files.deleteIfExists(cachedFiles.get(index));
+            }
+        } catch (Exception ignored) {
+            // Cache trimming is best-effort.
+        }
+    }
+
+    private static long lastModified(Path path) {
+        try {
+            return Files.getLastModifiedTime(path).toMillis();
+        } catch (Exception ignored) {
+            return Long.MIN_VALUE;
         }
     }
 

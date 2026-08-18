@@ -8,6 +8,7 @@ import com.ecl.auth.MinecraftSkinService;
 import com.ecl.auth.OfflineAuth;
 import com.ecl.auth.OfflineSkinStore;
 import com.ecl.auth.YggdrasilAuth;
+import com.ecl.auth.offline.AuthlibInjectorManager;
 import com.ecl.backup.BackupEntry;
 import com.ecl.backup.WorldBackupService;
 import com.ecl.config.SettingsManager;
@@ -15,11 +16,15 @@ import com.ecl.diagnostic.DiagnosticBundleService;
 import com.ecl.download.DownloadService;
 import com.ecl.download.ContentDownloader;
 import com.ecl.download.GameDownloader;
+import com.ecl.download.DownloadTaskCenter;
 import com.ecl.download.ModrinthDownloader;
+import com.ecl.download.ServerJarDownloader;
+import com.ecl.desktop.DesktopShortcutService;
 import com.ecl.game.DefaultGameRepository;
 import com.ecl.game.DefaultIsolationType;
 import com.ecl.game.InstanceGameSettings;
 import com.ecl.game.InstanceGameSettingsStore;
+import com.ecl.game.PlaytimeTracker;
 import com.ecl.launcher.CrashAnalyzer;
 import com.ecl.launcher.LaunchService;
 import com.ecl.launcher.ModLoaderInstaller;
@@ -99,6 +104,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.ZoneId;
+import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.EnumSet;
@@ -110,6 +116,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -144,7 +151,9 @@ public class LauncherUI extends javafx.application.Application {
 
     private VersionManager versionManager;
     private DownloadService downloader;
+    private DownloadTaskCenter downloadTaskCenter;
     private ModrinthDownloader modrinthDownloader;
+    private ServerJarDownloader serverJarDownloader;
     private ModLoaderInstaller modLoaderInstaller;
     private MrpackInstaller mrpackInstaller;
     private WorldBackupService worldBackupService;
@@ -203,6 +212,11 @@ public class LauncherUI extends javafx.application.Application {
     private Label homeAccountAvatarLabel;
     private Label homeEnvironmentStatusLabel;
     private Label topTaskLabel;
+    private Label playtimeTotalLabel;
+    private Label playtimeRecentLabel;
+    private Label playtimeLaunchCountLabel;
+    private ListView<DownloadTaskCenter.TaskSnapshot> downloadTaskList;
+    private Label downloadTaskSummaryLabel;
     private TitledPane instanceSettingsPane;
     private VBox homePage;
     private HBox workspacePane;
@@ -224,9 +238,11 @@ public class LauncherUI extends javafx.application.Application {
     private boolean backupIncludeMods;
     private final BoundedLogBuffer liveGameLog =
             new BoundedLogBuffer(ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
+    private final PlaytimeTracker playtimeTracker = new PlaytimeTracker();
     private TextArea liveConsoleArea;
     private final StringBuilder pendingConsoleText = new StringBuilder();
     private final AtomicBoolean consoleFlushScheduled = new AtomicBoolean();
+    private final AtomicBoolean applicationStopping = new AtomicBoolean();
     private volatile Process activeGameProcess;
     private volatile String activeGameVersion;
     private double windowDragOffsetX;
@@ -240,6 +256,7 @@ public class LauncherUI extends javafx.application.Application {
     private AppView activeView = AppView.HOME;
 
     private enum AppView {
+        DOWNLOADS(ICON_LOG, "D", "nav.downloads"),
         HOME(ICON_HOME, "⌂", "nav.home"),
         VERSIONS(ICON_STONE_BLOCK, "□", "nav.versions"),
         MODRINTH(ICON_MODRINTH, "◎", "nav.modrinth"),
@@ -393,7 +410,11 @@ public class LauncherUI extends javafx.application.Application {
         Messages.setLocale(Locale.forLanguageTag(settingsManager.get(ECLConfig.KEY_LANGUAGE)));
         versionManager = controller.versions();
         downloader = controller.gameDownloader();
+        downloadTaskCenter = controller.downloadTasks();
+        downloadTaskCenter.addListener(this::onDownloadTasksChanged);
+        applyRequestedInstanceArgument();
         modrinthDownloader = controller.modrinthDownloader();
+        serverJarDownloader = new ServerJarDownloader(versionManager);
         modLoaderInstaller = new ModLoaderInstaller();
         mrpackInstaller = new MrpackInstaller();
         worldBackupService = new WorldBackupService();
@@ -458,8 +479,51 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
+    private void applyRequestedInstanceArgument() {
+        List<String> arguments = getParameters() == null ? List.of() : getParameters().getRaw();
+        for (int i = 0; i < arguments.size(); i++) {
+            String argument = arguments.get(i);
+            String value = null;
+            if (argument.startsWith("--instance=")) {
+                value = argument.substring("--instance=".length());
+            } else if ((argument.equals("--instance") || argument.equals("--version"))
+                    && i + 1 < arguments.size()) {
+                value = arguments.get(++i);
+            }
+            if (value != null && !value.isBlank()) {
+                settingsManager.set(ECLConfig.KEY_SELECTED_VERSION, value.trim());
+                return;
+            }
+        }
+    }
+
+    private void onDownloadTasksChanged(List<DownloadTaskCenter.TaskSnapshot> tasks) {
+        Runnable update = () -> {
+            long active = tasks.stream().filter(task -> task.status() == DownloadTaskCenter.Status.QUEUED
+                    || task.status() == DownloadTaskCenter.Status.RUNNING
+                    || task.status() == DownloadTaskCenter.Status.CANCELLING).count();
+            long failed = tasks.stream().filter(task -> task.status() == DownloadTaskCenter.Status.FAILED).count();
+            if (topTaskLabel != null) {
+                topTaskLabel.setText(active == 0 && failed == 0
+                        ? Messages.get("download.none")
+                        : Messages.format("download.summary.count", active, failed));
+                topTaskLabel.setTooltip(new Tooltip(Messages.get("download.tooltip.open")));
+            }
+            if (downloadTaskList != null) downloadTaskList.getItems().setAll(tasks);
+            if (downloadTaskSummaryLabel != null) {
+                downloadTaskSummaryLabel.setText(active == 0
+                        ? (failed == 0 ? Messages.get("download.summary.none")
+                                : Messages.format("download.summary.failed", failed))
+                        : Messages.format("download.summary.active", active));
+            }
+        };
+        if (Platform.isFxApplicationThread()) update.run();
+        else Platform.runLater(update);
+    }
+
     @Override
     public void stop() {
+        applicationStopping.set(true);
         stopAllProgressAnimations();
         closeActiveModBrowserView();
         closeActiveServerBrowserView();
@@ -629,6 +693,8 @@ public class LauncherUI extends javafx.application.Application {
 
         topTaskLabel = new Label("暂无下载任务");
         topTaskLabel.getStyleClass().add("task-chip");
+        topTaskLabel.setOnMouseClicked(event -> setActiveView(AppView.DOWNLOADS));
+        topTaskLabel.setCursor(javafx.scene.Cursor.HAND);
 
         topAuthBadgeLabel = createValueLabel("Steve");
         topAuthBadgeLabel.getStyleClass().add("account-chip");
@@ -824,6 +890,7 @@ public class LauncherUI extends javafx.application.Application {
         return switch (view) {
             case HOME -> Messages.get("nav.short.home");
             case VERSIONS -> Messages.get("nav.short.versions");
+            case DOWNLOADS -> Messages.get("nav.short.downloads");
             case MODRINTH -> Messages.get("nav.short.modrinth");
             case SERVERS -> Messages.get("nav.short.servers");
             case LOGS -> Messages.get("nav.short.logs");
@@ -835,6 +902,7 @@ public class LauncherUI extends javafx.application.Application {
         return switch (view) {
             case HOME -> Messages.get("nav.subtitle.home");
             case VERSIONS -> Messages.get("nav.subtitle.versions");
+            case DOWNLOADS -> Messages.get("nav.subtitle.downloads");
             case MODRINTH -> Messages.get("nav.subtitle.modrinth");
             case SERVERS -> Messages.get("nav.subtitle.servers");
             case SETTINGS -> Messages.get("nav.subtitle.settings");
@@ -882,6 +950,7 @@ public class LauncherUI extends javafx.application.Application {
         switch (activeView) {
             case HOME -> addMainContent(getOrCreateHomePage(), null);
             case VERSIONS -> addMainContent(createVersionsPage(), null);
+            case DOWNLOADS -> addMainContent(createDownloadTasksPage(), null);
             case MODRINTH -> addMainContent(createModrinthPage(), null);
             case SERVERS -> addMainContent(createServersPage(), null);
             case SETTINGS -> addMainContent(createSettingsPage(), null);
@@ -948,7 +1017,12 @@ public class LauncherUI extends javafx.application.Application {
                         "整合包", "完整玩法包与客户端预设", "P", "modpack",
                         new String[0], new String[]{".mrpack"},
                         false, "搜索整合包名称，例如 fabulously optimized",
-                        version -> new File(resolveVersionGameDir(version), "modpacks"))
+                        version -> new File(resolveVersionGameDir(version), "modpacks")),
+                new ContentTarget(
+                        "服务端", "官方 server.jar 与国内镜像", "V", "server",
+                        new String[0], new String[]{".jar"},
+                        false, "选择 Minecraft 服务端版本",
+                        version -> new File(getConfiguredGameRootDir(), "server-downloads"))
         );
     }
 
@@ -1204,7 +1278,7 @@ public class LauncherUI extends javafx.application.Application {
         downloadProgress.setMaxWidth(Double.MAX_VALUE);
         Region taskSpacer = new Region();
         VBox.setVgrow(taskSpacer, Priority.ALWAYS);
-        Button viewTasks = createLinkButton("查看内容库  ›", () -> setActiveView(AppView.MODRINTH));
+        Button viewTasks = createLinkButton("查看下载任务  ›", () -> setActiveView(AppView.DOWNLOADS));
         taskCard.getChildren().addAll(
                 taskLabel,
                 statusLabel,
@@ -1213,15 +1287,30 @@ public class LauncherUI extends javafx.application.Application {
                 taskSpacer,
                 viewTasks);
 
-        double preferredCardWidth = (LAUNCH_WIDTH - 48) / 3.0;
-        for (VBox card : List.of(accountCard, environmentCard, taskCard)) {
+        VBox playtimeCard = new VBox(12);
+        playtimeCard.getStyleClass().addAll("home-card", "playtime-card");
+        Label playtimeTitle = new Label(Messages.get("playtime.title"));
+        playtimeTitle.getStyleClass().add("card-kicker");
+        playtimeTotalLabel = createValueLabel(Messages.get("label.notSelected"));
+        playtimeRecentLabel = createValueLabel(Messages.get("playtime.never"));
+        playtimeLaunchCountLabel = createValueLabel("0");
+        playtimeCard.getChildren().addAll(
+                playtimeTitle,
+                createSummaryRow(Messages.get("playtime.total"), playtimeTotalLabel),
+                createSummaryRow(Messages.get("playtime.lastLaunch"), playtimeRecentLabel),
+                createSummaryRow(Messages.get("playtime.launches"), playtimeLaunchCountLabel),
+                createLinkButton(Messages.get("shortcut.createLink"),
+                        () -> setActiveView(AppView.VERSIONS)));
+
+        double preferredCardWidth = (LAUNCH_WIDTH - 72) / 4.0;
+        for (VBox card : List.of(accountCard, environmentCard, taskCard, playtimeCard)) {
             card.setMinWidth(0);
             card.setPrefWidth(preferredCardWidth);
             card.setMaxWidth(Double.MAX_VALUE);
             HBox.setHgrow(card, Priority.ALWAYS);
         }
 
-        HBox cards = new HBox(24, accountCard, environmentCard, taskCard);
+        HBox cards = new HBox(24, accountCard, environmentCard, taskCard, playtimeCard);
         cards.getStyleClass().add("home-summary");
         cards.setFillHeight(true);
         return cards;
@@ -1275,6 +1364,131 @@ public class LauncherUI extends javafx.application.Application {
         return corner;
     }
 
+    private VBox createDownloadTasksPage() {
+        VBox page = createMainPage();
+        downloadTaskSummaryLabel = createBodyText(Messages.get("download.summary.none"));
+
+        downloadTaskList = new ListView<>();
+        downloadTaskList.setPrefHeight(430);
+        downloadTaskList.setPlaceholder(createBodyText(Messages.get("download.placeholder")));
+        downloadTaskList.setCellFactory(list -> new ListCell<>() {
+            @Override
+            protected void updateItem(DownloadTaskCenter.TaskSnapshot item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    setGraphic(null);
+                    return;
+                }
+                Label title = new Label(item.title());
+                title.getStyleClass().add("content-title");
+                Label status = new Label(downloadStatusText(item));
+                status.getStyleClass().add("status-detail");
+                Label detail = new Label(item.detail());
+                detail.getStyleClass().add("content-subtitle");
+                detail.setWrapText(true);
+                ProgressBar progress = new ProgressBar(item.progress());
+                progress.setPrefWidth(210);
+                progress.setVisible(item.status() == DownloadTaskCenter.Status.QUEUED
+                        || item.status() == DownloadTaskCenter.Status.RUNNING
+                        || item.status() == DownloadTaskCenter.Status.CANCELLING);
+                Label meta = new Label(downloadTaskMeta(item));
+                meta.getStyleClass().add("content-subtitle");
+                VBox text = new VBox(3, title, status, detail, meta);
+                HBox.setHgrow(text, Priority.ALWAYS);
+
+                Button action = null;
+                if (item.status() == DownloadTaskCenter.Status.QUEUED
+                        || item.status() == DownloadTaskCenter.Status.RUNNING) {
+                    action = createActionButton(Messages.get("download.action.cancel"), "ghost-button",
+                            () -> downloadTaskCenter.cancel(item.id()));
+                } else if (item.status() == DownloadTaskCenter.Status.FAILED
+                        || item.status() == DownloadTaskCenter.Status.CANCELLED) {
+                    action = createActionButton(Messages.get("download.action.retry"), "secondary-button",
+                            () -> downloadTaskCenter.retry(item.id()));
+                }
+                HBox row = new HBox(12, text, progress);
+                if (action != null) row.getChildren().add(action);
+                row.setAlignment(Pos.CENTER_LEFT);
+                row.setPadding(new Insets(8, 4, 8, 4));
+                setGraphic(row);
+            }
+        });
+        downloadTaskList.getItems().setAll(downloadTaskCenter.snapshots());
+
+        ComboBox<Integer> concurrency = new ComboBox<>();
+        concurrency.getItems().addAll(1, 2, 3, 4, 5, 6, 7, 8);
+        concurrency.setValue(downloadTaskCenter.maxConcurrent());
+        concurrency.setOnAction(event -> {
+            Integer value = concurrency.getValue();
+            if (value == null) return;
+            downloadTaskCenter.setMaxConcurrent(value);
+            settingsManager.set(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT, value);
+            settingsManager.save();
+        });
+
+        ComboBox<String> rate = new ComboBox<>();
+        rate.getItems().addAll(Messages.get("download.rate.unlimited"), "256 KB/s", "512 KB/s",
+                "1 MB/s", "2 MB/s", "4 MB/s", "8 MB/s");
+        rate.setValue(downloadRateLabel(downloadTaskCenter.bandwidthLimitBytesPerSecond()));
+        rate.setOnAction(event -> {
+            long bytes = parseDownloadRate(rate.getValue());
+            downloadTaskCenter.setBandwidthLimitBytesPerSecond(bytes);
+            settingsManager.set(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB, (int) (bytes / 1024));
+            settingsManager.save();
+        });
+
+        Button clear = createActionButton(Messages.get("download.action.clear"), "ghost-button",
+                downloadTaskCenter::clearFinished);
+        HBox settings = new HBox(12,
+                createControlRow(Messages.get("download.settings.concurrency"), concurrency),
+                createControlRow(Messages.get("download.settings.speedLimit"), rate), clear);
+        settings.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(settings.getChildren().get(0), Priority.ALWAYS);
+        HBox.setHgrow(settings.getChildren().get(1), Priority.ALWAYS);
+
+        page.getChildren().addAll(
+                createSurface(Messages.get("download.center.title"), Messages.get("download.center.subtitle"),
+                        downloadTaskSummaryLabel, settings),
+                createSurface(Messages.get("download.tasks.title"), Messages.get("download.tasks.subtitle"),
+                        downloadTaskList));
+        return page;
+    }
+
+    private String downloadStatusText(DownloadTaskCenter.TaskSnapshot task) {
+        return switch (task.status()) {
+            case QUEUED -> Messages.get("download.status.queued");
+            case RUNNING -> Messages.get("download.status.running");
+            case CANCELLING -> Messages.get("download.status.cancelling");
+            case COMPLETED -> Messages.get("download.status.completed");
+            case FAILED -> Messages.format("download.status.failed", task.errorMessage());
+            case CANCELLED -> Messages.get("download.status.cancelled");
+        };
+    }
+
+    private String downloadTaskMeta(DownloadTaskCenter.TaskSnapshot task) {
+        String transfer = task.totalBytes() > 0
+                ? formatBytes(task.downloadedBytes()) + " / " + formatBytes(task.totalBytes())
+                : formatBytes(task.downloadedBytes());
+        String speed = task.speedBytesPerSecond() > 0
+                ? " · " + formatBytes(task.speedBytesPerSecond()) + "/s" : "";
+        return Messages.format("download.meta", transfer, speed, task.attempts());
+    }
+
+    private String downloadRateLabel(long bytes) {
+        if (bytes <= 0) return Messages.get("download.rate.unlimited");
+        if (bytes % (1024L * 1024L) == 0) return (bytes / (1024L * 1024L)) + " MB/s";
+        return (bytes / 1024L) + " KB/s";
+    }
+
+    private long parseDownloadRate(String value) {
+        if (value == null || value.equals(Messages.get("download.rate.unlimited"))) return 0;
+        String digits = value.replaceAll("[^0-9]", "");
+        if (digits.isBlank()) return 0;
+        long kb = Long.parseLong(digits);
+        return value.contains("MB") ? kb * 1024L * 1024L : kb * 1024L;
+    }
+
     private VBox createVersionsPage() {
         VBox page = createMainPage();
 
@@ -1290,9 +1504,14 @@ public class LauncherUI extends javafx.application.Application {
                 () -> openLocalFolder(ECLConfig.getVersionsDir(), "版本目录"));
         Button backupManagerButton = createActionButton("备份管理", "ghost-button",
                 this::showBackupManagerDialog);
+        Button desktopShortcutButton = createActionButton(Messages.get("shortcut.desktop"), "ghost-button",
+                () -> createInstanceShortcut(false));
+        Button startMenuShortcutButton = createActionButton(Messages.get("shortcut.startMenu"), "ghost-button",
+                () -> createInstanceShortcut(true));
 
         HBox actions = new HBox(10, refreshVersionsButton, installLoaderButton, reinstallButton,
-                deleteButton, chooseVersionButton, openVersionsDirButton, backupManagerButton);
+                deleteButton, chooseVersionButton, openVersionsDirButton, backupManagerButton,
+                desktopShortcutButton, startMenuShortcutButton);
         actions.setAlignment(Pos.CENTER_LEFT);
 
         VBox versionCard = createSurface(
@@ -1306,6 +1525,87 @@ public class LauncherUI extends javafx.application.Application {
 
         page.getChildren().add(versionCard);
         return page;
+    }
+
+    private void createInstanceShortcut(boolean startMenu) {
+        String profileId = getSelectedVersion();
+        if (profileId == null || profileId.isBlank()) {
+            setStatus(Messages.get("shortcut.error.title"), Messages.get("shortcut.error.selectInstance"));
+            return;
+        }
+        if (!PlatformUtil.isWindows()) {
+            setStatus(Messages.get("shortcut.unavailable.title"),
+                    Messages.get("shortcut.unavailable.windowsOnly"));
+            return;
+        }
+        Path executable = resolveLauncherExecutable();
+        if (executable == null) {
+            setStatus(Messages.get("shortcut.error.title"), Messages.get("shortcut.error.packagedExe"));
+            return;
+        }
+        try {
+            DesktopShortcutService shortcuts = new DesktopShortcutService();
+            String name = "ECL - " + profileId;
+            Path created = startMenu
+                    ? shortcuts.createStartMenuShortcut(executable, name, List.of("--instance", profileId))
+                    : shortcuts.createDesktopShortcut(executable, name, List.of("--instance", profileId));
+            setStatus(Messages.get("shortcut.created"), created.toString());
+        } catch (IOException error) {
+            setStatus(Messages.get("shortcut.failed"), cleanMessage(error));
+        }
+    }
+
+    private Path resolveLauncherExecutable() {
+        String configured = System.getProperty("ecl.executable", "");
+        if (configured.isBlank()) configured = System.getenv("ECL_EXECUTABLE");
+        String runningCommand = ProcessHandle.current().info().command().orElse("");
+        Path codeSource = null;
+        try {
+            codeSource = Path.of(LauncherUI.class.getProtectionDomain().getCodeSource()
+                    .getLocation().toURI());
+        } catch (URISyntaxException | RuntimeException ignored) {
+            // Development launches do not have a packaged executable.
+        }
+        return resolveLauncherExecutableCandidate(configured, runningCommand,
+                Path.of(System.getProperty("user.dir", ".")), codeSource);
+    }
+
+    static Path resolveLauncherExecutableCandidate(String configured, String runningCommand,
+                                                    Path workingDirectory, Path codeSource) {
+        List<Path> candidates = new java.util.ArrayList<>();
+        addExplicitExecutableCandidate(candidates, configured);
+        if (isPackagedEclExecutable(runningCommand)) candidates.add(Path.of(runningCommand));
+        if (workingDirectory != null) candidates.add(workingDirectory.resolve("ECL.exe"));
+        if (codeSource != null) {
+            if (Files.isDirectory(codeSource)) {
+                candidates.add(codeSource.resolve("ECL.exe"));
+            } else if (isPackagedEclExecutable(codeSource.toString())) {
+                candidates.add(codeSource);
+            }
+            if (codeSource.getParent() != null) {
+                candidates.add(codeSource.getParent().resolve("ECL.exe"));
+            }
+        }
+        return candidates.stream().filter(path -> path != null && Files.isRegularFile(path))
+                .map(path -> path.toAbsolutePath().normalize()).findFirst().orElse(null);
+    }
+
+    private static void addExplicitExecutableCandidate(List<Path> candidates, String configured) {
+        if (configured == null || configured.isBlank()) return;
+        Path candidate = Path.of(configured);
+        String fileName = candidate.getFileName() == null ? "" : candidate.getFileName().toString();
+        if (fileName.toLowerCase(Locale.ROOT).endsWith(".exe")) candidates.add(candidate);
+    }
+
+    private static boolean isPackagedEclExecutable(String command) {
+        if (command == null || command.isBlank()) return false;
+        try {
+            Path path = Path.of(command);
+            return path.getFileName() != null
+                    && "ecl.exe".equalsIgnoreCase(path.getFileName().toString());
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private void showBackupManagerDialog() {
@@ -1626,13 +1926,15 @@ public class LauncherUI extends javafx.application.Application {
             cancel.setDisable(true);
             setControlsBusy(true);
             startProgressAnimation(downloadProgress);
-            runAsync("ecl-install-" + loader.id(), () -> {
+            DownloadTaskCenter.TaskHandle<Void> loaderTask = downloadTaskCenter.submit(
+                    "Loader " + loader.displayName(), context -> {
                 try {
                     ModLoaderInstaller.InstallResult result = modLoaderInstaller.install(
                             gameVersion, loader, versionField.getText().trim(),
                             new ModLoaderInstaller.Listener() {
                                 @Override
                                 public void onStatus(String message) {
+                                    context.updateStatus(message);
                                     Platform.runLater(() -> {
                                         installStatus.setText(message);
                                         setStatus("正在安装加载器", message);
@@ -1641,6 +1943,7 @@ public class LauncherUI extends javafx.application.Application {
 
                                 @Override
                                 public void onProgress(long downloaded, long total) {
+                                    context.updateProgress(downloaded, total);
                                     Platform.runLater(() ->
                                             updateProgress(downloadProgress, downloaded, total));
                                 }
@@ -1667,7 +1970,9 @@ public class LauncherUI extends javafx.application.Application {
                         installStatus.setText("安装失败: " + message);
                         setStatus("加载器安装失败", message);
                     });
+                    throw error;
                 }
+                return null;
             });
         });
 
@@ -1730,6 +2035,7 @@ public class LauncherUI extends javafx.application.Application {
                 });
             } catch (IOException error) {
                 Platform.runLater(() -> setStatus("删除版本失败", cleanMessage(error)));
+                throw new RuntimeException(error);
             }
         });
     }
@@ -1931,9 +2237,11 @@ public class LauncherUI extends javafx.application.Application {
                         button.getStyleClass().remove("content-library-nav-item-active"));
                 categoryButton.getStyleClass().add("content-library-nav-item-active");
                 closeActiveModBrowserView();
-                Node selectedContent = target.usesLoader()
-                        ? createModLibraryContent()
-                        : createContentLibraryBrowser(target);
+                Node selectedContent = switch (target.projectType) {
+                    case "mod" -> createModLibraryContent();
+                    case "server" -> createServerJarLibraryContent();
+                    default -> createContentLibraryBrowser(target);
+                };
                 content.getChildren().setAll(selectedContent);
             });
         }
@@ -1960,6 +2268,7 @@ public class LauncherUI extends javafx.application.Application {
             case "shader" -> "改善光照与画面";
             case "resourcepack" -> "替换纹理与音效";
             case "modpack" -> "完整客户端与玩法配置";
+            case "server" -> "各版本官方服务端文件";
             default -> target.subtitle;
         });
         detail.getStyleClass().add("content-library-nav-item-detail");
@@ -2022,6 +2331,392 @@ public class LauncherUI extends javafx.application.Application {
                 createBodyText("当前实例是 Minecraft " + minecraftVersion
                         + " 原版。安装 Fabric、Quilt、Forge 或 NeoForge 后即可浏览兼容模组。"),
                 install);
+    }
+
+    private Node createServerJarLibraryContent() {
+        Label eyebrow = new Label("MINECRAFT SERVER / OFFICIAL + MIRROR");
+        eyebrow.getStyleClass().add("eyebrow");
+        Label title = new Label("服务端文件");
+        title.getStyleClass().add("content-library-section-title");
+        Label description = new Label("选择任意 Minecraft Java 版本，下载官方 server.jar；官方源失败时自动切换国内镜像");
+        description.getStyleClass().add("status-detail");
+        description.setWrapText(true);
+        VBox heading = new VBox(4, eyebrow, title, description);
+
+        ComboBox<VersionManager.VersionCategory> categoryCombo = new ComboBox<>();
+        categoryCombo.getItems().addAll(VersionManager.VersionCategory.values());
+        categoryCombo.setValue(VersionManager.VersionCategory.ALL);
+        categoryCombo.setPrefWidth(176);
+        categoryCombo.setCellFactory(list -> createServerVersionCategoryCell());
+        categoryCombo.setButtonCell(createServerVersionCategoryCell());
+        applyFieldStyle(categoryCombo);
+
+        ComboBox<String> serverVersionCombo = new ComboBox<>();
+        serverVersionCombo.setVisibleRowCount(18);
+        serverVersionCombo.setMaxWidth(Double.MAX_VALUE);
+        serverVersionCombo.setCellFactory(list -> createPlainVersionCell());
+        serverVersionCombo.setButtonCell(createPlainVersionCell());
+        applyFieldStyle(serverVersionCombo);
+        HBox.setHgrow(serverVersionCombo, Priority.ALWAYS);
+
+        Button refreshButton = createActionButton("刷新版本", "secondary-button", () -> { });
+        HBox versionRow = new HBox(8, categoryCombo, serverVersionCombo, refreshButton);
+
+        Label artifactInfo = new Label("选择版本后会读取官方服务端文件信息");
+        artifactInfo.getStyleClass().add("content-library-description");
+        artifactInfo.setWrapText(true);
+
+        Label channelsLabel = new Label("下载渠道：等待读取");
+        channelsLabel.getStyleClass().add("content-library-target");
+        channelsLabel.setWrapText(true);
+
+        AtomicReference<File> directory = new AtomicReference<>(
+                new File(getConfiguredGameRootDir(), "server-downloads"));
+        Label targetLabel = new Label();
+        targetLabel.getStyleClass().add("content-library-target");
+        targetLabel.setWrapText(true);
+
+        Label status = new Label("请选择一个 Minecraft 版本");
+        status.getStyleClass().add("status-detail");
+        status.setWrapText(true);
+
+        ProgressBar progress = new ProgressBar(0);
+        progress.getStyleClass().add("download-progress");
+        progress.setMaxWidth(Double.MAX_VALUE);
+        progress.setVisible(false);
+        progress.managedProperty().bind(progress.visibleProperty());
+
+        Button downloadButton = createActionButton("下载服务端 JAR", "primary-button", () -> { });
+        downloadButton.setDisable(true);
+        Button chooseFolderButton = createActionButton("更改保存目录", "secondary-button", () -> { });
+        Button openFolderButton = createActionButton("打开保存目录", "secondary-button", () -> { });
+        HBox actions = new HBox(8, downloadButton, chooseFolderButton, openFolderButton);
+        actions.setAlignment(Pos.CENTER_RIGHT);
+
+        Label eulaNotice = new Label("提示：首次运行服务端前，请阅读并同意 Minecraft EULA。服务端文件版权归 Mojang Studios 所有。");
+        eulaNotice.getStyleClass().add("status-detail");
+        eulaNotice.setWrapText(true);
+
+        AtomicReference<ServerJarDownloader.ServerArtifact> artifact = new AtomicReference<>();
+        AtomicLong metadataGeneration = new AtomicLong();
+        AtomicLong downloadGeneration = new AtomicLong();
+
+        Runnable updateTarget = () -> {
+            String version = serverVersionCombo.getValue();
+            String fileName = ServerJarDownloader.suggestedFileName(version);
+            targetLabel.setText("保存到：" + new File(directory.get(), fileName).getAbsolutePath());
+        };
+
+        Runnable loadArtifact = () -> loadServerJarArtifact(
+                serverVersionCombo.getValue(), artifact, artifactInfo, channelsLabel, status,
+                progress, downloadButton, metadataGeneration, updateTarget);
+
+        Runnable updateVersions = () -> {
+            String previous = serverVersionCombo.getValue();
+            String currentMinecraftVersion = selectedMinecraftVersionForServerDownload();
+            List<String> versions = new java.util.ArrayList<>(versionManager.getVersions(
+                    categoryCombo.getValue() == null
+                            ? VersionManager.VersionCategory.ALL : categoryCombo.getValue()));
+            if (!currentMinecraftVersion.isBlank() && !versions.contains(currentMinecraftVersion)) {
+                versions.addFirst(currentMinecraftVersion);
+            }
+            serverVersionCombo.getItems().setAll(versions);
+            if (previous != null && versions.contains(previous)) {
+                serverVersionCombo.setValue(previous);
+            } else if (!currentMinecraftVersion.isBlank() && versions.contains(currentMinecraftVersion)) {
+                serverVersionCombo.setValue(currentMinecraftVersion);
+            } else if (!versions.isEmpty()) {
+                serverVersionCombo.setValue(versions.getFirst());
+            } else {
+                artifact.set(null);
+                artifactInfo.setText("版本列表为空，请点击“刷新版本”联网获取最新清单");
+                channelsLabel.setText("下载渠道：等待版本列表");
+                status.setText("没有可选版本");
+                downloadButton.setDisable(true);
+                updateTarget.run();
+            }
+            if (serverVersionCombo.getValue() != null) loadArtifact.run();
+        };
+
+        serverVersionCombo.setOnAction(event -> {
+            updateTarget.run();
+            loadArtifact.run();
+        });
+        categoryCombo.setOnAction(event -> updateVersions.run());
+
+        refreshButton.setOnAction(event -> {
+            refreshButton.setDisable(true);
+            categoryCombo.setDisable(true);
+            serverVersionCombo.setDisable(true);
+            status.setText("正在刷新 Minecraft 版本列表…");
+            runAsync("ecl-refresh-server-versions", () -> {
+                try {
+                    versionManager.refresh();
+                    Platform.runLater(() -> {
+                        updateVersions.run();
+                        refreshButton.setDisable(false);
+                        categoryCombo.setDisable(false);
+                        serverVersionCombo.setDisable(false);
+                        status.setText("版本列表已更新");
+                    });
+                } catch (Exception error) {
+                    Platform.runLater(() -> {
+                        refreshButton.setDisable(false);
+                        categoryCombo.setDisable(false);
+                        serverVersionCombo.setDisable(false);
+                        status.setText("版本列表刷新失败：" + cleanMessage(error));
+                    });
+                }
+            });
+        });
+
+        chooseFolderButton.setOnAction(event -> {
+            DirectoryChooser chooser = new DirectoryChooser();
+            chooser.setTitle("选择服务端文件保存目录");
+            File current = directory.get();
+            if (current.isDirectory()) chooser.setInitialDirectory(current);
+            File selected = chooser.showDialog(primaryStage);
+            if (selected != null) {
+                directory.set(selected);
+                updateTarget.run();
+                status.setText("保存目录已更改");
+            }
+        });
+        openFolderButton.setOnAction(event -> {
+            try {
+                ensureDirectory(directory.get());
+                openLocalFolder(directory.get(), "服务端文件目录");
+            } catch (IOException error) {
+                status.setText("无法打开保存目录：" + cleanMessage(error));
+            }
+        });
+
+        downloadButton.setOnAction(event -> {
+            ServerJarDownloader.ServerArtifact selectedArtifact = artifact.get();
+            if (selectedArtifact == null) return;
+            File target = new File(directory.get(),
+                    ServerJarDownloader.suggestedFileName(selectedArtifact.versionId()));
+            try {
+                ensureDirectory(directory.get());
+            } catch (IOException error) {
+                status.setText("无法创建保存目录：" + cleanMessage(error));
+                return;
+            }
+            long generation = downloadGeneration.incrementAndGet();
+            downloadButton.setDisable(true);
+            chooseFolderButton.setDisable(true);
+            serverVersionCombo.setDisable(true);
+            categoryCombo.setDisable(true);
+            refreshButton.setDisable(true);
+            progress.setProgress(0);
+            progress.setVisible(true);
+            status.setText("准备下载 Minecraft " + selectedArtifact.versionId() + " 服务端…");
+            setStatus("正在下载服务端", selectedArtifact.versionId() + " · " + target.getName());
+
+            DownloadTaskCenter.TaskHandle<Void> serverTask = downloadTaskCenter.submit(
+                    "Server JAR " + selectedArtifact.versionId(), context -> {
+                try {
+                    serverJarDownloader.download(selectedArtifact, target,
+                            createServerDownloadListener(status, progress, generation, downloadGeneration, context));
+                    Platform.runLater(() -> {
+                        if (generation != downloadGeneration.get()) return;
+                        progress.setProgress(1);
+                        status.setText("下载完成并通过校验：" + target.getAbsolutePath());
+                        setStatus("服务端下载完成", target.getAbsolutePath());
+                        setServerDownloadControlsBusy(false, downloadButton, chooseFolderButton,
+                                serverVersionCombo, categoryCombo, refreshButton);
+                    });
+                } catch (Exception error) {
+                    Platform.runLater(() -> {
+                        if (generation != downloadGeneration.get()) return;
+                        status.setText("服务端下载失败：" + cleanMessage(error));
+                        setStatus("服务端下载失败", cleanMessage(error));
+                        setServerDownloadControlsBusy(false, downloadButton, chooseFolderButton,
+                                serverVersionCombo, categoryCombo, refreshButton);
+                    });
+                    throw error;
+                }
+                return null;
+            });
+        });
+
+        updateVersions.run();
+        updateTarget.run();
+
+        VBox browser = new VBox(12, heading, versionRow, artifactInfo, channelsLabel,
+                targetLabel, status, progress, eulaNotice, actions);
+        browser.getStyleClass().addAll("surface", "content-library-browser");
+        browser.setFillWidth(true);
+        return browser;
+    }
+
+    private ListCell<String> createPlainVersionCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item);
+            }
+        };
+    }
+
+    private ListCell<VersionManager.VersionCategory> createServerVersionCategoryCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(VersionManager.VersionCategory item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : switch (item) {
+                    case FEATURED -> "精选版本";
+                    case RELEASE -> "正式版";
+                    case PREVIEW -> "预览版 / 快照";
+                    case APRIL_FOOLS -> "愚人节版";
+                    case ALL -> "全部版本";
+                });
+            }
+        };
+    }
+
+    private String selectedMinecraftVersionForServerDownload() {
+        String profile = getSelectedVersion();
+        if (profile == null || profile.isBlank()) return "";
+        try {
+            return versionManager.resolveMinecraftVersionId(profile);
+        } catch (IOException error) {
+            return profile;
+        }
+    }
+
+    private void loadServerJarArtifact(
+            String version,
+            AtomicReference<ServerJarDownloader.ServerArtifact> artifact,
+            Label artifactInfo,
+            Label channelsLabel,
+            Label status,
+            ProgressBar progress,
+            Button downloadButton,
+            AtomicLong metadataGeneration,
+            Runnable updateTarget
+    ) {
+        long generation = metadataGeneration.incrementAndGet();
+        artifact.set(null);
+        downloadButton.setDisable(true);
+        progress.setVisible(false);
+        if (version == null || version.isBlank()) return;
+        artifactInfo.setText("正在读取 Minecraft " + version + " 服务端元数据…");
+        channelsLabel.setText("下载渠道：正在解析");
+        status.setText("正在查询官方版本清单…");
+
+        runAsync("ecl-resolve-server-" + version, () -> {
+            try {
+                ServerJarDownloader.ServerArtifact resolved = serverJarDownloader.resolve(version,
+                        new ServerJarDownloader.Listener() {
+                            @Override
+                            public void onSource(String sourceName, String candidateUrl, boolean mirror) {
+                                Platform.runLater(() -> {
+                                    if (generation == metadataGeneration.get()) {
+                                        status.setText("正在通过" + sourceName + "读取版本元数据…");
+                                    }
+                                });
+                            }
+
+                            @Override
+                            public void onSourceFailure(String candidateUrl, IOException error) {
+                                Platform.runLater(() -> {
+                                    if (generation == metadataGeneration.get()) {
+                                        status.setText("元数据源响应失败，正在尝试下一渠道…");
+                                    }
+                                });
+                            }
+                        });
+                Platform.runLater(() -> {
+                    if (generation != metadataGeneration.get()) return;
+                    artifact.set(resolved);
+                    String size = resolved.size() < 0 ? "未知" : formatBytes(resolved.size());
+                    String sha1 = resolved.sha1() == null || resolved.sha1().isBlank()
+                            ? "未提供" : resolved.sha1();
+                    artifactInfo.setText("Minecraft " + resolved.versionId()
+                            + " · 文件大小 " + size + "\nSHA-1：" + sha1);
+                    channelsLabel.setText("下载渠道：" + resolved.channels().stream()
+                            .map(ServerJarDownloader.DownloadChannel::name)
+                            .distinct()
+                            .collect(java.util.stream.Collectors.joining(" → "))
+                            + "（失败时自动切换）");
+                    status.setText("服务端文件可下载");
+                    downloadButton.setDisable(false);
+                    updateTarget.run();
+                });
+            } catch (Exception error) {
+                Platform.runLater(() -> {
+                    if (generation != metadataGeneration.get()) return;
+                    artifactInfo.setText("Minecraft " + version + " 没有可用的官方服务端文件");
+                    channelsLabel.setText("下载渠道：不可用");
+                    status.setText(cleanMessage(error));
+                });
+            }
+        });
+    }
+
+    private ServerJarDownloader.Listener createServerDownloadListener(
+            Label status,
+            ProgressBar progress,
+            long generation,
+            AtomicLong downloadGeneration,
+            DownloadTaskCenter.TaskContext taskContext
+    ) {
+        return new ServerJarDownloader.Listener() {
+            @Override
+            public void onStart(long total) {
+                taskContext.updateProgress(0, total);
+                Platform.runLater(() -> {
+                    if (generation == downloadGeneration.get()) progress.setProgress(0);
+                });
+            }
+
+            @Override
+            public void onProgress(long downloaded, long total) {
+                taskContext.updateProgress(downloaded, total);
+                Platform.runLater(() -> {
+                    if (generation != downloadGeneration.get()) return;
+                    progress.setProgress(total > 0 ? (double) downloaded / total : -1);
+                    status.setText(total > 0
+                            ? "正在下载：" + formatBytes(downloaded) + " / " + formatBytes(total)
+                            : "正在下载：" + formatBytes(downloaded));
+                });
+            }
+
+            @Override
+            public void onSource(String sourceName, String candidateUrl, boolean mirror) {
+                Platform.runLater(() -> {
+                    if (generation == downloadGeneration.get()) {
+                        status.setText("正在使用" + sourceName + "下载…");
+                    }
+                });
+            }
+
+            @Override
+            public void onSourceFailure(String candidateUrl, IOException error) {
+                Platform.runLater(() -> {
+                    if (generation == downloadGeneration.get()) {
+                        status.setText("当前下载渠道失败，正在切换下一渠道…");
+                    }
+                });
+            }
+        };
+    }
+
+    private void setServerDownloadControlsBusy(
+            boolean busy,
+            Button downloadButton,
+            Button chooseFolderButton,
+            ComboBox<String> serverVersionCombo,
+            ComboBox<VersionManager.VersionCategory> categoryCombo,
+            Button refreshButton
+    ) {
+        downloadButton.setDisable(busy);
+        chooseFolderButton.setDisable(busy);
+        serverVersionCombo.setDisable(busy);
+        categoryCombo.setDisable(busy);
+        refreshButton.setDisable(busy);
     }
 
     private Node createContentLibraryBrowser(ContentTarget target) {
@@ -2832,17 +3527,20 @@ public class LauncherUI extends javafx.application.Application {
         setControlsBusy(true);
         startProgressAnimation(downloadProgress);
         setStatus("正在安装加载器", loader.displayName() + " / Minecraft " + minecraftVersion);
-        runAsync("ecl-install-" + loader.id(), () -> {
+        DownloadTaskCenter.TaskHandle<Void> loaderTask = downloadTaskCenter.submit(
+                "Loader " + loader.displayName(), context -> {
             try {
                 ModLoaderInstaller.InstallResult result = modLoaderInstaller.install(
                         minecraftVersion, loader, "", new ModLoaderInstaller.Listener() {
                             @Override
                             public void onStatus(String message) {
+                                context.updateStatus(message);
                                 Platform.runLater(() -> setStatus("正在安装加载器", message));
                             }
 
                             @Override
                             public void onProgress(long downloaded, long total) {
+                                context.updateProgress(downloaded, total);
                                 Platform.runLater(() -> updateProgress(downloadProgress, downloaded, total));
                             }
                         });
@@ -2868,7 +3566,9 @@ public class LauncherUI extends javafx.application.Application {
                     updateLoaderControls();
                     setStatus("加载器安装失败", cleanMessage(error));
                 });
+                throw error;
             }
+            return null;
         });
     }
 
@@ -3081,6 +3781,38 @@ public class LauncherUI extends javafx.application.Application {
         if (launchReadinessLabel != null) {
             launchReadinessLabel.setText("●  " + readiness);
         }
+        updatePlaytimeSummary();
+    }
+
+    private void updatePlaytimeSummary() {
+        if (playtimeTotalLabel == null || versionCombo == null) return;
+        String selected = versionCombo.getValue();
+        if (selected == null || selected.isBlank()) {
+            playtimeTotalLabel.setText(Messages.get("label.notSelected"));
+            playtimeRecentLabel.setText(Messages.get("playtime.never"));
+            playtimeLaunchCountLabel.setText("0");
+            return;
+        }
+        try {
+            PlaytimeTracker.PlaytimeStats stats = playtimeTracker.stats(
+                    resolveVersionInstanceRoot(selected).toPath());
+            playtimeTotalLabel.setText(formatPlaytime(stats.totalSeconds()));
+            playtimeRecentLabel.setText(stats.lastLaunchedAt().isBlank() ? Messages.get("playtime.never")
+                    : DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                            .withZone(ZoneId.systemDefault())
+                            .format(Instant.parse(stats.lastLaunchedAt())));
+            playtimeLaunchCountLabel.setText(String.valueOf(stats.launchCount()));
+        } catch (IOException | RuntimeException error) {
+            playtimeTotalLabel.setText(Messages.get("playtime.unavailable"));
+            playtimeRecentLabel.setText("-");
+            playtimeLaunchCountLabel.setText("-");
+        }
+    }
+
+    private String formatPlaytime(long seconds) {
+        long hours = Math.max(0, seconds) / 3600;
+        long minutes = (Math.max(0, seconds) % 3600) / 60;
+        return hours > 0 ? hours + "h " + minutes + "m" : minutes + "m";
     }
 
     private int getEffectiveMaxMemoryMb() {
@@ -3141,10 +3873,18 @@ public class LauncherUI extends javafx.application.Application {
         if (detailLabel != null) {
             detailLabel.setText(safeDetail);
         }
-        if (topTaskLabel != null) {
+        if (topTaskLabel != null && !downloadTaskChipHasAttention()) {
             topTaskLabel.setText(abbreviate(safeTitle, 12));
             topTaskLabel.setTooltip(safeDetail.isBlank() ? null : new Tooltip(safeDetail));
         }
+    }
+
+    private boolean downloadTaskChipHasAttention() {
+        return downloadTaskCenter != null && downloadTaskCenter.snapshots().stream()
+                .anyMatch(task -> task.status() == DownloadTaskCenter.Status.QUEUED
+                        || task.status() == DownloadTaskCenter.Status.RUNNING
+                        || task.status() == DownloadTaskCenter.Status.CANCELLING
+                        || task.status() == DownloadTaskCenter.Status.FAILED);
     }
 
     private void startProgressAnimation(ProgressBar progressBar) {
@@ -3371,54 +4111,70 @@ public class LauncherUI extends javafx.application.Application {
                         : version + " 将继承 " + downloadVersion
                                 + "，正在补齐基础客户端、依赖库和资源文件。");
 
-        downloader.setListener(new GameDownloader.DownloadListener() {
-            @Override
-            public void onStatus(String message) {
-                Platform.runLater(() -> setStatus("下载中", message));
-            }
+        DownloadTaskCenter.TaskHandle<Void> task = downloadTaskCenter.submit(
+                "Minecraft " + downloadVersion, context -> {
+                    AtomicReference<String> downloadFailure = new AtomicReference<>();
+                    downloader.setListener(new GameDownloader.DownloadListener() {
+                        @Override
+                        public void onStatus(String message) {
+                            context.updateStatus(message);
+                            Platform.runLater(() -> setStatus("下载中", message));
+                        }
 
-            @Override
-            public void onProgress(long downloaded, long total) {
-                Platform.runLater(() -> {
-                    updateProgress(downloadProgress, downloaded, total);
-                    detailLabel.setText("当前进度: " + formatBytes(downloaded) + (total > 0 ? " / " + formatBytes(total) : ""));
+                        @Override
+                        public void onProgress(long downloaded, long total) {
+                            context.updateProgress(downloaded, total);
+                            Platform.runLater(() -> {
+                                updateProgress(downloadProgress, downloaded, total);
+                                detailLabel.setText("当前进度: " + formatBytes(downloaded)
+                                        + (total > 0 ? " / " + formatBytes(total) : ""));
+                            });
+                        }
+
+                        @Override
+                        public void onError(String message) {
+                            downloadFailure.set(message);
+                            Platform.runLater(() -> {
+                                setStatus("下载失败", message);
+                                stopProgressAnimation(downloadProgress, true);
+                                setControlsBusy(false);
+                            });
+                        }
+
+                        @Override
+                        public void onComplete() {
+                            Platform.runLater(() -> {
+                                downloadProgress.setProgress(1);
+                                stopProgressAnimation(downloadProgress, true);
+                                if (!versionManager.isVersionDownloaded(version)) {
+                                    setStatus("基础版本仍不完整",
+                                            downloadVersion + " 下载完成，但 " + version
+                                                    + " 的继承客户端仍不可用，请检查版本配置。");
+                                    setControlsBusy(false);
+                                    return;
+                                }
+                                setStatus("下载完成",
+                                        downloadVersion + " 已就绪，准备启动 " + version + "。");
+                                try {
+                                    gameRepository().applyDefaultIsolationSettingForNewInstance(version);
+                                } catch (IOException error) {
+                                    LOGGER.warn("Cannot persist default isolation for {}", version, error);
+                                }
+                                startGame(version);
+                            });
+                        }
+                    });
+                    context.registerCancellation(downloader::cancelDownload);
+                    Future<?> future = downloader.downloadVersionAsync(downloadVersion, url);
+                    future.get();
+                    String failure = downloadFailure.get();
+                    if (failure != null && !failure.isBlank()) throw new IOException(failure);
+                    return null;
                 });
-            }
-
-            @Override
-            public void onError(String message) {
-                Platform.runLater(() -> {
-                    setStatus("下载失败", message);
-                    stopProgressAnimation(downloadProgress, true);
-                    setControlsBusy(false);
-                });
-            }
-
-            @Override
-            public void onComplete() {
-                Platform.runLater(() -> {
-                    downloadProgress.setProgress(1);
-                    stopProgressAnimation(downloadProgress, true);
-                    if (!versionManager.isVersionDownloaded(version)) {
-                        setStatus("基础版本仍不完整",
-                                downloadVersion + " 下载完成，但 " + version
-                                        + " 的继承客户端仍不可用，请检查版本配置。");
-                        setControlsBusy(false);
-                        return;
-                    }
-                    setStatus("下载完成",
-                            downloadVersion + " 已就绪，准备启动 " + version + "。");
-                    try {
-                        gameRepository().applyDefaultIsolationSettingForNewInstance(version);
-                    } catch (IOException error) {
-                        LOGGER.warn("Cannot persist default isolation for {}", version, error);
-                    }
-                    startGame(version);
-                });
-            }
-        });
-
-        downloader.downloadVersion(downloadVersion, url);
+        task.completion().whenComplete((ignored, error) -> Platform.runLater(() -> {
+            if (error != null) setStatus(Messages.get("download.status.failedTitle"), cleanMessage(error));
+            if (error != null) setControlsBusy(false);
+        }));
     }
 
     private void startGame(String version) {
@@ -3440,10 +4196,12 @@ public class LauncherUI extends javafx.application.Application {
                 AuthProvider auth = buildAuthProvider(authType, server, username, password);
                 password = null;
                 gameLauncher.setAuth(auth);
+                AuthlibInjectorManager authlibInjector = null;
                 if (auth.getType() == com.ecl.auth.AuthType.OFFLINE) {
-                    gameLauncher.setOfflineSkin(new OfflineSkinStore()
-                            .find(OfflineSkinStore.identityForOffline(auth.getUsername()))
-                            .orElse(null));
+                    var offlineSkin = new OfflineSkinStore()
+                            .find(OfflineSkinStore.identityForOffline(auth.getUsername()));
+                    gameLauncher.setOfflineSkin(offlineSkin.orElse(null));
+                    if (offlineSkin.isPresent()) authlibInjector = new AuthlibInjectorManager();
                 } else {
                     gameLauncher.setOfflineSkin(null);
                 }
@@ -3458,14 +4216,34 @@ public class LauncherUI extends javafx.application.Application {
                 gameLauncher.setServerAddress(quickServer);
                 gameLauncher.setProcessorCount(processorCount);
                 createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
-                long launchStartedAt = System.currentTimeMillis();
+                if (authlibInjector != null && authlibInjector.requiresDownload()) {
+                    AuthlibInjectorManager component = authlibInjector;
+                    DownloadTaskCenter.TaskHandle<Path> authlibTask = downloadTaskCenter.submit(
+                            Messages.get("download.authlib.title"), context -> component.ensureJar(
+                                    context::updateStatus, context::updateProgress));
+                    authlibTask.completion().get();
+                }
+                if (gameLauncher.requiresJavaRuntimeDownload()) {
+                    DownloadTaskCenter.TaskHandle<String> runtimeTask = downloadTaskCenter.submit(
+                            Messages.get("download.runtime.title"), context -> gameLauncher.prepareJavaRuntime(
+                                    context::updateStatus, context::updateProgress));
+                    runtimeTask.completion().get();
+                }
                 Process process = gameLauncher.launch();
+                long launchStartedAt = process.info().startInstant()
+                        .map(Instant::toEpochMilli)
+                        .orElseGet(System::currentTimeMillis);
+                try {
+                    playtimeTracker.recordLaunch(resolveVersionInstanceRoot(version).toPath(), launchStartedAt);
+                } catch (IOException statsError) {
+                    LOGGER.warn("Cannot record launch statistics for {}", version, statsError);
+                }
                 activeGameProcess = process;
                 activeGameVersion = version;
                 UUID runningInstanceId = registerRunningModInstance(version);
                 boolean minimizeThisLaunch = closeAfterLaunch;
 
-                Platform.runLater(() -> {
+                runOnUiIfActive(() -> {
                     setStatus("游戏已启动", version + " 正在运行，实例目录: " + launchDir.getAbsolutePath());
                     updateRuntimeSummary();
                     setControlsBusy(false);
@@ -3479,7 +4257,7 @@ public class LauncherUI extends javafx.application.Application {
                 monitorGameProcess(process, version, launchDir, launchStartedAt,
                         runningInstanceId, minimizeThisLaunch);
             } catch (Exception e) {
-                Platform.runLater(() -> {
+                runOnUiIfActive(() -> {
                     CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
                     setStatus("启动失败", report.getTitle());
                     showGameErrorDialog(report);
@@ -3526,7 +4304,7 @@ public class LauncherUI extends javafx.application.Application {
 
     private void monitorGameProcess(Process process, String version, File launchDir, long launchStartedAt,
                                     UUID runningInstanceId, boolean restoreLauncher) {
-        runAsync("ecl-monitor-game-" + version, () -> {
+        Thread.ofPlatform().name("ecl-monitor-game-" + version).daemon(false).start(() -> {
             BoundedLogBuffer output = new BoundedLogBuffer(ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
@@ -3537,22 +4315,28 @@ public class LauncherUI extends javafx.application.Application {
 
                 int exitCode = process.waitFor();
                 if (exitCode == 0) {
-                    Platform.runLater(() -> setStatus("游戏已正常退出", version + " 退出码 0。"));
+                    runOnUiIfActive(() -> setStatus("游戏已正常退出", version + " 退出码 0。"));
                     return;
                 }
 
                 CrashAnalyzer.Report report = CrashAnalyzer.analyzeGameExit(version, exitCode, output.toString(), launchDir, launchStartedAt);
-                Platform.runLater(() -> {
+                runOnUiIfActive(() -> {
                     setStatus("游戏异常退出", report.getTitle());
                     showGameErrorDialog(report);
                 });
             } catch (Exception e) {
                 CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
-                Platform.runLater(() -> {
+                runOnUiIfActive(() -> {
                     setStatus("错误分析失败", report.getTitle());
                     showGameErrorDialog(report);
                 });
             } finally {
+                try {
+                    playtimeTracker.recordSession(resolveVersionInstanceRoot(version).toPath(),
+                            launchStartedAt, System.currentTimeMillis());
+                } catch (IOException statsError) {
+                    LOGGER.warn("Cannot record playtime statistics for {}", version, statsError);
+                }
                 if (runningInstanceId != null) {
                     controller.setInstanceRunning(runningInstanceId, false);
                 }
@@ -3560,7 +4344,7 @@ public class LauncherUI extends javafx.application.Application {
                     activeGameProcess = null;
                     activeGameVersion = null;
                 }
-                Platform.runLater(() -> {
+                runOnUiIfActive(() -> {
                     updateRuntimeSummary();
                     if (restoreLauncher) {
                         primaryStage.setIconified(false);
@@ -3572,8 +4356,16 @@ public class LauncherUI extends javafx.application.Application {
         });
     }
 
+    private void runOnUiIfActive(Runnable action) {
+        if (applicationStopping.get()) return;
+        Platform.runLater(() -> {
+            if (!applicationStopping.get()) action.run();
+        });
+    }
+
     private void appendGameConsoleLine(String line) {
         liveGameLog.appendLine(line);
+        if (applicationStopping.get()) return;
         synchronized (pendingConsoleText) {
             pendingConsoleText.append(line).append(System.lineSeparator());
             int excess = pendingConsoleText.length() - ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS;
@@ -4641,10 +5433,11 @@ public class LauncherUI extends javafx.application.Application {
                 project.getTitle() + " " + selectedVersion.versionNumber()
                         + " -> " + gameVersion + loaderLabel);
 
-        runAsync("ecl-download-" + source.id() + "-" + target.projectType, () -> {
+        DownloadTaskCenter.TaskHandle<Void> contentTask = downloadTaskCenter.submit(
+                "Content " + project.getTitle(), context -> {
             if (generation != downloadGeneration.get()) {
                 // The download dialog was closed; do not start the transfer or touch the UI.
-                return;
+                return null;
             }
             try {
                 ModrinthDownloader.DownloadResult result = controller.contentDownloader(source).downloadVersion(
@@ -4657,6 +5450,7 @@ public class LauncherUI extends javafx.application.Application {
                         new ModrinthDownloader.DownloadListener() {
                             @Override
                             public void onStatus(String message) {
+                                context.updateStatus(message);
                                 Platform.runLater(() -> {
                                     if (generation != downloadGeneration.get()) {
                                         return;
@@ -4668,6 +5462,7 @@ public class LauncherUI extends javafx.application.Application {
 
                             @Override
                             public void onProgress(long downloaded, long total) {
+                                context.updateProgress(downloaded, total);
                                 Platform.runLater(() -> {
                                     if (generation != downloadGeneration.get()) {
                                         return;
@@ -4699,6 +5494,7 @@ public class LauncherUI extends javafx.application.Application {
                                 new MrpackInstaller.Listener() {
                                 @Override
                                 public void onStatus(String message) {
+                                    context.updateStatus(message);
                                     Platform.runLater(() -> {
                                         if (generation != downloadGeneration.get()) {
                                             return;
@@ -4710,6 +5506,7 @@ public class LauncherUI extends javafx.application.Application {
 
                                 @Override
                                 public void onProgress(long downloaded, long total) {
+                                    context.updateProgress(downloaded, total);
                                     Platform.runLater(() -> {
                                         if (generation != downloadGeneration.get()) {
                                             return;
@@ -4770,7 +5567,9 @@ public class LauncherUI extends javafx.application.Application {
                     dialogStatus.setText("下载失败: " + message);
                     setStatus(target.title + "下载失败", message);
                 });
+                throw e;
             }
+            return null;
         });
     }
 
@@ -5553,6 +6352,7 @@ public class LauncherUI extends javafx.application.Application {
             case "shader" -> ICON_LAMP_BLOCK;
             case "resourcepack" -> ICON_WOOD_BLOCK;
             case "modpack" -> ICON_STONE_BLOCK;
+            case "server" -> ICON_SIGNAL;
             default -> ICON_GRASS_BLOCK;
         };
     }

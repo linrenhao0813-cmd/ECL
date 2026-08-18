@@ -2,6 +2,8 @@ package com.ecl.launcher;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import com.ecl.auth.AuthProvider;
 import com.ecl.auth.OfflineSkin;
@@ -39,6 +41,17 @@ public interface LaunchService {
 
     /** Locally imported skin to inject for an offline account; no-op by default. */
     default void setOfflineSkin(OfflineSkin skin) {
+    }
+
+    /** Whether preparing the selected version requires a managed Java download. */
+    default boolean requiresJavaRuntimeDownload() throws IOException {
+        return false;
+    }
+
+    /** Resolve or download the Java runtime before launching so UI task centers can observe it. */
+    default String prepareJavaRuntime(Consumer<String> status,
+                                      BiConsumer<Long, Long> progress) throws IOException {
+        return null;
     }
 
     Process launch() throws IOException;

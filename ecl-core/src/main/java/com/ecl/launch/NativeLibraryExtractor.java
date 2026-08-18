@@ -139,11 +139,8 @@ public final class NativeLibraryExtractor {
         if (template != null && !template.isBlank()) {
             keys.add(template.replace("${arch}", architectureBits()));
         }
-        keys.add("natives-" + osArch);
-        if (nativeClassifier != null && !nativeClassifier.isBlank()) {
-            keys.add(nativeClassifier);
-        }
-        keys.add(osArch);
+        keys.addAll(java.util.Arrays.asList(
+                com.ecl.util.MinecraftRuleUtil.nativeKeys(nativeClassifier)));
         return keys;
     }
 

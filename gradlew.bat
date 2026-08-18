@@ -8,4 +8,5 @@ if defined JAVA_HOME (
   set JAVA_EXE=java.exe
 )
 "%JAVA_EXE%" -Dorg.gradle.appname=gradlew -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
-endlocal
+set EXIT_CODE=%ERRORLEVEL%
+endlocal & exit /b %EXIT_CODE%

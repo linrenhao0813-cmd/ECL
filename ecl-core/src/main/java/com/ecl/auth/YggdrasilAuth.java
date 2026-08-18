@@ -8,7 +8,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -27,8 +30,41 @@ public class YggdrasilAuth implements AuthProvider {
     private boolean loggedIn;
 
     public YggdrasilAuth(String authServer) {
-        this.authServer = authServer.endsWith("/") ? authServer : authServer + "/";
+        this.authServer = normalizeAuthServer(authServer);
         this.clientToken = UUID.randomUUID().toString().replace("-", "");
+    }
+
+    static String normalizeAuthServer(String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Yggdrasil authentication server is blank");
+        }
+        try {
+            URI parsed = new URI(value.trim());
+            String scheme = parsed.getScheme() == null
+                    ? "" : parsed.getScheme().toLowerCase(Locale.ROOT);
+            String host = parsed.getHost();
+            if (host == null || host.isBlank() || parsed.getUserInfo() != null
+                    || parsed.getQuery() != null || parsed.getFragment() != null) {
+                throw new IllegalArgumentException("Invalid Yggdrasil authentication server URL");
+            }
+            if (!"https".equals(scheme) && !("http".equals(scheme) && isLoopbackHost(host))) {
+                throw new IllegalArgumentException(
+                        "Yggdrasil authentication requires HTTPS (HTTP is allowed only for localhost)");
+            }
+            String path = parsed.getPath() == null ? "" : parsed.getPath();
+            if (!path.endsWith("/")) {
+                path += "/";
+            }
+            return new URI(scheme, null, host, parsed.getPort(), path, null, null).toASCIIString();
+        } catch (URISyntaxException error) {
+            throw new IllegalArgumentException("Invalid Yggdrasil authentication server URL", error);
+        }
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        String normalized = host.toLowerCase(Locale.ROOT);
+        return "localhost".equals(normalized) || "::1".equals(normalized)
+                || normalized.startsWith("127.");
     }
 
     public YggdrasilAuth(String authServer, String username, String uuid,

@@ -6,6 +6,7 @@ import com.ecl.download.DownloadService;
 import com.ecl.download.GameDownloader;
 import com.ecl.download.ContentDownloader;
 import com.ecl.download.CurseForgeDownloader;
+import com.ecl.download.DownloadTaskCenter;
 import com.ecl.download.ModrinthDownloader;
 import com.ecl.launcher.GameLauncher;
 import com.ecl.launcher.LaunchService;
@@ -55,6 +56,7 @@ public final class MainController implements AutoCloseable {
     private final SettingsManager settingsManager;
     private final VersionManager versionManager;
     private final DownloadService gameDownloader;
+    private final DownloadTaskCenter downloadTaskCenter;
     private final ModrinthDownloader modrinthDownloader;
     private final CurseForgeDownloader curseForgeDownloader;
     private final ModrinthApiClient modrinthApiClient;
@@ -80,7 +82,11 @@ public final class MainController implements AutoCloseable {
         settingsManager = new SettingsManager();
         settingsManager.load();
         versionManager = new VersionManager();
-        gameDownloader = new GameDownloader();
+        int configuredConcurrency = settingsManager.get(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT);
+        configuredConcurrency = Math.max(1, Math.min(8, configuredConcurrency));
+        long configuredRate = Math.max(0L, settingsManager.get(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB)) * 1024L;
+        gameDownloader = new GameDownloader(configuredConcurrency);
+        downloadTaskCenter = new DownloadTaskCenter(configuredConcurrency, configuredRate);
         modrinthDownloader = new ModrinthDownloader();
         curseForgeDownloader = new CurseForgeDownloader(this::curseForgeApiKey);
         modrinthApiClient = new DefaultModrinthApiClient();
@@ -96,7 +102,7 @@ public final class MainController implements AutoCloseable {
             return thread;
         });
         modDownloadExecutor = Executors.newFixedThreadPool(
-                Math.max(1, ECLConfig.DOWNLOAD_THREADS), runnable -> {
+                configuredConcurrency, runnable -> {
                     Thread thread = new Thread(runnable,
                             "ecl-mod-download-" + threadNumber.incrementAndGet());
                     thread.setDaemon(true);
@@ -145,6 +151,7 @@ public final class MainController implements AutoCloseable {
     public SettingsManager settings() { return settingsManager; }
     public VersionManager versions() { return versionManager; }
     public DownloadService gameDownloader() { return gameDownloader; }
+    public DownloadTaskCenter downloadTasks() { return downloadTaskCenter; }
     public ModrinthDownloader modrinthDownloader() { return modrinthDownloader; }
     public CurseForgeDownloader curseForgeDownloader() { return curseForgeDownloader; }
     public ContentDownloader contentDownloader(ContentSource source) {
@@ -241,6 +248,7 @@ public final class MainController implements AutoCloseable {
     @Override
     public void close() {
         // Interrupt user-visible work first; downloader shutdown may wait for its own workers.
+        downloadTaskCenter.close();
         backgroundExecutor.shutdownNow();
         modDownloadExecutor.shutdownNow();
         metadataProviders.close();

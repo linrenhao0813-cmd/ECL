@@ -8,6 +8,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ServerCatalogTest {
@@ -67,6 +68,16 @@ class ServerCatalogTest {
         assertEquals("example.org:25566", customPort.address());
     }
 
+    @Test
+    void websiteUriAllowsOnlyNormalWebLinks() {
+        assertEquals("https://example.org/details",
+                serverWithWebsite("https://example.org/details").websiteUri().toString());
+        assertEquals("http://example.org", serverWithWebsite("http://example.org").websiteUri().toString());
+        assertNull(serverWithWebsite("file:///C:/secrets.txt").websiteUri());
+        assertNull(serverWithWebsite("javascript:alert(1)").websiteUri());
+        assertNull(serverWithWebsite("https://user@example.org").websiteUri());
+    }
+
     private static List<String> names(List<PublicServer> servers) {
         return servers.stream().map(PublicServer::name).toList();
     }
@@ -74,5 +85,10 @@ class ServerCatalogTest {
     private static PublicServer server(String host, int port) {
         return new PublicServer("Test", "smp", host, port, "1.21", "", "", "",
                 List.of(), "T");
+    }
+
+    private static PublicServer serverWithWebsite(String website) {
+        return new PublicServer("Test", "smp", "example.org", 25565, "1.21", "", "",
+                website, List.of(), "T");
     }
 }

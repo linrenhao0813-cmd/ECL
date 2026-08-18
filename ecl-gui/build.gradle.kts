@@ -8,6 +8,7 @@ val detectedJavafxPlatform = when {
     osName.contains("win") -> "win"
     osName.contains("mac") && (osArch.contains("aarch64") || osArch.contains("arm64")) -> "mac-aarch64"
     osName.contains("mac") -> "mac"
+    osName.contains("linux") && (osArch.contains("aarch64") || osArch.contains("arm64")) -> "linux-aarch64"
     else -> "linux"
 }
 val javafxPlatform = providers.gradleProperty("javafxPlatform").orElse(detectedJavafxPlatform)

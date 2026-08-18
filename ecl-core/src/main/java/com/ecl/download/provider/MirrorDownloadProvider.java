@@ -20,7 +20,8 @@ public final class MirrorDownloadProvider implements DownloadProvider {
     public boolean supports(URI original) {
         if (original == null || original.getHost() == null) return false;
         return switch (original.getHost()) {
-            case "piston-meta.mojang.com", "launchermeta.mojang.com", "launcher.mojang.com",
+            case "piston-meta.mojang.com", "piston-data.mojang.com",
+                    "launchermeta.mojang.com", "launcher.mojang.com",
                     "libraries.minecraft.net", "resources.download.minecraft.net" -> true;
             default -> false;
         };
@@ -33,6 +34,7 @@ public final class MirrorDownloadProvider implements DownloadProvider {
         String query = original.getRawQuery();
         switch (original.getHost()) {
             case "piston-meta.mojang.com" -> mirrors.add(build("bmclapi2.bangbang93.com", path, query));
+            case "piston-data.mojang.com" -> mirrors.add(build("bmclapi2.bangbang93.com", path, query));
             case "launchermeta.mojang.com" -> {
                 mirrors.add(build("launchermeta.fastmcmirror.org", path, query));
                 mirrors.add(build("bmclapi2.bangbang93.com", path, query));
