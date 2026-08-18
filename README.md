@@ -1,5 +1,7 @@
 # ECL
 
+[![CI](https://github.com/linrenhao0813-cmd/ECL/actions/workflows/ci.yml/badge.svg)](https://github.com/linrenhao0813-cmd/ECL/actions/workflows/ci.yml)
+
 ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器。它提供图形界面和无头 CLI，覆盖游戏版本与加载器安装、账户管理、内容安装、整合包导入导出、服务器浏览，以及诊断与打包等常用流程。
 
 > 当前项目版本：`1.0.0`。从源码构建需要 JDK 21。
@@ -7,6 +9,7 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器。它提供图形界�
 ## 功能
 
 - 安装、重装、删除 Minecraft 正式版、快照和愚人节版本；下载时校验客户端、资源和依赖文件。
+- 使用统一下载任务中心管理游戏、服务端、加载器、Java 运行时和内容下载；支持并行数与限速设置、取消、失败重试和自动清理历史任务。
 - 安装 Fabric、Quilt、Forge、NeoForge 加载器，并为带加载器的实例提供隔离运行目录。
 - 使用离线账户、Microsoft 设备码登录或 Yggdrasil 外置登录；保存的账户凭据采用加密存储。
 - Microsoft 正版账户可上传官方皮肤；离线账户可导入本地皮肤，并在启动游戏时自动注入。
@@ -14,8 +17,15 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器。它提供图形界�
 - 导入 Modrinth `.mrpack` 与 CurseForge 整合包，导出 ECL、MultiMC、CurseForge 或 MRPACK 格式。
 - 浏览公开 Minecraft 服务器目录，搜索、查看在线状态、复制地址或作为直连地址启动。
 - 自动选择合适的 Java；本机缺少匹配运行时时可下载 Eclipse Temurin JRE。
-- 提供启动日志、崩溃中文诊断、世界备份、浅色/深色主题和简体中文、繁体中文、英文切换。
+- 提供启动日志、崩溃中文诊断、世界备份、浅色/深色主题和简体中文、繁体中文、英文切换；首页与服务器页面的主要界面文案已纳入语言资源。
 - 提供适合脚本和服务器环境的 CLI，支持 JSON 输出。
+
+## 安全和可靠性
+
+- 对版本 ID、继承版本和客户端 JAR 标识执行统一校验，并通过规范路径检查将版本元数据和客户端文件限制在 `versions` 目录中；依赖库与资源路径也会检查目录边界。
+- Java 运行时下载完成后校验 SHA-256。Linux 与 macOS 的 `.tar.gz` 使用内置解压器处理，不依赖系统 `tar`；绝对路径、路径穿越、符号链接、硬链接、异常校验和以及超过条目或体积限制的归档会被拒绝。
+- 游戏进程监控使用守护线程。关闭启动器不会等待仍在运行的游戏退出，游戏本体也不会因此被终止。
+- 用户取消下载会显示为“已取消”而不是“下载失败”。下载中心仅保留最近 200 条已结束任务，排队或执行中的任务不会被自动删除。
 
 ## 快速开始
 
@@ -95,6 +105,8 @@ settings get | set
 .\gradlew.bat check
 ```
 
+`check` 会运行 JUnit、Checkstyle、SpotBugs 和 JaCoCo 报告任务。
+
 构建全部模块：
 
 ```powershell
@@ -112,6 +124,8 @@ settings get | set
 ```text
 ecl-boot/build/install/ECL/
 ```
+
+GitHub Actions 会在 Ubuntu、Windows 和 macOS 上执行 `build check`，并额外生成 Windows 与 macOS 应用镜像作为工作流产物。
 
 ### 原生应用镜像
 
