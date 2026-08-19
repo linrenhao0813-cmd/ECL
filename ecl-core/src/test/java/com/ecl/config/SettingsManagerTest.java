@@ -2,11 +2,15 @@ package com.ecl.config;
 
 import com.ecl.config.SettingKey;
 import com.ecl.config.SettingsManager;
+import com.ecl.util.CryptoUtil;
 import com.google.gson.JsonObject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Field;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -17,11 +21,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SettingsManagerTest {
+    @TempDir
+    Path tempDir;
+
     private SettingsManager manager;
     private JsonObject settings;
 
     @BeforeEach
     void createInMemoryManager() throws Exception {
+        System.setProperty("ecl.crypto.keyFile", tempDir.resolve("secret.key").toString());
+        CryptoUtil.resetKeyCache();
         manager = new SettingsManager();
         settings = new JsonObject();
 
@@ -32,6 +41,12 @@ class SettingsManagerTest {
         Field loadedField = SettingsManager.class.getDeclaredField("loadAttempted");
         loadedField.setAccessible(true);
         loadedField.setBoolean(manager, true);
+    }
+
+    @AfterEach
+    void clearCryptoTestState() {
+        CryptoUtil.resetKeyCache();
+        System.clearProperty("ecl.crypto.keyFile");
     }
 
     @Test

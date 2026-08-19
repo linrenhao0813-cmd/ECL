@@ -1,10 +1,28 @@
 package com.ecl.util;
 
+import com.ecl.i18n.ResourceBundleI18n;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class MessagesTest {
+
+    private Locale previousLocale;
+
+    @BeforeEach
+    void useSimplifiedChinese() {
+        previousLocale = Messages.locale();
+        Messages.setLocale(ResourceBundleI18n.SIMPLIFIED_CHINESE);
+    }
+
+    @AfterEach
+    void restoreLocale() {
+        Messages.setLocale(previousLocale);
+    }
 
     @Test
     void returnsKnownKey() {

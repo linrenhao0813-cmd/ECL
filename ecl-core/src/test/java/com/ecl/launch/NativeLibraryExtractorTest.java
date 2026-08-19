@@ -1,6 +1,7 @@
 package com.ecl.launch;
 
 import com.ecl.game.VersionRepository;
+import com.ecl.util.PlatformUtil;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -80,19 +81,21 @@ class NativeLibraryExtractorTest {
         Path versionsDir = Files.createDirectories(tempDir.resolve("versions"));
         Path librariesDir = Files.createDirectories(tempDir.resolve("libs"));
         Path assetsDir = Files.createDirectories(tempDir.resolve("assets"));
-        Path nativeJar = librariesDir.resolve("lwjgl/natives-windows.jar");
+        String nativeOs = PlatformUtil.current().minecraftName();
+        String nativeClassifier = "natives-" + nativeOs;
+        Path nativeJar = librariesDir.resolve("lwjgl/" + nativeClassifier + ".jar");
         Files.createDirectories(nativeJar.getParent());
-        writeJarTo(nativeJar, "natives-windows.jar", Map.of("lwjgl.dll", new byte[]{9, 9, 9}));
+        writeJarTo(nativeJar, nativeClassifier + ".jar", Map.of("lwjgl.dll", new byte[]{9, 9, 9}));
 
         String versionJson = """
                 {"mainClass":"net.minecraft.client.main.Main",
                  "libraries":[{"name":"org.lwjgl:lwjgl:3.3.1",
-                   "natives":{"windows":"natives-windows"},
+                   "natives":{"%s":"%s"},
                    "downloads":{
                      "artifact":{"url":"https://x/lwjgl.jar","path":"lwjgl/3.3.1.jar"},
-                     "classifiers":{"natives-windows":{"url":"https://x/n.jar",
-                       "path":"lwjgl/natives-windows.jar"}}}}]}
-                """;
+                     "classifiers":{"%s":{"url":"https://x/n.jar",
+                       "path":"lwjgl/%s.jar"}}}}]}
+                """.formatted(nativeOs, nativeClassifier, nativeClassifier, nativeClassifier);
         Path versionDir = Files.createDirectories(versionsDir.resolve("1.21"));
         Files.writeString(versionDir.resolve("1.21.json"), versionJson, StandardCharsets.UTF_8);
         VersionRepository repository = new VersionRepository(versionsDir.toFile());
@@ -115,16 +118,18 @@ class NativeLibraryExtractorTest {
         Path versionsDir = Files.createDirectories(tempDir.resolve("versions"));
         Path librariesDir = Files.createDirectories(tempDir.resolve("libs"));
         Path assetsDir = Files.createDirectories(tempDir.resolve("assets"));
-        Path nativeJar = librariesDir.resolve("natives-windows.jar");
-        writeJarTo(nativeJar, "natives-windows.jar", Map.of("native.dll", new byte[]{1}));
+        String nativeOs = PlatformUtil.current().minecraftName();
+        String nativeClassifier = "natives-" + nativeOs;
+        Path nativeJar = librariesDir.resolve(nativeClassifier + ".jar");
+        writeJarTo(nativeJar, nativeClassifier + ".jar", Map.of("native.dll", new byte[]{1}));
 
         String versionJson = """
                 {"mainClass":"net.minecraft.client.main.Main",
                  "libraries":[{"name":"org.x:natives:1.0",
-                   "natives":{"windows":"natives-windows"},
-                   "downloads":{"classifiers":{"natives-windows":{"url":"https://x/n.jar",
-                     "path":"natives-windows.jar"}}}}]}
-                """;
+                   "natives":{"%s":"%s"},
+                   "downloads":{"classifiers":{"%s":{"url":"https://x/n.jar",
+                     "path":"%s.jar"}}}}]}
+                """.formatted(nativeOs, nativeClassifier, nativeClassifier, nativeClassifier);
         Path versionDir = Files.createDirectories(versionsDir.resolve("1.21"));
         Files.writeString(versionDir.resolve("1.21.json"), versionJson, StandardCharsets.UTF_8);
         VersionRepository repository = new VersionRepository(versionsDir.toFile());
@@ -134,7 +139,7 @@ class NativeLibraryExtractorTest {
         Path staged = versionsDir.resolve("1.21/natives/native.dll");
         assertArrayEquals(new byte[]{1}, Files.readAllBytes(staged));
 
-        writeJarTo(nativeJar, "natives-windows.jar", Map.of("native.dll", new byte[]{2}));
+        writeJarTo(nativeJar, nativeClassifier + ".jar", Map.of("native.dll", new byte[]{2}));
         NativeLibraryExtractor.extract(repository.resolve("1.21"), environment, "1.21");
         assertArrayEquals(new byte[]{2}, Files.readAllBytes(staged));
     }
