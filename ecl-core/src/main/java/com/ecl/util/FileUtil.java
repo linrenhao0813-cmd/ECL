@@ -103,12 +103,16 @@ public class FileUtil {
         }
         // Canonical paths also account for existing junctions/symbolic links. A purely lexical
         // startsWith check would allow <root>/linked-dir/file to reach outside the managed root.
-        Path rootPath = root.getCanonicalFile().toPath();
+        Path rootPath = root.toPath().toAbsolutePath().normalize();
+        Path canonicalRoot = root.getCanonicalFile().toPath();
         Path candidate;
         try {
             // Normalize backslashes so Windows-style separators cannot smuggle in ".." escapes.
-            candidate = rootPath.resolve(relativePath.replace('\\', '/')).normalize()
-                    .toFile().getCanonicalFile().toPath();
+            candidate = rootPath.resolve(relativePath.replace('\\', '/')).normalize();
+            Path canonicalCandidate = candidate.toFile().getCanonicalFile().toPath();
+            if (!canonicalCandidate.startsWith(canonicalRoot)) {
+                throw new IOException("依赖路径越界: " + relativePath);
+            }
         } catch (InvalidPathException error) {
             throw new IOException("依赖路径无效: " + relativePath, error);
         }
