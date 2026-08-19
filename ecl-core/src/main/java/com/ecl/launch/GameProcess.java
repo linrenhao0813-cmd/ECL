@@ -53,8 +53,9 @@ public final class GameProcess implements AutoCloseable {
         return process.isAlive();
     }
 
+    /** Return the process exit code, or {@code -1} while it is still running. */
     public int exitCode() {
-        return process.exitValue();
+        return process.isAlive() ? -1 : process.exitValue();
     }
 
     /** Block until the process exits and return this handle. Throws when the process was destroyed. */

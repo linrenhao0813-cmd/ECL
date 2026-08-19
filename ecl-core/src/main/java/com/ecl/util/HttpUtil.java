@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,22 +41,36 @@ public class HttpUtil {
     private static final Gson COMPACT_GSON = GsonProvider.compact();
     private static final Gson PRETTY_GSON = GsonProvider.pretty();
 
-    private static final HttpClient HTTP_CLIENT = createHttpClient();
+    private static final int DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+    private static final int DEFAULT_READ_TIMEOUT_MS = 30_000;
+    private static final HttpClient HTTP_CLIENT = createHttpClient(DEFAULT_CONNECT_TIMEOUT_MS);
+    private static final Map<Integer, HttpClient> HTTP_CLIENTS_BY_CONNECT_TIMEOUT =
+            new ConcurrentHashMap<>();
     private static final Object RATE_LIMIT_LOCK = new Object();
     private static long downloadRateLimitBytesPerSecond;
     private static double availableRateTokens;
     private static long rateTokensUpdatedAt;
 
-    private static final int DEFAULT_READ_TIMEOUT_MS = 30_000;
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes (\\d+)-(\\d+)/(\\d+)");
 
-    private static HttpClient createHttpClient() {
+    private static HttpClient createHttpClient(int connectTimeoutMs) {
         HttpClient.Builder builder = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
-                .connectTimeout(Duration.ofSeconds(15));
+                .connectTimeout(Duration.ofMillis(connectTimeoutMs));
         proxySelectorFor(System.getenv("HTTPS_PROXY"), System.getenv("HTTP_PROXY"),
                 System.getenv("ALL_PROXY")).ifPresent(builder::proxy);
         return builder.build();
+    }
+
+    static HttpClient httpClientForConnectTimeout(int connectTimeoutMs) {
+        if (connectTimeoutMs <= 0) {
+            throw new IllegalArgumentException("connectTimeout must be positive");
+        }
+        if (connectTimeoutMs == DEFAULT_CONNECT_TIMEOUT_MS) {
+            return HTTP_CLIENT;
+        }
+        return HTTP_CLIENTS_BY_CONNECT_TIMEOUT.computeIfAbsent(
+                connectTimeoutMs, HttpUtil::createHttpClient);
     }
 
     /** Configure a process-wide download limit. Zero disables throttling. */
@@ -229,7 +244,7 @@ public class HttpUtil {
 
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(urlStr))
-                .timeout(Duration.ofMillis(Math.max(connectTimeout, readTimeout)))
+                .timeout(Duration.ofMillis(readTimeout))
                 .header("User-Agent", "ECL/1.0")
                 .header("Accept", "application/json");
 
@@ -251,7 +266,8 @@ public class HttpUtil {
         }
 
         try {
-            HttpResponse<InputStream> response = HTTP_CLIENT.send(builder.build(),
+            HttpResponse<InputStream> response = httpClientForConnectTimeout(connectTimeout)
+                    .send(builder.build(),
                     HttpResponse.BodyHandlers.ofInputStream());
             int statusCode = response.statusCode();
             String responseBody = readStream(response.body());

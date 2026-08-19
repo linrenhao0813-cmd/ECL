@@ -56,6 +56,7 @@ class GameProcessTest {
                 .start();
         GameProcess gameProcess = new GameProcess(process, "sleeper", tempDir);
         assertTrue(gameProcess.isAlive());
+        assertEquals(-1, gameProcess.exitCode());
 
         gameProcess.destroyForcibly();
         GameProcess exited = gameProcess.whenExited().get(20, TimeUnit.SECONDS);

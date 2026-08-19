@@ -6,6 +6,7 @@ import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.PlatformUtil;
 import com.ecl.util.RuleEvaluator;
+import com.ecl.util.ThreadFactories;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -19,9 +20,7 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class GameDownloader implements DownloadService {
@@ -43,9 +42,11 @@ public class GameDownloader implements DownloadService {
     }
 
     public GameDownloader(int downloadThreads) {
-        versionDownloadExecutor = Executors.newSingleThreadExecutor(daemonThreadFactory("ecl-version-download"));
+        versionDownloadExecutor = Executors.newSingleThreadExecutor(
+                ThreadFactories.daemon("ecl-version-download"));
         fileDownloadExecutor = Executors.newFixedThreadPool(
-                Math.max(1, Math.min(8, downloadThreads)), daemonThreadFactory("ecl-file-download"));
+                Math.max(1, Math.min(8, downloadThreads)),
+                ThreadFactories.daemon("ecl-file-download"));
     }
 
     public void setListener(DownloadListener listener) {
@@ -448,15 +449,6 @@ public class GameDownloader implements DownloadService {
         } catch (IOException e) {
             return null;
         }
-    }
-
-    private static ThreadFactory daemonThreadFactory(String prefix) {
-        AtomicInteger threadNumber = new AtomicInteger();
-        return runnable -> {
-            Thread thread = new Thread(runnable, prefix + "-" + threadNumber.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        };
     }
 
     private record NativePlatform(String osName, String archBits, String nativeClassifier) {

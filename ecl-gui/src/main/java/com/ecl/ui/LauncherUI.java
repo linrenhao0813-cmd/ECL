@@ -5941,7 +5941,7 @@ public class LauncherUI extends javafx.application.Application {
 
         PasswordField curseForgeApiKeyField = new PasswordField();
         String storedCurseForgeKey = settingsManager.getEncrypted(
-                ECLConfig.SETTING_CURSEFORGE_API_KEY);
+                ECLConfig.KEY_CURSEFORGE_API_KEY);
         curseForgeApiKeyField.setText(storedCurseForgeKey == null ? "" : storedCurseForgeKey);
         curseForgeApiKeyField.setPromptText("可留空，或使用 CURSEFORGE_API_KEY 环境变量");
         applyFieldStyle(curseForgeApiKeyField);
@@ -6059,7 +6059,7 @@ public class LauncherUI extends javafx.application.Application {
                 default -> ReleaseChannel.RELEASE_AND_BETA;
             };
             settingsManager.set(ECLConfig.KEY_MOD_RELEASE_CHANNEL, modReleaseChannel.name());
-            settingsManager.setEncrypted(ECLConfig.SETTING_CURSEFORGE_API_KEY,
+            settingsManager.setEncrypted(ECLConfig.KEY_CURSEFORGE_API_KEY,
                     curseForgeApiKeyField.getText().trim());
             if (selectedInstanceId != null && !selectedInstanceId.isBlank()) {
                 try {

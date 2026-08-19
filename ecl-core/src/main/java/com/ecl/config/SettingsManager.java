@@ -246,6 +246,10 @@ public class SettingsManager {
         }
     }
 
+    public synchronized void setEncrypted(SettingKey<String> key, String value) {
+        setEncrypted(key.key(), value);
+    }
+
     /**
      * Read and decrypt a value stored with {@link #setEncrypted}.
      * Returns the decrypted plaintext, or {@code null} if not found or decryptable.
@@ -261,6 +265,10 @@ public class SettingsManager {
             LOGGER.warn("Ignoring unreadable encrypted setting '{}'", key, error);
             return null;
         }
+    }
+
+    public synchronized String getEncrypted(SettingKey<String> key) {
+        return getEncrypted(key.key());
     }
 
     /**

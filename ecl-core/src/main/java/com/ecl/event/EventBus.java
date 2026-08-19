@@ -1,6 +1,5 @@
 package com.ecl.event;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -38,21 +37,34 @@ public final class EventBus {
      * @return a handle that can be passed to {@link #unregister} to remove this subscription
      */
     public <E extends Event> Subscription register(Class<E> type, EventHandler<E> handler) {
-        List<EventHandler<? super Event>> bucket =
-                handlersByType.computeIfAbsent(type, ignored -> new CopyOnWriteArrayList<>());
         // The cast is safe: insertion is guarded by the Class<E> index of this bucket.
         @SuppressWarnings("unchecked")
         EventHandler<? super Event> widened = (EventHandler<? super Event>) handler;
-        bucket.add(widened);
+        CopyOnWriteArrayList<EventHandler<? super Event>> bucket = handlersByType.compute(type,
+                (ignored, existing) -> {
+                    CopyOnWriteArrayList<EventHandler<? super Event>> selected = existing == null
+                            ? new CopyOnWriteArrayList<>() : existing;
+                    selected.add(widened);
+                    return selected;
+                });
         AtomicBoolean released = new AtomicBoolean();
         return new Subscription() {
             @Override
             public void release() {
                 if (released.compareAndSet(false, true)) {
-                    bucket.remove(widened);
+                    handlersByType.computeIfPresent(type, (ignored, existing) -> {
+                        if (existing == bucket) {
+                            existing.remove(widened);
+                        }
+                        return existing.isEmpty() ? null : existing;
+                    });
                 }
             }
         };
+    }
+
+    int subscriptionBucketCount() {
+        return handlersByType.size();
     }
 
     /** Remove a previously registered subscription. No-op for an already-removed handle. */

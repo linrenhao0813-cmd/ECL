@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
  * Microsoft account authentication for official Minecraft Java accounts.
  */
 public class MicrosoftAuth implements AuthProvider {
+    private static final int MAX_DEVICE_POLL_INTERVAL_SECONDS = 60;
     private static final Logger LOGGER = LoggerFactory.getLogger(MicrosoftAuth.class);
     private static final String CLIENT_ID = System.getProperty("ecl.microsoft.clientId", "00000000402b5328");
     private static final String MSA_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
@@ -257,7 +258,8 @@ public class MicrosoftAuth implements AuthProvider {
         }
         String message = JsonUtil.getString(json, "message", "请在浏览器中打开 " + verificationUri + " 并输入代码 " + userCode);
         int expiresIn = Math.max(60, JsonUtil.getInt(json, "expires_in", 900));
-        int interval = Math.max(1, JsonUtil.getInt(json, "interval", 5));
+        int interval = Math.min(MAX_DEVICE_POLL_INTERVAL_SECONDS,
+                Math.max(1, JsonUtil.getInt(json, "interval", 5)));
 
         DeviceCode prompt = new DeviceCode(deviceCode, userCode, verificationUri, message, expiresIn, interval);
         notifyDeviceCode(prompt);
@@ -284,13 +286,20 @@ public class MicrosoftAuth implements AuthProvider {
                 continue;
             }
             if ("slow_down".equals(error)) {
-                interval += 5;
+                interval = nextDevicePollInterval(interval);
                 continue;
             }
             throw new IOException(errorMessage(tokenJson, "Microsoft device login failed"));
         }
 
         throw new IOException("Microsoft device login timed out");
+    }
+
+    static int nextDevicePollInterval(int currentInterval) {
+        if (currentInterval >= MAX_DEVICE_POLL_INTERVAL_SECONDS) {
+            return MAX_DEVICE_POLL_INTERVAL_SECONDS;
+        }
+        return Math.min(MAX_DEVICE_POLL_INTERVAL_SECONDS, Math.max(1, currentInterval) + 5);
     }
 
     long beginLogin() {

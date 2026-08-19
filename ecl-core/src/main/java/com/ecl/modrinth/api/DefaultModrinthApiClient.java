@@ -10,8 +10,10 @@ import com.ecl.modrinth.model.ModDependency;
 import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModProject;
 import com.ecl.modrinth.model.ModVersion;
+import com.ecl.util.BoundedCache;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.TextUtil;
+import com.ecl.util.ThreadFactories;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -41,21 +43,20 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public final class DefaultModrinthApiClient implements ModrinthApiClient {
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultModrinthApiClient.class);
     private static final Set<Integer> RETRYABLE_STATUS_CODES = Set.of(429, 502, 503, 504);
     private static final Set<String> LOADER_CATEGORIES = Set.of("fabric", "quilt", "forge", "neoforge");
+    private static final int MAX_CACHE_ENTRIES = 256;
 
     private final ModrinthApiConfiguration configuration;
     private final ObjectMapper objectMapper;
     private final ModrinthHttpTransport transport;
     private final ScheduledExecutorService retryScheduler;
     private final boolean ownsScheduler;
-    private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
+    private final BoundedCache<String, CacheEntry> cache = new BoundedCache<>(MAX_CACHE_ENTRIES);
     private final Map<String, CompletableFuture<HttpUtil.Response>> inFlightGets = new ConcurrentHashMap<>();
 
     public DefaultModrinthApiClient() {
@@ -86,13 +87,8 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
     }
 
     private static ScheduledExecutorService newRetryScheduler() {
-        AtomicInteger number = new AtomicInteger();
-        ThreadFactory factory = runnable -> {
-            Thread thread = new Thread(runnable, "ecl-modrinth-retry-" + number.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        };
-        return Executors.newSingleThreadScheduledExecutor(factory);
+        return Executors.newSingleThreadScheduledExecutor(
+                ThreadFactories.daemon("ecl-modrinth-retry"));
     }
 
     @Override
@@ -214,7 +210,7 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
             });
             return request;
         });
-        return shared.thenApply(response -> response);
+        return shared;
     }
 
     private CompletableFuture<HttpUtil.Response> post(URI uri, String body) {

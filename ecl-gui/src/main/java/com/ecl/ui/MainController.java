@@ -38,6 +38,7 @@ import com.ecl.modrinth.service.ModManagementService;
 import com.ecl.modrinth.service.ModUpdateService;
 import com.ecl.modrinth.service.ModVersionSelector;
 import com.ecl.modrinth.transaction.InstallationPlanBuilder;
+import com.ecl.util.ThreadFactories;
 
 import java.io.IOException;
 import java.util.Map;
@@ -48,7 +49,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /** Owns application services and background task creation independently of JavaFX view construction. */
@@ -95,19 +95,10 @@ public final class MainController implements AutoCloseable {
                 new CurseForgeMetadataProvider(curseForgeDownloader.api()));
         ModMetadataProvider metadataProvider = metadataProviders.require(ContentSource.MODRINTH);
         gameLauncher = new GameLauncher();
-        AtomicInteger threadNumber = new AtomicInteger();
-        backgroundExecutor = Executors.newCachedThreadPool(runnable -> {
-            Thread thread = new Thread(runnable, "ecl-background-" + threadNumber.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        });
+        backgroundExecutor = Executors.newCachedThreadPool(
+                ThreadFactories.daemon("ecl-background"));
         modDownloadExecutor = Executors.newFixedThreadPool(
-                configuredConcurrency, runnable -> {
-                    Thread thread = new Thread(runnable,
-                            "ecl-mod-download-" + threadNumber.incrementAndGet());
-                    thread.setDaemon(true);
-                    return thread;
-                });
+                configuredConcurrency, ThreadFactories.daemon("ecl-mod-download"));
         installedModRepository = new FileInstalledModRepository();
         modVersionSelector = new DefaultModVersionSelector();
         modOperationLock = new DefaultInstanceOperationLock();
@@ -203,7 +194,7 @@ public final class MainController implements AutoCloseable {
     }
 
     private String curseForgeApiKey() {
-        String stored = settingsManager.getEncrypted(ECLConfig.SETTING_CURSEFORGE_API_KEY);
+        String stored = settingsManager.getEncrypted(ECLConfig.KEY_CURSEFORGE_API_KEY);
         if (stored != null && !stored.isBlank()) return stored;
         String property = System.getProperty("ecl.curseforge.apiKey", "");
         if (!property.isBlank()) return property;

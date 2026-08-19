@@ -1,6 +1,7 @@
 package com.ecl.download;
 
 import com.ecl.util.HttpUtil;
+import com.ecl.util.ThreadFactories;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -15,7 +16,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A process-wide download job queue.  Download implementations remain responsible
@@ -106,7 +106,6 @@ public final class DownloadTaskCenter implements AutoCloseable {
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private final ExecutorService executor;
     private final AtomicLong sequence = new AtomicLong();
-    private final AtomicInteger threadNumber = new AtomicInteger();
     private int maxConcurrent;
     private int runningCount;
     private long bandwidthLimitBytesPerSecond;
@@ -120,12 +119,8 @@ public final class DownloadTaskCenter implements AutoCloseable {
         this.maxConcurrent = clampConcurrency(maxConcurrent);
         this.bandwidthLimitBytesPerSecond = Math.max(0, bandwidthLimitBytesPerSecond);
         HttpUtil.setDownloadRateLimitBytesPerSecond(this.bandwidthLimitBytesPerSecond);
-        executor = Executors.newCachedThreadPool(runnable -> {
-            Thread thread = new Thread(runnable,
-                    "ecl-download-task-" + threadNumber.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        });
+        executor = Executors.newCachedThreadPool(
+                ThreadFactories.daemon("ecl-download-task"));
     }
 
     public <T> TaskHandle<T> submit(String title, Operation<T> operation) {

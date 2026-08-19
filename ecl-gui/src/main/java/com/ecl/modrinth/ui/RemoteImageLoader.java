@@ -1,7 +1,9 @@
 package com.ecl.modrinth.ui;
 
 import com.ecl.ECLConfig;
+import com.ecl.util.BoundedCache;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.ThreadFactories;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.PixelWriter;
@@ -25,10 +27,7 @@ import java.util.Collection;
 import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -40,13 +39,10 @@ public final class RemoteImageLoader {
     private static final long MAX_SOURCE_PIXELS = 16_000_000L;
     private static final int MAX_MEMORY_CACHE_ENTRIES = 256;
     private static final int MAX_DISK_CACHE_ENTRIES = 512;
-    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(8, runnable -> {
-        Thread thread = new Thread(runnable, "ecl-remote-image");
-        thread.setDaemon(true);
-        return thread;
-    });
-    private static final Map<String, CompletableFuture<Image>> CACHE = new ConcurrentHashMap<>();
-    private static final ConcurrentLinkedQueue<String> CACHE_ORDER = new ConcurrentLinkedQueue<>();
+    private static final ExecutorService EXECUTOR =
+            Executors.newFixedThreadPool(8, ThreadFactories.daemon("ecl-remote-image"));
+    private static final BoundedCache<String, CompletableFuture<Image>> CACHE =
+            new BoundedCache<>(MAX_MEMORY_CACHE_ENTRIES);
     private static final Image LOADING = placeholder(Color.web("#E5E7EB"), Color.web("#9CA3AF"));
     private static final Image MISSING = placeholder(Color.web("#F3F4F6"), Color.web("#CBD5E1"));
 
@@ -58,25 +54,14 @@ public final class RemoteImageLoader {
             return CompletableFuture.completedFuture(MISSING);
         }
         String key = uri.toString();
-        CompletableFuture<Image> cached = CACHE.get(key);
-        if (cached != null) {
-            return cached;
-        }
-        CompletableFuture<Image> created = CompletableFuture.supplyAsync(() -> {
+        return CACHE.computeIfAbsent(key, ignored -> CompletableFuture.supplyAsync(() -> {
             try {
                 byte[] bytes = cachedBytes(key);
                 return decodeWithImageIo(bytes);
-            } catch (Exception ignored) {
+            } catch (Exception ignoredError) {
                 return MISSING;
             }
-        }, EXECUTOR);
-        CompletableFuture<Image> selected = CACHE.putIfAbsent(key, created);
-        if (selected != null) {
-            return selected;
-        }
-        CACHE_ORDER.add(key);
-        trimMemoryCache();
-        return created;
+        }, EXECUTOR));
     }
 
     /** Starts image requests before cells become visible so scrolling does not reveal blank covers. */
@@ -194,16 +179,6 @@ public final class RemoteImageLoader {
 
     private static boolean isDecodedSizeAllowed(int width, int height) {
         return width > 0 && height > 0 && width <= ICON_SIZE && height <= ICON_SIZE;
-    }
-
-    private static void trimMemoryCache() {
-        while (CACHE.size() > MAX_MEMORY_CACHE_ENTRIES) {
-            String oldest = CACHE_ORDER.poll();
-            if (oldest == null) {
-                return;
-            }
-            CACHE.remove(oldest);
-        }
     }
 
     private static void trimDiskCache(Path directory) {

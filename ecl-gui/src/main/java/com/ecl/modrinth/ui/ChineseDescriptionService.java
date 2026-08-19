@@ -1,5 +1,6 @@
 package com.ecl.modrinth.ui;
 
+import com.ecl.util.BoundedCache;
 import com.ecl.util.HttpUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -11,14 +12,16 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /** Asynchronous Chinese translation for public content summaries with shared session caching. */
 public final class ChineseDescriptionService {
     private static final int MAX_SOURCE_LENGTH = 450;
+    private static final int MAX_CACHE_ENTRIES = 256;
+    private static final Duration CACHE_TTL = Duration.ofHours(1);
     private static final Pattern HAN = Pattern.compile("[\\p{IsHan}]");
-    private static final Map<String, CompletableFuture<String>> CACHE = new ConcurrentHashMap<>();
+    private static final BoundedCache<String, CompletableFuture<String>> CACHE =
+            new BoundedCache<>(MAX_CACHE_ENTRIES, CACHE_TTL);
 
     private ChineseDescriptionService() {
     }

@@ -1,6 +1,7 @@
 package com.ecl.server;
 
 import com.ecl.util.Messages;
+import com.ecl.util.ThreadFactories;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -48,16 +49,9 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
     private final Map<ServerCategory, Label> categoryCountLabels =
             new EnumMap<>(ServerCategory.class);
     private final ExecutorService directoryExecutor =
-            Executors.newSingleThreadExecutor(runnable -> {
-                Thread thread = new Thread(runnable, "ecl-server-directory");
-                thread.setDaemon(true);
-                return thread;
-            });
-    private final ExecutorService statusExecutor = Executors.newFixedThreadPool(4, runnable -> {
-        Thread thread = new Thread(runnable, "ecl-server-status");
-        thread.setDaemon(true);
-        return thread;
-    });
+            Executors.newSingleThreadExecutor(ThreadFactories.daemon("ecl-server-directory"));
+    private final ExecutorService statusExecutor =
+            Executors.newFixedThreadPool(4, ThreadFactories.daemon("ecl-server-status"));
     private final Set<String> probingAddresses = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean refreshing = new AtomicBoolean();
 

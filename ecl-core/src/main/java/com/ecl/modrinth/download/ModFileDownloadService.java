@@ -105,11 +105,11 @@ public final class ModFileDownloadService {
         RuntimeException failure = null;
         for (int attempt = 1; attempt <= 2; attempt++) {
             throwIfInterrupted(request);
+            AtomicLong previousFileBytes = new AtomicLong();
             try {
                 Files.createDirectories(request.temporaryFile().getParent());
                 Files.deleteIfExists(request.temporaryFile());
                 long startedAt = System.nanoTime();
-                AtomicLong previousFileBytes = new AtomicLong();
                 HttpUtil.downloadFileWithProgress(
                         downloadUri.toString(),
                         request.temporaryFile().toFile(),
@@ -142,9 +142,10 @@ public final class ModFileDownloadService {
                 return new DownloadedModFile(request, request.temporaryFile(), hashes, size);
             } catch (HashMismatchException e) {
                 failure = e;
-                subtractPartial(overallDownloaded, request.temporaryFile());
+                subtractPartial(overallDownloaded, previousFileBytes.get());
                 deleteQuietly(request.temporaryFile());
             } catch (IOException e) {
+                subtractPartial(overallDownloaded, previousFileBytes.get());
                 deleteQuietly(request.temporaryFile());
                 if (Thread.currentThread().isInterrupted()
                         || e instanceof java.nio.channels.ClosedByInterruptException
@@ -169,13 +170,8 @@ public final class ModFileDownloadService {
         }
     }
 
-    private static void subtractPartial(AtomicLong overallDownloaded, java.nio.file.Path file) {
-        try {
-            long size = Files.size(file);
-            overallDownloaded.updateAndGet(value -> Math.max(0, value - size));
-        } catch (IOException ignored) {
-            // The next progress event will continue from the current aggregate.
-        }
+    private static void subtractPartial(AtomicLong overallDownloaded, long downloadedBytes) {
+        overallDownloaded.updateAndGet(value -> Math.max(0, value - downloadedBytes));
     }
 
     private static void deleteQuietly(java.nio.file.Path file) {

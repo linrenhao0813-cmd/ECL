@@ -1,11 +1,12 @@
 package com.ecl.task;
 
+import com.ecl.util.ThreadFactories;
+
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -43,7 +44,7 @@ public final class TaskExecutor implements AutoCloseable {
      */
     public TaskExecutor(Executor delegate, TaskListener listener) {
         this.executor = delegate == null
-                ? Executors.newCachedThreadPool(daemonThreadFactory())
+                ? Executors.newCachedThreadPool(ThreadFactories.daemon("ecl-task"))
                 : adaptExecutor(delegate);
         this.listener = listener;
     }
@@ -210,15 +211,6 @@ public final class TaskExecutor implements AutoCloseable {
     @SuppressWarnings("unchecked")
     private static <T extends Throwable> RuntimeException rethrow(Throwable throwable) throws T {
         throw (T) throwable;
-    }
-
-    private static ThreadFactory daemonThreadFactory() {
-        AtomicInteger threadNumber = new AtomicInteger();
-        return runnable -> {
-            Thread thread = new Thread(runnable, "ecl-task-" + threadNumber.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        };
     }
 
     /** Bridges an arbitrary non-service {@link Executor} into the ExecutorService contract. */

@@ -121,4 +121,15 @@ class EventBusTest {
         assertEquals(0, received.get());
         assertTrue(true, "releasing twice must not throw");
     }
+
+    @Test
+    void removesEmptySubscriptionBuckets() {
+        EventBus bus = new EventBus();
+        EventBus.Subscription subscription = bus.register(BaseEvent.class, event -> { });
+
+        assertEquals(1, bus.subscriptionBucketCount());
+        subscription.release();
+
+        assertEquals(0, bus.subscriptionBucketCount());
+    }
 }

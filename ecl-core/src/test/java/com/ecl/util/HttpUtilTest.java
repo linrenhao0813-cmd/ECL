@@ -17,6 +17,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,8 +27,17 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class HttpUtilTest {
+
+    @Test
+    void createsAndReusesClientsWithTheRequestedConnectTimeout() {
+        var client = HttpUtil.httpClientForConnectTimeout(1_234);
+
+        assertEquals(Duration.ofMillis(1_234), client.connectTimeout().orElseThrow());
+        assertSame(client, HttpUtil.httpClientForConnectTimeout(1_234));
+    }
 
     @Test
     void readsStandardHttpsProxyDefinition() {

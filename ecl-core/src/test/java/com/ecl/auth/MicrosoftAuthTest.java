@@ -14,6 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MicrosoftAuthTest {
     @Test
+    void slowDownPollingIntervalIsCapped() {
+        assertEquals(10, MicrosoftAuth.nextDevicePollInterval(5));
+        assertEquals(60, MicrosoftAuth.nextDevicePollInterval(58));
+        assertEquals(60, MicrosoftAuth.nextDevicePollInterval(60));
+        assertEquals(60, MicrosoftAuth.nextDevicePollInterval(Integer.MAX_VALUE));
+    }
+
+    @Test
     void returnsAConsistentCachedSessionSnapshot() {
         MicrosoftAuth.CachedSession cached = new MicrosoftAuth.CachedSession(
                 "refresh", "access", 123L, "Player", "uuid");

@@ -21,4 +21,10 @@ class ECLConfigTest {
         assertEquals(10, ECLConfig.KEY_BACKUP_KEEP_COUNT.defaultValue());
         assertEquals(false, ECLConfig.KEY_BACKUP_INCLUDE_MODS.defaultValue());
     }
+
+    @Test
+    void curseForgeApiKeyHasATypeSafeSettingKey() {
+        assertEquals("curseForgeApiKey", ECLConfig.KEY_CURSEFORGE_API_KEY.key());
+        assertEquals("", ECLConfig.KEY_CURSEFORGE_API_KEY.defaultValue());
+    }
 }
