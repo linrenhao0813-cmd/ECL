@@ -39,8 +39,7 @@ public final class RuleEvaluator {
     private static boolean matchesOs(JsonObject os) {
         if (os == null) return true;
 
-        String currentOs = PlatformUtil.current().minecraftName();
-        if (os.has("name") && !JsonUtil.getString(os, "name", "").equals(currentOs)) {
+        if (os.has("name") && !"windows".equals(JsonUtil.getString(os, "name", ""))) {
             return false;
         }
         if (os.has("arch") && !matchesArchitecture(JsonUtil.getString(os, "arch", ""))) {

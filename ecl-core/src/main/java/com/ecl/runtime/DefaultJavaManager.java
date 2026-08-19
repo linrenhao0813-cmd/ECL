@@ -65,8 +65,6 @@ public final class DefaultJavaManager implements JavaManager {
     private static boolean isJdk(File javaExecutable) {
         File bin = javaExecutable.getParentFile();
         if (bin == null) return false;
-        String javac = System.getProperty("os.name", "").toLowerCase().contains("win")
-                ? "javac.exe" : "javac";
-        return new File(bin, javac).isFile();
+        return new File(bin, "javac.exe").isFile();
     }
 }

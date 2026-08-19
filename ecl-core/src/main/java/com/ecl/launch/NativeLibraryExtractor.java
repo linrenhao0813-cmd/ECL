@@ -61,8 +61,7 @@ public final class NativeLibraryExtractor {
                                File instanceDirectory) throws IOException {
         Path nativesDir = instanceDirectory == null
                 ? environment.nativesDirectory(versionId).toPath()
-                : instanceDirectory.toPath().resolve("natives-"
-                        + com.ecl.util.PlatformUtil.current().minecraftName());
+                : instanceDirectory.toPath().resolve("natives-windows");
         Files.createDirectories(nativesDir);
         if (metadata.libraries().isEmpty()) {
             return;
@@ -71,7 +70,7 @@ public final class NativeLibraryExtractor {
         String nativeClassifier = FileUtil.getNativeClassifier();
         String osArch = nativeClassifier.indexOf('-') >= 0
                 ? nativeClassifier.substring(0, nativeClassifier.indexOf('-'))
-                : com.ecl.util.PlatformUtil.current().minecraftName();
+                : "windows";
         Set<File> nativeFiles = collectNativeFiles(metadata, environment, nativeClassifier, osArch,
                 instanceDirectory);
         if (nativeFiles.isEmpty()) {

@@ -165,7 +165,7 @@ public final class ZipUtil {
                 ZipEntry entry = entries.nextElement();
                 String entryName = entry.getName();
                 if (entryName == null || entryName.isBlank() || entryName.indexOf('\0') >= 0
-                        || (PlatformUtil.isWindows() && entryName.indexOf(':') >= 0)) {
+                        || entryName.indexOf(':') >= 0) {
                     throw new IOException("ZIP contains an invalid entry name");
                 }
                 Path target = targetRoot.resolve(entryName).normalize();

@@ -12,8 +12,7 @@ class DefaultJavaManagerTest {
     @Test
     void detectsAndSelectsCurrentJava() {
         String executable = new File(System.getProperty("java.home"),
-                "bin/" + (System.getProperty("os.name").toLowerCase().contains("win")
-                        ? "java.exe" : "java")).getAbsolutePath();
+                "bin/java.exe").getAbsolutePath();
         DefaultJavaManager manager = new DefaultJavaManager(executable);
 
         assertFalse(manager.detect().isEmpty());

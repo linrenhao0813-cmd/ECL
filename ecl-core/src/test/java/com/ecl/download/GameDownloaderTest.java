@@ -38,21 +38,21 @@ class GameDownloaderTest {
 
         assertEquals("natives-windows-64",
                 GameDownloader.nativeClassifierKey(library, "windows", "64"));
-        assertEquals("natives-linux",
-                GameDownloader.nativeClassifierKey(new JsonObject(), "linux", "64"));
+        assertEquals("natives-windows",
+                GameDownloader.nativeClassifierKey(new JsonObject(), "windows", "64"));
     }
 
     @Test
     void arm64NativeClassifierPrefersArchitectureSpecificArtifact() {
         JsonObject library = new JsonObject();
         JsonObject natives = new JsonObject();
-        natives.addProperty("osx", "natives-osx");
+        natives.addProperty("windows", "natives-windows");
         library.add("natives", natives);
         JsonObject classifiers = new JsonObject();
-        classifiers.add("natives-osx", new JsonObject());
-        classifiers.add("natives-macos-arm64", new JsonObject());
+        classifiers.add("natives-windows", new JsonObject());
+        classifiers.add("natives-windows-arm64", new JsonObject());
 
-        assertEquals("natives-macos-arm64", GameDownloader.nativeClassifierKey(
-                library, classifiers, "osx", "64", "osx-arm64"));
+        assertEquals("natives-windows-arm64", GameDownloader.nativeClassifierKey(
+                library, classifiers, "windows", "64", "windows-arm64"));
     }
 }

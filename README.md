@@ -23,7 +23,7 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器。它提供图形界�
 ## 安全和可靠性
 
 - 对版本 ID、继承版本和客户端 JAR 标识执行统一校验，并通过规范路径检查将版本元数据和客户端文件限制在 `versions` 目录中；依赖库与资源路径也会检查目录边界。
-- Java 运行时下载完成后校验 SHA-256。Linux 与 macOS 的 `.tar.gz` 使用内置解压器处理，不依赖系统 `tar`；绝对路径、路径穿越、符号链接、硬链接、异常校验和以及超过条目或体积限制的归档会被拒绝。
+- Java 运行时下载完成后校验 SHA-256；解压 Windows ZIP 时会校验目标路径，拒绝越出运行时目录的条目。
 - 游戏进程监控使用守护线程。关闭启动器不会等待仍在运行的游戏退出，游戏本体也不会因此被终止。
 - 用户取消下载会显示为“已取消”而不是“下载失败”。下载中心仅保留最近 200 条已结束任务，排队或执行中的任务不会被自动删除。
 
@@ -35,19 +35,13 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器。它提供图形界�
 .\gradlew.bat run
 ```
 
-macOS 或 Linux：
-
-```bash
-./gradlew run
-```
-
 首次构建会下载 Gradle 与项目依赖。运行启动器、登录、下载游戏或在线内容时也需要网络连接。
 
 ## 环境要求
 
 - JDK 21
 - 项目已包含 Gradle Wrapper，无需另行安装 Gradle
-- Windows、macOS 或 Linux
+- Windows
 
 若 Windows 中 `java` 不在 `PATH`，请在同一 PowerShell 会话中配置 JDK 21 的 `JAVA_HOME` 和 `PATH`。
 
@@ -125,19 +119,14 @@ settings get | set
 ecl-boot/build/install/ECL/
 ```
 
-GitHub Actions 会在 Ubuntu、Windows 和 macOS 上执行 `build check`，并额外生成 Windows 与 macOS 应用镜像作为工作流产物。
+GitHub Actions 会在 Windows 上执行 `build check`，并生成 Windows 应用镜像作为工作流产物。
 
 ### 原生应用镜像
 
-`jpackage` 必须在目标操作系统上运行。以下任务会先构建分发目录：
+以下任务使用 Windows JDK 自带的 `jpackage.exe`，并会先构建分发目录：
 
 ```powershell
 .\gradlew.bat packageWindowsApp
-```
-
-```bash
-./gradlew packageMacApp
-./gradlew packageLinuxApp
 ```
 
 输出位置：
@@ -145,10 +134,6 @@ GitHub Actions 会在 Ubuntu、Windows 和 macOS 上执行 `build check`，并�
 ```text
 dist/windows/ECL/ECL.exe
 dist/windows/ECL/ECL-CLI.exe
-dist/macos/mac/ECL.app
-dist/macos/mac-aarch64/ECL.app
-dist/linux/linux-x64/ECL/
-dist/linux/linux-aarch64/ECL/
 ```
 
 ## 数据目录
@@ -158,8 +143,6 @@ dist/linux/linux-aarch64/ECL/
 | 系统 | ECL 数据目录 | 默认游戏目录 |
 | --- | --- | --- |
 | Windows | `%APPDATA%\.ecl` | `%APPDATA%\.minecraft` |
-| macOS | `~/Library/Application Support/.ecl` | `~/Library/Application Support/minecraft` |
-| Linux | `~/.ecl` | `~/.minecraft` |
 
 该目录会保存版本元数据、库、资源、运行时、配置、备份和诊断文件。游戏目录可在设置中覆盖；默认情况下，带加载器的实例使用隔离运行目录，原版实例共享游戏根目录。
 

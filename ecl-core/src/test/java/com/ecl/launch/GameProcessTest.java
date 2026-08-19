@@ -6,7 +6,6 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -22,9 +21,7 @@ class GameProcessTest {
     Path tempDir;
 
     private static String javaExecutable() {
-        String executable = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")
-                ? "java.exe" : "java";
-        return System.getProperty("java.home") + File.separator + "bin" + File.separator + executable;
+        return System.getProperty("java.home") + File.separator + "bin" + File.separator + "java.exe";
     }
 
     @Test

@@ -40,7 +40,6 @@ import com.ecl.modrinth.ui.RemoteImageLoader;
 import com.ecl.server.ServerBrowserView;
 import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.Messages;
-import com.ecl.util.PlatformUtil;
 import com.ecl.util.TextUtil;
 import javafx.animation.Animation;
 import javafx.animation.Interpolator;
@@ -1532,11 +1531,6 @@ public class LauncherUI extends javafx.application.Application {
         String profileId = getSelectedVersion();
         if (profileId == null || profileId.isBlank()) {
             setStatus(Messages.get("shortcut.error.title"), Messages.get("shortcut.error.selectInstance"));
-            return;
-        }
-        if (!PlatformUtil.isWindows()) {
-            setStatus(Messages.get("shortcut.unavailable.title"),
-                    Messages.get("shortcut.unavailable.windowsOnly"));
             return;
         }
         Path executable = resolveLauncherExecutable();
@@ -5687,9 +5681,7 @@ public class LauncherUI extends javafx.application.Application {
         }
         String firstPath = first.getAbsoluteFile().toPath().normalize().toString();
         String secondPath = second.getAbsoluteFile().toPath().normalize().toString();
-        return System.getProperty("os.name", "").toLowerCase().contains("win")
-                ? firstPath.equalsIgnoreCase(secondPath)
-                : firstPath.equals(secondPath);
+        return firstPath.equalsIgnoreCase(secondPath);
     }
 
     private File getActiveGameDir() {
@@ -5784,9 +5776,7 @@ public class LauncherUI extends javafx.application.Application {
             if (initial != null) {
                 chooser.setInitialDirectory(initial);
             }
-            if (PlatformUtil.isWindows()) {
-                chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Java 可执行文件", "java.exe", "*.exe"));
-            }
+            chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Java 可执行文件", "java.exe", "*.exe"));
             File selected = chooser.showOpenDialog(dialog);
             if (selected != null) {
                 javaField.setText(selected.getAbsolutePath());

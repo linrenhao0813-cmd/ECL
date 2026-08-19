@@ -51,7 +51,7 @@ class OfflineSkinAgentSmokeTest {
             server.registerCharacter("0123456789abcdef0123456789abcdef", "Steve", skin, false);
 
             Path javaExecutable = Path.of(System.getProperty("java.home"), "bin",
-                    System.getProperty("os.name").toLowerCase().contains("win") ? "java.exe" : "java");
+                    "java.exe");
             ProcessBuilder pb = new ProcessBuilder(
                     javaExecutable.toString(),
                     "-javaagent:" + jar.toAbsolutePath() + "=" + server.baseUrl(),

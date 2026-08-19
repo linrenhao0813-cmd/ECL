@@ -1,3 +1,5 @@
+import org.gradle.jvm.application.tasks.CreateStartScripts
+
 plugins {
     `java-library`
     application
@@ -16,4 +18,14 @@ dependencies {
 application {
     mainClass.set("com.ecl.cli.EclCli")
     applicationName = "ecl-cli"
+}
+
+tasks.named("distTar") {
+    enabled = false
+}
+
+tasks.named<CreateStartScripts>("startScripts") {
+    doLast {
+        unixScript.delete()
+    }
 }

@@ -80,13 +80,3 @@ tasks.register("packageWindowsApp") {
     group = "distribution"
     dependsOn(":ecl-dist:packageWindowsApp")
 }
-
-tasks.register("packageMacApp") {
-    group = "distribution"
-    dependsOn(":ecl-dist:packageMacApp")
-}
-
-tasks.register("packageLinuxApp") {
-    group = "distribution"
-    dependsOn(":ecl-dist:packageLinuxApp")
-}

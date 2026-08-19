@@ -192,16 +192,6 @@ public final class JavaRuntimeUtil {
                 return fromBin;
             }
 
-            File fromMacBundle = new File(candidate, "Contents/Home/bin/" + executableName());
-            if (fromMacBundle.isFile()) {
-                return fromMacBundle;
-            }
-
-            File fromHomebrewBundle = new File(candidate, "libexec/openjdk.jdk/Contents/Home/bin/" + executableName());
-            if (fromHomebrewBundle.isFile()) {
-                return fromHomebrewBundle;
-            }
-
             File nestedExecutable = new File(candidate, executableName());
             if (nestedExecutable.isFile()) {
                 return nestedExecutable;
@@ -223,8 +213,6 @@ public final class JavaRuntimeUtil {
         String userHome = System.getProperty("user.home", "");
         String programFiles = System.getenv("ProgramFiles");
         String programFilesX86 = System.getenv("ProgramFiles(x86)");
-        String osName = System.getProperty("os.name", "").toLowerCase();
-
         if (!userHome.isBlank()) {
             roots.add(new File(userHome, ".jdks"));
         }
@@ -238,17 +226,6 @@ public final class JavaRuntimeUtil {
             roots.add(new File(programFilesX86, "Java"));
             roots.add(new File(programFilesX86, "Eclipse Adoptium"));
         }
-        if (osName.contains("mac")) {
-            roots.add(new File("/Library/Java/JavaVirtualMachines"));
-            if (!userHome.isBlank()) {
-                roots.add(new File(userHome, "Library/Java/JavaVirtualMachines"));
-            }
-            roots.add(new File("/opt/homebrew/opt/openjdk"));
-            roots.add(new File("/usr/local/opt/openjdk"));
-            roots.add(new File("/opt/homebrew/Cellar/openjdk"));
-            roots.add(new File("/usr/local/Cellar/openjdk"));
-        }
-
         for (File root : roots) {
             candidates.addAll(findJavaCandidatesUnderRoot(root));
         }
@@ -359,6 +336,6 @@ public final class JavaRuntimeUtil {
     }
 
     private static String executableName() {
-        return PlatformUtil.isWindows() ? "java.exe" : "java";
+        return "java.exe";
     }
 }

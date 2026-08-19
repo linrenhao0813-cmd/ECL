@@ -1,7 +1,6 @@
 package com.ecl.launch;
 
 import com.ecl.game.VersionRepository;
-import com.ecl.util.PlatformUtil;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -81,7 +80,7 @@ class NativeLibraryExtractorTest {
         Path versionsDir = Files.createDirectories(tempDir.resolve("versions"));
         Path librariesDir = Files.createDirectories(tempDir.resolve("libs"));
         Path assetsDir = Files.createDirectories(tempDir.resolve("assets"));
-        String nativeOs = PlatformUtil.current().minecraftName();
+        String nativeOs = "windows";
         String nativeClassifier = "natives-" + nativeOs;
         Path nativeJar = librariesDir.resolve("lwjgl/" + nativeClassifier + ".jar");
         Files.createDirectories(nativeJar.getParent());
@@ -118,7 +117,7 @@ class NativeLibraryExtractorTest {
         Path versionsDir = Files.createDirectories(tempDir.resolve("versions"));
         Path librariesDir = Files.createDirectories(tempDir.resolve("libs"));
         Path assetsDir = Files.createDirectories(tempDir.resolve("assets"));
-        String nativeOs = PlatformUtil.current().minecraftName();
+        String nativeOs = "windows";
         String nativeClassifier = "natives-" + nativeOs;
         Path nativeJar = librariesDir.resolve(nativeClassifier + ".jar");
         writeJarTo(nativeJar, nativeClassifier + ".jar", Map.of("native.dll", new byte[]{1}));

@@ -109,7 +109,7 @@ class GameLauncherTest {
         writeVersion("child", """
                 {"inheritsFrom":"base","libraries":[
                   {"name":"example:shared:2.0"},
-                  {"name":"example:native:2.0:natives-linux"}
+                  {"name":"example:native:2.0:natives-windows-arm64"}
                 ]}
                 """);
 
@@ -120,7 +120,7 @@ class GameLauncherTest {
                 merged.getAsJsonArray("libraries").get(0).getAsJsonObject().get("name").getAsString());
         assertEquals("example:native:1.0:natives-windows",
                 merged.getAsJsonArray("libraries").get(1).getAsJsonObject().get("name").getAsString());
-        assertEquals("example:native:2.0:natives-linux",
+        assertEquals("example:native:2.0:natives-windows-arm64",
                 merged.getAsJsonArray("libraries").get(2).getAsJsonObject().get("name").getAsString());
     }
 

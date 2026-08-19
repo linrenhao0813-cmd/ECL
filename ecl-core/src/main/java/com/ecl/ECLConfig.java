@@ -5,8 +5,6 @@ import java.lang.management.ManagementFactory;
 import javax.management.ObjectName;
 
 import com.ecl.config.SettingKey;
-import com.ecl.util.PlatformUtil;
-
 public class ECLConfig {
     public static final String LAUNCHER_NAME = "ECL";
     public static final String LAUNCHER_VERSION = "1.0.0";
@@ -138,14 +136,8 @@ public class ECLConfig {
                 result = baseDir;
                 if (result == null) {
                     String userHome = System.getProperty("user.home");
-                    if (PlatformUtil.isWindows()) {
-                        String appData = System.getenv("APPDATA");
-                        result = new File(appData == null || appData.isBlank() ? userHome : appData, ".ecl");
-                    } else if (PlatformUtil.isMac()) {
-                        result = new File(userHome, "Library/Application Support/.ecl");
-                    } else {
-                        result = new File(userHome, ".ecl");
-                    }
+                    String appData = System.getenv("APPDATA");
+                    result = new File(appData == null || appData.isBlank() ? userHome : appData, ".ecl");
                     baseDir = result;
                 }
             }
@@ -170,13 +162,7 @@ public class ECLConfig {
     }
 
     public static File getGameDir() {
-        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
-        if (os.contains("win")) {
-            return new File(getWindowsRoamingDir(), ".minecraft");
-        } else if (os.contains("mac")) {
-            return new File(System.getProperty("user.home"), "Library/Application Support/minecraft");
-        }
-        return new File(System.getProperty("user.home"), ".minecraft");
+        return new File(getWindowsRoamingDir(), ".minecraft");
     }
 
     public static File getLegacyGameDir() {

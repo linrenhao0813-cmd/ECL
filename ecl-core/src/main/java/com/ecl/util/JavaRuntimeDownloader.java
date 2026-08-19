@@ -33,7 +33,7 @@ final class JavaRuntimeDownloader {
 
     static String download(int featureVersion, Consumer<String> status,
                            BiConsumer<Long, Long> progress) throws IOException {
-        String os = apiOs();
+        String os = "windows";
         String arch = apiArch();
         String key = featureVersion + "-" + os + "-" + arch;
         synchronized (DOWNLOAD_LOCKS.computeIfAbsent(key, ignored -> new Object())) {
@@ -44,7 +44,7 @@ final class JavaRuntimeDownloader {
     private static String downloadLocked(int featureVersion, String os, String arch,
                                          Consumer<String> status,
                                          BiConsumer<Long, Long> progress) throws IOException {
-        String extension = "windows".equals(os) ? ".zip" : ".tar.gz";
+        String extension = ".zip";
         Path runtimesRoot = ECLConfig.getBaseDir().toPath().resolve("runtimes");
         Path target = runtimesRoot.resolve("temurin-" + featureVersion + "-" + os + "-" + arch);
         Path existing = findJava(target);
@@ -79,11 +79,7 @@ final class JavaRuntimeDownloader {
                     });
             verifySha256(archive, packageInfo.sha256);
             status.accept("正在解压 Java " + featureVersion + " 运行时...");
-            if ("windows".equals(os)) {
-                extractZip(archive, staging);
-            } else {
-                extractTar(archive, staging);
-            }
+            extractZip(archive, staging);
             Path java = findJava(staging);
             if (java == null) {
                 throw new IOException("下载的 Java 运行时中没有找到 java 可执行文件");
@@ -177,20 +173,13 @@ final class JavaRuntimeDownloader {
         }
     }
 
-    private static void extractTar(Path archive, Path target) throws IOException {
-        // 使用自带的安全解压器：逐条目校验路径，拒绝绝对路径、../、符号链接与硬链接，
-        // 避免恶意/损坏的归档越出解压目录（系统 tar -xzf 不具备该安全边界）。
-        TarUtil.extractGzipTar(archive, target);
-    }
-
     private static Path findJava(Path root) throws IOException {
         if (!Files.isDirectory(root)) {
             return null;
         }
-        String executable = PlatformUtil.isWindows() ? "java.exe" : "java";
         try (var stream = Files.walk(root, 5)) {
             return stream.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().equalsIgnoreCase(executable))
+                    .filter(path -> path.getFileName().toString().equalsIgnoreCase("java.exe"))
                     .filter(path -> path.getParent() != null
                             && "bin".equalsIgnoreCase(path.getParent().getFileName().toString()))
                     .findFirst().orElse(null);
@@ -224,14 +213,6 @@ final class JavaRuntimeDownloader {
             }
         } catch (IOException ignored) {
         }
-    }
-
-    private static String apiOs() throws IOException {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        if (os.contains("win")) return "windows";
-        if (os.contains("mac")) return "mac";
-        if (os.contains("linux")) return "linux";
-        throw new IOException("暂不支持自动下载 Java 的系统: " + os);
     }
 
     private static String apiArch() throws IOException {

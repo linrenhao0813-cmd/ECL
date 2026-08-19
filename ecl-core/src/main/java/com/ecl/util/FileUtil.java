@@ -70,8 +70,7 @@ public class FileUtil {
     }
 
     public static String getNativeClassifier() {
-        return PlatformUtil.current().minecraftName() + "-"
-                + nativeArchitecture(System.getProperty("os.arch", ""));
+        return "windows-" + nativeArchitecture(System.getProperty("os.arch", ""));
     }
 
     /** Normalize JVM architecture names to the suffixes used by Minecraft native classifiers. */

@@ -1,6 +1,5 @@
 package com.ecl.desktop;
 
-import com.ecl.util.PlatformUtil;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -25,7 +24,6 @@ public final class DesktopShortcutService {
 
     private Path createShortcut(Path directory, Path executable, String shortcutName,
                                 List<String> arguments) throws IOException {
-        if (!PlatformUtil.isWindows()) throw new IOException("快捷方式功能仅支持 Windows");
         Path target = Objects.requireNonNull(executable, "executable").toAbsolutePath().normalize();
         if (!Files.isRegularFile(target)) throw new IOException("找不到 ECL.exe: " + target);
         String name = safeFileName(shortcutName);

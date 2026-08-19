@@ -57,18 +57,7 @@ public final class MinecraftRuleUtil {
         List<String> keys = new ArrayList<>();
         addKey(keys, nativeClassifier);
         addKey(keys, "natives-" + nativeClassifier);
-
-        if (nativeClassifier.startsWith("osx-")) {
-            String archPart = nativeClassifier.substring("osx-".length());
-            addKey(keys, "natives-macos-" + archPart);
-            addKey(keys, "natives-osx-" + archPart);
-            addKey(keys, "natives-macos");
-            addKey(keys, "natives-osx");
-            addKey(keys, "macos-" + archPart);
-        } else {
-            addKey(keys, "natives-" + osPart);
-        }
-
+        addKey(keys, "natives-" + osPart);
         addKey(keys, osPart);
         return keys.toArray(String[]::new);
     }
@@ -80,17 +69,7 @@ public final class MinecraftRuleUtil {
     }
 
     private static boolean osNameMatches(String expectedName) {
-        String osName = System.getProperty("os.name", "").toLowerCase();
-        if ("windows".equals(expectedName)) {
-            return osName.contains("win");
-        }
-        if ("osx".equals(expectedName)) {
-            return osName.contains("mac");
-        }
-        if ("linux".equals(expectedName)) {
-            return osName.contains("linux");
-        }
-        return false;
+        return "windows".equals(expectedName);
     }
 
     private static boolean osArchMatches(String expectedArch) {

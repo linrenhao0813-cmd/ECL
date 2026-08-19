@@ -12,7 +12,6 @@ import com.ecl.util.JsonUtil;
 import com.ecl.util.MinecraftRuleUtil;
 import com.ecl.util.RuleEvaluator;
 import com.ecl.util.JavaRuntimeUtil;
-import com.ecl.util.PlatformUtil;
 import com.ecl.util.TextUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -595,8 +594,7 @@ public class GameLauncher implements LaunchService {
     private File nativesDirectory() throws IOException {
         File root = instanceDir == null
                 ? FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), versionId) : instanceDir;
-        return FileUtil.safeResolveUnder(root,
-                "natives-" + PlatformUtil.current().minecraftName());
+        return FileUtil.safeResolveUnder(root, "natives-windows");
     }
 
     private File libraryDirectory(JsonObject library) {
@@ -610,7 +608,7 @@ public class GameLauncher implements LaunchService {
 
     private String getOsArch(String nativeClassifier) {
         if (nativeClassifier == null || nativeClassifier.isBlank()) {
-            return PlatformUtil.current().minecraftName();
+            return "windows";
         }
         int separator = nativeClassifier.indexOf('-');
         return separator > 0 ? nativeClassifier.substring(0, separator) : nativeClassifier;
@@ -974,7 +972,4 @@ public class GameLauncher implements LaunchService {
         return versionId;
     }
 
-    private boolean isMac() {
-        return System.getProperty("os.name", "").toLowerCase().contains("mac");
-    }
 }

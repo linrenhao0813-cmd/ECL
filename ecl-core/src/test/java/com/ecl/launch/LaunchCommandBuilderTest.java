@@ -85,9 +85,9 @@ class LaunchCommandBuilderTest {
                 .build();
 
         LaunchCommand command = new LaunchCommandBuilder().build(
-                options, repository.resolve("1.21"), "/opt/jdk/bin/java");
+                options, repository.resolve("1.21"), "C:\\Java\\bin\\java.exe");
 
-        assertEquals("/opt/jdk/bin/java", command.executable());
+        assertEquals("C:\\Java\\bin\\java.exe", command.executable());
         List<String> args = command.arguments();
         assertEquals("-Xms512m", args.get(0));
         assertEquals("-Xmx2048m", args.get(1));

@@ -4,7 +4,6 @@ import com.ecl.ECLConfig;
 import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
-import com.ecl.util.PlatformUtil;
 import com.ecl.util.RuleEvaluator;
 import com.ecl.util.ThreadFactories;
 import com.google.gson.JsonArray;
@@ -455,7 +454,7 @@ public class GameDownloader implements DownloadService {
         private static NativePlatform current() {
             String architecture = System.getProperty("os.arch", "").toLowerCase();
             String bits = architecture.contains("64") || architecture.contains("aarch64") ? "64" : "32";
-            String osName = PlatformUtil.current().minecraftName();
+            String osName = "windows";
             return new NativePlatform(osName, bits,
                     osName + "-" + FileUtil.nativeArchitecture(architecture));
         }

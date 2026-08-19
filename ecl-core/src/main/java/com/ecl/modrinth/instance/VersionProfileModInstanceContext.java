@@ -61,10 +61,7 @@ public final class VersionProfileModInstanceContext implements ModInstanceContex
         Path gameDirectory = resolvedRunDirectory == null ? instanceRoot
                 : resolvedRunDirectory.toAbsolutePath().normalize();
 
-        String identityPath = instanceRoot.toString();
-        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
-            identityPath = identityPath.toLowerCase(Locale.ROOT);
-        }
+        String identityPath = instanceRoot.toString().toLowerCase(Locale.ROOT);
         UUID instanceId = UUID.nameUUIDFromBytes(("ecl-version-profile:" + identityPath)
                 .getBytes(StandardCharsets.UTF_8));
         return new VersionProfileModInstanceContext(instanceId, normalizedProfileId, minecraftVersion,

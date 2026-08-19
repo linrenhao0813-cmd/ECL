@@ -9,7 +9,7 @@ import java.util.Objects;
  * <pre>{@code
  *   public static final SettingKey<String> JAVA_PATH = new SettingKey<>("javaPath", String.class, "");
  *   String path = settings.get(JAVA_PATH);
- *   settings.set(JAVA_PATH, "/usr/bin/java");
+ *   settings.set(JAVA_PATH, "C:\\Java\\bin\\java.exe");
  * }</pre>
  *
  * @param <T> the value type (String, Integer, Long, Boolean)

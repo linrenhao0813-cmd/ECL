@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import com.ecl.cli.EclCli;
-import com.ecl.util.PlatformUtil;
 
 /**
  * Main entry point for ECL.
@@ -129,19 +128,10 @@ public class ECL {
     }
 
     private static String javaExecutable() {
-        String executable = PlatformUtil.isWindows() ? "java.exe" : "java";
-        return new File(System.getProperty("java.home"), "bin/" + executable).getAbsolutePath();
+        return new File(System.getProperty("java.home"), "bin/java.exe").getAbsolutePath();
     }
 
     private static String javafxClassifier() {
-        String osName = System.getProperty("os.name", "").toLowerCase();
-        String osArch = System.getProperty("os.arch", "").toLowerCase();
-        if (osName.contains("win")) {
-            return "win";
-        }
-        if (osName.contains("mac")) {
-            return osArch.contains("aarch64") || osArch.contains("arm64") ? "mac-aarch64" : "mac";
-        }
-        return "linux";
+        return "win";
     }
 }

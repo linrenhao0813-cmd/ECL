@@ -16,6 +16,7 @@ dist/
 
 # Local agent/workspace metadata
 .agents/
+.reasonix/
 
 # Logs
 *.log
