@@ -18,6 +18,7 @@ import com.ecl.ui.MainController;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.collections.ListChangeListener;
+import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -65,6 +66,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 public final class ModBrowserView extends VBox implements AutoCloseable {
     private final MainController controller;
@@ -87,9 +89,15 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     private final Button issuesButton = new Button("问题反馈");
     private final ListView<ModProject> resultList = new ListView<>();
     private final ListView<InstalledMod> installedList = new ListView<>();
+    private final ListView<ModUpdate> updateList = new ListView<>();
     private final PauseTransition searchDebounce = new PauseTransition(Duration.millis(400));
     private final AtomicLong detailGeneration = new AtomicLong();
     private Tab installedTab;
+    private Tab updatesTab;
+    private Button checkUpdatesButton;
+    private Button updateSelectedButton;
+    private Button updateAllButton;
+    private boolean updateBatchRunning;
     private String recommendedVersionId = "";
 
     private ModProject selectedProject;
@@ -135,13 +143,15 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
 
         Tab browserTab = new Tab("浏览模组", createBrowserPane());
         installedTab = new Tab("已安装", createInstalledPane());
+        updatesTab = new Tab("更新", createUpdatesPane());
         browserTab.setClosable(false);
         installedTab.setClosable(false);
-        TabPane tabs = new TabPane(browserTab, installedTab);
+        updatesTab.setClosable(false);
+        TabPane tabs = new TabPane(browserTab, installedTab, updatesTab);
         tabs.getStyleClass().add("mod-tabs");
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabs.getSelectionModel().selectedItemProperty().addListener((observable, oldTab, newTab) -> {
-            if (newTab == installedTab) {
+            if (newTab == installedTab || newTab == updatesTab) {
                 viewModel.ensureUpdatesChecked(preferredReleaseChannel());
             }
         });
@@ -372,10 +382,54 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         return pane;
     }
 
+    private Node createUpdatesPane() {
+        updateList.setItems(FXCollections.observableArrayList());
+        updateList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        updateList.setCellFactory(list -> new ListCell<>() {
+            @Override
+            protected void updateItem(ModUpdate update, boolean empty) {
+                super.updateItem(update, empty);
+                if (empty || update == null) {
+                    setGraphic(null);
+                    setText(null);
+                    return;
+                }
+                Label title = new Label(update.installedMod().displayName());
+                title.getStyleClass().add("mod-item-title");
+                Label detail = new Label(update.installedMod().versionNumber() + "  →  "
+                        + update.availableVersion().versionNumber() + "  ·  "
+                        + update.availableVersion().versionType());
+                detail.getStyleClass().add("status-detail");
+                setGraphic(new VBox(3, title, detail));
+            }
+        });
+        updateList.setPlaceholder(new Label("没有可用的 Mod 更新。点击“检查更新”重新扫描。"));
+        VBox.setVgrow(updateList, Priority.ALWAYS);
+
+        Button check = button("检查更新", "secondary-button");
+        check.setOnAction(event -> viewModel.checkUpdates(preferredReleaseChannel()));
+        Button updateSelected = button("更新选中", "primary-button");
+        updateSelected.setOnAction(event -> updateSelectedUpdates());
+        Button updateAll = button("一键更新全部", "primary-button");
+        updateAll.setOnAction(event -> updateAll());
+        HBox actions = new HBox(8, check, updateSelected, updateAll);
+        checkUpdatesButton = check;
+        updateSelectedButton = updateSelected;
+        updateAllButton = updateAll;
+        updateList.getSelectionModel().getSelectedItems().addListener(
+                (ListChangeListener<ModUpdate>) change -> refreshUpdateButtons());
+        refreshUpdateButtons();
+        actions.setAlignment(Pos.CENTER_RIGHT);
+        VBox pane = new VBox(10, updateList, actions);
+        pane.setPadding(new Insets(10, 0, 0, 0));
+        return pane;
+    }
+
     private void bindState() {
         viewModel.loadingProperty().addListener((observable, oldValue, loading) -> {
             resultList.setDisable(loading);
             installButton.setDisable(loading || versionChoice.getValue() == null);
+            refreshUpdateButtons();
         });
         viewModel.errorMessageProperty().addListener((observable, oldValue, message) -> {
             if (message != null && !message.isBlank()) {
@@ -390,6 +444,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         viewModel.installedMods().addListener((ListChangeListener<InstalledMod>) change -> {
             resultList.refresh();
             installedList.refresh();
+            updateList.setItems(FXCollections.observableArrayList(viewModel.availableUpdates()));
+            refreshUpdateButtons();
         });
         viewModel.searchResults().addListener((ListChangeListener<ModProject>) change ->
                 RemoteImageLoader.prefetch(viewModel.searchResults().stream()
@@ -397,8 +453,11 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         viewModel.updateCountProperty().addListener((observable, oldValue, newValue) -> {
             int count = newValue == null ? 0 : newValue.intValue();
             installedTab.setText(count > 0 ? "已安装 (" + count + ")" : "已安装");
+            updatesTab.setText(count > 0 ? "更新 (" + count + ")" : "更新");
+            updateList.setItems(FXCollections.observableArrayList(viewModel.availableUpdates()));
             installedList.refresh();
             resultList.refresh();
+            refreshUpdateButtons();
         });
     }
 
@@ -736,22 +795,43 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     }
 
     private void updateSelected() {
-        InstalledMod selected = installedList.getSelectionModel().getSelectedItem();
-        if (selected != null) {
-            viewModel.applyUpdate(selected.projectId());
-        }
+        Set<String> selectedIds = List.copyOf(
+                        installedList.getSelectionModel().getSelectedItems()).stream()
+                .map(InstalledMod::projectId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        List<ModUpdate> selected = viewModel.availableUpdates().stream()
+                .filter(update -> selectedIds.contains(update.installedMod().projectId()))
+                .toList();
+        runUpdates(selected);
+    }
+
+    private void updateSelectedUpdates() {
+        runUpdates(List.copyOf(updateList.getSelectionModel().getSelectedItems()));
     }
 
     private void updateAll() {
-        List<ModUpdate> updates = viewModel.availableUpdates();
+        runUpdates(List.copyOf(viewModel.availableUpdates()));
+    }
+
+    private void runUpdates(List<ModUpdate> requestedUpdates) {
+        List<ModUpdate> updates = requestedUpdates == null ? List.of() : List.copyOf(requestedUpdates);
         if (updates.isEmpty()) {
             statusConsumer.accept("没有可用更新");
             return;
         }
-        SequentialBatchRunner.run(
+        updateBatchRunning = true;
+        refreshUpdateButtons();
+        runSequentialUpdateBatch(
                 updates,
                 update -> viewModel.applyUpdate(update.installedMod().projectId()))
-                .thenAccept(result -> Platform.runLater(() -> {
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    updateBatchRunning = false;
+                    viewModel.refreshInstalled();
+                    refreshUpdateButtons();
+                    if (error != null) {
+                        statusConsumer.accept(planFailureReason(error));
+                        return;
+                    }
                     if (result.failures().isEmpty()) {
                         statusConsumer.accept("全部更新完成：" + result.succeeded() + " 个成功");
                         return;
@@ -764,6 +844,22 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                     statusConsumer.accept("批量更新完成：" + result.succeeded() + " 个成功，"
                             + result.failures().size() + " 个失败（" + failedNames + "）");
                 }));
+    }
+
+    static <T> CompletableFuture<SequentialBatchRunner.Result<T>> runSequentialUpdateBatch(
+            List<T> updates, Function<T, ? extends CompletableFuture<?>> operation) {
+        return SequentialBatchRunner.run(List.copyOf(updates), operation);
+    }
+
+    private void refreshUpdateButtons() {
+        if (checkUpdatesButton == null) {
+            return;
+        }
+        boolean busy = updateBatchRunning || viewModel.loadingProperty().get();
+        checkUpdatesButton.setDisable(busy);
+        updateSelectedButton.setDisable(busy
+                || updateList.getSelectionModel().getSelectedItems().isEmpty());
+        updateAllButton.setDisable(busy || viewModel.availableUpdates().isEmpty());
     }
 
     private void chooseHistoryVersion() {
@@ -828,6 +924,11 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     private List<String> selectedInstalledIds() {
         return installedList.getSelectionModel().getSelectedItems().stream()
                 .map(InstalledMod::projectId).distinct().toList();
+    }
+
+    /** Refreshes the installed list after a file is dropped on the launcher window. */
+    public void refreshInstalledMods() {
+        viewModel.refreshInstalled();
     }
 
     private void openUri(URI uri) {

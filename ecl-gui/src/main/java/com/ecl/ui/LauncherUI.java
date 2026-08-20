@@ -33,6 +33,8 @@ import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.pack.MrpackInstaller;
+import com.ecl.modrinth.pack.ModpackUpdate;
+import com.ecl.modrinth.pack.ModpackUpdateService;
 import com.ecl.modrinth.provider.ContentSource;
 import com.ecl.modrinth.ui.ChineseDescriptionService;
 import com.ecl.modrinth.ui.ModBrowserView;
@@ -65,6 +67,7 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TitledPane;
@@ -73,7 +76,9 @@ import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.DragEvent;
 import javafx.scene.input.ScrollEvent;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -117,6 +122,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -666,8 +672,89 @@ public class LauncherUI extends javafx.application.Application {
         BorderPane.setMargin(root.getCenter(), Insets.EMPTY);
         root.setBottom(createFooterBar());
         BorderPane.setMargin(root.getBottom(), Insets.EMPTY);
+        installModDropTarget(root);
 
         return root;
+    }
+
+    private void installModDropTarget(Pane root) {
+        root.addEventHandler(DragEvent.DRAG_OVER, event -> {
+            if (hasModFiles(event.getDragboard())) {
+                event.acceptTransferModes(TransferMode.COPY);
+                root.getStyleClass().add("drop-target-active");
+            }
+            event.consume();
+        });
+        root.addEventHandler(DragEvent.DRAG_EXITED, event -> {
+            root.getStyleClass().remove("drop-target-active");
+            event.consume();
+        });
+        root.addEventHandler(DragEvent.DRAG_DROPPED, event -> {
+            root.getStyleClass().remove("drop-target-active");
+            List<Path> files = event.getDragboard().hasFiles()
+                    ? event.getDragboard().getFiles().stream()
+                    .map(File::toPath)
+                    .filter(this::isModJar)
+                    .toList() : List.of();
+            event.setDropCompleted(!files.isEmpty());
+            event.consume();
+            if (!files.isEmpty()) {
+                importDroppedMods(files);
+            } else {
+                setStatus("Mod 导入", "请拖入 .jar 模组文件");
+            }
+        });
+    }
+
+    private boolean hasModFiles(javafx.scene.input.Dragboard board) {
+        return board != null && board.hasFiles()
+                && board.getFiles().stream().anyMatch(file -> isModJar(file.toPath()));
+    }
+
+    private boolean isModJar(Path file) {
+        return file != null && Files.isRegularFile(file)
+                && file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar");
+    }
+
+    private void importDroppedMods(List<Path> files) {
+        String profileId = getSelectedVersion();
+        if (profileId == null || profileId.isBlank()) {
+            setStatus("Mod 导入失败", "请先选择一个 Fabric、Quilt、Forge 或 NeoForge 实例");
+            return;
+        }
+        try {
+            ModInstanceContext instance = VersionProfileModInstanceContext.load(
+                    profileId,
+                    ECLConfig.getVersionsDir().toPath(),
+                    getConfiguredGameRootDir().toPath(),
+                    resolveVersionGameDir(profileId).toPath());
+            if (!instance.loader().supportsMods()) {
+                setStatus("Mod 导入失败", "当前实例不是支持模组的加载器实例");
+                return;
+            }
+            CompletableFuture<List<String>> imported = CompletableFuture.completedFuture(new java.util.ArrayList<>());
+            for (Path file : files) {
+                imported = imported.thenCompose(names ->
+                        controller.modManagementService().importLocalJar(instance, file)
+                                .thenApply(mod -> {
+                                    names.add(file.getFileName().toString());
+                                    return names;
+                                }));
+            }
+            imported.whenComplete((names, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    setStatus("Mod 导入失败", cleanMessage(error));
+                } else {
+                    setStatus("Mod 导入完成", "已导入 " + names.size()
+                            + " 个模组到 " + instance.modsDirectory());
+                    if (activeModBrowserView != null) {
+                        activeModBrowserView.refreshInstalledMods();
+                    }
+                }
+            }));
+        } catch (Exception error) {
+            setStatus("Mod 导入失败", cleanMessage(error));
+        }
     }
 
     private HBox createWindowTitleBar() {
@@ -2259,6 +2346,15 @@ public class LauncherUI extends javafx.application.Application {
                 content.getChildren().setAll(selectedContent);
             });
         }
+        Button packUpdatesButton = createPackUpdatesNavButton();
+        navigation.getChildren().add(packUpdatesButton);
+        packUpdatesButton.setOnAction(event -> {
+            categoryButtons.forEach(button ->
+                    button.getStyleClass().remove("content-library-nav-item-active"));
+            packUpdatesButton.getStyleClass().add("content-library-nav-item-active");
+            closeActiveModBrowserView();
+            content.getChildren().setAll(createPackUpdatesContent());
+        });
 
         HBox library = new HBox(18, navigation, content);
         library.getStyleClass().add("content-library-layout");
@@ -2295,6 +2391,155 @@ public class LauncherUI extends javafx.application.Application {
         button.getStyleClass().add("content-library-nav-item");
         button.setMaxWidth(Double.MAX_VALUE);
         return button;
+    }
+
+    private Button createPackUpdatesNavButton() {
+        Label icon = new Label("↻");
+        icon.getStyleClass().add("content-library-nav-icon");
+        Label title = new Label("整合包更新");
+        title.getStyleClass().add("content-library-nav-item-title");
+        Label detail = new Label("检查已安装整合包的新版本");
+        detail.getStyleClass().add("content-library-nav-item-detail");
+        HBox row = new HBox(10, icon, new VBox(2, title, detail));
+        row.setAlignment(Pos.CENTER_LEFT);
+        Button button = new Button();
+        button.setGraphic(row);
+        button.getStyleClass().add("content-library-nav-item");
+        button.setMaxWidth(Double.MAX_VALUE);
+        return button;
+    }
+
+    private Node createPackUpdatesContent() {
+        VBox page = new VBox(14);
+        page.getStyleClass().add("content-library-content");
+
+        Label title = new Label("整合包更新");
+        title.getStyleClass().add("content-library-section-title");
+        Label hint = new Label("只检查已通过 Modrinth 安装并记录来源的整合包，更新会保留存档等实例文件。");
+        hint.getStyleClass().add("status-detail");
+        hint.setWrapText(true);
+
+        ListView<ModpackUpdate> list = new ListView<>();
+        list.getStyleClass().add("mod-result-list");
+        list.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        list.setPlaceholder(new Label("尚未发现可更新的整合包。"));
+        list.setCellFactory(view -> new ListCell<>() {
+            @Override
+            protected void updateItem(ModpackUpdate item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    setText(null);
+                    return;
+                }
+                Label name = new Label(item.instance().name());
+                name.getStyleClass().add("mod-item-title");
+                Label detail = new Label(item.instance().currentVersion() + "  →  "
+                        + item.availableVersion().versionNumber() + "   ·   "
+                        + item.instance().minecraftVersion()
+                        + (item.instance().loader().isBlank() ? "" : " / " + item.instance().loader()));
+                detail.getStyleClass().add("status-detail");
+                detail.setWrapText(true);
+                setGraphic(new VBox(3, name, detail));
+            }
+        });
+        VBox.setVgrow(list, Priority.ALWAYS);
+
+        Label status = createBodyText("点击“检查更新”扫描已安装整合包。");
+        Button[] controls = new Button[3];
+        controls[0] = createActionButton("检查更新", "secondary-button", () ->
+                checkPackUpdates(list, status, controls[0], controls[1], controls[2]));
+        controls[1] = createActionButton("更新选中", "primary-button", () ->
+                applyPackUpdates(list.getSelectionModel().getSelectedItems(), list, status,
+                        controls[0], controls[1], controls[2]));
+        controls[2] = createActionButton("一键更新全部", "primary-button", () ->
+                applyPackUpdates(List.copyOf(list.getItems()), list, status,
+                        controls[0], controls[1], controls[2]));
+        Button check = controls[0];
+        Button updateSelected = controls[1];
+        Button updateAll = controls[2];
+        updateSelected.setDisable(true);
+        updateAll.setDisable(true);
+        list.getSelectionModel().getSelectedItems().addListener(
+                (javafx.collections.ListChangeListener<ModpackUpdate>) change ->
+                        updateSelected.setDisable(list.getSelectionModel().getSelectedItems().isEmpty()));
+        HBox actions = new HBox(8, check, updateSelected, updateAll);
+        actions.setAlignment(Pos.CENTER_RIGHT);
+        page.getChildren().addAll(createSurface("整合包更新检测", null, title, hint, list, status, actions));
+
+        Platform.runLater(() -> checkPackUpdates(list, status, check, updateSelected, updateAll));
+        return page;
+    }
+
+    private void checkPackUpdates(ListView<ModpackUpdate> list, Label status,
+                                  Button check, Button updateSelected, Button updateAll) {
+        setPackUpdateControls(true, check, updateSelected, updateAll);
+        status.setText("正在检查整合包更新...");
+        ModpackUpdateService service = controller.modpackUpdateService();
+        service.checkUpdates(getConfiguredGameRootDir().toPath(), controller.preferredModReleaseChannel())
+                .whenComplete((updates, error) -> Platform.runLater(() -> {
+                    if (error != null) {
+                        list.getItems().clear();
+                        status.setText("检查失败: " + cleanMessage(error));
+                    } else {
+                        list.getItems().setAll(updates);
+                        status.setText(updates.isEmpty()
+                                ? "所有已记录来源的整合包均为最新版本。"
+                                : "发现 " + updates.size() + " 个整合包可更新。");
+                    }
+                    setPackUpdateControls(false, check, updateSelected, updateAll);
+                    updateAll.setDisable(list.getItems().isEmpty());
+                    updateSelected.setDisable(list.getSelectionModel().getSelectedItems().isEmpty());
+                }));
+    }
+
+    private void applyPackUpdates(List<ModpackUpdate> updates, ListView<ModpackUpdate> list,
+                                  Label status, Button check, Button updateSelected, Button updateAll) {
+        if (updates == null || updates.isEmpty()) return;
+        setPackUpdateControls(true, check, updateSelected, updateAll);
+        CompletableFuture<Integer> chain = CompletableFuture.completedFuture(0);
+        for (ModpackUpdate update : updates) {
+            chain = chain.thenCompose(count -> controller.modpackUpdateService()
+                    .applyUpdate(update, getConfiguredGameRootDir().toPath(), new MrpackInstaller.Listener() {
+                        @Override
+                        public void onStatus(String message) {
+                            Platform.runLater(() -> status.setText(message));
+                        }
+
+                        @Override
+                        public void onProgress(long downloaded, long total) {
+                            if (total > 0) {
+                                Platform.runLater(() -> status.setText("正在更新 "
+                                        + update.instance().name() + " · "
+                                        + formatPackBytes(downloaded) + " / " + formatPackBytes(total)));
+                            }
+                        }
+                    }).thenApply(result -> count + 1));
+        }
+        chain.whenComplete((count, error) -> Platform.runLater(() -> {
+            setPackUpdateControls(false, check, updateSelected, updateAll);
+            if (error != null) {
+                status.setText("批量更新中断: " + cleanMessage(error));
+            } else {
+                status.setText("已完成 " + count + " 个整合包更新。");
+                list.getItems().removeAll(updates);
+                updateAll.setDisable(list.getItems().isEmpty());
+            }
+            updateSelected.setDisable(list.getSelectionModel().getSelectedItems().isEmpty());
+        }));
+    }
+
+    private void setPackUpdateControls(boolean busy, Button check, Button updateSelected,
+                                       Button updateAll) {
+        check.setDisable(busy);
+        updateSelected.setDisable(busy);
+        updateAll.setDisable(busy);
+    }
+
+    private static String formatPackBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+        return String.format("%.1f MB", bytes / 1024.0 / 1024.0);
     }
 
     private Node createModLibraryContent() {
@@ -5546,6 +5791,8 @@ public class LauncherUI extends javafx.application.Application {
                                 installArchive,
                                 getConfiguredGameRootDir(),
                                 project.getTitle(),
+                                source == ContentSource.MODRINTH ? project.getProjectId() : "",
+                                source == ContentSource.MODRINTH ? selectedVersion.versionId() : "",
                                 new MrpackInstaller.Listener() {
                                 @Override
                                 public void onStatus(String message) {

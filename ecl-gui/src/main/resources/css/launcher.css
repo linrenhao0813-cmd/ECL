@@ -56,6 +56,13 @@
     -fx-font-family: "JetBrains Mono", "Cascadia Code", "Consolas", "Courier New", monospace;
 }
 
+.root-pane.drop-target-active {
+    -fx-border-color: #00ffd5;
+    -fx-border-width: 2;
+    -fx-border-insets: 2;
+    -fx-effect: dropshadow(gaussian, rgba(0, 255, 213, 0.34), 18, 0.24, 0, 0);
+}
+
 .root-pane:filled,
 .root-pane > * {
     -fx-font-family: "JetBrains Mono", "Cascadia Code", "Consolas", "Courier New", monospace;

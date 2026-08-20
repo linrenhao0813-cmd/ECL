@@ -37,6 +37,8 @@ import com.ecl.modrinth.service.ModInstallationService;
 import com.ecl.modrinth.service.ModManagementService;
 import com.ecl.modrinth.service.ModUpdateService;
 import com.ecl.modrinth.service.ModVersionSelector;
+import com.ecl.modrinth.pack.DefaultModpackUpdateService;
+import com.ecl.modrinth.pack.ModpackUpdateService;
 import com.ecl.modrinth.transaction.InstallationPlanBuilder;
 import com.ecl.util.ThreadFactories;
 
@@ -71,6 +73,7 @@ public final class MainController implements AutoCloseable {
     private final ModManagementService modManagementService;
     private final LocalModScanner localModScanner;
     private final ModUpdateService modUpdateService;
+    private final ModpackUpdateService modpackUpdateService;
     private final InstallationPlanBuilder installationPlanBuilder;
     private final InstanceOperationLock modOperationLock;
     private final Map<ContentSource, ModSourceServices> sourceServices = new ConcurrentHashMap<>();
@@ -135,6 +138,9 @@ public final class MainController implements AutoCloseable {
         modUpdateService = new DefaultModUpdateService(
                 metadataProvider, modVersionSelector, modDependencyResolver,
                 installationPlanBuilder, modInstallationService, modInstances::get);
+        modpackUpdateService = new DefaultModpackUpdateService(
+                metadataProvider, backgroundExecutor, modOperationLock,
+                runningInstances::contains);
         sourceServices.put(ContentSource.MODRINTH,
                 new ModSourceServices(modDependencyResolver, localModScanner, modUpdateService));
     }
@@ -182,6 +188,7 @@ public final class MainController implements AutoCloseable {
     public ModManagementService modManagementService() { return modManagementService; }
     public LocalModScanner localModScanner() { return localModScanner; }
     public ModUpdateService modUpdateService() { return modUpdateService; }
+    public ModpackUpdateService modpackUpdateService() { return modpackUpdateService; }
     public LaunchService gameLauncher() { return gameLauncher; }
 
     public ReleaseChannel preferredModReleaseChannel() {

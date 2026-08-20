@@ -21,7 +21,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -44,14 +46,37 @@ public final class MrpackInstaller {
                                 int downloadedFiles) {
     }
 
-    private final ModLoaderInstaller loaderInstaller;
+    @FunctionalInterface
+    interface LoaderInstallation {
+        ModLoaderInstaller.InstallResult install(
+                String minecraftVersion,
+                ModLoaderInstaller.Loader loader,
+                String loaderVersion,
+                ModLoaderInstaller.Listener listener
+        ) throws IOException;
+    }
+
+    @FunctionalInterface
+    interface TransactionFactory {
+        PackUpdateTransaction create(Path instanceRoot, Path profileFile) throws IOException;
+    }
+
+    private final LoaderInstallation loaderInstallation;
+    private final TransactionFactory transactionFactory;
 
     public MrpackInstaller() {
-        this(new ModLoaderInstaller());
+        this(new ModLoaderInstaller()::install, PackUpdateTransaction::new);
     }
 
     MrpackInstaller(ModLoaderInstaller loaderInstaller) {
-        this.loaderInstaller = loaderInstaller;
+        this(loaderInstaller::install, PackUpdateTransaction::new);
+    }
+
+    MrpackInstaller(LoaderInstallation loaderInstallation, TransactionFactory transactionFactory) {
+        this.loaderInstallation = java.util.Objects.requireNonNull(
+                loaderInstallation, "loaderInstallation");
+        this.transactionFactory = java.util.Objects.requireNonNull(
+                transactionFactory, "transactionFactory");
     }
 
     /** Install the client files and overrides from an MRPACK into an existing staging directory. */
@@ -95,6 +120,13 @@ public final class MrpackInstaller {
 
     public InstallResult install(File archive, File gameRoot, String preferredName,
                                  Listener listener) throws IOException {
+        return install(archive, gameRoot, preferredName, "", "", listener);
+    }
+
+    /** Install a pack and retain the provider identity used by the update checker. */
+    public InstallResult install(File archive, File gameRoot, String preferredName,
+                                 String sourceProjectId, String sourceVersionId,
+                                 Listener listener) throws IOException {
         if (archive == null || !archive.isFile()) {
             throw new IOException("整合包文件不存在");
         }
@@ -136,7 +168,7 @@ public final class MrpackInstaller {
             if (loaderDependency != null) {
                 safeListener.onStatus("正在准备整合包需要的 " + loaderDependency.loader.displayName()
                         + " " + loaderDependency.version + "...");
-                parentProfile = loaderInstaller.install(minecraftVersion, loaderDependency.loader,
+                parentProfile = loaderInstallation.install(minecraftVersion, loaderDependency.loader,
                         loaderDependency.version, safeListener).profileId();
             }
 
@@ -156,6 +188,8 @@ public final class MrpackInstaller {
                 extractOverrides(zip, "client-overrides/", staging, extractionBudget);
                 Files.copy(archive.toPath(), staging.resolve(profileId + ".mrpack"),
                         StandardCopyOption.REPLACE_EXISTING);
+                PackManifest.capture(staging, version)
+                        .write(staging.resolve(PackManifest.FILE_NAME));
                 try {
                     Files.move(staging, instanceRoot, StandardCopyOption.ATOMIC_MOVE);
                 } catch (IOException atomicMoveError) {
@@ -163,7 +197,7 @@ public final class MrpackInstaller {
                 }
                 try {
                     writeProfile(profileId, parentProfile, name, version,
-                            minecraftVersion, loaderDependency);
+                            minecraftVersion, loaderDependency, sourceProjectId, sourceVersionId);
                 } catch (IOException profileError) {
                     deleteRecursively(instanceRoot);
                     deleteProfile(profileId);
@@ -176,6 +210,190 @@ public final class MrpackInstaller {
             } finally {
                 deleteRecursively(staging);
             }
+        }
+    }
+
+    /**
+     * Applies a newer MRPACK to an existing pack profile while preserving user files in the
+     * instance directory. The pack archive and every file managed by the new index are replaced
+     * through a staging directory; saves, screenshots and other user-created files are retained.
+     */
+    public InstallResult update(File archive, File gameRoot, String profileId,
+                                String sourceProjectId, String sourceVersionId,
+                                Listener listener) throws IOException {
+        return update(archive, gameRoot, profileId, sourceProjectId, sourceVersionId,
+                () -> false, listener);
+    }
+
+    /**
+     * Applies a newer MRPACK as one journaled transaction. Files removed by the new pack are
+     * deleted only when their current SHA-512 still matches the previous pack manifest.
+     */
+    public InstallResult update(File archive, File gameRoot, String profileId,
+                                String sourceProjectId, String sourceVersionId,
+                                BooleanSupplier instanceRunning,
+                                Listener listener) throws IOException {
+        if (archive == null || !archive.isFile()) {
+            throw new IOException("MRPACK file does not exist");
+        }
+        if (gameRoot == null) {
+            throw new IOException("Game directory must not be null");
+        }
+        String safeProfileId = profileId == null ? "" : profileId.trim();
+        com.ecl.util.FileUtil.requireSafeVersionId(safeProfileId);
+        Path gameRootPath = gameRoot.toPath().toAbsolutePath().normalize();
+        Path instanceRoot = safeInstanceDirectory(gameRootPath, safeProfileId);
+        if (!Files.isDirectory(instanceRoot)) {
+            throw new IOException("Modpack instance directory does not exist: " + instanceRoot);
+        }
+        Path profileFile = com.ecl.util.FileUtil.safeVersionJson(
+                ECLConfig.getVersionsDir(), safeProfileId).toPath().toAbsolutePath().normalize();
+        if (!Files.isRegularFile(profileFile)) {
+            throw new IOException("Modpack profile metadata does not exist: " + profileFile);
+        }
+
+        Listener safeListener = listener == null ? message -> { } : listener;
+        BooleanSupplier runningGuard = instanceRunning == null ? () -> false : instanceRunning;
+        JsonObject index;
+        JsonObject dependencies;
+        try (ZipFile zip = new ZipFile(archive, StandardCharsets.UTF_8)) {
+            index = readIndex(zip);
+            if (!"1".equals(JsonUtil.getString(index, "formatVersion", ""))) {
+                throw new IOException("Unsupported MRPACK format version");
+            }
+            dependencies = requireObject(index, "dependencies");
+        }
+        String minecraftVersion = JsonUtil.getString(dependencies, "minecraft", "");
+        if (minecraftVersion.isBlank()) {
+            throw new IOException("MRPACK does not declare a Minecraft version");
+        }
+        LoaderDependency loaderDependency = findLoader(dependencies);
+        String packVersion = JsonUtil.getString(index, "versionId", sourceVersionId);
+        JsonObject profile = HttpUtil.readJson(profileFile.toFile());
+        PackManifest oldManifest = readInstalledManifest(instanceRoot, safeListener);
+
+        PackUpdateTransaction.recoverIncompleteTransactions(instanceRoot, profileFile);
+        try (PackUpdateTransaction transaction = transactionFactory.create(instanceRoot, profileFile)) {
+            Path staging = transaction.stagingDirectory();
+            safeListener.onStatus("正在准备整合包更新文件...");
+            int fileCount = installContents(archive, staging, safeListener);
+            Files.copy(archive.toPath(), staging.resolve(safeProfileId + ".mrpack"),
+                    StandardCopyOption.REPLACE_EXISTING);
+            PackManifest newManifest = PackManifest.capture(staging, packVersion);
+            Path stagedManifest = staging.resolve(PackManifest.FILE_NAME);
+            newManifest.write(stagedManifest);
+
+            LoaderState loaderState = prepareLoader(
+                    profile, minecraftVersion, loaderDependency, safeListener);
+            updateProfile(profile, loaderState, safeProfileId, minecraftVersion,
+                    packVersion, sourceProjectId, sourceVersionId);
+            Path stagedProfile = staging.resolve(".ecl-profile-update.json");
+            Files.writeString(stagedProfile, profile.toString(), StandardCharsets.UTF_8);
+
+            int warnings = stagePackChanges(transaction, instanceRoot, staging,
+                    oldManifest, newManifest, safeListener);
+            transaction.stageReplacement(stagedManifest,
+                    instanceRoot.resolve(PackManifest.FILE_NAME));
+            transaction.stageReplacement(stagedProfile, profileFile);
+
+            if (runningGuard.getAsBoolean()) {
+                throw new IOException("Instance is running; modpack update was cancelled before commit");
+            }
+            transaction.commit();
+            safeListener.onStatus(warnings == 0
+                    ? "整合包更新完成: " + safeProfileId
+                    : "整合包更新完成，已保留 " + warnings + " 个用户修改过的旧文件");
+            return new InstallResult(safeProfileId,
+                    JsonUtil.getString(profile, "eclModpackName", safeProfileId),
+                    packVersion, minecraftVersion, loaderState.loaderId(),
+                    instanceRoot, fileCount);
+        }
+    }
+
+    private LoaderState prepareLoader(JsonObject profile, String minecraftVersion,
+                                      LoaderDependency requested, Listener listener)
+            throws IOException {
+        if (requested == null) {
+            return new LoaderState(minecraftVersion, "", "");
+        }
+        String currentMinecraft = JsonUtil.getString(profile, "eclMinecraftVersion", "");
+        String currentLoader = JsonUtil.getString(profile, "eclModLoader", "");
+        String currentLoaderVersion = JsonUtil.getString(profile, "eclModLoaderVersion", "");
+        String currentParent = JsonUtil.getString(profile, "inheritsFrom", "");
+        boolean changed = !minecraftVersion.equals(currentMinecraft)
+                || !requested.loader().id().equalsIgnoreCase(currentLoader)
+                || !requested.version().equals(currentLoaderVersion)
+                || currentParent.isBlank();
+        if (!changed) {
+            return new LoaderState(currentParent, requested.loader().id(), requested.version());
+        }
+        listener.onStatus("正在准备整合包需要的 " + requested.loader().displayName()
+                + " " + requested.version() + "...");
+        ModLoaderInstaller.InstallResult installed = loaderInstallation.install(
+                minecraftVersion, requested.loader(), requested.version(), listener);
+        return new LoaderState(installed.profileId(), installed.loader().id(),
+                installed.loaderVersion());
+    }
+
+    private static void updateProfile(JsonObject profile, LoaderState loaderState,
+                                      String profileId, String minecraftVersion,
+                                      String packVersion, String sourceProjectId,
+                                      String sourceVersionId) {
+        profile.addProperty("id", profileId);
+        profile.addProperty("inheritsFrom", loaderState.parentProfile());
+        profile.addProperty("eclMinecraftVersion", minecraftVersion);
+        profile.addProperty("eclModLoader", loaderState.loaderId());
+        profile.addProperty("eclModLoaderVersion", loaderState.loaderVersion());
+        profile.addProperty("eclModpackVersion", packVersion);
+        if (sourceProjectId != null && !sourceProjectId.isBlank()) {
+            profile.addProperty("eclModpackProjectId", sourceProjectId.trim());
+        }
+        if (sourceVersionId != null && !sourceVersionId.isBlank()) {
+            profile.addProperty("eclModpackVersionId", sourceVersionId.trim());
+        }
+        profile.addProperty("eclModpackSource", "modrinth");
+    }
+
+    private static int stagePackChanges(PackUpdateTransaction transaction, Path instanceRoot,
+                                        Path staging, PackManifest oldManifest,
+                                        PackManifest newManifest, Listener listener)
+            throws IOException {
+        for (String relative : newManifest.files().keySet()) {
+            transaction.stageReplacement(
+                    PackManifest.resolve(staging, relative),
+                    PackManifest.resolve(instanceRoot, relative));
+        }
+        int warnings = 0;
+        for (Map.Entry<String, String> old : oldManifest.files().entrySet()) {
+            if (newManifest.files().containsKey(old.getKey())) {
+                continue;
+            }
+            Path target = PackManifest.resolve(instanceRoot, old.getKey());
+            if (!Files.exists(target)) {
+                continue;
+            }
+            if (Files.isRegularFile(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    && PackManifest.sha512(target).equalsIgnoreCase(old.getValue())) {
+                transaction.stageDeletion(target);
+            } else {
+                warnings++;
+                listener.onStatus("警告：旧版文件已被用户修改，更新时予以保留: " + old.getKey());
+            }
+        }
+        return warnings;
+    }
+
+    private static PackManifest readInstalledManifest(Path instanceRoot, Listener listener) {
+        Path manifestFile = instanceRoot.resolve(PackManifest.FILE_NAME);
+        if (!Files.isRegularFile(manifestFile)) {
+            listener.onStatus("未找到旧整合包文件清单；本次更新不会删除旧版遗留文件");
+            return new PackManifest("", Map.of());
+        }
+        try {
+            return PackManifest.read(manifestFile);
+        } catch (IOException error) {
+            listener.onStatus("旧整合包文件清单无效；本次更新不会删除旧版遗留文件");
+            return new PackManifest("", Map.of());
         }
     }
 
@@ -360,7 +578,8 @@ public final class MrpackInstaller {
 
     private static void writeProfile(String profileId, String parentProfile, String packName,
                                      String packVersion, String minecraftVersion,
-                                     LoaderDependency loader) throws IOException {
+                                     LoaderDependency loader, String sourceProjectId,
+                                     String sourceVersionId) throws IOException {
         JsonObject profile = new JsonObject();
         profile.addProperty("id", profileId);
         profile.addProperty("inheritsFrom", parentProfile);
@@ -370,6 +589,13 @@ public final class MrpackInstaller {
         profile.addProperty("eclModLoaderVersion", loader == null ? "" : loader.version);
         profile.addProperty("eclModpackName", packName);
         profile.addProperty("eclModpackVersion", packVersion);
+        if (sourceProjectId != null && !sourceProjectId.isBlank()) {
+            profile.addProperty("eclModpackSource", "modrinth");
+            profile.addProperty("eclModpackProjectId", sourceProjectId.trim());
+        }
+        if (sourceVersionId != null && !sourceVersionId.isBlank()) {
+            profile.addProperty("eclModpackVersionId", sourceVersionId.trim());
+        }
         Path root = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
         Path profileDir = root.resolve(profileId).normalize();
         if (!profileDir.startsWith(root)) {
@@ -391,8 +617,13 @@ public final class MrpackInstaller {
             if (found != null) {
                 throw new IOException("整合包同时声明了多个模组加载器");
             }
+            JsonElement value = dependencies.get(key);
+            if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()
+                    || value.getAsString().isBlank()) {
+                throw new IOException("整合包声明了无效的加载器版本: " + key);
+            }
             found = new LoaderDependency((ModLoaderInstaller.Loader) candidate[1],
-                    dependencies.get(key).getAsString());
+                    value.getAsString());
         }
         return found;
     }
@@ -477,8 +708,12 @@ public final class MrpackInstaller {
     private record LoaderDependency(ModLoaderInstaller.Loader loader, String version) {
     }
 
+    private record LoaderState(String parentProfile, String loaderId, String loaderVersion) {
+    }
+
     private static final class ExtractionBudget {
         private long total;
         private int entries;
     }
+
 }
