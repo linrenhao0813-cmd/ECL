@@ -30,7 +30,7 @@ final class LaunchVariables {
         variables.put("${auth_access_token}", auth.getAccessToken());
         variables.put("${version_name}", options.versionId());
         variables.put("${version_type}", options.environment().launcherName());
-        variables.put("${game_directory}", gameDir.getAbsolutePath());
+        variables.put("${game_directory}", gameDir == null ? "" : gameDir.getAbsolutePath());
         variables.put("${assets_root}", assetsRoot.getAbsolutePath());
         variables.put("${assets_index_name}", assetIndexName(version));
         variables.put("${user_type}", auth.getType().name().toLowerCase());

@@ -33,7 +33,11 @@ public record ServerAddress(String host, Integer port) {
     }
 
     private static Integer tryPort(String candidate) {
-        return candidate != null && candidate.matches("\\d{1,5}") ? Integer.parseInt(candidate) : null;
+        if (candidate == null || !candidate.matches("\\d{1,5}")) {
+            return null;
+        }
+        int value = Integer.parseInt(candidate);
+        return value >= 1 && value <= 65_535 ? value : null;
     }
 
     /** Whether this represents an actual direct-connect target. */

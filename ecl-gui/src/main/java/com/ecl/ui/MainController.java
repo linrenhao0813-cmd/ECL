@@ -8,8 +8,10 @@ import com.ecl.download.ContentDownloader;
 import com.ecl.download.CurseForgeDownloader;
 import com.ecl.download.DownloadTaskCenter;
 import com.ecl.download.ModrinthDownloader;
-import com.ecl.launcher.GameLauncher;
-import com.ecl.launcher.LaunchService;
+import com.ecl.launch.DefaultLauncher;
+import com.ecl.launch.LaunchEnvironment;
+import com.ecl.launch.Launcher;
+import com.ecl.game.VersionRepository;
 import com.ecl.launcher.VersionManager;
 import com.ecl.modrinth.api.DefaultModrinthApiClient;
 import com.ecl.modrinth.api.ModrinthApiClient;
@@ -51,6 +53,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /** Owns application services and background task creation independently of JavaFX view construction. */
@@ -63,7 +66,9 @@ public final class MainController implements AutoCloseable {
     private final CurseForgeDownloader curseForgeDownloader;
     private final ModrinthApiClient modrinthApiClient;
     private final ModMetadataProviderRegistry metadataProviders;
-    private final LaunchService gameLauncher;
+    private final VersionRepository versionRepository;
+    private final LaunchEnvironment launchEnvironment;
+    private final Launcher gameLauncher;
     private final ExecutorService backgroundExecutor;
     private final ExecutorService modDownloadExecutor;
     private final InstalledModRepository installedModRepository;
@@ -84,20 +89,25 @@ public final class MainController implements AutoCloseable {
         ECLConfig.ensureDirs();
         settingsManager = new SettingsManager();
         settingsManager.load();
+        settingsManager.enableAutoSave(); // GUI 设置变更自动落盘（防抖 500ms）
         versionManager = new VersionManager();
+        versionRepository = new VersionRepository(ECLConfig.getVersionsDir());
         int configuredConcurrency = settingsManager.get(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT);
         configuredConcurrency = Math.max(1, Math.min(8, configuredConcurrency));
         long configuredRate = Math.max(0L, settingsManager.get(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB)) * 1024L;
         gameDownloader = new GameDownloader(configuredConcurrency);
         downloadTaskCenter = new DownloadTaskCenter(configuredConcurrency, configuredRate);
-        modrinthDownloader = new ModrinthDownloader();
         curseForgeDownloader = new CurseForgeDownloader(this::curseForgeApiKey);
         modrinthApiClient = new DefaultModrinthApiClient();
+        modrinthDownloader = new ModrinthDownloader(modrinthApiClient);
         metadataProviders = new ModMetadataProviderRegistry(
                 new ModrinthMetadataProvider(modrinthApiClient, false),
                 new CurseForgeMetadataProvider(curseForgeDownloader.api()));
         ModMetadataProvider metadataProvider = metadataProviders.require(ContentSource.MODRINTH);
-        gameLauncher = new GameLauncher();
+        launchEnvironment = new LaunchEnvironment(
+                ECLConfig.getVersionsDir(), ECLConfig.getLibrariesDir(), ECLConfig.getAssetsDir(),
+                ECLConfig.LAUNCHER_NAME, ECLConfig.LAUNCHER_VERSION);
+        gameLauncher = new DefaultLauncher(versionRepository, launchEnvironment);
         backgroundExecutor = Executors.newCachedThreadPool(
                 ThreadFactories.daemon("ecl-background"));
         modDownloadExecutor = Executors.newFixedThreadPool(
@@ -189,7 +199,13 @@ public final class MainController implements AutoCloseable {
     public LocalModScanner localModScanner() { return localModScanner; }
     public ModUpdateService modUpdateService() { return modUpdateService; }
     public ModpackUpdateService modpackUpdateService() { return modpackUpdateService; }
-    public LaunchService gameLauncher() { return gameLauncher; }
+    public Launcher gameLauncher() { return gameLauncher; }
+    public LaunchEnvironment launchEnvironment() { return launchEnvironment; }
+
+    /** Invalidate launch metadata after an install or profile rewrite. */
+    public void invalidateLaunchVersion(String versionId) {
+        versionRepository.invalidate(versionId);
+    }
 
     public ReleaseChannel preferredModReleaseChannel() {
         String configured = settingsManager.get(ECLConfig.KEY_MOD_RELEASE_CHANNEL);
@@ -246,12 +262,26 @@ public final class MainController implements AutoCloseable {
     @Override
     public void close() {
         // Interrupt user-visible work first; downloader shutdown may wait for its own workers.
+        settingsManager.close(); // flush pending auto-save before stopping
         downloadTaskCenter.close();
         backgroundExecutor.shutdownNow();
         modDownloadExecutor.shutdownNow();
+        awaitTermination(backgroundExecutor);
+        awaitTermination(modDownloadExecutor);
         metadataProviders.close();
         modrinthApiClient.close();
         gameDownloader.close();
+    }
+
+    private static void awaitTermination(ExecutorService executor) {
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            executor.shutdownNow();
+        }
     }
 
     public record ModSourceServices(ModDependencyResolver dependencyResolver,

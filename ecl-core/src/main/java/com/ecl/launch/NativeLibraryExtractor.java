@@ -19,6 +19,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -115,10 +116,18 @@ public final class NativeLibraryExtractor {
             }
         }
         Set<File> files = new LinkedHashSet<>();
+        if (chosen.isEmpty()) {
+            return files;
+        }
+        // 反向索引：一次遍历建立 classifier -> 所属库 的映射，避免对每个选中对象做 O(n) 线性查找。
+        Map<DownloadObject, Library> ownerByObject = new java.util.HashMap<>();
+        for (Library library : metadata.libraries()) {
+            for (DownloadObject classifier : library.classifiers().values()) {
+                ownerByObject.putIfAbsent(classifier, library);
+            }
+        }
         for (DownloadObject object : chosen) {
-            Library owner = metadata.libraries().stream()
-                    .filter(library -> library.classifiers().containsValue(object))
-                    .findFirst().orElse(null);
+            Library owner = ownerByObject.get(object);
             File base = owner != null && owner.isLocal() && instanceDirectory != null
                     ? new File(instanceDirectory, "libraries") : environment.librariesDirectory();
             File nativeFile = new File(base, object.path());

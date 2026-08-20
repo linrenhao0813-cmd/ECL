@@ -109,7 +109,11 @@ public final class DownloadTaskCenter implements AutoCloseable {
     private int maxConcurrent;
     private int runningCount;
     private long bandwidthLimitBytesPerSecond;
+    private final long previousRateLimitBytesPerSecond;
     private boolean closed;
+    /** 进度类通知的最小间隔，避免高频下载进度触发全量快照广播。 */
+    private static final long NOTIFY_THROTTLE_MS = 100;
+    private volatile long lastNotifiedAt;
 
     public DownloadTaskCenter() {
         this(2, 0);
@@ -118,6 +122,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
     public DownloadTaskCenter(int maxConcurrent, long bandwidthLimitBytesPerSecond) {
         this.maxConcurrent = clampConcurrency(maxConcurrent);
         this.bandwidthLimitBytesPerSecond = Math.max(0, bandwidthLimitBytesPerSecond);
+        this.previousRateLimitBytesPerSecond = HttpUtil.getDownloadRateLimitBytesPerSecond();
         HttpUtil.setDownloadRateLimitBytesPerSecond(this.bandwidthLimitBytesPerSecond);
         executor = Executors.newCachedThreadPool(
                 ThreadFactories.daemon("ecl-download-task"));
@@ -140,7 +145,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
         }
         // Always notify: when the concurrency limit is reached the new task remains queued and
         // pump() does not emit a second state change for it.
-        fireChanged();
+        fireChanged(true);
         pump();
         return new TaskHandle<>(this, entry);
     }
@@ -205,7 +210,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
         synchronized (lock) {
             maxConcurrent = clampConcurrency(value);
         }
-        fireChanged();
+        fireChanged(true);
         pump();
     }
 
@@ -250,7 +255,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
             changed = true;
         }
         runCancellation(cancellationHook);
-        if (changed) fireChanged();
+        if (changed) fireChanged(true);
         pump();
         return changed;
     }
@@ -278,7 +283,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
                 }
             }
         }
-        if (removed > 0) fireChanged();
+        if (removed > 0) fireChanged(true);
         return removed;
     }
 
@@ -306,7 +311,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
             }
         }
         if (toStart.isEmpty()) return;
-        fireChanged();
+        fireChanged(true);
         for (Entry<?> entry : toStart) {
             try {
                 executor.submit(() -> execute(entry));
@@ -367,7 +372,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
         if (!changed) return;
         if (cancelled) entry.completion.cancel(false);
         else complete(entry, result);
-        fireChanged();
+        fireChanged(true);
         pump();
     }
 
@@ -399,7 +404,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
         if (!changed) return;
         if (cancelled) entry.completion.cancel(false);
         else entry.completion.completeExceptionally(error);
-        fireChanged();
+        fireChanged(true);
         pump();
     }
 
@@ -417,7 +422,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
         }
         if (!changed) return;
         entry.completion.cancel(false);
-        fireChanged();
+        fireChanged(true);
         pump();
     }
 
@@ -436,6 +441,26 @@ public final class DownloadTaskCenter implements AutoCloseable {
     }
 
     private void fireChanged() {
+        fireChanged(false);
+    }
+
+    /**
+     * Notify listeners. Intermediate progress updates are throttled to
+     * {@value #NOTIFY_THROTTLE_MS} ms so high-frequency download progress does not trigger a
+     * full snapshot broadcast on every chunk; terminal/state changes pass {@code immediate}.
+     */
+    private void fireChanged(boolean immediate) {
+        if (listeners.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (!immediate) {
+            long last = lastNotifiedAt;
+            if (now - last < NOTIFY_THROTTLE_MS) {
+                return;
+            }
+        }
+        lastNotifiedAt = now;
         List<TaskSnapshot> current = snapshots();
         for (Listener listener : listeners) {
             try {
@@ -483,7 +508,8 @@ public final class DownloadTaskCenter implements AutoCloseable {
         }
         cancelAll();
         executor.shutdownNow();
-        HttpUtil.setDownloadRateLimitBytesPerSecond(0);
+        // 限速是进程级共享状态：本实例退出时恢复其创建前的值，避免误清其他实例的配置。
+        HttpUtil.setDownloadRateLimitBytesPerSecond(previousRateLimitBytesPerSecond);
     }
 
     public static final class TaskHandle<T> {

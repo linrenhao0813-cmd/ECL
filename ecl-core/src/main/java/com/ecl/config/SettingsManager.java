@@ -17,19 +17,56 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Manages launcher settings persistence.
+ *
+ * <p>By default values are kept in memory and persisted only by an explicit {@link #save()}.
+ * GUI callers can switch on debounced auto-save via {@link #enableAutoSave()}, which batches
+ * rapid {@code set*} calls into a single disk write shortly after the last change.</p>
  */
 public class SettingsManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(SettingsManager.class);
     private static final Gson GSON = GsonProvider.pretty();
     private static final File SETTINGS_FILE = new File(com.ecl.ECLConfig.getBaseDir(), "settings.json");
+    private static final long AUTO_SAVE_DELAY_MS = 500;
 
     private JsonObject settings = new JsonObject();
     private boolean loadAttempted;
+    private volatile boolean autoSaveEnabled;
+    private volatile boolean dirty;
+    private volatile ScheduledFuture<?> pendingAutoSave;
+    private final ScheduledExecutorService autoSaveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "ecl-settings-autosave");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /**
+     * Persist future {@code set*} / {@code remove} changes automatically after a short debounce.
+     * Explicit {@link #save()} remains available and is unaffected.
+     */
+    public void enableAutoSave() {
+        autoSaveEnabled = true;
+    }
+
+    /** Flush any pending auto-save and stop the background scheduler. */
+    public void close() {
+        ScheduledFuture<?> pending = pendingAutoSave;
+        if (pending != null) {
+            pending.cancel(false);
+        }
+        autoSaveExecutor.shutdownNow();
+        if (dirty) {
+            save();
+        }
+    }
 
     public synchronized void load() {
         loadAttempted = true;
@@ -66,6 +103,7 @@ public class SettingsManager {
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
             }
+            dirty = false;
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to save settings to {}", SETTINGS_FILE, e);
@@ -81,9 +119,22 @@ public class SettingsManager {
         }
     }
 
+    /** Mark the in-memory settings as changed and schedule a debounced disk write when enabled. */
+    private void markDirty() {
+        if (!autoSaveEnabled) {
+            return;
+        }
+        dirty = true;
+        ScheduledFuture<?> pending = pendingAutoSave;
+        if (pending != null && !pending.isDone()) {
+            return;
+        }
+        pendingAutoSave = autoSaveExecutor.schedule(this::save, AUTO_SAVE_DELAY_MS, TimeUnit.MILLISECONDS);
+    }
+
     public synchronized String getString(String key, String defaultValue) {
         ensureLoaded();
-        if (settings.has(key)) {
+        if (settings.has(key) && !settings.get(key).isJsonNull()) {
             try {
                 return settings.get(key).getAsString();
             } catch (RuntimeException e) {
@@ -96,6 +147,7 @@ public class SettingsManager {
     public synchronized void setString(String key, String value) {
         ensureLoaded();
         settings.addProperty(key, value);
+        markDirty();
     }
 
     public synchronized int getInt(String key, int defaultValue) {
@@ -113,6 +165,7 @@ public class SettingsManager {
     public synchronized void setInt(String key, int value) {
         ensureLoaded();
         settings.addProperty(key, value);
+        markDirty();
     }
 
     public synchronized long getLong(String key, long defaultValue) {
@@ -130,6 +183,7 @@ public class SettingsManager {
     public synchronized void setLong(String key, long value) {
         ensureLoaded();
         settings.addProperty(key, value);
+        markDirty();
     }
 
     public synchronized boolean getBoolean(String key, boolean defaultValue) {
@@ -147,6 +201,7 @@ public class SettingsManager {
     public synchronized void setBoolean(String key, boolean value) {
         ensureLoaded();
         settings.addProperty(key, value);
+        markDirty();
     }
 
     /**
@@ -181,11 +236,13 @@ public class SettingsManager {
                 settings.addProperty(key, b);
             }
         }
+        markDirty();
     }
 
     public synchronized void remove(String key) {
         ensureLoaded();
         settings.remove(key);
+        markDirty();
     }
 
     // ---- Type-safe API via SettingKey ----

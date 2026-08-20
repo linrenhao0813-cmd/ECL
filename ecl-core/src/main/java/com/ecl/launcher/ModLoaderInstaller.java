@@ -10,6 +10,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -29,6 +30,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.TimeUnit;
 import java.util.HexFormat;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
 /**
  * Installs launchable Fabric, Quilt, Forge and NeoForge profiles into ECL's
@@ -41,7 +47,6 @@ public final class ModLoaderInstaller {
             "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml";
     private static final String NEOFORGE_META =
             "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
-    private static final Pattern XML_VERSION = Pattern.compile("<version>([^<]+)</version>");
 
     public enum Loader {
         FABRIC("fabric", "Fabric"),
@@ -308,10 +313,23 @@ public final class ModLoaderInstaller {
     }
 
     private static List<String> listMavenVersions(String metadataUrl) throws IOException {
-        Matcher matcher = XML_VERSION.matcher(HttpUtil.get(metadataUrl));
+        String xml = HttpUtil.get(metadataUrl);
         List<String> versions = new ArrayList<>();
-        while (matcher.find()) {
-            versions.add(matcher.group(1).trim());
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            // 防御性关闭 DTD/外部实体，避免解析不可信元数据时触发 XXE。
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            Document document = factory.newDocumentBuilder()
+                    .parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+            NodeList versionNodes = document.getElementsByTagName("version");
+            for (int index = 0; index < versionNodes.getLength(); index++) {
+                String value = versionNodes.item(index).getTextContent().trim();
+                if (!value.isBlank()) {
+                    versions.add(value);
+                }
+            }
+        } catch (ParserConfigurationException | SAXException failure) {
+            throw new IOException("加载器版本元数据不是有效的 XML: " + metadataUrl, failure);
         }
         versions.sort(ModLoaderInstaller::compareVersionsDescending);
         return versions;

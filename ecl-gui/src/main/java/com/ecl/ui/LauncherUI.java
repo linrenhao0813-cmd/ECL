@@ -6,9 +6,9 @@ import com.ecl.auth.MicrosoftAuth;
 import com.ecl.auth.MicrosoftAccountStore;
 import com.ecl.auth.MinecraftSkinService;
 import com.ecl.auth.OfflineAuth;
+import com.ecl.auth.OfflineSkin;
 import com.ecl.auth.OfflineSkinStore;
 import com.ecl.auth.YggdrasilAuth;
-import com.ecl.auth.offline.AuthlibInjectorManager;
 import com.ecl.backup.BackupEntry;
 import com.ecl.backup.WorldBackupService;
 import com.ecl.config.SettingsManager;
@@ -26,7 +26,9 @@ import com.ecl.game.InstanceGameSettings;
 import com.ecl.game.InstanceGameSettingsStore;
 import com.ecl.game.PlaytimeTracker;
 import com.ecl.launcher.CrashAnalyzer;
-import com.ecl.launcher.LaunchService;
+import com.ecl.launch.GameProcess;
+import com.ecl.launch.LaunchOptions;
+import com.ecl.launch.Launcher;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.launcher.VersionManager;
 import com.ecl.modrinth.instance.ModInstanceContext;
@@ -96,10 +98,8 @@ import javafx.stage.Window;
 import javafx.util.Duration;
 
 import java.awt.Desktop;
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -165,7 +165,7 @@ public class LauncherUI extends javafx.application.Application {
     private WorldBackupService worldBackupService;
     private MicrosoftAccountStore microsoftAccountStore;
     private MinecraftSkinService minecraftSkinService;
-    private LaunchService gameLauncher;
+    private Launcher gameLauncher;
     private SettingsManager settingsManager;
     private MainController controller;
     private Stage primaryStage;
@@ -4493,41 +4493,31 @@ public class LauncherUI extends javafx.application.Application {
                 ensureVersionGameDirs(version);
                 AuthProvider auth = buildAuthProvider(authType, server, username, password);
                 password = null;
-                gameLauncher.setAuth(auth);
-                AuthlibInjectorManager authlibInjector = null;
-                if (auth.getType() == com.ecl.auth.AuthType.OFFLINE) {
-                    var offlineSkin = new OfflineSkinStore()
-                            .find(OfflineSkinStore.identityForOffline(auth.getUsername()));
-                    gameLauncher.setOfflineSkin(offlineSkin.orElse(null));
-                    if (offlineSkin.isPresent()) authlibInjector = new AuthlibInjectorManager();
-                } else {
-                    gameLauncher.setOfflineSkin(null);
-                }
-                gameLauncher.setVersion(version);
-                gameLauncher.setMaxMemory(getEffectiveMaxMemoryMb());
-                gameLauncher.setGameDir(launchDir);
-                gameLauncher.setInstanceDir(resolveVersionInstanceRoot(version));
-                gameLauncher.setJvmArgs(extraJvmArgs == null ? "" : extraJvmArgs);
-                gameLauncher.setJavaPath(javaPath);
-                gameLauncher.setGameResolution(gameWidth, gameHeight);
-                gameLauncher.setFullscreen(gameFullscreen);
-                gameLauncher.setServerAddress(quickServer);
-                gameLauncher.setProcessorCount(processorCount);
+                OfflineSkin offlineSkin = auth.getType() == com.ecl.auth.AuthType.OFFLINE
+                        ? new OfflineSkinStore()
+                                .find(OfflineSkinStore.identityForOffline(auth.getUsername()))
+                                .orElse(null)
+                        : null;
+                LaunchOptions options = LaunchOptions.builder()
+                        .versionId(version)
+                        .auth(auth)
+                        .offlineSkin(offlineSkin)
+                        .gameDirectory(launchDir)
+                        .instanceDirectory(resolveVersionInstanceRoot(version))
+                        .environment(controller.launchEnvironment())
+                        .maxMemoryMb(getEffectiveMaxMemoryMb())
+                        .jvmArguments(TextUtil.parseCommandLine(
+                                extraJvmArgs == null ? "" : extraJvmArgs))
+                        .javaExecutablePath(javaPath)
+                        .gameResolution(gameWidth, gameHeight)
+                        .fullscreen(gameFullscreen)
+                        .serverAddress(quickServer)
+                        .processorCount(processorCount)
+                        .build();
                 createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
-                if (authlibInjector != null && authlibInjector.requiresDownload()) {
-                    AuthlibInjectorManager component = authlibInjector;
-                    DownloadTaskCenter.TaskHandle<Path> authlibTask = downloadTaskCenter.submit(
-                            Messages.get("download.authlib.title"), context -> component.ensureJar(
-                                    context::updateStatus, context::updateProgress));
-                    authlibTask.completion().get();
-                }
-                if (gameLauncher.requiresJavaRuntimeDownload()) {
-                    DownloadTaskCenter.TaskHandle<String> runtimeTask = downloadTaskCenter.submit(
-                            Messages.get("download.runtime.title"), context -> gameLauncher.prepareJavaRuntime(
-                                    context::updateStatus, context::updateProgress));
-                    runtimeTask.completion().get();
-                }
-                Process process = gameLauncher.launch();
+                controller.invalidateLaunchVersion(version);
+                GameProcess gameProcess = gameLauncher.launch(options);
+                Process process = gameProcess.process();
                 long launchStartedAt = process.info().startInstant()
                         .map(Instant::toEpochMilli)
                         .orElseGet(System::currentTimeMillis);
@@ -4552,7 +4542,7 @@ public class LauncherUI extends javafx.application.Application {
                         primaryStage.setIconified(true);
                     }
                 });
-                monitorGameProcess(process, version, launchDir, launchStartedAt,
+                monitorGameProcess(gameProcess, version, launchDir, launchStartedAt,
                         runningInstanceId, minimizeThisLaunch);
             } catch (Exception e) {
                 runOnUiIfActive(() -> {
@@ -4600,19 +4590,20 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private void monitorGameProcess(Process process, String version, File launchDir, long launchStartedAt,
+    private void monitorGameProcess(GameProcess gameProcess, String version, File launchDir,
+                                    long launchStartedAt,
                                     UUID runningInstanceId, boolean restoreLauncher) {
         // 守护线程：关闭启动器窗口后进程能立即退出，不会被该监控线程拖住；
         // 游戏本体是独立进程，启动器退出不影响其继续运行。
         Thread.ofPlatform().name("ecl-monitor-game-" + version).daemon(true).start(() -> {
             BoundedLogBuffer output = new BoundedLogBuffer(ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.appendLine(line);
-                    appendGameConsoleLine(line);
-                }
-
+            com.ecl.launch.ProcessOutputListener outputListener = line -> {
+                output.appendLine(line);
+                appendGameConsoleLine(line);
+            };
+            gameProcess.attachOutputListener(outputListener);
+            Process process = gameProcess.process();
+            try {
                 int exitCode = process.waitFor();
                 if (exitCode == 0) {
                     runOnUiIfActive(() -> setStatus("游戏已正常退出", version + " 退出码 0。"));
@@ -4631,6 +4622,7 @@ public class LauncherUI extends javafx.application.Application {
                     showGameErrorDialog(report);
                 });
             } finally {
+                gameProcess.detachOutputListener(outputListener);
                 try {
                     playtimeTracker.recordSession(resolveVersionInstanceRoot(version).toPath(),
                             launchStartedAt, System.currentTimeMillis());
@@ -4965,8 +4957,7 @@ public class LauncherUI extends javafx.application.Application {
                 ? new MicrosoftAuth.CachedSession(
                         forceNew ? null : settingsManager.getEncrypted("microsoftRefreshToken"),
                         forceNew ? null : settingsManager.getEncrypted("microsoftAccessToken"),
-                        forceNew ? 0 : settingsManager.getLong(
-                                ECLConfig.SETTING_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT, 0),
+                        forceNew ? 0 : settingsManager.get(ECLConfig.KEY_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT),
                         forceNew ? null : settingsManager.get(ECLConfig.KEY_MICROSOFT_PROFILE_NAME),
                         forceNew ? null : settingsManager.get(ECLConfig.KEY_MICROSOFT_PROFILE_UUID))
                 : new MicrosoftAuth.CachedSession(

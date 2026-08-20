@@ -95,9 +95,11 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
     public CompletableFuture<ModSearchResult> searchMods(ModSearchQuery query) {
         Objects.requireNonNull(query, "query");
         List<List<String>> facets = new ArrayList<>();
-        facets.add(List.of("project_type:mod"));
+        facets.add(List.of("project_type:" + query.projectType().toLowerCase(Locale.ROOT)));
         facets.add(List.of("versions:" + query.minecraftVersion()));
-        facets.add(List.of("categories:" + query.loader().toLowerCase(Locale.ROOT)));
+        if (!query.loader().isBlank()) {
+            facets.add(List.of("categories:" + query.loader().toLowerCase(Locale.ROOT)));
+        }
         query.categories().stream()
                 .filter(category -> category != null && !category.isBlank())
                 .sorted()
@@ -146,11 +148,13 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
                                                                   String loader) {
         String id = requireText(projectId, "projectId");
         String gameVersion = requireText(minecraftVersion, "minecraftVersion");
-        String loaderName = requireText(loader, "loader").toLowerCase(Locale.ROOT);
-        URI uri = endpoint("project/" + encodePathSegment(id) + "/version", Map.of(
-                "game_versions", writeJson(List.of(gameVersion)),
-                "loaders", writeJson(List.of(loaderName))
-        ));
+        String loaderName = loader == null ? "" : loader.trim().toLowerCase(Locale.ROOT);
+        Map<String, String> parameters = new LinkedHashMap<>();
+        parameters.put("game_versions", writeJson(List.of(gameVersion)));
+        if (!loaderName.isBlank()) {
+            parameters.put("loaders", writeJson(List.of(loaderName)));
+        }
+        URI uri = endpoint("project/" + encodePathSegment(id) + "/version", parameters);
         return get(uri).thenApply(response -> {
             requireSuccess(response);
             List<ModVersionDto> versions = readJson(response.body(), new TypeReference<>() {});

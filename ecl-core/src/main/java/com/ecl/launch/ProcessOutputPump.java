@@ -49,11 +49,14 @@ public final class ProcessOutputPump implements AutoCloseable {
         synchronized (listenerLock) {
             listeners.add(listener);
             if (listeners.size() == 1 && !pendingLines.isEmpty()) {
-                for (String line : pendingLines) {
-                    if (!notifyListener(listener, line)) break;
+                while (!pendingLines.isEmpty()) {
+                    String line = pendingLines.peekFirst();
+                    if (!notifyListener(listener, line)) {
+                        pendingChars -= pendingLines.removeFirst().length() + 1;
+                        break;
+                    }
+                    pendingChars -= pendingLines.removeFirst().length() + 1;
                 }
-                pendingLines.clear();
-                pendingChars = 0;
             }
         }
     }

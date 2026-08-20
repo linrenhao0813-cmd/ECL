@@ -1,6 +1,7 @@
 package com.ecl.download;
 
 import com.ecl.ECLConfig;
+import com.ecl.download.install.InstallHelpers;
 import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
@@ -12,6 +13,8 @@ import com.google.gson.JsonObject;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -21,8 +24,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class GameDownloader implements DownloadService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(GameDownloader.class);
+
     public interface DownloadListener {
         void onStatus(String message);
         void onProgress(long downloaded, long total);
@@ -68,7 +75,10 @@ public class GameDownloader implements DownloadService {
         cancelDownload();
         DownloadListener runListener = configuredListener;
         Future<?> task = versionDownloadExecutor.submit(
-                () -> downloadVersionInternal(versionId, versionUrl, runListener));
+                () -> {
+                    downloadVersionInternal(versionId, versionUrl, runListener);
+                    return null;
+                });
         activeDownload.set(task);
         return task;
     }
@@ -92,7 +102,8 @@ public class GameDownloader implements DownloadService {
         awaitTermination(fileDownloadExecutor, "file download");
     }
 
-    private void downloadVersionInternal(String versionId, String versionUrl, DownloadListener runListener) {
+    private void downloadVersionInternal(String versionId, String versionUrl,
+                                         DownloadListener runListener) throws Exception {
         try {
             if (runListener != null) runListener.onStatus("正在下载版本信息...");
 
@@ -150,6 +161,9 @@ public class GameDownloader implements DownloadService {
                 return;
             }
             if (runListener != null) runListener.onError("下载失败: " + e.getMessage());
+            // Keep the listener as a UI notification only; the Future must also fail so every
+            // caller can observe the download error without relying on callback side effects.
+            throw new RuntimeException(e);
         }
     }
 
@@ -271,6 +285,10 @@ public class GameDownloader implements DownloadService {
             verifyDownloadedFile(indexFile, indexSha1);
         }
 
+        // 该资源索引上次已完整校验（index SHA-1 未变）时跳过对每个文件的重复哈希计算，
+        // 只做存在性检查；索引变更或缺失校验标记时才执行全量 SHA-1 校验。
+        boolean skipHashVerification = verifiedMarkerMatches(assetId, indexSha1);
+
         JsonObject objects = HttpUtil.readJson(indexFile).getAsJsonObject("objects");
         List<FileDownloadTask> tasks = new ArrayList<>();
         for (String name : objects.keySet()) {
@@ -281,7 +299,7 @@ public class GameDownloader implements DownloadService {
             }
             String subPath = hash.substring(0, 2) + "/" + hash;
             File target = FileUtil.safeResolveUnder(assetDir, subPath);
-            if (needsDownload(target, hash)) {
+            if (needsDownload(target, hash, skipHashVerification)) {
                 tasks.add(new FileDownloadTask(
                         "https://resources.download.minecraft.net/" + subPath,
                         target, hash, "资源文件"));
@@ -289,45 +307,75 @@ public class GameDownloader implements DownloadService {
         }
 
         downloadConcurrently(tasks, "资源文件", runListener);
+        // 全部下载成功（或本就没有缺失）后记录校验标记，下次启动免去全量哈希。
+        writeVerifiedMarker(assetId, indexSha1);
+    }
+
+    /** 校验标记：<assets>/.ecl-verified-indexes/<assetId>.marker，内容为该索引的 SHA-1。 */
+    private File verifiedMarkerFile(String assetId) {
+        return new File(ECLConfig.getAssetsDir(), ".ecl-verified-indexes/" + assetId + ".marker");
+    }
+
+    private boolean verifiedMarkerMatches(String assetId, String indexSha1) {
+        if (!verifyExistingFiles || !hasSha1(indexSha1)) {
+            return false;
+        }
+        File marker = verifiedMarkerFile(assetId);
+        if (!marker.isFile()) {
+            return false;
+        }
+        try {
+            return indexSha1.equalsIgnoreCase(
+                    Files.readString(marker.toPath(), StandardCharsets.UTF_8).trim());
+        } catch (IOException e) {
+            LOGGER.debug("Failed to read assets verification marker {}", marker, e);
+            return false;
+        }
+    }
+
+    private void writeVerifiedMarker(String assetId, String indexSha1) {
+        if (!hasSha1(indexSha1)) {
+            return;
+        }
+        File marker = verifiedMarkerFile(assetId);
+        File parent = marker.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            return;
+        }
+        try {
+            Files.writeString(marker.toPath(), indexSha1, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            LOGGER.debug("Failed to write assets verification marker {}", marker, e);
+        }
     }
 
     boolean needsDownload(File target, String expectedSha1) {
-        if (!target.isFile()) return true;
-        return verifyExistingFiles && hasSha1(expectedSha1) && !FileUtil.verifySha1(target, expectedSha1);
+        return needsDownload(target, expectedSha1, false);
+    }
+
+    boolean needsDownload(File target, String expectedSha1, boolean skipHashVerification) {
+        if (skipHashVerification) {
+            return !target.isFile();
+        }
+        return InstallHelpers.needsDownload(target, expectedSha1, verifyExistingFiles);
     }
 
     private void verifyDownloadedFile(File target, String expectedSha1) throws IOException {
-        if (!hasSha1(expectedSha1) || FileUtil.verifySha1(target, expectedSha1)) return;
-        if (!target.delete()) target.deleteOnExit();
-        throw new IOException(target.getName() + " 的 SHA-1 校验失败");
+        InstallHelpers.verifyDownloadedFile(target, expectedSha1);
     }
 
     private static boolean hasSha1(String sha1) {
-        return sha1 != null && !sha1.isBlank();
+        return InstallHelpers.hasSha1(sha1);
     }
 
     static String nativeClassifierKey(JsonObject library, String osName, String archBits) {
-        if (library.has("natives")) {
-            JsonObject natives = library.getAsJsonObject("natives");
-            if (natives.has(osName)) {
-                return natives.get(osName).getAsString().replace("${arch}", archBits);
-            }
-        }
-        return "natives-" + osName;
+        return InstallHelpers.nativeClassifierKey(library, osName, archBits);
     }
 
     static String nativeClassifierKey(JsonObject library, JsonObject classifiers, String osName,
                                       String archBits, String nativeClassifier) {
-        java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
-        boolean arm = nativeClassifier != null && nativeClassifier.endsWith("-arm64");
-        if (arm) {
-            candidates.addAll(java.util.Arrays.asList(
-                    com.ecl.util.MinecraftRuleUtil.nativeKeys(nativeClassifier)));
-        }
-        candidates.add(nativeClassifierKey(library, osName, archBits));
-        candidates.addAll(java.util.Arrays.asList(
-                com.ecl.util.MinecraftRuleUtil.nativeKeys(nativeClassifier)));
-        return candidates.stream().filter(classifiers::has).findFirst().orElse(null);
+        return InstallHelpers.nativeClassifierKey(library, classifiers, osName, archBits,
+                nativeClassifier);
     }
 
     private void downloadConcurrently(List<FileDownloadTask> tasks, String phase,

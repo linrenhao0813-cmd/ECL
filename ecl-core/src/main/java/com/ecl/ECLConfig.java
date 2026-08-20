@@ -9,7 +9,6 @@ public class ECLConfig {
     public static final String LAUNCHER_NAME = "ECL";
     public static final String LAUNCHER_VERSION = "1.0.0";
     public static final String MC_VERSION_MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
-    public static final String AUTH_SERVER_URL = "https://authserver.mojang.com";
     public static final int OFFICIAL_SOURCE_TIMEOUT_MS = 8000;
     public static final int MIRROR_SOURCE_TIMEOUT_MS = 60000;
     public static final int DOWNLOAD_THREADS = parseDownloadThreads();
@@ -22,52 +21,6 @@ public class ECLConfig {
     public static final int MAX_GAME_MEMORY_MB = 65_536;
     public static final int MAX_AUTO_MEMORY_MB = 8_192;
     public static final int RESERVED_SYSTEM_MEMORY_MB = 2_048;
-
-    // Backward-compatible String keys (deprecated — prefer SettingKey constants)
-    /** @deprecated Use {@link #KEY_JAVA_PATH} instead. */
-    @Deprecated
-    public static final String SETTING_JAVA_PATH = "javaPath";
-    /** @deprecated Use {@link #KEY_GAME_DIR} instead. */
-    @Deprecated
-    public static final String SETTING_GAME_DIR = "gameDir";
-    /** @deprecated Use {@link #KEY_JVM_ARGS} instead. */
-    @Deprecated
-    public static final String SETTING_JVM_ARGS = "jvmArgs";
-    /** @deprecated Use {@link #KEY_MAX_MEMORY_MB} instead. */
-    @Deprecated
-    public static final String SETTING_MAX_MEMORY_MB = "maxMemoryMb";
-    /** @deprecated Use {@link #KEY_MICROSOFT_REFRESH_TOKEN} instead. */
-    @Deprecated
-    public static final String SETTING_MICROSOFT_REFRESH_TOKEN = "microsoftRefreshToken";
-    /** @deprecated Use {@link #KEY_MICROSOFT_ACCESS_TOKEN} instead. */
-    @Deprecated
-    public static final String SETTING_MICROSOFT_ACCESS_TOKEN = "microsoftAccessToken";
-    /** @deprecated Use {@link #KEY_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT} instead. */
-    @Deprecated
-    public static final String SETTING_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT = "microsoftAccessTokenExpiresAt";
-    /** @deprecated Use {@link #KEY_MICROSOFT_PROFILE_NAME} instead. */
-    @Deprecated
-    public static final String SETTING_MICROSOFT_PROFILE_NAME = "microsoftProfileName";
-    /** @deprecated Use {@link #KEY_MICROSOFT_PROFILE_UUID} instead. */
-    @Deprecated
-    public static final String SETTING_MICROSOFT_PROFILE_UUID = "microsoftProfileUuid";
-
-    // Settings keys used by LauncherUI (factor out magic strings)
-    /** @deprecated Use {@link #KEY_SELECTED_VERSION} instead. */
-    @Deprecated
-    public static final String SETTING_SELECTED_VERSION = "selectedVersion";
-    /** @deprecated Use {@link #KEY_VERSION_CATEGORY} instead. */
-    @Deprecated
-    public static final String SETTING_VERSION_CATEGORY = "versionCategory2";
-    /** @deprecated Use {@link #KEY_AUTH_TYPE} instead. */
-    @Deprecated
-    public static final String SETTING_AUTH_TYPE = "authType";
-    /** @deprecated Use {@link #KEY_USERNAME} instead. */
-    @Deprecated
-    public static final String SETTING_USERNAME = "username";
-    /** @deprecated Use {@link #KEY_YGGDRASIL_SERVER} instead. */
-    @Deprecated
-    public static final String SETTING_YGGDRASIL_SERVER = "yggdrasilServer";
 
     public static final String DEFAULT_YGGDRASIL_SERVER = "https://littleskin.cn/api/yggdrasil/";
 
@@ -88,9 +41,6 @@ public class ECLConfig {
     public static final SettingKey<String> KEY_YGGDRASIL_SERVER = new SettingKey<>("yggdrasilServer", String.class, DEFAULT_YGGDRASIL_SERVER);
     public static final SettingKey<String> KEY_MOD_RELEASE_CHANNEL =
             new SettingKey<>("modReleaseChannel", String.class, "RELEASE_AND_BETA");
-    /** @deprecated Use {@link #KEY_CURSEFORGE_API_KEY} instead. */
-    @Deprecated
-    public static final String SETTING_CURSEFORGE_API_KEY = "curseForgeApiKey";
     public static final SettingKey<String> KEY_CURSEFORGE_API_KEY =
             new SettingKey<>("curseForgeApiKey", String.class, "");
     public static final SettingKey<String> KEY_DEFAULT_ISOLATION_TYPE =

@@ -1,12 +1,10 @@
 package com.ecl.launcher;
 
 import com.ecl.ECLConfig;
-import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
 import com.ecl.util.Messages;
-import com.ecl.util.MinecraftRuleUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -41,6 +39,8 @@ public class VersionManager {
     private volatile JsonObject manifest;
     private volatile Map<String, JsonObject> versionIndex = Map.of();
     private final Map<String, String> displayNameCache = new ConcurrentHashMap<>();
+    /** Cached scan of local version profiles; null means not computed yet. */
+    private volatile List<LocalVersionProfile> localProfilesCache;
 
     public enum VersionCategory {
         FEATURED("version.featured"),
@@ -114,6 +114,7 @@ public class VersionManager {
 
     public synchronized List<String> mergeLocalLoaderProfiles(List<String> remoteVersions) {
         displayNameCache.clear();
+        localProfilesCache = null; // 版本列表刷新时强制重新扫描本地档案
         List<String> base = remoteVersions == null ? List.of() : List.copyOf(remoteVersions);
         List<LocalVersionProfile> localProfiles = getLocalVersionProfiles();
         Map<String, List<LocalVersionProfile>> byMinecraftVersion = new LinkedHashMap<>();
@@ -223,6 +224,10 @@ public class VersionManager {
     }
 
     public List<LocalVersionProfile> getLocalVersionProfiles() {
+        List<LocalVersionProfile> cached = localProfilesCache;
+        if (cached != null) {
+            return cached;
+        }
         File versionsDirectory = ECLConfig.getVersionsDir();
         File[] directories = versionsDirectory.listFiles(File::isDirectory);
         if (directories == null) {
@@ -259,7 +264,15 @@ public class VersionManager {
         profiles.sort(Comparator.comparing(LocalVersionProfile::minecraftVersion).reversed()
                 .thenComparing(LocalVersionProfile::loader)
                 .thenComparing(LocalVersionProfile::profileId));
-        return List.copyOf(profiles);
+        List<LocalVersionProfile> result = List.copyOf(profiles);
+        localProfilesCache = result;
+        return result;
+    }
+
+    /** Drop cached local profile scans and display names after install/delete/rename of versions. */
+    public void invalidateLocalVersionProfiles() {
+        displayNameCache.clear();
+        localProfilesCache = null;
     }
 
     public synchronized String getVersionDisplayName(String versionId) {
@@ -431,7 +444,7 @@ public class VersionManager {
         return null;
     }
 
-    private void ensureManifestLoaded() {
+    private synchronized void ensureManifestLoaded() {
         if (manifest == null) {
             manifest = loadCachedManifest();
         }
@@ -476,99 +489,6 @@ public class VersionManager {
             return null;
         }
         return versionIndex.get(versionId);
-    }
-
-    private boolean isClientJarValid(JsonObject versionJson, File jar) {
-        JsonObject downloads = versionJson.getAsJsonObject("downloads");
-        if (downloads == null || !downloads.has("client")) {
-            return jar.exists();
-        }
-
-        JsonObject client = downloads.getAsJsonObject("client");
-        String sha1 = getString(client, "sha1");
-        return sha1.isBlank() ? jar.exists() : FileUtil.verifySha1(jar, sha1);
-    }
-
-    private boolean areLibrariesReady(JsonObject versionJson) {
-        JsonArray libraries = versionJson.getAsJsonArray("libraries");
-        if (libraries == null) {
-            return true;
-        }
-
-        String nativeClassifier = FileUtil.getNativeClassifier();
-        for (JsonElement el : libraries) {
-            JsonObject lib = el.getAsJsonObject();
-            if (lib.has("rules") && !MinecraftRuleUtil.checkRules(lib.getAsJsonArray("rules"))) {
-                continue;
-            }
-            if (!lib.has("downloads")) {
-                // Fabric/Quilt style: bare Maven coordinate with a repository URL.
-                String name = JsonUtil.getString(lib, "name", "");
-                String repository = JsonUtil.getString(lib, "url", "");
-                if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {
-                    File file = new File(ECLConfig.getLibrariesDir(),
-                            MavenCoordinates.repositoryPath(name));
-                    if (!file.isFile()) {
-                        return false;
-                    }
-                }
-                continue;
-            }
-
-            JsonObject downloads = lib.getAsJsonObject("downloads");
-            if (downloads.has("artifact") && !isArtifactReady(downloads.getAsJsonObject("artifact"))) {
-                return false;
-            }
-            if (downloads.has("classifiers") && !isNativeArtifactReady(downloads.getAsJsonObject("classifiers"), nativeClassifier)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean isNativeArtifactReady(JsonObject classifiers, String nativeClassifier) {
-        for (String key : MinecraftRuleUtil.nativeKeys(nativeClassifier)) {
-            if (classifiers.has(key)) {
-                return isArtifactReady(classifiers.getAsJsonObject(key));
-            }
-        }
-        return true;
-    }
-
-    private boolean isArtifactReady(JsonObject artifact) {
-        String path = getString(artifact, "path");
-        if (path.isBlank()) {
-            return true;
-        }
-
-        File file;
-        try {
-            file = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
-        } catch (IOException e) {
-            return false;
-        }
-        String sha1 = getString(artifact, "sha1");
-        return sha1.isBlank() ? file.exists() : FileUtil.verifySha1(file, sha1);
-    }
-
-    private boolean isAssetIndexReady(JsonObject versionJson) {
-        JsonObject assetIndex = versionJson.getAsJsonObject("assetIndex");
-        if (assetIndex == null) {
-            return true;
-        }
-
-        String assetId = getString(assetIndex, "id");
-        if (assetId.isBlank()) {
-            return true;
-        }
-
-        File indexFile = new File(ECLConfig.getAssetsDir(), "indexes/" + assetId + ".json");
-        String sha1 = getString(assetIndex, "sha1");
-        return sha1.isBlank() ? indexFile.exists() : FileUtil.verifySha1(indexFile, sha1);
-    }
-
-    private String getString(JsonObject object, String key) {
-        return JsonUtil.getString(object, key, "");
     }
 
     private boolean matchesCategory(JsonObject version, VersionCategory category) {
