@@ -1,39 +1,26 @@
 package com.ecl.ui;
 
 import com.ecl.ECLConfig;
-import com.ecl.auth.AuthProvider;
-import com.ecl.auth.MicrosoftAuth;
 import com.ecl.auth.MicrosoftAccountStore;
 import com.ecl.auth.MinecraftSkinService;
-import com.ecl.auth.OfflineAuth;
-import com.ecl.auth.OfflineSkin;
 import com.ecl.auth.OfflineSkinStore;
-import com.ecl.auth.YggdrasilAuth;
-import com.ecl.backup.BackupEntry;
 import com.ecl.backup.WorldBackupService;
 import com.ecl.config.SettingsManager;
 import com.ecl.diagnostic.DiagnosticBundleService;
 import com.ecl.download.DownloadService;
 import com.ecl.download.ContentDownloader;
-import com.ecl.download.GameDownloader;
 import com.ecl.download.DownloadTaskCenter;
 import com.ecl.download.ModrinthDownloader;
 import com.ecl.download.ServerJarDownloader;
 import com.ecl.desktop.DesktopShortcutService;
 import com.ecl.game.DefaultGameRepository;
 import com.ecl.game.DefaultIsolationType;
-import com.ecl.game.InstanceGameSettings;
-import com.ecl.game.InstanceGameSettingsStore;
 import com.ecl.game.PlaytimeTracker;
-import com.ecl.launcher.CrashAnalyzer;
-import com.ecl.launch.GameProcess;
-import com.ecl.launch.LaunchOptions;
 import com.ecl.launch.Launcher;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.launcher.VersionManager;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
-import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.pack.MrpackInstaller;
 import com.ecl.modrinth.pack.ModpackUpdate;
 import com.ecl.modrinth.pack.ModpackUpdateService;
@@ -56,13 +43,8 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
-import javafx.scene.control.Alert;
-import javafx.scene.control.ButtonType;
-import javafx.scene.control.ButtonBar;
-import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Control;
-import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -76,10 +58,7 @@ import javafx.scene.control.TitledPane;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.scene.input.Clipboard;
-import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.DragEvent;
-import javafx.scene.input.ScrollEvent;
 import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
@@ -94,7 +73,6 @@ import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
-import javafx.stage.Window;
 import javafx.util.Duration;
 
 import java.awt.Desktop;
@@ -103,25 +81,16 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.ZoneId;
-import java.time.Instant;
-import java.time.format.DateTimeFormatter;
-import java.util.Comparator;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.Future;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import org.slf4j.Logger;
@@ -131,11 +100,11 @@ import static com.ecl.util.TextUtil.abbreviate;
 import static com.ecl.util.TextUtil.formatCount;
 
 public class LauncherUI extends javafx.application.Application {
-    private static final Logger LOGGER = LoggerFactory.getLogger(LauncherUI.class);
-    private static final String AUTH_OFFLINE = "OFFLINE";
-    private static final String AUTH_MICROSOFT = "MICROSOFT";
-    private static final String AUTH_YGGDRASIL = "YGGDRASIL";
-    private static final String MC_CHINESE_WIKI_VERSION_URL_PREFIX = "https://zh.minecraft.wiki/w/";
+    static final Logger LOGGER = LoggerFactory.getLogger(LauncherUI.class);
+    static final String AUTH_OFFLINE = "OFFLINE";
+    static final String AUTH_MICROSOFT = "MICROSOFT";
+    static final String AUTH_YGGDRASIL = "YGGDRASIL";
+    static final String MC_CHINESE_WIKI_VERSION_URL_PREFIX = "https://zh.minecraft.wiki/w/";
     private static final double WINDOW_WIDTH = 1440;
     private static final double WINDOW_HEIGHT = 900;
     private static final double NAV_WIDTH = 200;
@@ -155,49 +124,53 @@ public class LauncherUI extends javafx.application.Application {
     private static final String ICON_CHECK = "/icons/ui/check.png";
     private static final String ICON_SIGNAL = "/icons/ui/signal.png";
 
-    private VersionManager versionManager;
-    private DownloadService downloader;
-    private DownloadTaskCenter downloadTaskCenter;
+    VersionManager versionManager;
+    DownloadService downloader;
+    DownloadTaskCenter downloadTaskCenter;
     private ModrinthDownloader modrinthDownloader;
     private ServerJarDownloader serverJarDownloader;
-    private ModLoaderInstaller modLoaderInstaller;
+    ModLoaderInstaller modLoaderInstaller;
     private MrpackInstaller mrpackInstaller;
-    private WorldBackupService worldBackupService;
-    private MicrosoftAccountStore microsoftAccountStore;
-    private MinecraftSkinService minecraftSkinService;
-    private Launcher gameLauncher;
-    private SettingsManager settingsManager;
-    private MainController controller;
-    private Stage primaryStage;
-    private Stage firstRunStage;
+    WorldBackupService worldBackupService;
+    MicrosoftAccountStore microsoftAccountStore;
+    MinecraftSkinService minecraftSkinService;
+    Launcher gameLauncher;
+    SettingsManager settingsManager;
+    MainController controller;
+    Stage primaryStage;
+    private FirstRunWizard firstRunWizard;
+    MicrosoftAccountCoordinator microsoftAccounts;
+    SkinCoordinator skins;
+    GameLaunchCoordinator gameLaunch;
+    VersionActions versionActions;
 
-    private ComboBox<String> versionCombo;
-    private String lastContentVersion;
-    private ComboBox<VersionManager.VersionCategory> versionTypeCombo;
-    private ComboBox<LoaderChoice> loaderChoiceCombo;
-    private Button installSelectedLoaderButton;
-    private boolean syncingLoaderChoice;
-    private TextField usernameField;
-    private PasswordField passwordField;
-    private ProgressBar downloadProgress;
+    ComboBox<String> versionCombo;
+    String lastContentVersion;
+    ComboBox<VersionManager.VersionCategory> versionTypeCombo;
+    ComboBox<LoaderChoice> loaderChoiceCombo;
+    Button installSelectedLoaderButton;
+    boolean syncingLoaderChoice;
+    TextField usernameField;
+    PasswordField passwordField;
+    ProgressBar downloadProgress;
     private Label statusLabel;
-    private Label detailLabel;
-    private Button launchBtn;
-    private Button refreshBtn;
-    private Button settingsBtn;
-    private Button microsoftLoginBtn;
-    private Button microsoftAddAccountBtn;
-    private Button skinUploadBtn;
-    private Button homeSkinUploadButton;
-    private Button offlineSkinRemoveBtn;
-    private ComboBox<MicrosoftAccountStore.Account> microsoftAccountCombo;
-    private volatile MicrosoftAccountStore.Account selectedMicrosoftAccount;
-    private volatile boolean lastMicrosoftAccountPersisted = true;
-    private Button selectedVersionWikiButton;
-    private ComboBox<String> authTypeCombo;
-    private TextField yggdrasilServerField;
-    private Label serverLabel;
-    private Label passwordLabel;
+    Label detailLabel;
+    Button launchBtn;
+    Button refreshBtn;
+    Button settingsBtn;
+    Button microsoftLoginBtn;
+    Button microsoftAddAccountBtn;
+    Button skinUploadBtn;
+    Button homeSkinUploadButton;
+    Button offlineSkinRemoveBtn;
+    ComboBox<MicrosoftAccountStore.Account> microsoftAccountCombo;
+    volatile MicrosoftAccountStore.Account selectedMicrosoftAccount;
+    volatile boolean lastMicrosoftAccountPersisted = true;
+    Button selectedVersionWikiButton;
+    ComboBox<String> authTypeCombo;
+    TextField yggdrasilServerField;
+    Label serverLabel;
+    Label passwordLabel;
 
     private Label authSummaryLabel;
     private Label authHintLabel;
@@ -218,39 +191,38 @@ public class LauncherUI extends javafx.application.Application {
     private Label homeAccountAvatarLabel;
     private Label homeEnvironmentStatusLabel;
     private Label topTaskLabel;
-    private Label playtimeTotalLabel;
-    private Label playtimeRecentLabel;
-    private Label playtimeLaunchCountLabel;
-    private ListView<DownloadTaskCenter.TaskSnapshot> downloadTaskList;
-    private Label downloadTaskSummaryLabel;
+    Label playtimeTotalLabel;
+    Label playtimeRecentLabel;
+    Label playtimeLaunchCountLabel;
+    private DownloadTasksPage downloadTasksPage;
     private TitledPane instanceSettingsPane;
     private VBox homePage;
     private HBox workspacePane;
     private List<ContentTarget> contentTargets;
 
-    private String javaPath;
-    private File gameDir;
-    private String extraJvmArgs;
-    private int maxMemoryMb;
-    private int gameWidth;
-    private int gameHeight;
-    private boolean gameFullscreen;
-    private String quickServer;
-    private boolean closeAfterLaunch;
-    private int processorCount;
-    private boolean showGameConsole;
-    private boolean backupOnLaunch;
-    private int backupKeepCount;
-    private boolean backupIncludeMods;
-    private final BoundedLogBuffer liveGameLog =
-            new BoundedLogBuffer(ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
-    private final PlaytimeTracker playtimeTracker = new PlaytimeTracker();
-    private TextArea liveConsoleArea;
-    private final StringBuilder pendingConsoleText = new StringBuilder();
-    private final AtomicBoolean consoleFlushScheduled = new AtomicBoolean();
-    private final AtomicBoolean applicationStopping = new AtomicBoolean();
-    private volatile Process activeGameProcess;
-    private volatile String activeGameVersion;
+    String javaPath;
+    File gameDir;
+    String extraJvmArgs;
+    int maxMemoryMb;
+    int gameWidth;
+    int gameHeight;
+    boolean gameFullscreen;
+    String quickServer;
+    boolean closeAfterLaunch;
+    int processorCount;
+    boolean showGameConsole;
+    boolean backupOnLaunch;
+    int backupKeepCount;
+    boolean backupIncludeMods;
+    final LauncherLogBuffer liveGameLog =
+            new LauncherLogBuffer(ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
+    final PlaytimeTracker playtimeTracker = new PlaytimeTracker();
+    TextArea liveConsoleArea;
+    final StringBuilder pendingConsoleText = new StringBuilder();
+    final AtomicBoolean consoleFlushScheduled = new AtomicBoolean();
+    final AtomicBoolean applicationStopping = new AtomicBoolean();
+    volatile Process activeGameProcess;
+    volatile String activeGameVersion;
     private double windowDragOffsetX;
     private double windowDragOffsetY;
     private final Map<ProgressBar, Timeline> progressAnimations = new HashMap<>();
@@ -260,153 +232,6 @@ public class LauncherUI extends javafx.application.Application {
     private ModBrowserView activeModBrowserView;
     private ServerBrowserView activeServerBrowserView;
     private AppView activeView = AppView.HOME;
-
-    private enum AppView {
-        DOWNLOADS(ICON_LOG, "D", "nav.downloads"),
-        HOME(ICON_HOME, "⌂", "nav.home"),
-        VERSIONS(ICON_STONE_BLOCK, "□", "nav.versions"),
-        MODRINTH(ICON_MODRINTH, "◎", "nav.modrinth"),
-        SERVERS(ICON_SIGNAL, "◈", "nav.servers"),
-        LOGS(ICON_LOG, "▤", "nav.logs"),
-        SETTINGS(ICON_GEAR, "⚙", "nav.settings");
-
-        private final String iconResource;
-        private final String fallbackIcon;
-        private final String labelKey;
-
-        AppView(String iconResource, String fallbackIcon, String labelKey) {
-            this.iconResource = iconResource;
-            this.fallbackIcon = fallbackIcon;
-            this.labelKey = labelKey;
-        }
-
-        public String getLabel() {
-            return Messages.get(labelKey);
-        }
-    }
-
-    private static class ContentTarget {
-        private final String title;
-        private final String subtitle;
-        private final String initial;
-        private final String projectType;
-        private final String[] loaders;
-        private final String[] allowedExtensions;
-        private final boolean downloadDependencies;
-        private final String searchHint;
-        private final Function<String, File> folderResolver;
-
-        private ContentTarget(String title, String subtitle, String initial, String projectType,
-                              String[] loaders, String[] allowedExtensions,
-                              boolean downloadDependencies, String searchHint, Function<String, File> folderResolver) {
-            this.title = title;
-            this.subtitle = subtitle;
-            this.initial = initial;
-            this.projectType = projectType;
-            this.loaders = loaders;
-            this.allowedExtensions = allowedExtensions;
-            this.downloadDependencies = downloadDependencies;
-            this.searchHint = searchHint;
-            this.folderResolver = folderResolver;
-        }
-
-        private boolean usesLoader() {
-            return loaders != null && loaders.length > 0;
-        }
-    }
-
-    /** Fixed-size character ring that retains only the newest log tail without head deletions. */
-    private static final class BoundedLogBuffer {
-        private final char[] chars;
-        private int start;
-        private int size;
-
-        private BoundedLogBuffer(int capacity) {
-            chars = new char[Math.max(1, capacity)];
-        }
-
-        private synchronized void appendLine(String line) {
-            append(line);
-            append(System.lineSeparator());
-        }
-
-        private synchronized void append(CharSequence text) {
-            int textLength = text.length();
-            if (textLength == 0) {
-                return;
-            }
-            int capacity = chars.length;
-
-            if (textLength >= capacity) {
-                // 只保留 text 的最后 capacity 个字符
-                int offset = textLength - capacity;
-                copyIn(text, offset, 0, capacity);
-                start = 0;
-                size = capacity;
-                return;
-            }
-
-            int writePos = (start + size) % capacity;
-            int remaining = capacity - size;
-            if (textLength <= remaining) {
-                // 直接写入尾部空闲区，不淘汰旧数据
-                copyIn(text, 0, writePos, textLength);
-                size += textLength;
-                return;
-            }
-            // 需要淘汰 (textLength - remaining) 个最旧字符：
-            // 先把 text[0..remaining) 写入尾部空闲区，再把 text[remaining..) 写到 start 起始位置（覆盖最旧字符）
-            if (remaining > 0) {
-                copyIn(text, 0, writePos, remaining);
-            }
-            int secondChunk = textLength - remaining;
-            copyIn(text, remaining, start, secondChunk);
-            start = (start + secondChunk) % capacity;
-            size = capacity;
-        }
-
-        private void copyIn(CharSequence text, int textOffset, int destOffset, int length) {
-            if (length <= 0) {
-                return;
-            }
-            int capacity = chars.length;
-            int wrappedDest = destOffset % capacity;
-            if (text instanceof String s) {
-                s.getChars(textOffset, textOffset + length, chars, wrappedDest);
-            } else {
-                int contiguous = capacity - wrappedDest;
-                if (length <= contiguous) {
-                    for (int i = 0; i < length; i++) {
-                        chars[wrappedDest + i] = text.charAt(textOffset + i);
-                    }
-                } else {
-                    for (int i = 0; i < contiguous; i++) {
-                        chars[wrappedDest + i] = text.charAt(textOffset + i);
-                    }
-                    int second = length - contiguous;
-                    for (int i = 0; i < second; i++) {
-                        chars[i] = text.charAt(textOffset + contiguous + i);
-                    }
-                }
-            }
-        }
-
-        private synchronized void clear() {
-            start = 0;
-            size = 0;
-        }
-
-        @Override
-        public synchronized String toString() {
-            StringBuilder result = new StringBuilder(size);
-            int firstPart = Math.min(size, chars.length - start);
-            result.append(chars, start, firstPart);
-            if (firstPart < size) {
-                result.append(chars, 0, size - firstPart);
-            }
-            return result.toString();
-        }
-    }
 
     @Override
     public void start(Stage primaryStage) {
@@ -427,6 +252,10 @@ public class LauncherUI extends javafx.application.Application {
         microsoftAccountStore = new MicrosoftAccountStore();
         minecraftSkinService = new MinecraftSkinService();
         gameLauncher = controller.gameLauncher();
+        microsoftAccounts = new MicrosoftAccountCoordinator(this);
+        skins = new SkinCoordinator(this);
+        gameLaunch = new GameLaunchCoordinator(this);
+        versionActions = new VersionActions(this);
 
         javaPath = settingsManager.get(ECLConfig.KEY_JAVA_PATH);
         gameDir = resolveConfiguredGameRootDir(new File(
@@ -478,7 +307,7 @@ public class LauncherUI extends javafx.application.Application {
         updateRuntimeSummary();
         setStatus(Messages.get("status.ready"), Messages.get("status.ready.detail"));
         if (!Boolean.getBoolean("ecl.snapshot")) {
-            refreshVersions();
+            versionActions.refreshVersions();
             if (!settingsManager.get(ECLConfig.KEY_FIRST_RUN_COMPLETED)) {
                 Platform.runLater(this::showFirstRunWizard);
             }
@@ -515,12 +344,8 @@ public class LauncherUI extends javafx.application.Application {
                         : Messages.format("download.summary.count", active, failed));
                 topTaskLabel.setTooltip(new Tooltip(Messages.get("download.tooltip.open")));
             }
-            if (downloadTaskList != null) downloadTaskList.getItems().setAll(tasks);
-            if (downloadTaskSummaryLabel != null) {
-                downloadTaskSummaryLabel.setText(active == 0
-                        ? (failed == 0 ? Messages.get("download.summary.none")
-                                : Messages.format("download.summary.failed", failed))
-                        : Messages.format("download.summary.active", active));
+            if (downloadTasksPage != null) {
+                downloadTasksPage.updateTasks(tasks);
             }
         };
         if (Platform.isFxApplicationThread()) update.run();
@@ -541,103 +366,12 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private enum LoaderChoice {
-        VANILLA(null, "原版"),
-        FABRIC(ModLoaderInstaller.Loader.FABRIC, "Fabric"),
-        QUILT(ModLoaderInstaller.Loader.QUILT, "Quilt"),
-        FORGE(ModLoaderInstaller.Loader.FORGE, "Forge"),
-        NEOFORGE(ModLoaderInstaller.Loader.NEOFORGE, "NeoForge");
-
-        private final ModLoaderInstaller.Loader loader;
-        private final String displayName;
-
-        LoaderChoice(ModLoaderInstaller.Loader loader, String displayName) {
-            this.loader = loader;
-            this.displayName = displayName;
-        }
-
-        private boolean vanilla() {
-            return loader == null;
-        }
-
-        @Override
-        public String toString() {
-            return displayName;
-        }
-    }
-
     private void showFirstRunWizard() {
-        if (firstRunStage != null && firstRunStage.isShowing()) {
-            firstRunStage.toFront();
-            return;
+        if (firstRunWizard == null) {
+            firstRunWizard = new FirstRunWizard(settingsManager, this::switchLanguage,
+                    this::languageDisplayName, this::applyThemeToScene);
         }
-        List<String> steps = List.of("wizard.welcome", "wizard.java", "wizard.account", "wizard.version");
-        int[] currentStep = {0};
-        Stage wizard = new Stage(StageStyle.DECORATED);
-        firstRunStage = wizard;
-        wizard.setTitle(Messages.get("wizard.title"));
-        wizard.initOwner(primaryStage);
-        wizard.initModality(Modality.WINDOW_MODAL);
-
-        Label progress = new Label();
-        progress.getStyleClass().add("section-kicker");
-        Label body = new Label();
-        body.getStyleClass().add("section-title");
-        body.setWrapText(true);
-
-        ComboBox<String> languageBox = new ComboBox<>();
-        languageBox.getItems().addAll("zh-CN", "zh-TW", "en");
-        languageBox.setValue(Messages.locale().toLanguageTag());
-        configureLocalizedCombo(languageBox, this::languageDisplayName);
-        Button back = createActionButton(Messages.get("wizard.back"), "ghost-button", () -> { });
-        Button skip = createActionButton(Messages.get("wizard.skip"), "ghost-button", () -> finishFirstRun(wizard));
-        Button next = createActionButton(Messages.get("wizard.next"), "primary-button", () -> { });
-        Runnable update = () -> {
-            progress.setText((currentStep[0] + 1) + " / " + steps.size());
-            body.setText(Messages.get(steps.get(currentStep[0])));
-            back.setText(Messages.get("wizard.back"));
-            skip.setText(Messages.get("wizard.skip"));
-            next.setText(Messages.get(currentStep[0] == steps.size() - 1 ? "wizard.finish" : "wizard.next"));
-            back.setDisable(currentStep[0] == 0);
-        };
-        languageBox.setOnAction(event -> {
-            switchLanguage(languageBox.getValue());
-            wizard.setTitle(Messages.get("wizard.title"));
-            update.run();
-        });
-        back.setOnAction(event -> {
-            if (currentStep[0] > 0) currentStep[0]--;
-            update.run();
-        });
-        next.setOnAction(event -> {
-            if (currentStep[0] == steps.size() - 1) finishFirstRun(wizard);
-            else {
-                currentStep[0]++;
-                update.run();
-            }
-        });
-        HBox actions = new HBox(10, skip, new Region(), back, next);
-        HBox.setHgrow(actions.getChildren().get(1), Priority.ALWAYS);
-        actions.setAlignment(Pos.CENTER_RIGHT);
-        VBox root = new VBox(22, progress, body, createControlRow(Messages.get("settings.language"), languageBox), actions);
-        root.getStyleClass().addAll("scene-root", "wizard-root");
-        root.setPadding(new Insets(32));
-        Scene scene = new Scene(root, 620, 330);
-        URL stylesheet = getClass().getResource("/css/launcher.css");
-        if (stylesheet != null) scene.getStylesheets().add(stylesheet.toExternalForm());
-        wizard.setScene(scene);
-        applyThemeToScene(scene, settingsManager.get(ECLConfig.KEY_THEME));
-        wizard.setOnCloseRequest(event -> finishFirstRun(wizard));
-        update.run();
-        wizard.show();
-    }
-
-    private void finishFirstRun(Stage wizard) {
-        settingsManager.set(ECLConfig.KEY_FIRST_RUN_COMPLETED, true);
-        settingsManager.save();
-        wizard.setOnCloseRequest(null);
-        wizard.close();
-        firstRunStage = null;
+        firstRunWizard.show(primaryStage);
     }
 
     private void exportDiagnosticBundle() {
@@ -997,7 +731,7 @@ public class LauncherUI extends javafx.application.Application {
         };
     }
 
-    private void setActiveView(AppView view) {
+    void setActiveView(AppView view) {
         if (view == null || workspacePane == null) {
             return;
         }
@@ -1022,11 +756,11 @@ public class LauncherUI extends javafx.application.Application {
         showNavCandidate(activeView);
     }
 
-    private void renderActiveView() {
+    void renderActiveView() {
         renderActiveView(0);
     }
 
-    private void renderActiveView(int slideDirection) {
+    void renderActiveView(int slideDirection) {
         if (workspacePane == null) {
             return;
         }
@@ -1087,30 +821,9 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private List<ContentTarget> createContentTargets() {
-        return List.of(
-                new ContentTarget(
-                        Messages.get("content.mods.title"), Messages.get("content.mods.subtitle"), "M", "mod",
-                        new String[]{"fabric", "forge", "neoforge", "quilt"}, new String[]{".jar"},
-                        true, Messages.get("content.mods.searchHint"), this::resolveModsDir),
-                new ContentTarget(
-                        Messages.get("content.shaders.title"), Messages.get("content.shaders.subtitle"), "S", "shader",
-                        new String[0], new String[]{".zip"},
-                        false, Messages.get("content.shaders.searchHint"), version -> new File(resolveVersionGameDir(version), "shaderpacks")),
-                new ContentTarget(
-                        Messages.get("content.resourcepacks.title"), Messages.get("content.resourcepacks.subtitle"), "R", "resourcepack",
-                        new String[0], new String[]{".zip"},
-                        false, Messages.get("content.resourcepacks.searchHint"), version -> new File(resolveVersionGameDir(version), "resourcepacks")),
-                new ContentTarget(
-                        Messages.get("content.modpacks.title"), Messages.get("content.modpacks.subtitle"), "P", "modpack",
-                        new String[0], new String[]{".mrpack"},
-                        false, Messages.get("content.modpacks.searchHint"),
-                        version -> new File(resolveVersionGameDir(version), "modpacks")),
-                new ContentTarget(
-                        Messages.get("content.server.title"), Messages.get("content.server.subtitle"), "V", "server",
-                        new String[0], new String[]{".jar"},
-                        false, Messages.get("content.server.searchHint"),
-                        version -> new File(getConfiguredGameRootDir(), "server-downloads"))
-        );
+        return ContentTargetFactory.create(
+                this::resolveModsDir, this::resolveVersionGameDir,
+                this::getConfiguredGameRootDir);
     }
 
     private VBox createUtilityColumn() {
@@ -1261,7 +974,7 @@ public class LauncherUI extends javafx.application.Application {
         selectedVersionTitleLabel.getStyleClass().add("launch-version-big");
 
         selectedRuntimeMetaLabel = new Label(Messages.format("home.runtimeMeta",
-                Runtime.version().feature(), getMemoryDisplayText()));
+                Runtime.version().feature(), gameLaunch.getMemoryDisplayText()));
         selectedRuntimeMetaLabel.getStyleClass().add("launch-version-meta");
 
         launchReadinessLabel = new Label(Messages.get("home.autoCheck"));
@@ -1319,7 +1032,7 @@ public class LauncherUI extends javafx.application.Application {
         Region accountSpacer = new Region();
         VBox.setVgrow(accountSpacer, Priority.ALWAYS);
         Button manageAccount = createLinkButton(Messages.get("home.manageAccount"), () -> expandInstanceSettings(authTypeCombo));
-        homeSkinUploadButton = createLinkButton(Messages.get("home.uploadSkin"), this::chooseAndUploadSkin);
+        homeSkinUploadButton = createLinkButton(Messages.get("home.uploadSkin"), () -> skins.chooseAndUploadSkin());
         Region accountActionSpacer = new Region();
         HBox.setHgrow(accountActionSpacer, Priority.ALWAYS);
         HBox accountActions = new HBox(8, manageAccount, accountActionSpacer, homeSkinUploadButton);
@@ -1342,7 +1055,7 @@ public class LauncherUI extends javafx.application.Application {
                 environmentCheck);
         environmentTitle.setAlignment(Pos.CENTER_LEFT);
         javaSummaryLabel = createValueLabel(Messages.format("home.javaSummary", Runtime.version().feature()));
-        memorySummaryLabel = createValueLabel(getMemoryDisplayText());
+        memorySummaryLabel = createValueLabel(gameLaunch.getMemoryDisplayText());
         versionSummaryLabel = createValueLabel(Messages.get("home.versionPending"));
         environmentCard.getChildren().addAll(
                 environmentLabel,
@@ -1452,140 +1165,20 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private VBox createDownloadTasksPage() {
-        VBox page = createMainPage();
-        downloadTaskSummaryLabel = createBodyText(Messages.get("download.summary.none"));
-
-        downloadTaskList = new ListView<>();
-        downloadTaskList.setPrefHeight(430);
-        downloadTaskList.setPlaceholder(createBodyText(Messages.get("download.placeholder")));
-        downloadTaskList.setCellFactory(list -> new ListCell<>() {
-            @Override
-            protected void updateItem(DownloadTaskCenter.TaskSnapshot item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setGraphic(null);
-                    return;
-                }
-                Label title = new Label(item.title());
-                title.getStyleClass().add("content-title");
-                Label status = new Label(downloadStatusText(item));
-                status.getStyleClass().add("status-detail");
-                Label detail = new Label(item.detail());
-                detail.getStyleClass().add("content-subtitle");
-                detail.setWrapText(true);
-                ProgressBar progress = new ProgressBar(item.progress());
-                progress.setPrefWidth(210);
-                progress.setVisible(item.status() == DownloadTaskCenter.Status.QUEUED
-                        || item.status() == DownloadTaskCenter.Status.RUNNING
-                        || item.status() == DownloadTaskCenter.Status.CANCELLING);
-                Label meta = new Label(downloadTaskMeta(item));
-                meta.getStyleClass().add("content-subtitle");
-                VBox text = new VBox(3, title, status, detail, meta);
-                HBox.setHgrow(text, Priority.ALWAYS);
-
-                Button action = null;
-                if (item.status() == DownloadTaskCenter.Status.QUEUED
-                        || item.status() == DownloadTaskCenter.Status.RUNNING) {
-                    action = createActionButton(Messages.get("download.action.cancel"), "ghost-button",
-                            () -> downloadTaskCenter.cancel(item.id()));
-                } else if (item.status() == DownloadTaskCenter.Status.FAILED
-                        || item.status() == DownloadTaskCenter.Status.CANCELLED) {
-                    action = createActionButton(Messages.get("download.action.retry"), "secondary-button",
-                            () -> downloadTaskCenter.retry(item.id()));
-                }
-                HBox row = new HBox(12, text, progress);
-                if (action != null) row.getChildren().add(action);
-                row.setAlignment(Pos.CENTER_LEFT);
-                row.setPadding(new Insets(8, 4, 8, 4));
-                setGraphic(row);
-            }
-        });
-        downloadTaskList.getItems().setAll(downloadTaskCenter.snapshots());
-
-        ComboBox<Integer> concurrency = new ComboBox<>();
-        concurrency.getItems().addAll(1, 2, 3, 4, 5, 6, 7, 8);
-        concurrency.setValue(downloadTaskCenter.maxConcurrent());
-        concurrency.setOnAction(event -> {
-            Integer value = concurrency.getValue();
-            if (value == null) return;
-            downloadTaskCenter.setMaxConcurrent(value);
-            settingsManager.set(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT, value);
-            settingsManager.save();
-        });
-
-        ComboBox<String> rate = new ComboBox<>();
-        rate.getItems().addAll(Messages.get("download.rate.unlimited"), "256 KB/s", "512 KB/s",
-                "1 MB/s", "2 MB/s", "4 MB/s", "8 MB/s");
-        rate.setValue(downloadRateLabel(downloadTaskCenter.bandwidthLimitBytesPerSecond()));
-        rate.setOnAction(event -> {
-            long bytes = parseDownloadRate(rate.getValue());
-            downloadTaskCenter.setBandwidthLimitBytesPerSecond(bytes);
-            settingsManager.set(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB, (int) (bytes / 1024));
-            settingsManager.save();
-        });
-
-        Button clear = createActionButton(Messages.get("download.action.clear"), "ghost-button",
-                downloadTaskCenter::clearFinished);
-        HBox settings = new HBox(12,
-                createControlRow(Messages.get("download.settings.concurrency"), concurrency),
-                createControlRow(Messages.get("download.settings.speedLimit"), rate), clear);
-        settings.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(settings.getChildren().get(0), Priority.ALWAYS);
-        HBox.setHgrow(settings.getChildren().get(1), Priority.ALWAYS);
-
-        page.getChildren().addAll(
-                createSurface(Messages.get("download.center.title"), Messages.get("download.center.subtitle"),
-                        downloadTaskSummaryLabel, settings),
-                createSurface(Messages.get("download.tasks.title"), Messages.get("download.tasks.subtitle"),
-                        downloadTaskList));
-        return page;
-    }
-
-    private String downloadStatusText(DownloadTaskCenter.TaskSnapshot task) {
-        return switch (task.status()) {
-            case QUEUED -> Messages.get("download.status.queued");
-            case RUNNING -> Messages.get("download.status.running");
-            case CANCELLING -> Messages.get("download.status.cancelling");
-            case COMPLETED -> Messages.get("download.status.completed");
-            case FAILED -> Messages.format("download.status.failed", task.errorMessage());
-            case CANCELLED -> Messages.get("download.status.cancelled");
-        };
-    }
-
-    private String downloadTaskMeta(DownloadTaskCenter.TaskSnapshot task) {
-        String transfer = task.totalBytes() > 0
-                ? formatBytes(task.downloadedBytes()) + " / " + formatBytes(task.totalBytes())
-                : formatBytes(task.downloadedBytes());
-        String speed = task.speedBytesPerSecond() > 0
-                ? " · " + formatBytes(task.speedBytesPerSecond()) + "/s" : "";
-        return Messages.format("download.meta", transfer, speed, task.attempts());
-    }
-
-    private String downloadRateLabel(long bytes) {
-        if (bytes <= 0) return Messages.get("download.rate.unlimited");
-        if (bytes % (1024L * 1024L) == 0) return (bytes / (1024L * 1024L)) + " MB/s";
-        return (bytes / 1024L) + " KB/s";
-    }
-
-    private long parseDownloadRate(String value) {
-        if (value == null || value.equals(Messages.get("download.rate.unlimited"))) return 0;
-        String digits = value.replaceAll("[^0-9]", "");
-        if (digits.isBlank()) return 0;
-        long kb = Long.parseLong(digits);
-        return value.contains("MB") ? kb * 1024L * 1024L : kb * 1024L;
+        downloadTasksPage = new DownloadTasksPage(downloadTaskCenter, settingsManager);
+        return downloadTasksPage;
     }
 
     private VBox createVersionsPage() {
         VBox page = createMainPage();
 
-        Button refreshVersionsButton = createActionButton(Messages.get("button.refresh"), "primary-button", this::refreshVersions);
+        Button refreshVersionsButton = createActionButton(Messages.get("button.refresh"), "primary-button", () -> versionActions.refreshVersions());
         Button installLoaderButton = createActionButton(Messages.get("loader.install"), "primary-button",
                 this::showLoaderInstallDialog);
         Button reinstallButton = createActionButton(Messages.get("version.reinstall"), "secondary-button",
-                this::reinstallSelectedVersion);
+                () -> versionActions.reinstallSelectedVersion());
         Button deleteButton = createActionButton(Messages.get("version.delete"), "secondary-button",
-                this::deleteSelectedVersion);
+                () -> versionActions.deleteSelectedVersion());
         Button chooseVersionButton = createActionButton(Messages.get("button.back"), "secondary-button", () -> setActiveView(AppView.HOME));
         Button openVersionsDirButton = createActionButton(Messages.get("button.openDir"), "ghost-button",
                 () -> openLocalFolder(ECLConfig.getVersionsDir(), "版本目录"));
@@ -1604,7 +1197,7 @@ public class LauncherUI extends javafx.application.Application {
         VBox versionCard = createSurface(
                 Messages.get("version.page.title"),
                 null,
-                createInfoRow(Messages.get("label.currentFilter"), createStaticValueLabel(getSelectedVersionCategory().getLabel())),
+                createInfoRow(Messages.get("label.currentFilter"), createStaticValueLabel(versionActions.getSelectedVersionCategory().getLabel())),
                 createInfoRow(Messages.get("label.currentVersion"), createStaticValueLabel(getSelectedVersion() == null ? Messages.get("label.notSelected") : getSelectedVersion())),
                 createInfoRow(Messages.get("info.localDir"), createStaticValueLabel(ECLConfig.getVersionsDir().getAbsolutePath())),
                 actions
@@ -1638,298 +1231,20 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private Path resolveLauncherExecutable() {
-        String configured = System.getProperty("ecl.executable", "");
-        if (configured.isBlank()) configured = System.getenv("ECL_EXECUTABLE");
-        String runningCommand = ProcessHandle.current().info().command().orElse("");
-        Path codeSource = null;
-        try {
-            codeSource = Path.of(LauncherUI.class.getProtectionDomain().getCodeSource()
-                    .getLocation().toURI());
-        } catch (URISyntaxException | RuntimeException ignored) {
-            // Development launches do not have a packaged executable.
-        }
-        return resolveLauncherExecutableCandidate(configured, runningCommand,
-                Path.of(System.getProperty("user.dir", ".")), codeSource);
+        return LauncherExecutableResolver.resolveCurrent(LauncherUI.class);
     }
 
     static Path resolveLauncherExecutableCandidate(String configured, String runningCommand,
                                                     Path workingDirectory, Path codeSource) {
-        List<Path> candidates = new java.util.ArrayList<>();
-        addExplicitExecutableCandidate(candidates, configured);
-        if (isPackagedEclExecutable(runningCommand)) candidates.add(Path.of(runningCommand));
-        if (workingDirectory != null) candidates.add(workingDirectory.resolve("ECL.exe"));
-        if (codeSource != null) {
-            if (Files.isDirectory(codeSource)) {
-                candidates.add(codeSource.resolve("ECL.exe"));
-            } else if (isPackagedEclExecutable(codeSource.toString())) {
-                candidates.add(codeSource);
-            }
-            if (codeSource.getParent() != null) {
-                candidates.add(codeSource.getParent().resolve("ECL.exe"));
-            }
-        }
-        return candidates.stream().filter(path -> path != null && Files.isRegularFile(path))
-                .map(path -> path.toAbsolutePath().normalize()).findFirst().orElse(null);
-    }
-
-    private static void addExplicitExecutableCandidate(List<Path> candidates, String configured) {
-        if (configured == null || configured.isBlank()) return;
-        Path candidate = Path.of(configured);
-        String fileName = candidate.getFileName() == null ? "" : candidate.getFileName().toString();
-        if (fileName.toLowerCase(Locale.ROOT).endsWith(".exe")) candidates.add(candidate);
-    }
-
-    private static boolean isPackagedEclExecutable(String command) {
-        if (command == null || command.isBlank()) return false;
-        try {
-            Path path = Path.of(command);
-            return path.getFileName() != null
-                    && "ecl.exe".equalsIgnoreCase(path.getFileName().toString());
-        } catch (RuntimeException ignored) {
-            return false;
-        }
+        return LauncherExecutableResolver.resolveCandidate(
+                configured, runningCommand, workingDirectory, codeSource);
     }
 
     private void showBackupManagerDialog() {
-        String profileId = getSelectedVersion();
-        if (profileId == null || profileId.isBlank()) {
-            setStatus("无法打开备份管理", "请先选择一个实例。");
-            return;
-        }
-
-        Stage dialog = new Stage(StageStyle.UTILITY);
-        dialog.initOwner(primaryStage);
-        dialog.initModality(Modality.WINDOW_MODAL);
-        dialog.setTitle("备份管理 · " + profileId);
-        applyWindowIcon(dialog);
-
-        ListView<BackupEntry> backupList = new ListView<>();
-        backupList.setPrefHeight(270);
-        backupList.setPlaceholder(createBodyText("还没有备份。点击“新建备份”保存当前存档。"));
-        backupList.setCellFactory(list -> new ListCell<>() {
-            @Override
-            protected void updateItem(BackupEntry item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setTooltip(null);
-                    return;
-                }
-                String created = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                        .withZone(ZoneId.systemDefault()).format(item.createdAt());
-                setText(created + "    " + formatBytes(item.archiveSize()) + "\n"
-                        + formatBackupContents(item) + " · " + item.files().size() + " 个文件");
-                setTooltip(new Tooltip(item.archivePath().toString()));
-            }
-        });
-
-        CheckBox includeSaves = new CheckBox("存档 saves（必选）");
-        includeSaves.setSelected(true);
-        includeSaves.setDisable(true);
-        CheckBox includeMods = new CheckBox("模组 mods");
-        includeMods.setSelected(backupIncludeMods);
-        CheckBox includeShaders = new CheckBox("光影包 shaderpacks");
-        CheckBox includeResources = new CheckBox("材质包 resourcepacks");
-        CheckBox includeConfig = new CheckBox("配置 config");
-        HBox backupOptions = new HBox(18, includeSaves, includeMods, includeShaders,
-                includeResources, includeConfig);
-        backupOptions.setAlignment(Pos.CENTER_LEFT);
-
-        Label operationStatus = createBodyText("备份保存在 "
-                + worldBackupService.backupDirectory(profileId));
-        ProgressBar operationProgress = new ProgressBar(0);
-        operationProgress.setMaxWidth(Double.MAX_VALUE);
-
-        Button createButton = new Button("新建备份");
-        createButton.getStyleClass().addAll("app-button", "primary-button");
-        Button restoreButton = new Button("恢复所选");
-        restoreButton.getStyleClass().addAll("app-button", "secondary-button");
-        restoreButton.setDisable(true);
-        Button deleteButton = new Button("删除所选");
-        deleteButton.getStyleClass().addAll("app-button", "secondary-button");
-        deleteButton.setDisable(true);
-        Button openDirectoryButton = new Button("打开备份目录");
-        openDirectoryButton.getStyleClass().addAll("app-button", "ghost-button");
-        Button closeButton = new Button("关闭");
-        closeButton.getStyleClass().addAll("app-button", "ghost-button");
-        closeButton.setOnAction(event -> dialog.close());
-        openDirectoryButton.setOnAction(event -> openLocalFolder(
-                worldBackupService.backupDirectory(profileId).toFile(), "备份目录"));
-
-        AtomicBoolean operationRunning = new AtomicBoolean();
-        java.util.function.Consumer<Boolean> setBusy = busy -> {
-            operationRunning.set(busy);
-            createButton.setDisable(busy);
-            openDirectoryButton.setDisable(busy);
-            closeButton.setDisable(busy);
-            boolean noSelection = backupList.getSelectionModel().getSelectedItem() == null;
-            restoreButton.setDisable(busy || noSelection);
-            deleteButton.setDisable(busy || noSelection);
-            backupOptions.setDisable(busy);
-            if (!busy) operationProgress.setProgress(0);
-        };
-        Runnable refreshList = () -> {
-            try {
-                BackupEntry selected = backupList.getSelectionModel().getSelectedItem();
-                backupList.getItems().setAll(worldBackupService.listBackups(profileId));
-                if (selected != null) {
-                    backupList.getItems().stream()
-                            .filter(item -> item.archivePath().equals(selected.archivePath()))
-                            .findFirst().ifPresent(item -> backupList.getSelectionModel().select(item));
-                }
-            } catch (IOException error) {
-                operationStatus.setText("读取备份失败：" + cleanMessage(error));
-            }
-        };
-        backupList.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> {
-            if (!operationRunning.get()) {
-                restoreButton.setDisable(newValue == null);
-                deleteButton.setDisable(newValue == null);
-            }
-        });
-
-        createButton.setOnAction(event -> {
-            Path instanceDirectory = resolveVersionGameDir(profileId).toPath();
-            if (!Files.isDirectory(instanceDirectory)) {
-                operationStatus.setText("实例目录不存在，无法创建备份：" + instanceDirectory);
-                return;
-            }
-            EnumSet<BackupEntry.Content> content = EnumSet.of(BackupEntry.Content.SAVES);
-            if (includeMods.isSelected()) content.add(BackupEntry.Content.MODS);
-            if (includeShaders.isSelected()) content.add(BackupEntry.Content.SHADERPACKS);
-            if (includeResources.isSelected()) content.add(BackupEntry.Content.RESOURCEPACKS);
-            if (includeConfig.isSelected()) content.add(BackupEntry.Content.CONFIG);
-            setBusy.accept(true);
-            operationStatus.setText("正在创建备份…");
-            operationProgress.setProgress(-1);
-            WorldBackupService.ProgressListener progress = createBackupProgressListener(
-                    operationProgress, operationStatus, "正在备份");
-            runAsync("ecl-world-backup-create", () -> {
-                try {
-                    BackupEntry created = worldBackupService.createBackup(profileId,
-                            resolveBackupSourceVersion(profileId), instanceDirectory, content, progress);
-                    Platform.runLater(() -> {
-                        refreshList.run();
-                        backupList.getItems().stream()
-                                .filter(item -> item.archivePath().equals(created.archivePath()))
-                                .findFirst().ifPresent(item -> backupList.getSelectionModel().select(item));
-                        operationStatus.setText("备份已创建：" + created.archivePath().getFileName());
-                        setStatus("实例备份完成", profileId + " · " + formatBytes(created.archiveSize()));
-                        setBusy.accept(false);
-                    });
-                } catch (Exception error) {
-                    LOGGER.warn("Cannot create manual backup for {}", profileId, error);
-                    Platform.runLater(() -> {
-                        operationStatus.setText("备份失败：" + cleanMessage(error));
-                        setBusy.accept(false);
-                    });
-                }
-            });
-        });
-
-        restoreButton.setOnAction(event -> {
-            BackupEntry selected = backupList.getSelectionModel().getSelectedItem();
-            if (selected == null) return;
-            if (isGameProcessRunning()) {
-                operationStatus.setText("游戏正在运行，退出游戏后才能恢复存档。");
-                return;
-            }
-            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                    "将用所选备份替换实例中的“" + formatBackupContents(selected)
-                            + "”。恢复过程会保留可回滚副本，确认继续吗？",
-                    ButtonType.CANCEL, ButtonType.OK);
-            confirm.initOwner(dialog);
-            confirm.setTitle("恢复实例备份");
-            confirm.setHeaderText("恢复 " + selected.archivePath().getFileName());
-            if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
-
-            setBusy.accept(true);
-            operationStatus.setText("正在校验并恢复备份…");
-            operationProgress.setProgress(-1);
-            WorldBackupService.ProgressListener progress = createBackupProgressListener(
-                    operationProgress, operationStatus, "正在恢复");
-            runAsync("ecl-world-backup-restore", () -> {
-                try {
-                    if (isGameProcessRunning()) {
-                        throw new IOException("游戏正在运行，不能恢复实例文件");
-                    }
-                    worldBackupService.restore(selected, resolveVersionGameDir(profileId).toPath(), progress);
-                    Platform.runLater(() -> {
-                        operationStatus.setText("恢复完成：" + selected.archivePath().getFileName());
-                        setStatus("实例备份已恢复", profileId + " 的存档与所选内容已恢复。");
-                        setBusy.accept(false);
-                    });
-                } catch (Exception error) {
-                    LOGGER.warn("Cannot restore backup {}", selected.archivePath(), error);
-                    Platform.runLater(() -> {
-                        operationStatus.setText("恢复失败，原文件已回滚：" + cleanMessage(error));
-                        setBusy.accept(false);
-                    });
-                }
-            });
-        });
-
-        deleteButton.setOnAction(event -> {
-            BackupEntry selected = backupList.getSelectionModel().getSelectedItem();
-            if (selected == null) return;
-            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                    "将永久删除备份文件及其元数据。",
-                    ButtonType.CANCEL, ButtonType.OK);
-            confirm.initOwner(dialog);
-            confirm.setTitle("删除实例备份");
-            confirm.setHeaderText(selected.archivePath().getFileName().toString());
-            if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
-            setBusy.accept(true);
-            operationStatus.setText("正在删除备份…");
-            runAsync("ecl-world-backup-delete", () -> {
-                try {
-                    worldBackupService.deleteBackup(selected);
-                    Platform.runLater(() -> {
-                        refreshList.run();
-                        operationStatus.setText("备份已删除。");
-                        setBusy.accept(false);
-                    });
-                } catch (Exception error) {
-                    Platform.runLater(() -> {
-                        operationStatus.setText("删除失败：" + cleanMessage(error));
-                        setBusy.accept(false);
-                    });
-                }
-            });
-        });
-
-        Region actionSpacer = new Region();
-        HBox.setHgrow(actionSpacer, Priority.ALWAYS);
-        HBox actionBar = new HBox(10, createButton, restoreButton, deleteButton,
-                actionSpacer, openDirectoryButton, closeButton);
-        actionBar.setAlignment(Pos.CENTER_RIGHT);
-        VBox dialogRoot = new VBox(16,
-                createSurface("// " + profileId + " 的存档备份",
-                        "恢复时会先校验压缩包，并为当前文件创建临时回滚副本。", backupList),
-                createSurface("新建备份包含内容", "saves 始终包含，其余目录按需选择", backupOptions),
-                operationStatus, operationProgress, actionBar);
-        dialogRoot.getStyleClass().add("root-pane");
-        dialogRoot.setPadding(new Insets(20));
-        Scene scene = new Scene(dialogRoot, 920, 650);
-        URL stylesheet = getClass().getResource("/css/launcher.css");
-        if (stylesheet != null) scene.getStylesheets().add(stylesheet.toExternalForm());
-        dialog.setScene(scene);
-        applyThemeToScene(scene, settingsManager.get(ECLConfig.KEY_THEME));
-        refreshList.run();
-        dialog.show();
+        new BackupManagerDialog(this).show();
     }
 
-    private String formatBackupContents(BackupEntry backup) {
-        StringBuilder result = new StringBuilder();
-        for (BackupEntry.Content content : BackupEntry.Content.values()) {
-            if (!backup.includedContent().contains(content)) continue;
-            if (!result.isEmpty()) result.append("、");
-            result.append(content.displayName());
-        }
-        return result.toString();
-    }
-
-    private String resolveBackupSourceVersion(String profileId) {
+    String resolveBackupSourceVersion(String profileId) {
         try {
             return versionManager.resolveMinecraftVersionId(profileId);
         } catch (IOException error) {
@@ -1938,367 +1253,8 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private WorldBackupService.ProgressListener createBackupProgressListener(
-            ProgressBar progressBar, Label status, String action) {
-        AtomicLong lastUpdate = new AtomicLong();
-        return (completed, total, entry) -> {
-            long now = System.nanoTime();
-            long previous = lastUpdate.get();
-            if (completed < total && previous != 0 && now - previous < 80_000_000L) return;
-            if (!lastUpdate.compareAndSet(previous, now) && completed < total) return;
-            Platform.runLater(() -> {
-                progressBar.setProgress(total <= 0 ? -1
-                        : Math.max(0, Math.min(1, completed / (double) total)));
-                String current = entry == null || entry.isBlank() ? ""
-                        : " · " + abbreviate(entry, 64);
-                status.setText(action + " " + formatBytes(completed)
-                        + (total > 0 ? " / " + formatBytes(total) : "") + current);
-            });
-        };
-    }
-
     private void showLoaderInstallDialog() {
-        String selected = getSelectedVersion();
-        String minecraftVersion = selected;
-        if (selected != null && !selected.isBlank()) {
-            try {
-                minecraftVersion = versionManager.resolveMinecraftVersionId(selected);
-            } catch (IOException ignored) {
-                minecraftVersion = selected;
-            }
-        }
-
-        Stage dialog = new Stage(StageStyle.UTILITY);
-        dialog.initOwner(primaryStage);
-        dialog.initModality(Modality.WINDOW_MODAL);
-        dialog.setTitle("安装 Mod 加载器");
-        applyWindowIcon(dialog);
-
-        TextField minecraftField = new TextField(minecraftVersion == null ? "" : minecraftVersion);
-        minecraftField.setPromptText("例如 1.21.4");
-        applyFieldStyle(minecraftField);
-        ComboBox<String> loaderField = new ComboBox<>();
-        loaderField.getItems().setAll("Fabric", "Quilt", "Forge", "NeoForge");
-        loaderField.getSelectionModel().selectFirst();
-        applyFieldStyle(loaderField);
-        TextField versionField = new TextField();
-        versionField.setPromptText("留空自动选择最新兼容版本");
-        applyFieldStyle(versionField);
-        Label installStatus = createBodyText(
-                "Fabric / Quilt 使用官方 profile；Forge / NeoForge 会运行官方 installer。");
-
-        Button install = new Button("安装");
-        install.getStyleClass().addAll("app-button", "primary-button");
-        Button cancel = new Button("取消");
-        cancel.getStyleClass().addAll("app-button", "ghost-button");
-        cancel.setOnAction(e -> dialog.close());
-        install.setOnAction(e -> {
-            String gameVersion = minecraftField.getText().trim();
-            if (gameVersion.isBlank()) {
-                installStatus.setText("请填写 Minecraft 版本。");
-                return;
-            }
-            ModLoaderInstaller.Loader loader = switch (loaderField.getValue()) {
-                case "Quilt" -> ModLoaderInstaller.Loader.QUILT;
-                case "Forge" -> ModLoaderInstaller.Loader.FORGE;
-                case "NeoForge" -> ModLoaderInstaller.Loader.NEOFORGE;
-                default -> ModLoaderInstaller.Loader.FABRIC;
-            };
-            install.setDisable(true);
-            cancel.setDisable(true);
-            setControlsBusy(true);
-            startProgressAnimation(downloadProgress);
-            DownloadTaskCenter.TaskHandle<Void> loaderTask = downloadTaskCenter.submit(
-                    "Loader " + loader.displayName(), context -> {
-                try {
-                    ModLoaderInstaller.InstallResult result = modLoaderInstaller.install(
-                            gameVersion, loader, versionField.getText().trim(),
-                            new ModLoaderInstaller.Listener() {
-                                @Override
-                                public void onStatus(String message) {
-                                    context.updateStatus(message);
-                                    Platform.runLater(() -> {
-                                        installStatus.setText(message);
-                                        setStatus("正在安装加载器", message);
-                                    });
-                                }
-
-                                @Override
-                                public void onProgress(long downloaded, long total) {
-                                    context.updateProgress(downloaded, total);
-                                    Platform.runLater(() ->
-                                            updateProgress(downloadProgress, downloaded, total));
-                                }
-                    });
-                    gameRepository().applyDefaultIsolationSettingForNewInstance(result.profileId());
-                    if (context.isCancelled()) return null;
-                    Platform.runLater(() -> {
-                        if (context.isCancelled()) return;
-                        stopProgressAnimation(downloadProgress, true);
-                        setControlsBusy(false);
-                        restoreVersionComboItems(result.profileId());
-                        versionCombo.setValue(result.profileId());
-                        setStatus("加载器安装完成",
-                                result.loader().displayName() + " " + result.loaderVersion()
-                                        + " / Minecraft " + result.minecraftVersion());
-                        dialog.close();
-                        renderActiveView();
-                    });
-                } catch (Exception error) {
-                    boolean cancelled = context.isCancelled() || isCancellation(error);
-                    Platform.runLater(() -> {
-                        stopProgressAnimation(downloadProgress, true);
-                        setControlsBusy(false);
-                        install.setDisable(false);
-                        cancel.setDisable(false);
-                        if (cancelled) {
-                            installStatus.setText(Messages.get("download.status.cancelled"));
-                            setStatus(Messages.get("download.status.cancelled"), "");
-                        } else {
-                            String message = cleanMessage(error);
-                            installStatus.setText(Messages.format("download.status.failed", message));
-                            setStatus(Messages.get("status.downloadFailed"), message);
-                        }
-                    });
-                    throw error;
-                }
-                return null;
-            });
-        });
-
-        HBox buttons = new HBox(10, install, cancel);
-        buttons.setAlignment(Pos.CENTER_RIGHT);
-        VBox root = new VBox(14,
-                createSurface("Minecraft 版本", "加载器必须与游戏版本严格匹配", minecraftField),
-                createSurface("加载器", null, loaderField),
-                createSurface("加载器版本", "通常留空即可", versionField),
-                installStatus, buttons);
-        root.getStyleClass().add("root-pane");
-        root.setPadding(new Insets(20));
-        Scene scene = new Scene(root, 560, 470);
-        URL stylesheet = getClass().getResource("/css/launcher.css");
-        if (stylesheet != null) scene.getStylesheets().add(stylesheet.toExternalForm());
-        dialog.setScene(scene);
-        applyThemeToScene(scene, settingsManager.get(ECLConfig.KEY_THEME));
-        dialog.show();
-    }
-
-    private void deleteSelectedVersion() {
-        String profileId = getSelectedVersion();
-        if (profileId == null || profileId.isBlank()) {
-            setStatus("没有可删除的版本", "请先选择一个版本。");
-            return;
-        }
-        try {
-            com.ecl.util.FileUtil.requireSafeVersionId(profileId);
-        } catch (IOException error) {
-            setStatus("版本 ID 无效", cleanMessage(error));
-            return;
-        }
-        if (isGameProcessRunning()) {
-            setStatus("游戏运行中不能删除版本",
-                    activeGameVersion + " 正在运行，请退出游戏后再删除。");
-            return;
-        }
-        boolean localMetadata;
-        try {
-            localMetadata = com.ecl.util.FileUtil.safeVersionDirectory(
-                    ECLConfig.getVersionsDir(), profileId).isDirectory();
-        } catch (IOException error) {
-            setStatus("版本 ID 无效", cleanMessage(error));
-            return;
-        }
-        boolean localInstance = Files.isDirectory(
-                getConfiguredGameRootDir().toPath().resolve("versions").resolve(profileId));
-        if (!localMetadata && !localInstance) {
-            setStatus("版本尚未安装", profileId + " 没有可删除的本地文件。");
-            return;
-        }
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                "将删除版本文件和独立实例目录（mods、存档、设置、日志）。此操作不可撤销。\n\n"
-                        + profileId,
-                ButtonType.CANCEL, ButtonType.OK);
-        confirm.initOwner(primaryStage);
-        confirm.setTitle("删除版本");
-        confirm.setHeaderText("确认删除当前版本？");
-        if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
-            return;
-        }
-        setStatus("正在删除版本", profileId);
-        runAsync("ecl-delete-version", () -> {
-            try {
-                deleteProfileFiles(profileId, true);
-                Platform.runLater(() -> {
-                    settingsManager.remove(ECLConfig.KEY_SELECTED_VERSION);
-                    settingsManager.save();
-                    restoreVersionComboItems(null);
-                    setStatus("版本已删除", profileId + " 的版本文件和实例数据已移除。");
-                    renderActiveView();
-                });
-            } catch (IOException error) {
-                Platform.runLater(() -> setStatus("删除版本失败", cleanMessage(error)));
-                throw new RuntimeException(error);
-            }
-        });
-    }
-
-    private void reinstallSelectedVersion() {
-        String profileId = getSelectedVersion();
-        if (profileId == null || profileId.isBlank()) {
-            setStatus("没有可重装的版本", "请先选择一个版本。");
-            return;
-        }
-        if (isGameProcessRunning()) {
-            setStatus("游戏运行中不能重装版本",
-                    activeGameVersion + " 正在运行，请退出游戏后再重装。");
-            return;
-        }
-        VersionManager.LocalVersionProfile localProfile = versionManager.getLocalVersionProfiles().stream()
-                .filter(profile -> profile.profileId().equals(profileId))
-                .findFirst().orElse(null);
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                "将重建版本元数据和依赖库；独立实例中的 mods、存档和设置会保留。\n\n" + profileId,
-                ButtonType.CANCEL, ButtonType.OK);
-        confirm.initOwner(primaryStage);
-        confirm.setTitle("重装版本");
-        confirm.setHeaderText("确认重装当前版本？");
-        if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
-            return;
-        }
-        if (localProfile == null) {
-            String manifestUrl = versionManager.getVersionUrl(profileId);
-            if (manifestUrl == null || manifestUrl.isBlank()) {
-                setStatus("拒绝重装未知配置",
-                        profileId + " 不是 Mojang 原版或可识别加载器配置，请先手动备份后处理。");
-                return;
-            }
-            try {
-                deleteProfileFiles(profileId, false);
-                versionCombo.setValue(profileId);
-                setStatus("版本已标记为重装", "点击启动后会重新下载 " + profileId + " 的完整文件。");
-            } catch (IOException error) {
-                setStatus("重装准备失败", cleanMessage(error));
-            }
-            return;
-        }
-        ModLoaderInstaller.Loader loader;
-        try {
-            loader = ModLoaderInstaller.Loader.valueOf(localProfile.loader().toUpperCase(Locale.ROOT));
-        } catch (Exception error) {
-            setStatus("无法自动重装加载器", "无法识别加载器 " + localProfile.loader()
-                    + "，请使用“安装加载器”。");
-            return;
-        }
-        setControlsBusy(true);
-        startProgressAnimation(downloadProgress);
-        String requestedLoaderVersion;
-        try {
-            requestedLoaderVersion = detectInstalledLoaderVersion(profileId, loader);
-        } catch (IOException error) {
-            setControlsBusy(false);
-            stopProgressAnimation(downloadProgress, true);
-            setStatus("无法确定加载器版本", cleanMessage(error));
-            return;
-        }
-        runAsync("ecl-reinstall-" + loader.id(), () -> {
-            try {
-                ModLoaderInstaller.InstallResult result = modLoaderInstaller.install(
-                        localProfile.minecraftVersion(), loader, requestedLoaderVersion,
-                        new ModLoaderInstaller.Listener() {
-                            @Override
-                            public void onStatus(String message) {
-                                Platform.runLater(() -> setStatus("正在重装加载器", message));
-                            }
-
-                            @Override
-                            public void onProgress(long downloaded, long total) {
-                                Platform.runLater(() ->
-                                        updateProgress(downloadProgress, downloaded, total));
-                            }
-                        });
-                gameRepository().applyDefaultIsolationSettingForNewInstance(result.profileId());
-                Platform.runLater(() -> {
-                    stopProgressAnimation(downloadProgress, true);
-                    setControlsBusy(false);
-                    restoreVersionComboItems(profileId);
-                    versionCombo.setValue(profileId);
-                    setStatus("加载器已重装", profileId + "；原加载器版本和实例数据已保留。");
-                    renderActiveView();
-                });
-            } catch (Exception error) {
-                Platform.runLater(() -> {
-                    stopProgressAnimation(downloadProgress, true);
-                    setControlsBusy(false);
-                    setStatus("加载器重装失败", cleanMessage(error));
-                });
-            }
-        });
-    }
-
-    private boolean isGameProcessRunning() {
-        Process process = activeGameProcess;
-        return process != null && process.isAlive();
-    }
-
-    private String detectInstalledLoaderVersion(String profileId,
-                                                ModLoaderInstaller.Loader loader) throws IOException {
-        File jsonFile = com.ecl.util.FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), profileId);
-        com.google.gson.JsonObject json = com.ecl.util.HttpUtil.readJson(jsonFile);
-        com.google.gson.JsonArray libraries = json.has("libraries") && json.get("libraries").isJsonArray()
-                ? json.getAsJsonArray("libraries") : new com.google.gson.JsonArray();
-        for (com.google.gson.JsonElement item : libraries) {
-            if (!item.isJsonObject()) continue;
-            String coordinate = item.getAsJsonObject().has("name")
-                    ? item.getAsJsonObject().get("name").getAsString() : "";
-            String prefix = switch (loader) {
-                case FABRIC -> "net.fabricmc:fabric-loader:";
-                case QUILT -> "org.quiltmc:quilt-loader:";
-                case FORGE -> "net.minecraftforge:forge:";
-                case NEOFORGE -> "net.neoforged:neoforge:";
-            };
-            if (!coordinate.startsWith(prefix)) continue;
-            String version = coordinate.substring(prefix.length());
-            if (loader == ModLoaderInstaller.Loader.FORGE
-                    && version.startsWith(localMinecraftVersion(json) + "-")) {
-                version = version.substring(localMinecraftVersion(json).length() + 1);
-            }
-            if (!version.isBlank()) return version;
-        }
-        throw new IOException("版本配置中没有找到 " + loader.displayName() + " 版本号");
-    }
-
-    private String localMinecraftVersion(com.google.gson.JsonObject json) {
-        String explicit = json.has("eclMinecraftVersion")
-                ? json.get("eclMinecraftVersion").getAsString() : "";
-        return explicit.isBlank() && json.has("inheritsFrom")
-                ? json.get("inheritsFrom").getAsString() : explicit;
-    }
-
-    private void deleteProfileFiles(String profileId, boolean includeInstance) throws IOException {
-        if (profileId.contains("/") || profileId.contains("\\") || profileId.contains("..")) {
-            throw new IOException("版本 ID 无效");
-        }
-        Path metadataRoot = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
-        deleteTreeWithin(metadataRoot, metadataRoot.resolve(profileId));
-        if (includeInstance) {
-            Path instanceRoot = getConfiguredGameRootDir().toPath().toAbsolutePath()
-                    .normalize().resolve("versions").normalize();
-            deleteTreeWithin(instanceRoot, instanceRoot.resolve(profileId));
-        }
-    }
-
-    private void deleteTreeWithin(Path root, Path target) throws IOException {
-        Path normalizedRoot = root.toAbsolutePath().normalize();
-        Path normalizedTarget = target.toAbsolutePath().normalize();
-        if (normalizedTarget.equals(normalizedRoot) || !normalizedTarget.startsWith(normalizedRoot)) {
-            throw new IOException("拒绝删除越界目录: " + target);
-        }
-        if (!Files.exists(normalizedTarget)) return;
-        try (var stream = Files.walk(normalizedTarget)) {
-            for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(path);
-            }
-        }
+        new LoaderInstallDialog(this).show();
     }
 
     private VBox createModrinthPage() {
@@ -3339,24 +2295,16 @@ public class LauncherUI extends javafx.application.Application {
         return page;
     }
 
-    private Button createActionButton(String text, String styleClass, Runnable action) {
-        Button button = new Button(text);
-        button.getStyleClass().addAll("app-button", styleClass);
-        button.setOnAction(e -> action.run());
-        return button;
+    Button createActionButton(String text, String styleClass, Runnable action) {
+        return LauncherUiFactory.actionButton(text, styleClass, action);
     }
 
-    private Label createStaticValueLabel(String text) {
-        Label label = createValueLabel();
-        label.setText(text);
-        return label;
+    Label createStaticValueLabel(String text) {
+        return LauncherUiFactory.valueLabel(text);
     }
 
-    private Label createBodyText(String text) {
-        Label label = new Label(text);
-        label.getStyleClass().add("status-detail");
-        label.setWrapText(true);
-        return label;
+    Label createBodyText(String text) {
+        return LauncherUiFactory.bodyText(text);
     }
 
     private VBox createContentPane() {
@@ -3420,7 +2368,7 @@ public class LauncherUI extends javafx.application.Application {
 
         String previousVersion = versionCombo == null ? settingsManager.get(ECLConfig.KEY_SELECTED_VERSION) : versionCombo.getValue();
         VersionManager.VersionCategory previousCategory = versionTypeCombo == null || versionTypeCombo.getValue() == null
-                ? parseVersionCategory(settingsManager.get(ECLConfig.KEY_VERSION_CATEGORY))
+                ? versionActions.parseVersionCategory(settingsManager.get(ECLConfig.KEY_VERSION_CATEGORY))
                 : versionTypeCombo.getValue();
         String previousAuthType = authTypeCombo == null ? normalizeAuthType(settingsManager.get(ECLConfig.KEY_AUTH_TYPE)) : normalizeAuthType(authTypeCombo.getValue());
         String previousUsername = usernameField == null
@@ -3485,7 +2433,7 @@ public class LauncherUI extends javafx.application.Application {
                 }
             }
             updateRuntimeSummary();
-            updateSelectedVersionWikiButton();
+            versionActions.updateSelectedVersionWikiButton();
             syncLoaderChoiceFromProfile(newValue);
         });
 
@@ -3495,12 +2443,12 @@ public class LauncherUI extends javafx.application.Application {
         versionTypeCombo.setPrefWidth(176);
         versionTypeCombo.setTooltip(new Tooltip("默认显示正式版、预览版/快照和愚人节版，也可以只看某一类"));
         versionTypeCombo.setOnAction(e -> {
-            settingsManager.set(ECLConfig.KEY_VERSION_CATEGORY, getSelectedVersionCategory().name());
+            settingsManager.set(ECLConfig.KEY_VERSION_CATEGORY, versionActions.getSelectedVersionCategory().name());
             if (!settingsManager.save()) {
                 setStatus("设置保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
                 return;
             }
-            refreshVersions();
+                versionActions.refreshVersions();
         });
         applyFieldStyle(versionTypeCombo);
 
@@ -3519,15 +2467,15 @@ public class LauncherUI extends javafx.application.Application {
         installSelectedLoaderButton.setOnAction(event -> installSelectedLoader(null));
 
         selectedVersionWikiButton = createSelectedVersionWikiButton();
-        restoreVersionComboItems(previousVersion);
-        updateSelectedVersionWikiButton();
+        versionActions.restoreVersionComboItems(previousVersion);
+        versionActions.updateSelectedVersionWikiButton();
 
         TextField gameDirField = new TextField(abbreviate(getActiveGameDir().getAbsolutePath(), 72));
         gameDirField.setEditable(false);
         applyFieldStyle(gameDirField);
 
         TextField jvmField = new TextField(extraJvmArgs == null || extraJvmArgs.isBlank()
-                ? "未设置（内存: " + getMemoryDisplayText() + "）"
+                ? "未设置（内存: " + gameLaunch.getMemoryDisplayText() + "）"
                 : extraJvmArgs);
         jvmField.setEditable(false);
         applyFieldStyle(jvmField);
@@ -3545,19 +2493,19 @@ public class LauncherUI extends javafx.application.Application {
         microsoftLoginBtn = new Button("正版登录");
         microsoftLoginBtn.getStyleClass().addAll("app-button", "secondary-button", "compact-button");
         microsoftLoginBtn.setTooltip(new Tooltip("登录 Microsoft 正版 Minecraft Java 版账号"));
-        microsoftLoginBtn.setOnAction(e -> loginMicrosoftAccount());
+        microsoftLoginBtn.setOnAction(e -> microsoftAccounts.loginMicrosoftAccount());
         microsoftAddAccountBtn = new Button("添加账号");
         microsoftAddAccountBtn.getStyleClass().addAll("app-button", "ghost-button", "compact-button");
         microsoftAddAccountBtn.setTooltip(new Tooltip("使用设备码添加另一个 Microsoft 账号"));
-        microsoftAddAccountBtn.setOnAction(e -> addMicrosoftAccount());
+        microsoftAddAccountBtn.setOnAction(e -> microsoftAccounts.addMicrosoftAccount());
         skinUploadBtn = new Button("上传皮肤");
         skinUploadBtn.getStyleClass().addAll("app-button", "ghost-button", "compact-button");
         skinUploadBtn.setTooltip(new Tooltip("上传 PNG 皮肤到当前 Minecraft Java 正版账号"));
-        skinUploadBtn.setOnAction(e -> chooseAndUploadSkin());
+        skinUploadBtn.setOnAction(e -> skins.chooseAndUploadSkin());
         offlineSkinRemoveBtn = new Button("清除皮肤");
         offlineSkinRemoveBtn.getStyleClass().addAll("app-button", "ghost-button", "compact-button");
         offlineSkinRemoveBtn.setTooltip(new Tooltip("移除当前离线账号已导入的本地皮肤"));
-        offlineSkinRemoveBtn.setOnAction(e -> removeOfflineSkin());
+        offlineSkinRemoveBtn.setOnAction(e -> skins.removeOfflineSkin());
         setFieldVisible(offlineSkinRemoveBtn, false);
         microsoftAccountCombo = new ComboBox<>();
         microsoftAccountCombo.setPromptText("选择已保存账号");
@@ -3644,24 +2592,6 @@ public class LauncherUI extends javafx.application.Application {
         return grid;
     }
 
-    private void restoreVersionComboItems(String preferredVersion) {
-        if (versionCombo == null || versionTypeCombo == null || versionManager == null) {
-            return;
-        }
-        try {
-            List<String> versions = versionManager.mergeLocalLoaderProfiles(
-                    versionManager.getVersions(getSelectedVersionCategory()));
-            versionCombo.getItems().setAll(versions);
-            if (preferredVersion != null && versions.contains(preferredVersion)) {
-                versionCombo.getSelectionModel().select(preferredVersion);
-            } else if (!versions.isEmpty()) {
-                versionCombo.getSelectionModel().select(0);
-            }
-        } catch (Exception e) {
-            LOGGER.warn("Failed to restore version choices", e);
-        }
-    }
-
     private VBox createLoaderSelectionPage(String profileId, String minecraftVersion) {
         VBox page = createMainPage();
         VBox guidance = new VBox(12,
@@ -3708,7 +2638,7 @@ public class LauncherUI extends javafx.application.Application {
         updateLoaderControls();
     }
 
-    private LoaderChoice loaderChoiceForProfile(String profileId) {
+    LoaderChoice loaderChoiceForProfile(String profileId) {
         if (profileId == null || profileId.isBlank()) {
             return LoaderChoice.VANILLA;
         }
@@ -3765,7 +2695,7 @@ public class LauncherUI extends javafx.application.Application {
         updateLoaderControls();
     }
 
-    private void updateLoaderControls() {
+    void updateLoaderControls() {
         if (loaderChoiceCombo == null) {
             return;
         }
@@ -3789,7 +2719,7 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private void installSelectedLoader(Runnable afterSuccess) {
+    void installSelectedLoader(Runnable afterSuccess) {
         LoaderChoice requested = loaderChoiceCombo == null ? null : loaderChoiceCombo.getValue();
         String selectedProfile = versionCombo == null ? null : versionCombo.getValue();
         if (requested == null || requested.vanilla()) {
@@ -3836,7 +2766,7 @@ public class LauncherUI extends javafx.application.Application {
                 Platform.runLater(() -> {
                     stopProgressAnimation(downloadProgress, true);
                     setControlsBusy(false);
-                    restoreVersionComboItems(result.profileId());
+                    versionActions.restoreVersionComboItems(result.profileId());
                     versionCombo.setValue(result.profileId());
                     syncLoaderChoiceFromProfile(result.profileId());
                     setStatus("加载器安装完成", result.loader().displayName() + " "
@@ -3870,20 +2800,20 @@ public class LauncherUI extends javafx.application.Application {
         };
     }
 
-    private Button createSelectedVersionWikiButton() {
+    Button createSelectedVersionWikiButton() {
         Button button = new Button("更新说明");
         button.getStyleClass().addAll("app-button", "wiki-link-button");
         button.setTooltip(new Tooltip("打开 mc 中文 Wiki 的当前版本更新介绍"));
-        button.setOnAction(e -> openMinecraftWikiVersionPage(getSelectedVersion()));
+        button.setOnAction(e -> versionActions.openMinecraftWikiVersionPage(getSelectedVersion()));
         return button;
     }
 
-    private void updateSelectedVersionWikiButton() {
+    void updateSelectedVersionWikiButton() {
         if (selectedVersionWikiButton == null) {
             return;
         }
         String version = getSelectedVersion();
-        boolean supported = isWikiSupportedVersion(version);
+        boolean supported = versionActions.isWikiSupportedVersion(version);
         boolean comboBusy = versionCombo != null && versionCombo.isDisabled();
         selectedVersionWikiButton.setDisable(comboBusy || !supported);
         selectedVersionWikiButton.setTooltip(new Tooltip(supported
@@ -3899,7 +2829,7 @@ public class LauncherUI extends javafx.application.Application {
         launchBtn.setGraphicTextGap(10);
         launchBtn.getStyleClass().addAll("app-button", "launch-button");
         launchBtn.setDefaultButton(true);
-        launchBtn.setOnAction(e -> launchGame());
+        launchBtn.setOnAction(e -> gameLaunch.launchGame());
         updateLoaderControls();
 
         Button switchInstanceButton = createLinkButton(
@@ -3908,7 +2838,7 @@ public class LauncherUI extends javafx.application.Application {
 
         refreshBtn = new Button("刷新版本");
         refreshBtn.getStyleClass().addAll("app-button", "secondary-button");
-        refreshBtn.setOnAction(e -> refreshVersions());
+        refreshBtn.setOnAction(e -> versionActions.refreshVersions());
         setFieldVisible(refreshBtn, false);
 
         settingsBtn = new Button("高级设置");
@@ -3922,7 +2852,7 @@ public class LauncherUI extends javafx.application.Application {
         return buttonBar;
     }
 
-    private void updateAuthFields() {
+    void updateAuthFields() {
         String authType = authTypeCombo.getValue();
         boolean microsoft = AUTH_MICROSOFT.equals(authType);
         boolean yggdrasil = AUTH_YGGDRASIL.equals(authType);
@@ -3971,7 +2901,7 @@ public class LauncherUI extends javafx.application.Application {
         updateRuntimeSummary();
     }
 
-    private void updateOfflineSkinControls() {
+    void updateOfflineSkinControls() {
         if (offlineSkinRemoveBtn == null) {
             return;
         }
@@ -3980,7 +2910,7 @@ public class LauncherUI extends javafx.application.Application {
         offlineSkinRemoveBtn.setDisable(false);
     }
 
-    private boolean offlineSkinExists() {
+    boolean offlineSkinExists() {
         String username = usernameField.getText() == null ? "" : usernameField.getText().trim();
         if (username.isBlank()) {
             return false;
@@ -3990,7 +2920,7 @@ public class LauncherUI extends javafx.application.Application {
                 .isPresent();
     }
 
-    private void updateRuntimeSummary() {
+    void updateRuntimeSummary() {
         String launcherJava = "启动器 Java " + Runtime.version().feature();
         if (javaSummaryLabel != null) {
             javaSummaryLabel.setText(launcherJava);
@@ -4013,7 +2943,7 @@ public class LauncherUI extends javafx.application.Application {
                     ? Messages.get("home.selectVersion")
                     : versionDisplay);
         }
-        String memoryText = getMemoryDisplayText();
+        String memoryText = gameLaunch.getMemoryDisplayText();
         if (selectedRuntimeMetaLabel != null) {
             selectedRuntimeMetaLabel.setText(Messages.format("home.runtimeMeta", launcherJava, memoryText));
         }
@@ -4061,7 +2991,7 @@ public class LauncherUI extends javafx.application.Application {
         }
 
         String readiness = Messages.get("home.readiness.pendingInstance");
-        if (isGameProcessRunning()) {
+        if (gameLaunch.isGameProcessRunning()) {
             readiness = Messages.get("home.readiness.running");
         } else if (selectedVersion != null && !selectedVersion.isBlank()) {
             readiness = versionManager.isVersionDownloaded(selectedVersion)
@@ -4071,51 +3001,7 @@ public class LauncherUI extends javafx.application.Application {
         if (launchReadinessLabel != null) {
             launchReadinessLabel.setText("●  " + readiness);
         }
-        updatePlaytimeSummary();
-    }
-
-    private void updatePlaytimeSummary() {
-        if (playtimeTotalLabel == null || versionCombo == null) return;
-        String selected = versionCombo.getValue();
-        if (selected == null || selected.isBlank()) {
-            playtimeTotalLabel.setText(Messages.get("label.notSelected"));
-            playtimeRecentLabel.setText(Messages.get("playtime.never"));
-            playtimeLaunchCountLabel.setText("0");
-            return;
-        }
-        try {
-            PlaytimeTracker.PlaytimeStats stats = playtimeTracker.stats(
-                    resolveVersionInstanceRoot(selected).toPath());
-            playtimeTotalLabel.setText(formatPlaytime(stats.totalSeconds()));
-            playtimeRecentLabel.setText(stats.lastLaunchedAt().isBlank() ? Messages.get("playtime.never")
-                    : DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-                            .withZone(ZoneId.systemDefault())
-                            .format(Instant.parse(stats.lastLaunchedAt())));
-            playtimeLaunchCountLabel.setText(String.valueOf(stats.launchCount()));
-        } catch (IOException | RuntimeException error) {
-            playtimeTotalLabel.setText(Messages.get("playtime.unavailable"));
-            playtimeRecentLabel.setText("-");
-            playtimeLaunchCountLabel.setText("-");
-        }
-    }
-
-    private String formatPlaytime(long seconds) {
-        long hours = Math.max(0, seconds) / 3600;
-        long minutes = (Math.max(0, seconds) % 3600) / 60;
-        return hours > 0 ? hours + "h " + minutes + "m" : minutes + "m";
-    }
-
-    private int getEffectiveMaxMemoryMb() {
-        return maxMemoryMb == ECLConfig.AUTO_MEMORY_MB
-                ? ECLConfig.calculateAutoMemoryMb()
-                : maxMemoryMb;
-    }
-
-    private String getMemoryDisplayText() {
-        int effectiveMemoryMb = getEffectiveMaxMemoryMb();
-        return maxMemoryMb == ECLConfig.AUTO_MEMORY_MB
-                ? "自动 " + effectiveMemoryMb + " MB"
-                : effectiveMemoryMb + " MB";
+        gameLaunch.updatePlaytimeSummary();
     }
 
     private String getAuthDisplayName() {
@@ -4154,7 +3040,7 @@ public class LauncherUI extends javafx.application.Application {
         label.setTooltip((value == null || value.isBlank()) ? null : new Tooltip(value));
     }
 
-    private void setStatus(String title, String detail) {
+    void setStatus(String title, String detail) {
         String safeTitle = title == null || title.isBlank() ? "暂无任务" : title.trim();
         String safeDetail = detail == null || detail.isBlank() ? "" : detail.trim();
         if (statusLabel != null) {
@@ -4177,7 +3063,7 @@ public class LauncherUI extends javafx.application.Application {
                         || task.status() == DownloadTaskCenter.Status.FAILED);
     }
 
-    private void startProgressAnimation(ProgressBar progressBar) {
+    void startProgressAnimation(ProgressBar progressBar) {
         if (progressBar == null) {
             return;
         }
@@ -4193,7 +3079,7 @@ public class LauncherUI extends javafx.application.Application {
         advanceProgressPulse(progressBar);
     }
 
-    private void updateProgress(ProgressBar progressBar, long downloaded, long total) {
+    void updateProgress(ProgressBar progressBar, long downloaded, long total) {
         if (progressBar == null) {
             return;
         }
@@ -4206,7 +3092,7 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private void stopProgressAnimation(ProgressBar progressBar, boolean hide) {
+    void stopProgressAnimation(ProgressBar progressBar, boolean hide) {
         if (progressBar == null) {
             return;
         }
@@ -4239,64 +3125,6 @@ public class LauncherUI extends javafx.application.Application {
         progressBar.getProperties().put("pulse-step", (step + 1) % 3);
     }
 
-    private void refreshVersions() {
-        VersionManager.VersionCategory category = getSelectedVersionCategory();
-        String categoryLabel = category.getLabel();
-        refreshBtn.setDisable(true);
-        versionCombo.setDisable(true);
-        versionTypeCombo.setDisable(true);
-        updateSelectedVersionWikiButton();
-        setStatus("正在获取版本列表...", "正在加载 " + categoryLabel + "，失败时会回退到本地缓存。 ");
-
-        runAsync("ecl-refresh-versions", () -> {
-            try {
-                versionManager.refresh();
-                List<String> versions = versionManager.mergeLocalLoaderProfiles(
-                        versionManager.getVersions(category));
-                Platform.runLater(() -> {
-                    String current = versionCombo.getValue();
-                    versionCombo.getItems().setAll(versions);
-                    if (current != null && versions.contains(current)) {
-                        versionCombo.getSelectionModel().select(current);
-                    } else if (!versions.isEmpty()) {
-                        versionCombo.getSelectionModel().select(0);
-                    }
-                    setStatus("版本列表已更新", versions.isEmpty() ? "没有发现可用的" + categoryLabel + "。" : "已载入 " + versions.size() + " 个" + categoryLabel + "。 ");
-                    refreshBtn.setDisable(false);
-                    versionCombo.setDisable(false);
-                    versionTypeCombo.setDisable(false);
-                    updateRuntimeSummary();
-                    updateSelectedVersionWikiButton();
-                });
-            } catch (Exception e) {
-                Platform.runLater(() -> {
-                    setStatus("获取版本列表失败", cleanMessage(e));
-                    refreshBtn.setDisable(false);
-                    versionCombo.setDisable(false);
-                    versionTypeCombo.setDisable(false);
-                    updateRuntimeSummary();
-                    updateSelectedVersionWikiButton();
-                });
-            }
-        });
-    }
-
-    private VersionManager.VersionCategory getSelectedVersionCategory() {
-        if (versionTypeCombo == null || versionTypeCombo.getValue() == null) {
-            return VersionManager.VersionCategory.FEATURED;
-        }
-        return versionTypeCombo.getValue();
-    }
-
-    private VersionManager.VersionCategory parseVersionCategory(String value) {
-        try {
-            return VersionManager.VersionCategory.valueOf(value);
-        } catch (Exception e) {
-            LOGGER.debug("Invalid saved version category: {}", value, e);
-            return VersionManager.VersionCategory.FEATURED;
-        }
-    }
-
     private String normalizeAuthType(String value) {
         if (AUTH_MICROSOFT.equals(value) || AUTH_YGGDRASIL.equals(value) || AUTH_OFFLINE.equals(value)) {
             return value;
@@ -4320,829 +3148,13 @@ public class LauncherUI extends javafx.application.Application {
         };
     }
 
-    private void launchGame() {
-        String selectedVersion = versionCombo.getValue();
-        if (selectedVersion == null || selectedVersion.isBlank()) {
-            setStatus("请选择游戏版本", "先刷新并选择一个可启动的 Minecraft 版本。 ");
-            return;
-        }
-        LoaderChoice requestedLoader = loaderChoiceCombo == null
-                ? LoaderChoice.VANILLA : loaderChoiceCombo.getValue();
-        if (requestedLoader != null && !requestedLoader.vanilla()
-                && loaderChoiceForProfile(selectedVersion) != requestedLoader) {
-            installSelectedLoader(this::launchGame);
-            return;
-        }
-
-        if (lastContentVersion != null && !lastContentVersion.equals(selectedVersion)
-                && versionManager.isVersionDownloaded(lastContentVersion)) {
-            setStatus("注意：启动版本与已下载内容的版本不一致",
-                    "模组 / 光影 / 材质包已下载到 " + lastContentVersion
-                            + " 的实例目录，当前将启动 " + selectedVersion
-                            + "，这些内容不会被加载。可切换到 " + lastContentVersion + " 再启动。 ");
-        }
-
-        String configuredJavaPath = javaPath == null ? "" : javaPath.trim();
-        if (!configuredJavaPath.isBlank() && !JavaRuntimeUtil.isUsableJavaPath(configuredJavaPath)) {
-            setStatus("Java 路径无效", "高级设置里的 Java 路径不可用，请重新选择 java.exe 或 JDK 根目录。 ");
-            return;
-        }
-
-        if (configuredJavaPath.isBlank()) {
-            javaPath = "";
-        }
-
-        settingsManager.set(ECLConfig.KEY_JAVA_PATH, javaPath);
-        settingsManager.set(ECLConfig.KEY_GAME_DIR, gameDir.getAbsolutePath());
-        settingsManager.set(ECLConfig.KEY_JVM_ARGS, extraJvmArgs == null ? "" : extraJvmArgs);
-        settingsManager.set(ECLConfig.KEY_MAX_MEMORY_MB, maxMemoryMb);
-        settingsManager.set(ECLConfig.KEY_SELECTED_VERSION, selectedVersion);
-        settingsManager.set(ECLConfig.KEY_AUTH_TYPE, authTypeCombo.getValue());
-        settingsManager.set(ECLConfig.KEY_USERNAME, usernameField.getText().trim());
-        if (AUTH_YGGDRASIL.equals(authTypeCombo.getValue())) {
-            settingsManager.set(ECLConfig.KEY_YGGDRASIL_SERVER, yggdrasilServerField.getText().trim());
-        }
-        if (!settingsManager.save()) {
-            setStatus("设置保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
-            return;
-        }
-        updateRuntimeSummary();
-
-        if (!versionManager.isVersionDownloaded(selectedVersion)) {
-            downloadAndLaunch(selectedVersion);
-        } else {
-            startGame(selectedVersion);
-        }
-    }
-
-    private void downloadAndLaunch(String version) {
-        VersionManager.VersionDownloadTarget downloadTarget;
-        try {
-            downloadTarget = versionManager.resolveDownloadTarget(version);
-        } catch (IOException error) {
-            setStatus("无法解析基础版本", cleanMessage(error));
-            return;
-        }
-        String downloadVersion = downloadTarget.downloadVersionId();
-        String url = downloadTarget.versionUrl();
-        if (url == null || url.isBlank()) {
-            setStatus("找不到基础版本下载地址",
-                    version + " 需要 " + downloadVersion
-                            + "，但当前 Mojang 版本清单中没有该版本。请刷新版本列表后重试。");
-            return;
-        }
-
-        setControlsBusy(true);
-        downloadProgress.setProgress(0);
-        startProgressAnimation(downloadProgress);
-        setStatus("正在准备下载",
-                version.equals(downloadVersion)
-                        ? version + " 首次启动需要补齐客户端、依赖库和资源文件。"
-                        : version + " 将继承 " + downloadVersion
-                                + "，正在补齐基础客户端、依赖库和资源文件。");
-
-        DownloadTaskCenter.TaskHandle<Void> task = downloadTaskCenter.submit(
-                "Minecraft " + downloadVersion, context -> {
-                    AtomicReference<String> downloadFailure = new AtomicReference<>();
-                    downloader.setListener(new GameDownloader.DownloadListener() {
-                        @Override
-                        public void onStatus(String message) {
-                            context.updateStatus(message);
-                            Platform.runLater(() -> setStatus("下载中", message));
-                        }
-
-                        @Override
-                        public void onProgress(long downloaded, long total) {
-                            context.updateProgress(downloaded, total);
-                            Platform.runLater(() -> {
-                                updateProgress(downloadProgress, downloaded, total);
-                                detailLabel.setText("当前进度: " + formatBytes(downloaded)
-                                        + (total > 0 ? " / " + formatBytes(total) : ""));
-                            });
-                        }
-
-                        @Override
-                        public void onError(String message) {
-                            downloadFailure.set(message);
-                            Platform.runLater(() -> {
-                                if (context.isCancelled()) return;
-                                setStatus("下载失败", message);
-                                stopProgressAnimation(downloadProgress, true);
-                                setControlsBusy(false);
-                            });
-                        }
-
-                        @Override
-                        public void onComplete() {
-                            Platform.runLater(() -> {
-                                if (context.isCancelled()) return;
-                                downloadProgress.setProgress(1);
-                                stopProgressAnimation(downloadProgress, true);
-                                if (!versionManager.isVersionDownloaded(version)) {
-                                    setStatus("基础版本仍不完整",
-                                            downloadVersion + " 下载完成，但 " + version
-                                                    + " 的继承客户端仍不可用，请检查版本配置。");
-                                    setControlsBusy(false);
-                                    return;
-                                }
-                                setStatus("下载完成",
-                                        downloadVersion + " 已就绪，准备启动 " + version + "。");
-                                try {
-                                    gameRepository().applyDefaultIsolationSettingForNewInstance(version);
-                                } catch (IOException error) {
-                                    LOGGER.warn("Cannot persist default isolation for {}", version, error);
-                                }
-                                startGame(version);
-                            });
-                        }
-                    });
-                    context.registerCancellation(downloader::cancelDownload);
-                    Future<?> future = downloader.downloadVersionAsync(downloadVersion, url);
-                    future.get();
-                    String failure = downloadFailure.get();
-                    if (failure != null && !failure.isBlank()) throw new IOException(failure);
-                    return null;
-                });
-        task.completion().whenComplete((ignored, error) -> Platform.runLater(() -> {
-            if (error == null) return;
-            stopProgressAnimation(downloadProgress, true);
-            if (isCancellation(error)) {
-                setStatus(Messages.get("download.status.cancelled"), cleanMessage(error));
-            } else {
-                setStatus(Messages.get("download.status.failedTitle"), cleanMessage(error));
-            }
-            setControlsBusy(false);
-        }));
-    }
-
-    private void startGame(String version) {
-        String authType = authTypeCombo.getValue();
-        String server = yggdrasilServerField.getText().trim();
-        String username = usernameField.getText().trim();
-        AtomicReference<String> passwordRef = new AtomicReference<>(passwordField.getText());
-        passwordField.clear(); // 尽快清除 UI 中的密码，减少敏感数据驻留时间
-
-        setControlsBusy(true);
-        stopProgressAnimation(downloadProgress, true);
-        setStatus("正在启动游戏...", "准备认证、拼接类路径并拉起客户端进程。 ");
-
-        runAsync("ecl-launch-game", () -> {
-            File launchDir = resolveVersionGameDir(version);
-            String password = passwordRef.getAndSet(null);
-            try {
-                ensureVersionGameDirs(version);
-                AuthProvider auth = buildAuthProvider(authType, server, username, password);
-                password = null;
-                OfflineSkin offlineSkin = auth.getType() == com.ecl.auth.AuthType.OFFLINE
-                        ? new OfflineSkinStore()
-                                .find(OfflineSkinStore.identityForOffline(auth.getUsername()))
-                                .orElse(null)
-                        : null;
-                LaunchOptions options = LaunchOptions.builder()
-                        .versionId(version)
-                        .auth(auth)
-                        .offlineSkin(offlineSkin)
-                        .gameDirectory(launchDir)
-                        .instanceDirectory(resolveVersionInstanceRoot(version))
-                        .environment(controller.launchEnvironment())
-                        .maxMemoryMb(getEffectiveMaxMemoryMb())
-                        .jvmArguments(TextUtil.parseCommandLine(
-                                extraJvmArgs == null ? "" : extraJvmArgs))
-                        .javaExecutablePath(javaPath)
-                        .gameResolution(gameWidth, gameHeight)
-                        .fullscreen(gameFullscreen)
-                        .serverAddress(quickServer)
-                        .processorCount(processorCount)
-                        .build();
-                createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
-                controller.invalidateLaunchVersion(version);
-                GameProcess gameProcess = gameLauncher.launch(options);
-                Process process = gameProcess.process();
-                long launchStartedAt = process.info().startInstant()
-                        .map(Instant::toEpochMilli)
-                        .orElseGet(System::currentTimeMillis);
-                try {
-                    playtimeTracker.recordLaunch(resolveVersionInstanceRoot(version).toPath(), launchStartedAt);
-                } catch (IOException statsError) {
-                    LOGGER.warn("Cannot record launch statistics for {}", version, statsError);
-                }
-                activeGameProcess = process;
-                activeGameVersion = version;
-                UUID runningInstanceId = registerRunningModInstance(version);
-                boolean minimizeThisLaunch = closeAfterLaunch;
-
-                runOnUiIfActive(() -> {
-                    setStatus("游戏已启动", version + " 正在运行，实例目录: " + launchDir.getAbsolutePath());
-                    updateRuntimeSummary();
-                    setControlsBusy(false);
-                    if (showGameConsole) {
-                        setActiveView(AppView.LOGS);
-                    }
-                    if (minimizeThisLaunch) {
-                        primaryStage.setIconified(true);
-                    }
-                });
-                monitorGameProcess(gameProcess, version, launchDir, launchStartedAt,
-                        runningInstanceId, minimizeThisLaunch);
-            } catch (Exception e) {
-                runOnUiIfActive(() -> {
-                    CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
-                    setStatus("启动失败", report.getTitle());
-                    showGameErrorDialog(report);
-                    setControlsBusy(false);
-                });
-            } finally {
-                password = null;
-                passwordRef.set(null);
-            }
-        });
-    }
-
-    private void createAutomaticBackupBeforeLaunch(String profileId, Path instanceDirectory) {
-        if (!backupOnLaunch) return;
-        EnumSet<BackupEntry.Content> content = EnumSet.of(BackupEntry.Content.SAVES);
-        if (backupIncludeMods) content.add(BackupEntry.Content.MODS);
-        try {
-            BackupEntry created = worldBackupService.createBackup(profileId,
-                    resolveBackupSourceVersion(profileId), instanceDirectory, content, null);
-            List<BackupEntry> removed = worldBackupService.prune(profileId, backupKeepCount);
-            LOGGER.info("Created pre-launch backup {} for {} ({} bytes); pruned {} old backups",
-                    created.archivePath(), profileId, created.archiveSize(), removed.size());
-        } catch (Exception error) {
-            LOGGER.warn("Pre-launch backup failed for {}; game launch will continue",
-                    profileId, error);
-        }
-    }
-
-    private UUID registerRunningModInstance(String version) {
-        try {
-            ModInstanceContext instance = VersionProfileModInstanceContext.load(
-                    version,
-                    ECLConfig.getVersionsDir().toPath(),
-                    getConfiguredGameRootDir().toPath(),
-                    resolveVersionGameDir(version).toPath());
-            controller.registerModInstance(instance);
-            controller.setInstanceRunning(instance.instanceId(), true);
-            return instance.instanceId();
-        } catch (Exception e) {
-            LOGGER.warn("Cannot register running mod instance for {}", version, e);
-            return null;
-        }
-    }
-
-    private void monitorGameProcess(GameProcess gameProcess, String version, File launchDir,
-                                    long launchStartedAt,
-                                    UUID runningInstanceId, boolean restoreLauncher) {
-        // 守护线程：关闭启动器窗口后进程能立即退出，不会被该监控线程拖住；
-        // 游戏本体是独立进程，启动器退出不影响其继续运行。
-        Thread.ofPlatform().name("ecl-monitor-game-" + version).daemon(true).start(() -> {
-            BoundedLogBuffer output = new BoundedLogBuffer(ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
-            com.ecl.launch.ProcessOutputListener outputListener = line -> {
-                output.appendLine(line);
-                appendGameConsoleLine(line);
-            };
-            gameProcess.attachOutputListener(outputListener);
-            Process process = gameProcess.process();
-            try {
-                int exitCode = process.waitFor();
-                if (exitCode == 0) {
-                    runOnUiIfActive(() -> setStatus("游戏已正常退出", version + " 退出码 0。"));
-                    return;
-                }
-
-                CrashAnalyzer.Report report = CrashAnalyzer.analyzeGameExit(version, exitCode, output.toString(), launchDir, launchStartedAt);
-                runOnUiIfActive(() -> {
-                    setStatus("游戏异常退出", report.getTitle());
-                    showGameErrorDialog(report);
-                });
-            } catch (Exception e) {
-                CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
-                runOnUiIfActive(() -> {
-                    setStatus("错误分析失败", report.getTitle());
-                    showGameErrorDialog(report);
-                });
-            } finally {
-                gameProcess.detachOutputListener(outputListener);
-                try {
-                    playtimeTracker.recordSession(resolveVersionInstanceRoot(version).toPath(),
-                            launchStartedAt, System.currentTimeMillis());
-                } catch (IOException statsError) {
-                    LOGGER.warn("Cannot record playtime statistics for {}", version, statsError);
-                }
-                if (runningInstanceId != null) {
-                    controller.setInstanceRunning(runningInstanceId, false);
-                }
-                if (activeGameProcess == process) {
-                    activeGameProcess = null;
-                    activeGameVersion = null;
-                }
-                runOnUiIfActive(() -> {
-                    updateRuntimeSummary();
-                    if (restoreLauncher) {
-                        primaryStage.setIconified(false);
-                        primaryStage.show();
-                        primaryStage.toFront();
-                    }
-                });
-            }
-        });
-    }
-
-    private void runOnUiIfActive(Runnable action) {
-        if (applicationStopping.get()) return;
-        Platform.runLater(() -> {
-            if (!applicationStopping.get()) action.run();
-        });
-    }
-
-    private void appendGameConsoleLine(String line) {
-        liveGameLog.appendLine(line);
-        if (applicationStopping.get()) return;
-        synchronized (pendingConsoleText) {
-            pendingConsoleText.append(line).append(System.lineSeparator());
-            int excess = pendingConsoleText.length() - ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS;
-            if (excess > 0) {
-                pendingConsoleText.delete(0, excess);
-            }
-        }
-        if (consoleFlushScheduled.compareAndSet(false, true)) {
-            Platform.runLater(this::flushPendingConsoleText);
-        }
-    }
-
-    private void flushPendingConsoleText() {
-        String batch;
-        synchronized (pendingConsoleText) {
-            batch = pendingConsoleText.toString();
-            pendingConsoleText.setLength(0);
-        }
-        consoleFlushScheduled.set(false);
-        TextArea area = liveConsoleArea;
-        if (area != null && !batch.isEmpty()) {
-            area.appendText(batch);
-            int excess = area.getLength() - ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS;
-            if (excess > 0) area.deleteText(0, excess);
-            area.positionCaret(area.getLength());
-        }
-        synchronized (pendingConsoleText) {
-            if (pendingConsoleText.length() > 0
-                    && consoleFlushScheduled.compareAndSet(false, true)) {
-                Platform.runLater(this::flushPendingConsoleText);
-            }
-        }
-    }
-
-    private void showGameErrorDialog(CrashAnalyzer.Report report) {
-        CrashDiagnosticDialog.show(primaryStage, report, resolveModsDir(getSelectedVersion()),
-                folder -> openLocalFolder(folder, "诊断目录"));
-    }
-
-    private void loginMicrosoftAccount() {
-        authTypeCombo.setValue(AUTH_MICROSOFT);
-        updateAuthFields();
-        setControlsBusy(true);
-        setStatus("微软正版登录", "正在尝试恢复已保存的 Microsoft 登录状态。");
-
-        runAsync("ecl-login-microsoft", () -> {
-            try {
-                MicrosoftAuth microsoftAuth = authenticateMicrosoftAccount(false);
-                Platform.runLater(() -> {
-                    usernameField.setText(microsoftAuth.getUsername());
-                    refreshMicrosoftAccountChoices(microsoftAuth.getUUID());
-                    setStatus(lastMicrosoftAccountPersisted
-                                    ? "微软正版登录成功" : "微软登录成功，多账号保存失败",
-                            lastMicrosoftAccountPersisted
-                                    ? "已登录 " + microsoftAuth.getUsername() + "，现在可以直接启动游戏。"
-                                    : "当前登录可用，但账号列表无法写入；请检查 ECL 数据目录权限。");
-                    updateRuntimeSummary();
-                    setControlsBusy(false);
-                });
-            } catch (Exception e) {
-                Platform.runLater(() -> {
-                    setStatus("微软正版登录失败", cleanMessage(e));
-                    setControlsBusy(false);
-                });
-            }
-        });
-    }
-
-    private MicrosoftAuth authenticateMicrosoftAccount() {
-        return authenticateMicrosoftAccount(false);
-    }
-
-    private void addMicrosoftAccount() {
-        authTypeCombo.setValue(AUTH_MICROSOFT);
-        updateAuthFields();
-        setControlsBusy(true);
-        setStatus("添加 Microsoft 账号", "正在申请新的设备登录代码。");
-        runAsync("ecl-add-microsoft-account", () -> {
-            try {
-                MicrosoftAuth auth = authenticateMicrosoftAccount(true);
-                Platform.runLater(() -> {
-                    usernameField.setText(auth.getUsername());
-                    refreshMicrosoftAccountChoices(auth.getUUID());
-                    setStatus(lastMicrosoftAccountPersisted
-                                    ? "Microsoft 账号已添加" : "账号登录成功但保存失败",
-                            lastMicrosoftAccountPersisted
-                                    ? auth.getUsername() + " 已保存，可在账号下拉框中切换。"
-                                    : "当前登录可用，但无法写入多账号列表；请检查数据目录权限。");
-                    setControlsBusy(false);
-                });
-            } catch (Exception error) {
-                Platform.runLater(() -> {
-                    setStatus("添加 Microsoft 账号失败", cleanMessage(error));
-                    setControlsBusy(false);
-                });
-            }
-        });
-    }
-
-    private void chooseAndUploadSkin() {
-        String authType = authTypeCombo.getValue();
-        if (AUTH_OFFLINE.equals(authType)) {
-            chooseAndImportOfflineSkin();
-            return;
-        }
-        if (!AUTH_MICROSOFT.equals(authType)) {
-            setStatus("当前登录方式不支持皮肤操作",
-                    "请切换到 Microsoft 正版登录上传官方皮肤，或切换到离线登录导入本地皮肤。");
-            return;
-        }
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("选择 Minecraft Java 版皮肤");
-        chooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("PNG 皮肤图片 (*.png)", "*.png"));
-        File selected = chooser.showOpenDialog(primaryStage);
-        if (selected == null) return;
-
-        MinecraftSkinService.SkinImage skin;
-        try {
-            skin = minecraftSkinService.inspect(selected.toPath());
-        } catch (IOException error) {
-            setStatus("皮肤文件无效", cleanMessage(error));
-            return;
-        }
-
-        Dialog<MinecraftSkinService.Variant> dialog = new Dialog<>();
-        dialog.initOwner(primaryStage);
-        dialog.setTitle("上传 Minecraft 皮肤");
-        dialog.setHeaderText("确认皮肤模型");
-        dialog.setOnShown(event -> {
-            if (dialog.getDialogPane().getScene().getWindow() instanceof Stage stage) {
-                applyWindowIcon(stage);
-            }
-        });
-
-        ImageView preview = new ImageView(new Image(selected.toURI().toString()));
-        preview.setFitWidth(192);
-        preview.setFitHeight(192);
-        preview.setPreserveRatio(true);
-        preview.setSmooth(false);
-        preview.getStyleClass().add("skin-preview");
-
-        ComboBox<MinecraftSkinService.Variant> variant = new ComboBox<>();
-        variant.getItems().setAll(MinecraftSkinService.Variant.values());
-        variant.setValue(MinecraftSkinService.Variant.CLASSIC);
-        variant.setMaxWidth(Double.MAX_VALUE);
-        applyFieldStyle(variant);
-
-        Label fileInfo = createBodyText(selected.getName() + " · "
-                + skin.width() + "×" + skin.height() + " · " + formatBytes(skin.fileSize()));
-        Label accountInfo = createBodyText("上传到：" + (selectedMicrosoftAccount == null
-                ? settingsManager.get(ECLConfig.KEY_MICROSOFT_PROFILE_NAME)
-                : selectedMicrosoftAccount.username()));
-        VBox content = new VBox(12, preview, fileInfo, accountInfo,
-                new Label("角色模型"), variant);
-        content.setAlignment(Pos.CENTER);
-        dialog.getDialogPane().setContent(content);
-        ButtonType upload = new ButtonType("上传并使用", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().addAll(upload, ButtonType.CANCEL);
-        dialog.setResultConverter(button -> button == upload ? variant.getValue() : null);
-        dialog.showAndWait().ifPresent(selectedVariant ->
-                uploadSkin(selected.toPath(), selectedVariant));
-    }
-
-    private void uploadSkin(Path skin, MinecraftSkinService.Variant variant) {
-        setControlsBusy(true);
-        setStatus("正在上传皮肤", "正在验证 Microsoft 登录并连接 Minecraft 皮肤服务…");
-        runAsync("ecl-upload-skin", () -> {
-            try {
-                MicrosoftAuth auth = authenticateMicrosoftAccount(false);
-                MinecraftSkinService.UploadResult result = minecraftSkinService.upload(
-                        auth, skin, variant);
-                Platform.runLater(() -> {
-                    String account = result.profileName() == null || result.profileName().isBlank()
-                            ? auth.getUsername() : result.profileName();
-                    setStatus("皮肤上传成功", account + " 已使用 " + variant + " 皮肤。重新进入游戏后生效。");
-                    setControlsBusy(false);
-                });
-            } catch (Exception error) {
-                Platform.runLater(() -> {
-                    setStatus("皮肤上传失败", cleanMessage(error));
-                    setControlsBusy(false);
-                });
-            }
-        });
-    }
-
     /**
      * Offline account path: pick a PNG, confirm the model, and copy it into the launcher data
      * directory. The skin is injected at launch time through the built-in Yggdrasil skin service,
      * so it works in single player and on offline-mode servers without any mods or premium login.
      */
-    private void chooseAndImportOfflineSkin() {
-        String username = usernameField.getText() == null ? "" : usernameField.getText().trim();
-        if (username.isBlank()) {
-            setStatus("请输入玩家名称", "离线皮肤需要绑定到具体的离线玩家名，请先在“账号模式”中填写玩家名称。");
-            return;
-        }
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("选择离线账号皮肤（PNG）");
-        chooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("PNG 皮肤图片 (*.png)", "*.png"));
-        File selected = chooser.showOpenDialog(primaryStage);
-        if (selected == null) return;
 
-        MinecraftSkinService.SkinImage skin;
-        try {
-            skin = minecraftSkinService.inspect(selected.toPath());
-        } catch (IOException error) {
-            setStatus("皮肤文件无效", cleanMessage(error));
-            return;
-        }
-
-        Dialog<MinecraftSkinService.Variant> dialog = new Dialog<>();
-        dialog.initOwner(primaryStage);
-        dialog.setTitle("导入离线皮肤");
-        dialog.setHeaderText("确认皮肤模型");
-        dialog.setOnShown(event -> {
-            if (dialog.getDialogPane().getScene().getWindow() instanceof Stage stage) {
-                applyWindowIcon(stage);
-            }
-        });
-
-        ImageView preview = new ImageView(new Image(selected.toURI().toString()));
-        preview.setFitWidth(192);
-        preview.setFitHeight(192);
-        preview.setPreserveRatio(true);
-        preview.setSmooth(false);
-        preview.getStyleClass().add("skin-preview");
-
-        ComboBox<MinecraftSkinService.Variant> variant = new ComboBox<>();
-        variant.getItems().setAll(MinecraftSkinService.Variant.values());
-        variant.setValue(MinecraftSkinService.Variant.CLASSIC);
-        variant.setMaxWidth(Double.MAX_VALUE);
-        applyFieldStyle(variant);
-
-        Label fileInfo = createBodyText(selected.getName() + " · "
-                + skin.width() + "×" + skin.height() + " · " + formatBytes(skin.fileSize()));
-        Label accountInfo = createBodyText("应用到离线账号：" + username
-                + "\n皮肤与玩家名（含大小写）绑定；改名后需要重新导入。"
-                + "\n本地皮肤服务会在启动游戏时自动注入，无需正版账号。");
-        VBox content = new VBox(12, preview, fileInfo, accountInfo,
-                new Label("角色模型"), variant);
-        content.setAlignment(Pos.CENTER);
-        dialog.getDialogPane().setContent(content);
-        ButtonType importButton = new ButtonType("导入并使用", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().addAll(importButton, ButtonType.CANCEL);
-        dialog.setResultConverter(button -> button == importButton ? variant.getValue() : null);
-        dialog.showAndWait().ifPresent(selectedVariant ->
-                importOfflineSkin(selected.toPath(), username, selectedVariant));
-    }
-
-    private void importOfflineSkin(Path skin, String username, MinecraftSkinService.Variant variant) {
-        setControlsBusy(true);
-        setStatus("正在导入皮肤", "正在校验并复制皮肤到本地数据目录…");
-        runAsync("ecl-import-offline-skin", () -> {
-            try {
-                String identity = OfflineSkinStore.identityForOffline(username);
-                new OfflineSkinStore().importSkin(identity, skin, variant);
-                Platform.runLater(() -> {
-                    setStatus("皮肤导入成功",
-                            "离线账号 " + username + " 已使用本地皮肤，重新启动游戏后生效。");
-                    setControlsBusy(false);
-                    updateOfflineSkinControls();
-                });
-            } catch (Exception error) {
-                Platform.runLater(() -> {
-                    setStatus("皮肤导入失败", cleanMessage(error));
-                    setControlsBusy(false);
-                });
-            }
-        });
-    }
-
-    private void removeOfflineSkin() {
-        String username = usernameField.getText() == null ? "" : usernameField.getText().trim();
-        if (username.isBlank()) {
-            return;
-        }
-        String identity = OfflineSkinStore.identityForOffline(username);
-        try {
-            boolean removed = new OfflineSkinStore().remove(identity);
-            if (removed) {
-                setStatus("皮肤已清除", "离线账号 " + username + " 已恢复默认皮肤。");
-            } else {
-                setStatus("皮肤未找到", "该账号当前没有导入本地皮肤。");
-            }
-        } catch (RuntimeException failure) {
-            setStatus("清除皮肤失败", cleanMessage(failure));
-        }
-        updateOfflineSkinControls();
-    }
-
-    private MicrosoftAuth authenticateMicrosoftAccount(boolean forceNew) {
-        MicrosoftAccountStore.Account selected = forceNew ? null : selectedMicrosoftAccount;
-        MicrosoftAuth.CachedSession cachedSession = selected == null
-                ? new MicrosoftAuth.CachedSession(
-                        forceNew ? null : settingsManager.getEncrypted("microsoftRefreshToken"),
-                        forceNew ? null : settingsManager.getEncrypted("microsoftAccessToken"),
-                        forceNew ? 0 : settingsManager.get(ECLConfig.KEY_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT),
-                        forceNew ? null : settingsManager.get(ECLConfig.KEY_MICROSOFT_PROFILE_NAME),
-                        forceNew ? null : settingsManager.get(ECLConfig.KEY_MICROSOFT_PROFILE_UUID))
-                : new MicrosoftAuth.CachedSession(
-                        selected.refreshToken(), selected.accessToken(),
-                        selected.accessTokenExpiresAt(), selected.username(), selected.uuid());
-        MicrosoftAuth microsoftAuth = new MicrosoftAuth(cachedSession, new MicrosoftAuth.LoginListener() {
-            @Override
-            public void onDeviceCode(MicrosoftAuth.DeviceCode deviceCode) {
-                Platform.runLater(() -> {
-                    boolean copied = copyMicrosoftDeviceCodeToClipboard(deviceCode.getUserCode());
-                    setStatus("微软正版登录", copied
-                            ? "登录代码已自动复制: " + deviceCode.getUserCode() + "。浏览器打开后直接粘贴完成授权。"
-                            : "无法自动复制登录代码，请手动复制 " + deviceCode.getUserCode() + " 完成授权。");
-                    showMicrosoftDeviceCodeDialog(deviceCode);
-                    openMicrosoftVerificationPage(deviceCode);
-                });
-            }
-
-            @Override
-            public void onStatus(String message) {
-                Platform.runLater(() -> setStatus("微软正版登录", message));
-            }
-        });
-        microsoftAuth.login();
-        MicrosoftAuth.CachedSession authenticatedSession = microsoftAuth.getCachedSession();
-        String refreshToken = authenticatedSession.refreshToken();
-        if (refreshToken != null && !refreshToken.isBlank()) {
-            settingsManager.setEncrypted("microsoftRefreshToken", refreshToken);
-        }
-        settingsManager.setEncrypted("microsoftAccessToken", authenticatedSession.accessToken());
-        settingsManager.set(ECLConfig.KEY_MICROSOFT_ACCESS_TOKEN_EXPIRES_AT,
-                authenticatedSession.accessTokenExpiresAt());
-        settingsManager.set(ECLConfig.KEY_AUTH_TYPE, AUTH_MICROSOFT);
-        settingsManager.set(ECLConfig.KEY_MICROSOFT_PROFILE_NAME, authenticatedSession.username());
-        settingsManager.set(ECLConfig.KEY_MICROSOFT_PROFILE_UUID, authenticatedSession.uuid());
-        settingsManager.set(ECLConfig.KEY_USERNAME, authenticatedSession.username());
-        MicrosoftAccountStore.Account storedAccount = new MicrosoftAccountStore.Account(
-                authenticatedSession.uuid(), authenticatedSession.username(),
-                authenticatedSession.refreshToken(), authenticatedSession.accessToken(),
-                authenticatedSession.accessTokenExpiresAt());
-        lastMicrosoftAccountPersisted = microsoftAccountStore.save(storedAccount);
-        selectedMicrosoftAccount = storedAccount;
-        if (!settingsManager.save()) {
-            Platform.runLater(() -> setStatus("微软登录信息保存失败", "登录已成功，但无法保存刷新令牌，请检查目录权限或查看日志。"));
-        }
-        return microsoftAuth;
-    }
-
-    private void refreshMicrosoftAccountChoices(String selectedUuid) {
-        if (microsoftAccountCombo == null) return;
-        List<MicrosoftAccountStore.Account> accounts = microsoftAccountStore.list();
-        microsoftAccountCombo.getItems().setAll(accounts);
-        accounts.stream()
-                .filter(account -> account.uuid().equalsIgnoreCase(selectedUuid))
-                .findFirst()
-                .ifPresent(microsoftAccountCombo::setValue);
-    }
-
-    private void showMicrosoftDeviceCodeDialog(MicrosoftAuth.DeviceCode deviceCode) {
-        Stage dialog = new Stage(StageStyle.UTILITY);
-        dialog.initOwner(primaryStage);
-        dialog.initModality(Modality.NONE);
-        dialog.setTitle("Microsoft 登录");
-        applyWindowIcon(dialog);
-
-        Label title = new Label("Microsoft 登录");
-        title.getStyleClass().add("section-title");
-        Label message = createBodyText("登录代码已自动复制。打开浏览器访问验证地址并粘贴代码完成授权，授权成功后可以关闭本窗口。");
-
-        TextField codeField = new TextField(deviceCode.getUserCode());
-        codeField.setEditable(false);
-        codeField.setFocusTraversable(true);
-        applyFieldStyle(codeField);
-
-        TextField urlField = new TextField(deviceCode.getVerificationUri());
-        urlField.setEditable(false);
-        applyFieldStyle(urlField);
-
-        Button openButton = createActionButton("打开浏览器", "primary-button", () -> openMicrosoftVerificationPage(deviceCode));
-        Button copyButton = createActionButton("复制代码", "secondary-button", () -> copyMicrosoftDeviceCode(deviceCode.getUserCode()));
-        Button closeButton = createActionButton("关闭", "ghost-button", dialog::close);
-        HBox actions = new HBox(10, openButton, copyButton, closeButton);
-        actions.setAlignment(Pos.CENTER_LEFT);
-
-        VBox root = new VBox(12,
-                title,
-                message,
-                createInfoRow("登录码", createStaticValueLabel(deviceCode.getUserCode())),
-                codeField,
-                createInfoRow("验证 URL", createStaticValueLabel(deviceCode.getVerificationUri())),
-                urlField,
-                actions
-        );
-        root.getStyleClass().add("root-pane");
-        root.setPadding(new Insets(18));
-
-        Scene scene = new Scene(root, 520, 330);
-        URL stylesheet = getClass().getResource("/css/launcher.css");
-        if (stylesheet != null) {
-            scene.getStylesheets().add(stylesheet.toExternalForm());
-        }
-        dialog.setScene(scene);
-        applyThemeToScene(scene, settingsManager.get(ECLConfig.KEY_THEME));
-        dialog.show();
-        codeField.requestFocus();
-        codeField.selectAll();
-    }
-
-    private void openMicrosoftVerificationPage(MicrosoftAuth.DeviceCode deviceCode) {
-        try {
-            getHostServices().showDocument(deviceCode.getVerificationUri());
-            setStatus("微软正版登录", "登录代码已自动复制: " + deviceCode.getUserCode() + "。浏览器打开后直接粘贴完成授权。");
-        } catch (Exception e) {
-            setStatus("无法打开微软登录页面", cleanMessage(e) + "；请手动打开 " + deviceCode.getVerificationUri());
-        }
-    }
-
-    private void copyMicrosoftDeviceCode(String userCode) {
-        if (copyMicrosoftDeviceCodeToClipboard(userCode)) {
-            setStatus("已复制微软登录代码", userCode);
-        } else {
-            setStatus("复制微软登录代码失败", "请手动选择并复制 " + userCode);
-        }
-    }
-
-    private boolean copyMicrosoftDeviceCodeToClipboard(String userCode) {
-        try {
-            ClipboardContent content = new ClipboardContent();
-            content.putString(userCode);
-            Clipboard.getSystemClipboard().setContent(content);
-            return true;
-        } catch (Exception e) {
-            LOGGER.warn("Failed to copy Microsoft device code", e);
-            return false;
-        }
-    }
-
-    private AuthProvider buildAuthProvider(String authType, String server, String username, String password) {
-        if (AUTH_MICROSOFT.equals(authType)) {
-            MicrosoftAuth microsoftAuth = authenticateMicrosoftAccount();
-            Platform.runLater(() -> {
-                usernameField.setText(microsoftAuth.getUsername());
-                updateRuntimeSummary();
-            });
-            return microsoftAuth;
-        }
-
-        if (AUTH_YGGDRASIL.equals(authType)) {
-            String effectivePassword = password;
-            if (effectivePassword == null || effectivePassword.isBlank()) {
-                effectivePassword = settingsManager.getEncrypted(
-                        yggdrasilCredentialKey(server, username));
-            }
-            if (server.isBlank() || username.isBlank()
-                    || effectivePassword == null || effectivePassword.isBlank()) {
-                throw new IllegalArgumentException("请填写完整的外置登录信息。");
-            }
-            YggdrasilAuth yggdrasilAuth = new YggdrasilAuth(server);
-            yggdrasilAuth.setCredentials(username, effectivePassword);
-            yggdrasilAuth.login();
-            settingsManager.setEncrypted(yggdrasilCredentialKey(server, username), effectivePassword);
-            settingsManager.remove("_enc_yggdrasilPassword");
-            settingsManager.set(ECLConfig.KEY_YGGDRASIL_SERVER, server);
-            settingsManager.set(ECLConfig.KEY_USERNAME, yggdrasilAuth.getUsername());
-            if (!settingsManager.save()) {
-                LOGGER.warn("Failed to persist Yggdrasil session settings");
-            }
-            return yggdrasilAuth;
-        }
-
-        String offlineName = username.isBlank() ? "Player" : username;
-        return new OfflineAuth(offlineName);
-    }
-
-    private String yggdrasilCredentialKey(String server, String username) {
-        String normalizedServer = server == null ? "" : server.trim().toLowerCase(Locale.ROOT);
-        while (normalizedServer.endsWith("/")) {
-            normalizedServer = normalizedServer.substring(0, normalizedServer.length() - 1);
-        }
-        String normalizedUsername = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
-        String identity = normalizedServer + "\n" + normalizedUsername;
-        return "yggdrasilPassword."
-                + UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8));
-    }
-    private void setControlsBusy(boolean busy) {
+    void setControlsBusy(boolean busy) {
         launchBtn.setDisable(busy);
         refreshBtn.setDisable(busy);
         settingsBtn.setDisable(busy);
@@ -5172,7 +3184,7 @@ public class LauncherUI extends javafx.application.Application {
         if (installSelectedLoaderButton != null) {
             installSelectedLoaderButton.setDisable(busy);
         }
-        updateSelectedVersionWikiButton();
+        versionActions.updateSelectedVersionWikiButton();
         authTypeCombo.setDisable(busy);
         usernameField.setDisable(busy || AUTH_MICROSOFT.equals(authTypeCombo.getValue()));
         yggdrasilServerField.setDisable(busy);
@@ -5836,13 +3848,13 @@ public class LauncherUI extends javafx.application.Application {
                     dialogStatus.setText(mainFile + " 导入完成。 " + detail);
                     setStatus(target.title + "导入完成", detail);
                     if (completedPack != null) {
-                        restoreVersionComboItems(completedPack.profileId());
-                        syncLaunchVersionToContent(completedPack.profileId());
+                        versionActions.restoreVersionComboItems(completedPack.profileId());
+                        versionActions.syncLaunchVersionToContent(completedPack.profileId());
                         dialogStatus.setText(mainFile + " 安装完成，正在启动整合包…");
                         setStatus("整合包安装完成", "正在启动 " + completedPack.name());
-                        Platform.runLater(this::launchGame);
+                        Platform.runLater(() -> gameLaunch.launchGame());
                     } else {
-                        syncLaunchVersionToContent(instance.profileId());
+                        versionActions.syncLaunchVersionToContent(instance.profileId());
                     }
                 });
             } catch (Exception e) {
@@ -5866,7 +3878,7 @@ public class LauncherUI extends javafx.application.Application {
         });
     }
 
-    private String getSelectedVersion() {
+    String getSelectedVersion() {
         return versionCombo == null ? null : versionCombo.getValue();
     }
 
@@ -5876,21 +3888,8 @@ public class LauncherUI extends javafx.application.Application {
      * resourcepacks are actually loaded), the launch selection is realigned to that version after
      * a successful import. Only selects the value when it is already offered by the combo.
      */
-    private void syncLaunchVersionToContent(String contentVersion) {
-        if (contentVersion == null || contentVersion.isBlank()) {
-            return;
-        }
-        lastContentVersion = contentVersion;
-        if (versionCombo == null || contentVersion.equals(versionCombo.getValue())) {
-            return;
-        }
-        if (versionCombo.getItems().contains(contentVersion)) {
-            versionCombo.setValue(contentVersion);
-            updateRuntimeSummary();
-        }
-    }
 
-    private File getConfiguredGameRootDir() {
+    File getConfiguredGameRootDir() {
         return gameDir == null ? ECLConfig.getGameDir() : gameDir;
     }
 
@@ -5900,7 +3899,7 @@ public class LauncherUI extends javafx.application.Application {
      * location is folded back into the standard game directory so download targets and the launched
      * game directory can never diverge because of an outdated saved path.
      */
-    private File resolveConfiguredGameRootDir(File candidate) {
+    File resolveConfiguredGameRootDir(File candidate) {
         if (candidate == null || (candidate.getPath().isBlank())) {
             return ECLConfig.getGameDir();
         }
@@ -5926,7 +3925,7 @@ public class LauncherUI extends javafx.application.Application {
         return resolveVersionGameDir(getSelectedVersion());
     }
 
-    private File resolveVersionGameDir(String gameVersion) {
+    File resolveVersionGameDir(String gameVersion) {
         File rootDir = getConfiguredGameRootDir();
         if (gameVersion == null || gameVersion.isBlank()) {
             return rootDir;
@@ -5939,30 +3938,20 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private File resolveVersionInstanceRoot(String gameVersion) {
+    File resolveVersionInstanceRoot(String gameVersion) {
         if (gameVersion == null || gameVersion.isBlank()) {
             return getConfiguredGameRootDir();
         }
         return gameRepository().instanceRoot(sanitizeVersionDirectoryName(gameVersion)).toFile();
     }
 
-    private DefaultGameRepository gameRepository() {
+    DefaultGameRepository gameRepository() {
         return new DefaultGameRepository(ECLConfig.getVersionsDir().toPath(),
                 getConfiguredGameRootDir().toPath(), DefaultIsolationType.parse(
                         settingsManager.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE)));
     }
 
-    private void ensureVersionGameDirs(String gameVersion) throws IOException {
-        File instanceDir = resolveVersionGameDir(gameVersion);
-        ensureDirectory(instanceDir);
-        ensureDirectory(new File(instanceDir, "mods"));
-        ensureDirectory(new File(instanceDir, "shaderpacks"));
-        ensureDirectory(new File(instanceDir, "resourcepacks"));
-        ensureDirectory(new File(instanceDir, "saves"));
-        ensureDirectory(new File(instanceDir, "logs"));
-    }
-
-    private void ensureDirectory(File dir) throws IOException {
+    void ensureDirectory(File dir) throws IOException {
         if (!dir.exists() && !dir.mkdirs()) {
             throw new IOException("无法创建目录: " + dir.getAbsolutePath());
         }
@@ -5986,359 +3975,15 @@ public class LauncherUI extends javafx.application.Application {
         };
     }
 
-    private File resolveModsDir(String gameVersion) {
+    File resolveModsDir(String gameVersion) {
         return new File(resolveVersionGameDir(gameVersion), "mods");
     }
 
     private void showSettingsDialog() {
-        Stage dialog = new Stage();
-        dialog.initOwner(primaryStage);
-        dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.setTitle("高级设置");
-        applyWindowIcon(dialog);
-
-        TextField javaField = new TextField(javaPath);
-        javaField.setPromptText("java.exe 或 JDK 根目录");
-        applyFieldStyle(javaField);
-
-        Button detectBtn = new Button("自动检测");
-        detectBtn.getStyleClass().addAll("app-button", "secondary-button");
-        detectBtn.setOnAction(e -> javaField.setText(JavaRuntimeUtil.detectSystemJavaExecutable()));
-
-        Button javaBrowseBtn = new Button("浏览");
-        javaBrowseBtn.getStyleClass().addAll("app-button", "secondary-button");
-        javaBrowseBtn.setOnAction(e -> {
-            FileChooser chooser = new FileChooser();
-            chooser.setTitle("选择 Java 可执行文件");
-            File initial = prepareChooserDir(javaField.getText());
-            if (initial != null) {
-                chooser.setInitialDirectory(initial);
-            }
-            chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Java 可执行文件", "java.exe", "*.exe"));
-            File selected = chooser.showOpenDialog(dialog);
-            if (selected != null) {
-                javaField.setText(selected.getAbsolutePath());
-            }
-        });
-
-        HBox javaBox = new HBox(10, javaField, detectBtn, javaBrowseBtn);
-        HBox.setHgrow(javaField, Priority.ALWAYS);
-
-        TextField dirField = new TextField(gameDir.getAbsolutePath());
-        dirField.setPromptText("输入游戏目录");
-        applyFieldStyle(dirField);
-
-        Button dirBrowseBtn = new Button("浏览");
-        dirBrowseBtn.getStyleClass().addAll("app-button", "secondary-button");
-        dirBrowseBtn.setOnAction(e -> {
-            DirectoryChooser chooser = new DirectoryChooser();
-            chooser.setTitle("选择游戏目录");
-            File initial = prepareChooserDir(dirField.getText());
-            if (initial != null) {
-                chooser.setInitialDirectory(initial);
-            }
-            File selected = chooser.showDialog(dialog);
-            if (selected != null) {
-                dirField.setText(selected.getAbsolutePath());
-            }
-        });
-
-        HBox dirBox = new HBox(10, dirField, dirBrowseBtn);
-        HBox.setHgrow(dirField, Priority.ALWAYS);
-
-        ComboBox<String> isolationPolicyField = new ComboBox<>();
-        isolationPolicyField.getItems().setAll("始终隔离", "仅 Mod/加载器实例隔离", "全部共享");
-        isolationPolicyField.getSelectionModel().select(switch (DefaultIsolationType.parse(
-                settingsManager.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE))) {
-            case ALWAYS -> 0;
-            case MODDED -> 1;
-            case NEVER -> 2;
-        });
-        applyFieldStyle(isolationPolicyField);
-
-        String selectedInstanceId = getSelectedVersion();
-        ComboBox<String> instanceDirectoryModeField = new ComboBox<>();
-        instanceDirectoryModeField.getItems().setAll("跟随默认策略", "使用独立实例目录", "使用自定义目录");
-        TextField customInstanceDirectoryField = new TextField();
-        customInstanceDirectoryField.setPromptText("选择此实例的自定义运行目录");
-        applyFieldStyle(customInstanceDirectoryField);
-        if (selectedInstanceId == null || selectedInstanceId.isBlank()) {
-            instanceDirectoryModeField.getSelectionModel().select(0);
-            instanceDirectoryModeField.setDisable(true);
-            customInstanceDirectoryField.setDisable(true);
-        } else {
-            try {
-                InstanceGameSettings currentInstanceSettings = new InstanceGameSettingsStore().load(
-                        gameRepository().instanceRoot(selectedInstanceId));
-                if (!currentInstanceSettings.overridesRunningDirectory()) {
-                    instanceDirectoryModeField.getSelectionModel().select(0);
-                } else if (currentInstanceSettings.hasCustomDirectory()) {
-                    instanceDirectoryModeField.getSelectionModel().select(2);
-                    customInstanceDirectoryField.setText(currentInstanceSettings.runningDirectory());
-                } else {
-                    instanceDirectoryModeField.getSelectionModel().select(1);
-                }
-            } catch (IOException error) {
-                LOGGER.warn("Cannot load instance directory settings for {}", selectedInstanceId, error);
-                instanceDirectoryModeField.getSelectionModel().select(0);
-            }
-        }
-        customInstanceDirectoryField.setDisable(
-                instanceDirectoryModeField.getSelectionModel().getSelectedIndex() != 2);
-        instanceDirectoryModeField.setOnAction(event -> customInstanceDirectoryField.setDisable(
-                instanceDirectoryModeField.getSelectionModel().getSelectedIndex() != 2));
-        Button customInstanceBrowseButton = new Button("浏览");
-        customInstanceBrowseButton.getStyleClass().addAll("app-button", "secondary-button");
-        customInstanceBrowseButton.disableProperty().bind(customInstanceDirectoryField.disabledProperty());
-        customInstanceBrowseButton.setOnAction(event -> {
-            DirectoryChooser chooser = new DirectoryChooser();
-            chooser.setTitle("选择实例运行目录");
-            File initial = prepareChooserDir(customInstanceDirectoryField.getText());
-            if (initial != null) {
-                chooser.setInitialDirectory(initial);
-            }
-            File selected = chooser.showDialog(dialog);
-            if (selected != null) {
-                customInstanceDirectoryField.setText(selected.getAbsolutePath());
-            }
-        });
-        HBox customInstanceDirectoryBox = new HBox(10,
-                customInstanceDirectoryField, customInstanceBrowseButton);
-        HBox.setHgrow(customInstanceDirectoryField, Priority.ALWAYS);
-        VBox instanceDirectoryBox = new VBox(10,
-                instanceDirectoryModeField, customInstanceDirectoryBox);
-
-        TextField memoryField = new TextField(maxMemoryMb == ECLConfig.AUTO_MEMORY_MB ? "" : Integer.toString(maxMemoryMb));
-        memoryField.setPromptText("自动（当前 " + ECLConfig.calculateAutoMemoryMb() + " MB）");
-        applyFieldStyle(memoryField);
-
-        TextField jvmField = new TextField(extraJvmArgs);
-        jvmField.setPromptText("例如：-XX:+UseG1GC -Dfile.encoding=UTF-8");
-        applyFieldStyle(jvmField);
-
-        TextField widthField = new TextField(Integer.toString(gameWidth));
-        widthField.setPromptText("宽度");
-        applyFieldStyle(widthField);
-        TextField heightField = new TextField(Integer.toString(gameHeight));
-        heightField.setPromptText("高度");
-        applyFieldStyle(heightField);
-        HBox resolutionBox = new HBox(10, widthField, new Label("×"), heightField);
-        resolutionBox.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(widthField, Priority.ALWAYS);
-        HBox.setHgrow(heightField, Priority.ALWAYS);
-
-        CheckBox fullscreenField = new CheckBox("全屏启动");
-        fullscreenField.setSelected(gameFullscreen);
-        TextField serverField = new TextField(quickServer == null ? "" : quickServer);
-        serverField.setPromptText("可选，例如 play.example.com:25565");
-        applyFieldStyle(serverField);
-        TextField processorField = new TextField(processorCount <= 0 ? "" : Integer.toString(processorCount));
-        processorField.setPromptText("留空使用全部可用核心");
-        applyFieldStyle(processorField);
-        CheckBox closeAfterLaunchField = new CheckBox("游戏启动后隐藏启动器，退出后恢复");
-        closeAfterLaunchField.setSelected(closeAfterLaunch);
-        CheckBox showConsoleField = new CheckBox("启动后自动打开实时控制台");
-        showConsoleField.setSelected(showGameConsole);
-        VBox behaviorBox = new VBox(10, fullscreenField, closeAfterLaunchField, showConsoleField);
-
-        CheckBox backupOnLaunchField = new CheckBox("每次启动游戏前自动备份存档");
-        backupOnLaunchField.setSelected(backupOnLaunch);
-        TextField backupKeepCountField = new TextField(Integer.toString(backupKeepCount));
-        backupKeepCountField.setPromptText("保留份数（1-100）");
-        backupKeepCountField.setMaxWidth(160);
-        applyFieldStyle(backupKeepCountField);
-        CheckBox backupIncludeModsField = new CheckBox("自动备份同时包含 mods");
-        backupIncludeModsField.setSelected(backupIncludeMods);
-        Label backupKeepCountLabel = new Label("最多保留");
-        backupKeepCountLabel.getStyleClass().add("info-key");
-        Label backupKeepCountUnit = new Label("份");
-        HBox backupKeepCountBox = new HBox(10, backupKeepCountLabel,
-                backupKeepCountField, backupKeepCountUnit);
-        backupKeepCountBox.setAlignment(Pos.CENTER_LEFT);
-        VBox backupBehaviorBox = new VBox(10, backupOnLaunchField,
-                backupKeepCountBox, backupIncludeModsField);
-
-        ComboBox<String> modReleaseChannelField = new ComboBox<>();
-        modReleaseChannelField.getItems().setAll("仅正式版", "正式版和 Beta", "全部（含 Alpha）");
-        modReleaseChannelField.getSelectionModel().select(switch (controller.preferredModReleaseChannel()) {
-            case RELEASE_ONLY -> 0;
-            case RELEASE_AND_BETA -> 1;
-            case ALL -> 2;
-        });
-        applyFieldStyle(modReleaseChannelField);
-
-        PasswordField curseForgeApiKeyField = new PasswordField();
-        String storedCurseForgeKey = settingsManager.getEncrypted(
-                ECLConfig.KEY_CURSEFORGE_API_KEY);
-        curseForgeApiKeyField.setText(storedCurseForgeKey == null ? "" : storedCurseForgeKey);
-        curseForgeApiKeyField.setPromptText("可留空，或使用 CURSEFORGE_API_KEY 环境变量");
-        applyFieldStyle(curseForgeApiKeyField);
-
-        VBox dialogRoot = new VBox(18,
-                createSurface("Java 路径", "指向 java.exe 或 JDK 根目录", javaBox),
-                createSurface("游戏目录", "Minecraft 实例根目录", dirBox),
-                createSurface("默认版本隔离", "推荐仅隔离带加载器的实例；整合包始终隔离",
-                        isolationPolicyField),
-                createSurface("当前实例运行目录",
-                        selectedInstanceId == null || selectedInstanceId.isBlank()
-                                ? "选择一个已安装版本后可配置实例级覆盖"
-                                : "当前实例：" + selectedInstanceId,
-                        instanceDirectoryBox),
-                createSurface("最大内存", "留空使用自动分配（MB）", memoryField),
-                createSurface("JVM 参数", "追加到默认启动参数之后", jvmField),
-                createSurface("窗口分辨率", "窗口模式下的宽度和高度", resolutionBox),
-                createSurface("直连服务器", "启动后直接连接，可留空", serverField),
-                createSurface("处理器核心数", "通过 ActiveProcessorCount 限制游戏可见核心数", processorField),
-                createSurface("启动行为", null, behaviorBox),
-                createSurface("存档自动备份",
-                        "备份位于 ECL 数据目录；失败只写入日志，不会阻止游戏启动",
-                        backupBehaviorBox),
-                createSurface("Modrinth 发布通道",
-                        "控制默认版本、依赖版本和更新版本的稳定性范围",
-                        modReleaseChannelField),
-                createSurface("CurseForge API Key",
-                        "用于 CurseForge 模组、光影、材质包和整合包搜索下载；保存时加密存储",
-                        curseForgeApiKeyField)
-        );
-        dialogRoot.getStyleClass().add("root-pane");
-        dialogRoot.setPadding(new Insets(24));
-
-        Button saveBtn = new Button("保存");
-        saveBtn.getStyleClass().addAll("app-button", "primary-button");
-        saveBtn.setOnAction(e -> {
-            String configuredJava = javaField.getText().trim();
-            if (!configuredJava.isBlank() && !JavaRuntimeUtil.isUsableJavaPath(configuredJava)) {
-                setStatus("错误: Java 路径无效", "请选择一个可用的 java.exe 或 JDK 根目录后再保存。");
-                return;
-            }
-
-            String configuredGameDir = dirField.getText().trim();
-            if (configuredGameDir.isBlank()) {
-                configuredGameDir = ECLConfig.getGameDir().getAbsolutePath();
-            }
-
-            int configuredMemoryMb;
-            try {
-                configuredMemoryMb = parseMemorySetting(memoryField.getText());
-            } catch (IllegalArgumentException memoryError) {
-                setStatus("错误: 内存格式无效", memoryError.getMessage());
-                return;
-            }
-            int configuredWidth;
-            int configuredHeight;
-            int configuredProcessors;
-            int configuredBackupKeepCount;
-            try {
-                configuredWidth = parseRangedInt(widthField.getText(), "窗口宽度", 320, 16_384);
-                configuredHeight = parseRangedInt(heightField.getText(), "窗口高度", 240, 16_384);
-                configuredProcessors = processorField.getText().isBlank() ? 0
-                        : parseRangedInt(processorField.getText(), "核心数", 1,
-                                Math.max(1, Runtime.getRuntime().availableProcessors()));
-                configuredBackupKeepCount = parseRangedInt(
-                        backupKeepCountField.getText(), "备份保留份数", 1, 100);
-            } catch (IllegalArgumentException valueError) {
-                setStatus("游戏参数无效", valueError.getMessage());
-                return;
-            }
-
-            javaPath = configuredJava.isBlank() ? "" : JavaRuntimeUtil.resolveJavaExecutable(configuredJava);
-            gameDir = resolveConfiguredGameRootDir(new File(configuredGameDir));
-            gameDir.mkdirs();
-            extraJvmArgs = jvmField.getText().trim();
-            maxMemoryMb = configuredMemoryMb;
-            gameWidth = configuredWidth;
-            gameHeight = configuredHeight;
-            gameFullscreen = fullscreenField.isSelected();
-            quickServer = serverField.getText().trim();
-            processorCount = configuredProcessors;
-            closeAfterLaunch = closeAfterLaunchField.isSelected();
-            showGameConsole = showConsoleField.isSelected();
-            backupOnLaunch = backupOnLaunchField.isSelected();
-            backupKeepCount = configuredBackupKeepCount;
-            backupIncludeMods = backupIncludeModsField.isSelected();
-
-            DefaultIsolationType configuredIsolationType = switch (
-                    isolationPolicyField.getSelectionModel().getSelectedIndex()) {
-                case 0 -> DefaultIsolationType.ALWAYS;
-                case 2 -> DefaultIsolationType.NEVER;
-                default -> DefaultIsolationType.MODDED;
-            };
-
-            settingsManager.set(ECLConfig.KEY_JAVA_PATH, javaPath);
-            settingsManager.set(ECLConfig.KEY_GAME_DIR, gameDir.getAbsolutePath());
-            settingsManager.set(ECLConfig.KEY_JVM_ARGS, extraJvmArgs);
-            settingsManager.set(ECLConfig.KEY_MAX_MEMORY_MB, maxMemoryMb);
-            settingsManager.set(ECLConfig.KEY_GAME_WIDTH, gameWidth);
-            settingsManager.set(ECLConfig.KEY_GAME_HEIGHT, gameHeight);
-            settingsManager.set(ECLConfig.KEY_GAME_FULLSCREEN, gameFullscreen);
-            settingsManager.set(ECLConfig.KEY_QUICK_SERVER, quickServer);
-            settingsManager.set(ECLConfig.KEY_PROCESSOR_COUNT, processorCount);
-            settingsManager.set(ECLConfig.KEY_CLOSE_AFTER_LAUNCH, closeAfterLaunch);
-            settingsManager.set(ECLConfig.KEY_SHOW_GAME_CONSOLE, showGameConsole);
-            settingsManager.set(ECLConfig.KEY_BACKUP_ON_LAUNCH, backupOnLaunch);
-            settingsManager.set(ECLConfig.KEY_BACKUP_KEEP_COUNT, backupKeepCount);
-            settingsManager.set(ECLConfig.KEY_BACKUP_INCLUDE_MODS, backupIncludeMods);
-            settingsManager.set(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE,
-                    configuredIsolationType.name());
-            ReleaseChannel modReleaseChannel = switch (
-                    modReleaseChannelField.getSelectionModel().getSelectedIndex()) {
-                case 0 -> ReleaseChannel.RELEASE_ONLY;
-                case 2 -> ReleaseChannel.ALL;
-                default -> ReleaseChannel.RELEASE_AND_BETA;
-            };
-            settingsManager.set(ECLConfig.KEY_MOD_RELEASE_CHANNEL, modReleaseChannel.name());
-            settingsManager.setEncrypted(ECLConfig.KEY_CURSEFORGE_API_KEY,
-                    curseForgeApiKeyField.getText().trim());
-            if (selectedInstanceId != null && !selectedInstanceId.isBlank()) {
-                try {
-                    DefaultGameRepository repository = gameRepository();
-                    switch (instanceDirectoryModeField.getSelectionModel().getSelectedIndex()) {
-                        case 1 -> repository.setIsolated(selectedInstanceId);
-                        case 2 -> {
-                            String customDirectory = customInstanceDirectoryField.getText().trim();
-                            if (customDirectory.isBlank()) {
-                                setStatus("实例目录无效", "选择自定义目录时必须填写路径。");
-                                return;
-                            }
-                            repository.setCustomRunDirectory(selectedInstanceId,
-                                    Path.of(customDirectory));
-                        }
-                        default -> repository.inheritRunDirectoryPolicy(selectedInstanceId);
-                    }
-                } catch (IOException | RuntimeException directoryError) {
-                    setStatus("实例目录保存失败", directoryError.getMessage());
-                    return;
-                }
-            }
-            if (!settingsManager.save()) {
-                setStatus("保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
-                return;
-            }
-
-            updateRuntimeSummary();
-            setStatus("设置已保存", "新的运行环境、版本隔离与 Modrinth 发布通道已经生效。");
-            dialog.close();
-        });
-
-        Button cancelBtn = new Button("取消");
-        cancelBtn.getStyleClass().addAll("app-button", "ghost-button");
-        cancelBtn.setOnAction(e -> dialog.close());
-
-        HBox buttonBar = new HBox(12, saveBtn, cancelBtn);
-        buttonBar.setAlignment(Pos.CENTER_RIGHT);
-        dialogRoot.getChildren().add(buttonBar);
-
-        Scene scene = new Scene(createWheelScrollPane(dialogRoot), 760, 650);
-        URL stylesheet = getClass().getResource("/css/launcher.css");
-        if (stylesheet != null) {
-            scene.getStylesheets().add(stylesheet.toExternalForm());
-        }
-        dialog.setScene(scene);
-        applyThemeToScene(scene, settingsManager.get(ECLConfig.KEY_THEME));
-        dialog.show();
+        new SettingsDialog(this).show();
     }
 
-    private int parseMemorySetting(String value) {
+    int parseMemorySetting(String value) {
         if (value == null || value.isBlank() || "自动".equals(value.trim())) {
             return ECLConfig.AUTO_MEMORY_MB;
         }
@@ -6354,7 +3999,7 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private int parseRangedInt(String value, String label, int min, int max) {
+    int parseRangedInt(String value, String label, int min, int max) {
         try {
             int parsed = Integer.parseInt(value.trim());
             if (parsed < min || parsed > max) {
@@ -6366,73 +4011,15 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private ScrollPane createWheelScrollPane(Node content) {
-        ScrollPane scrollPane = new ScrollPane(content);
-        scrollPane.getStyleClass().add("main-scroll");
-        scrollPane.setFitToWidth(true);
-        scrollPane.setMinHeight(0);
-        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        scrollPane.setPannable(true);
-        scrollPane.setFocusTraversable(false);
-        scrollPane.addEventFilter(ScrollEvent.SCROLL, event -> scrollByWheel(scrollPane, event));
-        return scrollPane;
-    }
-
-    private void scrollByWheel(ScrollPane scrollPane, ScrollEvent event) {
-        double deltaY = event.getDeltaY();
-        if (deltaY == 0 || scrollPane.getContent() == null) {
-            return;
-        }
-
-        double contentHeight = scrollPane.getContent().getBoundsInLocal().getHeight();
-        double viewportHeight = scrollPane.getViewportBounds().getHeight();
-        double scrollableHeight = contentHeight - viewportHeight;
-        if (scrollableHeight <= 0) {
-            return;
-        }
-
-        double nextValue = clamp(scrollPane.getVvalue() - (deltaY / scrollableHeight), 0, 1);
-        if (nextValue != scrollPane.getVvalue()) {
-            scrollPane.setVvalue(nextValue);
-            event.consume();
-        }
+    ScrollPane createWheelScrollPane(Node content) {
+        return LauncherUiFactory.wheelScrollPane(content);
     }
 
     private double clamp(double value, double min, double max) {
-        return Math.max(min, Math.min(max, value));
+        return LauncherUiFactory.clamp(value, min, max);
     }
 
-    private void openMinecraftWikiVersionPage(String version) {
-        if (version == null || version.isBlank()) {
-            setStatus("未选择版本", "请先选择一个正式版或快照版。");
-            return;
-        }
-        if (!isWikiSupportedVersion(version)) {
-            setStatus("当前版本暂无 Wiki 入口", "仅正式版和快照版提供 mc 中文 Wiki 更新介绍按钮。");
-            return;
-        }
-
-        String url = buildMinecraftWikiVersionUrl(version);
-        try {
-            getHostServices().showDocument(url);
-            setStatus("已打开版本介绍", version + " 的 mc 中文 Wiki 更新介绍已在浏览器中打开。");
-        } catch (Exception e) {
-            setStatus("无法打开版本介绍", cleanMessage(e));
-        }
-    }
-
-    private boolean isWikiSupportedVersion(String version) {
-        return versionManager != null && versionManager.isReleaseOrSnapshot(version);
-    }
-
-    private String buildMinecraftWikiVersionUrl(String version) {
-        String pageName = "Java版" + version;
-        return MC_CHINESE_WIKI_VERSION_URL_PREFIX
-                + URLEncoder.encode(pageName, StandardCharsets.UTF_8).replace("+", "%20");
-    }
-
-    private void openLocalFolder(File folder, String label) {
+    void openLocalFolder(File folder, String label) {
         try {
             if (!folder.exists() && !folder.mkdirs()) {
                 throw new IOException("无法创建目录: " + folder.getAbsolutePath());
@@ -6454,14 +4041,18 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private void applyWindowIcon(Stage stage) {
+    void openExternalUrl(String url) {
+        getHostServices().showDocument(url);
+    }
+
+    void applyWindowIcon(Stage stage) {
         URL icon = getClass().getResource("/icons/ecl-icon.png");
         if (icon != null) {
             stage.getIcons().add(new Image(icon.toExternalForm()));
         }
     }
 
-    private File prepareChooserDir(String rawPath) {
+    File prepareChooserDir(String rawPath) {
         if (rawPath == null || rawPath.isBlank()) {
             return null;
         }
@@ -6474,90 +4065,40 @@ public class LauncherUI extends javafx.application.Application {
         return parent != null && parent.exists() ? parent : null;
     }
 
-    private void runAsync(String threadName, Runnable action) {
+    void runAsync(String threadName, Runnable action) {
         controller.runAsync(threadName, action);
     }
 
     private void setFieldVisible(Node node, boolean visible) {
-        node.setVisible(visible);
-        node.setManaged(visible);
+        LauncherUiFactory.setVisible(node, visible);
     }
 
-    private VBox createSurface(String title, String subtitle, Node... content) {
-        VBox box = new VBox(12);
-        box.getStyleClass().add("surface");
-
-        Label titleLabel = new Label(title);
-        titleLabel.getStyleClass().add("section-title");
-        box.getChildren().add(titleLabel);
-
-        if (subtitle != null && !subtitle.isBlank()) {
-            Label subtitleLabel = new Label(subtitle);
-            subtitleLabel.getStyleClass().add("section-subtitle");
-            subtitleLabel.setWrapText(true);
-            box.getChildren().add(subtitleLabel);
-        }
-
-        box.getChildren().addAll(content);
-        return box;
+    VBox createSurface(String title, String subtitle, Node... content) {
+        return LauncherUiFactory.surface(title, subtitle, content);
     }
 
-    private HBox createInfoRow(String key, Label valueLabel) {
-        Label keyLabel = new Label(key);
-        keyLabel.getStyleClass().add("info-key");
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox row = new HBox(12, keyLabel, spacer, valueLabel);
-        row.getStyleClass().add("info-row");
-        row.setAlignment(Pos.CENTER_LEFT);
-        return row;
+    HBox createInfoRow(String key, Label valueLabel) {
+        return LauncherUiFactory.infoRow(key, valueLabel);
     }
 
     private HBox createControlRow(String key, Node control) {
-        Label keyLabel = new Label(key);
-        keyLabel.getStyleClass().add("info-key");
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox row = new HBox(12, keyLabel, spacer, control);
-        row.getStyleClass().add("info-row");
-        row.setAlignment(Pos.CENTER_LEFT);
-        return row;
+        return LauncherUiFactory.controlRow(key, control);
     }
 
     private void configureLocalizedCombo(ComboBox<String> combo, Function<String, String> displayName) {
-        combo.setCellFactory(list -> new ListCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : displayName.apply(item));
-            }
-        });
-        combo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : displayName.apply(item));
-            }
-        });
-        applyFieldStyle(combo);
-        combo.setPrefWidth(220);
+        LauncherUiFactory.configureLocalizedCombo(combo, displayName);
     }
 
     private String languageDisplayName(String tag) {
-        return switch (tag == null ? "" : tag) {
-            case "zh-TW" -> Messages.get("language.zhTW");
-            case "en" -> Messages.get("language.en");
-            default -> Messages.get("language.zhCN");
-        };
+        return LauncherThemeManager.languageDisplayName(tag);
     }
 
     private String themeDisplayName(String theme) {
-        return "LIGHT".equalsIgnoreCase(theme) ? Messages.get("theme.light") : Messages.get("theme.dark");
+        return LauncherThemeManager.themeDisplayName(theme);
     }
 
     private String normalizeTheme(String theme) {
-        return "LIGHT".equalsIgnoreCase(theme) ? "LIGHT" : "DARK";
+        return LauncherThemeManager.normalize(theme);
     }
 
     private void switchLanguage(String languageTag) {
@@ -6574,63 +4115,33 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private void applyTheme(String requestedTheme) {
-        if (primaryStage != null && primaryStage.getScene() != null) {
-            applyThemeToScene(primaryStage.getScene(), requestedTheme);
-        }
-        for (Window window : Window.getWindows()) {
-            if (window != primaryStage && window.getScene() != null) {
-                applyThemeToScene(window.getScene(), requestedTheme);
-            }
-        }
+        LauncherThemeManager.applyToAllWindows(primaryStage, requestedTheme);
     }
 
-    private void applyThemeToScene(Scene scene, String requestedTheme) {
-        if (scene == null || scene.getRoot() == null) return;
-        Node root = scene.getRoot();
-        root.getStyleClass().removeAll("theme-dark", "theme-light");
-        root.getStyleClass().add("LIGHT".equals(normalizeTheme(requestedTheme)) ? "theme-light" : "theme-dark");
+    void applyThemeToScene(Scene scene, String requestedTheme) {
+        LauncherThemeManager.applyToScene(scene, requestedTheme);
     }
 
     private Label createValueLabel() {
-        Label label = new Label();
-        label.getStyleClass().add("info-value");
-        label.setWrapText(true);
-        return label;
+        return LauncherUiFactory.valueLabel();
     }
 
     private Label createValueLabel(String text) {
-        Label label = createValueLabel();
-        label.setText(text);
-        return label;
+        return LauncherUiFactory.valueLabel(text);
     }
 
-    private void applyFieldStyle(Control control) {
-        control.getStyleClass().add("field-control");
-        control.setMaxWidth(Double.MAX_VALUE);
+    void applyFieldStyle(Control control) {
+        LauncherUiFactory.applyFieldStyle(control);
     }
 
     private Button createIconActionButton(String iconResource, String fallbackIcon, String tooltip, Runnable action) {
-        Button button = new Button();
-        button.setGraphic(createIconNode(iconResource, fallbackIcon, 34, "icon-button-image"));
-        button.getStyleClass().addAll("app-button", "icon-button");
-        button.setTooltip(new Tooltip(tooltip));
-        button.setOnAction(e -> action.run());
-        return button;
+        return LauncherUiFactory.iconActionButton(LauncherUI.class,
+                iconResource, fallbackIcon, tooltip, action);
     }
 
     private Node createIconNode(String resourcePath, String fallbackText, double size, String styleClass) {
-        URL iconUrl = resourcePath == null ? null : getClass().getResource(resourcePath);
-        if (iconUrl != null) {
-            ImageView icon = new ImageView(new Image(iconUrl.toExternalForm()));
-            icon.setFitWidth(size);
-            icon.setFitHeight(size);
-            icon.setPreserveRatio(true);
-            icon.getStyleClass().add(styleClass);
-            return icon;
-        }
-        Label fallback = new Label(fallbackText == null ? "" : fallbackText);
-        fallback.getStyleClass().add(styleClass);
-        return fallback;
+        return LauncherUiFactory.iconNode(
+                LauncherUI.class, resourcePath, fallbackText, size, styleClass);
     }
 
     private String iconForContentTarget(ContentTarget target) {
@@ -6646,7 +4157,7 @@ public class LauncherUI extends javafx.application.Application {
         };
     }
 
-    private String formatBytes(long bytes) {
+    String formatBytes(long bytes) {
         if (bytes < 1024) {
             return bytes + " B";
         }
@@ -6661,7 +4172,7 @@ public class LauncherUI extends javafx.application.Application {
         return String.format(Locale.ROOT, "%.2f GB", mb / 1024.0);
     }
 
-    private boolean isCancellation(Throwable throwable) {
+    boolean isCancellation(Throwable throwable) {
         Throwable cursor = throwable;
         while (cursor != null) {
             if (cursor instanceof CancellationException || cursor instanceof InterruptedException) {
@@ -6675,7 +4186,7 @@ public class LauncherUI extends javafx.application.Application {
         return false;
     }
 
-    private String cleanMessage(Throwable throwable) {
+    String cleanMessage(Throwable throwable) {
         Throwable cursor = throwable;
         while (cursor.getCause() != null && cursor.getCause() != cursor) {
             cursor = cursor.getCause();

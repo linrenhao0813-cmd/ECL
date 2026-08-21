@@ -362,7 +362,7 @@ public final class LauncherUiSnapshot {
         @SuppressWarnings({"unchecked", "rawtypes"})
         private void showAppView(String name) throws Exception {
             Class<? extends Enum> viewType = (Class<? extends Enum>) Class.forName(
-                    "com.ecl.ui.LauncherUI$AppView");
+                    "com.ecl.ui.AppView");
             Object view = Enum.valueOf(viewType, name);
             Method setActiveView = LauncherUI.class.getDeclaredMethod("setActiveView", viewType);
             setActiveView.setAccessible(true);

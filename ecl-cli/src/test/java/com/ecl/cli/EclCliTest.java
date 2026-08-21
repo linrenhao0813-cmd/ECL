@@ -35,7 +35,7 @@ class EclCliTest {
     @Test
     void dryRunRedactionCoversSeparatedInlineAndEmbeddedSecrets() {
         AuthProvider auth = auth("real-token");
-        List<String> redacted = EclCli.LaunchCommandLine.redactCommand(List.of(
+        List<String> redacted = LaunchCommand.redactCommand(List.of(
                 "java", "--accessToken", "real-token", "--session=other-secret",
                 "prefix-real-token-suffix"), auth);
 
@@ -43,7 +43,7 @@ class EclCliTest {
         assertFalse(output.contains("real-token"));
         assertFalse(output.contains("other-secret"));
         assertTrue(output.contains("<redacted>"));
-        assertEquals("<redacted>", EclCli.LaunchCommandLine.redactEnvironment(
+        assertEquals("<redacted>", LaunchCommand.redactEnvironment(
                 Map.of("SESSION", "environment-secret"), auth).get("SESSION"));
     }
 
@@ -79,9 +79,9 @@ class EclCliTest {
     @Test
     void automaticMemoryUsesCalculatedValueInsteadOfMinimum() {
         assertEquals(com.ecl.ECLConfig.calculateAutoMemoryMb(),
-                EclCli.LaunchCommandLine.selectMemory(null, 0));
-        assertEquals(4096, EclCli.LaunchCommandLine.selectMemory(null, 4096));
-        assertEquals(3072, EclCli.LaunchCommandLine.selectMemory(3072, 4096));
+                LaunchCommand.selectMemory(null, 0));
+        assertEquals(4096, LaunchCommand.selectMemory(null, 4096));
+        assertEquals(3072, LaunchCommand.selectMemory(3072, 4096));
     }
 
     @Test

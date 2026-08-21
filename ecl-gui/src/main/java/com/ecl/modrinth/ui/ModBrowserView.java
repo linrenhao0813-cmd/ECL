@@ -10,30 +10,23 @@ import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.provider.ContentSource;
 import com.ecl.modrinth.provider.ModMetadataProvider;
-import com.ecl.modrinth.service.ResolvedMod;
 import com.ecl.modrinth.service.SequentialBatchRunner;
-import com.ecl.modrinth.transaction.ModInstallationPlan;
 import com.ecl.modrinth.ui.viewmodel.ModBrowserViewModel;
 import com.ecl.ui.MainController;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.collections.ListChangeListener;
-import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
-import javafx.scene.control.CheckBox;
 import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressBar;
-import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Separator;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
@@ -50,20 +43,14 @@ import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.util.Duration;
 
-import java.awt.Desktop;
 import java.io.File;
-import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -71,6 +58,7 @@ import java.util.function.Function;
 public final class ModBrowserView extends VBox implements AutoCloseable {
     private final MainController controller;
     private final ModBrowserViewModel viewModel;
+    private final ModInstallWorkflow installWorkflow;
     private final Consumer<String> statusConsumer;
     private final Label instanceLabel = new Label();
     private final Label emptyLabel = new Label("输入关键词或直接浏览兼容模组");
@@ -88,15 +76,13 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     private final Button sourceButton = new Button("源代码");
     private final Button issuesButton = new Button("问题反馈");
     private final ListView<ModProject> resultList = new ListView<>();
-    private final ListView<InstalledMod> installedList = new ListView<>();
-    private final ListView<ModUpdate> updateList = new ListView<>();
     private final PauseTransition searchDebounce = new PauseTransition(Duration.millis(400));
     private final AtomicLong detailGeneration = new AtomicLong();
+    private final ModExternalActions externalActions;
     private Tab installedTab;
     private Tab updatesTab;
-    private Button checkUpdatesButton;
-    private Button updateSelectedButton;
-    private Button updateAllButton;
+    private InstalledModsPane installedPane;
+    private ModUpdatesPane updatesPane;
     private boolean updateBatchRunning;
     private String recommendedVersionId = "";
 
@@ -110,6 +96,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     ) {
         this.controller = controller;
         this.statusConsumer = statusConsumer == null ? ignored -> { } : statusConsumer;
+        this.externalActions = new ModExternalActions(this.statusConsumer);
         this.viewModel = new ModBrowserViewModel(
                 controller.metadataProvider(ContentSource.MODRINTH),
                 controller.modDependencyResolver(),
@@ -119,6 +106,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                 controller.localModScanner(),
                 controller.modUpdateService(),
                 controller.downloadTasks());
+        this.installWorkflow = new ModInstallWorkflow(
+                viewModel, this::preferredReleaseChannel);
         controller.registerModInstance(initialInstance);
         viewModel.setInstance(initialInstance);
         buildView(initialInstance);
@@ -134,7 +123,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
 
         Label eyebrow = new Label("MODRINTH + CURSEFORGE / MODS");
         eyebrow.getStyleClass().add("eyebrow");
-        instanceLabel.setText(instanceText(context));
+        instanceLabel.setText(ModUiFormatter.instanceText(context));
         instanceLabel.getStyleClass().add("mod-instance-badge");
         Label scope = new Label("搜索与安装始终锁定当前实例的 Minecraft 版本和加载器");
         scope.getStyleClass().add("status-detail");
@@ -172,7 +161,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         error.managedProperty().bind(error.visibleProperty());
         error.getStyleClass().add("mod-error");
         error.setWrapText(true);
-        Button cancel = button("取消", "ghost-button");
+        Button cancel = ModUiControls.button("取消", "ghost-button");
         cancel.visibleProperty().bind(viewModel.operationCancellableProperty());
         cancel.managedProperty().bind(cancel.visibleProperty());
         cancel.setOnAction(event -> viewModel.cancelActiveRequest());
@@ -193,31 +182,31 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         ComboBox<ModSearchIndex> sort = new ComboBox<>();
         sort.getItems().setAll(ModSearchIndex.values());
         sort.valueProperty().bindBidirectional(viewModel.sortIndexProperty());
-        sort.setButtonCell(enumCell());
-        sort.setCellFactory(list -> enumCell());
+        sort.setButtonCell(new ModSearchIndexCell());
+        sort.setCellFactory(list -> new ModSearchIndexCell());
         sort.setPrefWidth(122);
 
-        ComboBox<CategoryChoice> category = new ComboBox<>();
+        ComboBox<ModCategoryChoice> category = new ComboBox<>();
         category.getItems().setAll(
-                new CategoryChoice("全部分类", ""),
-                new CategoryChoice("性能优化", "optimization"),
-                new CategoryChoice("科技", "technology"),
-                new CategoryChoice("冒险", "adventure"),
-                new CategoryChoice("魔法", "magic"),
-                new CategoryChoice("实用工具", "utility"),
-                new CategoryChoice("装饰", "decoration"));
+                new ModCategoryChoice("全部分类", ""),
+                new ModCategoryChoice("性能优化", "optimization"),
+                new ModCategoryChoice("科技", "technology"),
+                new ModCategoryChoice("冒险", "adventure"),
+                new ModCategoryChoice("魔法", "magic"),
+                new ModCategoryChoice("实用工具", "utility"),
+                new ModCategoryChoice("装饰", "decoration"));
         category.getSelectionModel().selectFirst();
         category.setPrefWidth(126);
         category.setOnAction(event -> {
-            CategoryChoice selected = category.getValue();
+            ModCategoryChoice selected = category.getValue();
             viewModel.setCategory(selected == null ? "" : selected.id());
             viewModel.search(false);
         });
 
         ComboBox<ModMetadataProvider> source = new ComboBox<>();
         source.getItems().setAll(controller.metadataProviders());
-        source.setCellFactory(list -> providerCell());
-        source.setButtonCell(providerCell());
+        source.setCellFactory(list -> new ModProviderCell());
+        source.setButtonCell(new ModProviderCell());
         source.getSelectionModel().select(controller.metadataProvider(viewModel.contentSource()));
         source.setPrefWidth(112);
         source.setOnAction(event -> {
@@ -230,7 +219,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             }
         });
 
-        Button searchButton = button("搜索", "primary-button");
+        Button searchButton = ModUiControls.button("搜索", "primary-button");
         searchButton.setMinWidth(64);
         searchButton.setOnAction(event -> viewModel.search(false));
         HBox searchBar = new HBox(8, search, searchButton);
@@ -243,17 +232,17 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         sort.setOnAction(event -> viewModel.search(false));
 
         resultList.setItems(viewModel.searchResults());
-        resultList.setCellFactory(list -> new ProjectCell());
+        resultList.setCellFactory(list -> new ModProjectCell(viewModel));
         resultList.getStyleClass().add("mod-result-list");
         resultList.setPlaceholder(emptyLabel);
         resultList.getSelectionModel().selectedItemProperty().addListener(
                 (observable, oldValue, newValue) -> showProject(newValue));
         VBox.setVgrow(resultList, Priority.ALWAYS);
 
-        Button loadMore = button("加载更多", "ghost-button");
+        Button loadMore = ModUiControls.button("加载更多", "ghost-button");
         loadMore.setMaxWidth(Double.MAX_VALUE);
         loadMore.setOnAction(event -> viewModel.search(true));
-        Button retry = button("重试", "secondary-button");
+        Button retry = ModUiControls.button("重试", "secondary-button");
         retry.visibleProperty().bind(viewModel.errorMessageProperty().isNotEmpty());
         retry.managedProperty().bind(retry.visibleProperty());
         retry.setOnAction(event -> viewModel.search(false));
@@ -301,8 +290,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
 
         versionChoice.setPromptText("选择兼容版本");
         versionChoice.setMaxWidth(Double.MAX_VALUE);
-        versionChoice.setCellFactory(list -> versionCell());
-        versionChoice.setButtonCell(versionCell());
+        versionChoice.setCellFactory(list -> new ModVersionCell(() -> recommendedVersionId));
+        versionChoice.setButtonCell(new ModVersionCell(() -> recommendedVersionId));
         installButton.getStyleClass().addAll("app-button", "primary-button");
         installButton.setDisable(true);
         installButton.setOnAction(event -> prepareSelectedVersion());
@@ -310,21 +299,21 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         projectPageButton.setDisable(true);
         projectPageButton.setOnAction(event -> {
             if (detailedProject != null && detailedProject.projectUrl() != null) {
-                openUri(detailedProject.projectUrl());
+                externalActions.openUri(detailedProject.projectUrl());
             }
         });
         sourceButton.getStyleClass().addAll("app-button", "ghost-button");
         sourceButton.setDisable(true);
         sourceButton.setOnAction(event -> {
             if (detailedProject != null && detailedProject.sourceUrl() != null) {
-                openUri(detailedProject.sourceUrl());
+                externalActions.openUri(detailedProject.sourceUrl());
             }
         });
         issuesButton.getStyleClass().addAll("app-button", "ghost-button");
         issuesButton.setDisable(true);
         issuesButton.setOnAction(event -> {
             if (detailedProject != null && detailedProject.issuesUrl() != null) {
-                openUri(detailedProject.issuesUrl());
+                externalActions.openUri(detailedProject.issuesUrl());
             }
         });
         HBox actions = new HBox(8, installButton, projectPageButton, sourceButton, issuesButton);
@@ -346,83 +335,18 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     }
 
     private Node createInstalledPane() {
-        installedList.setItems(viewModel.installedMods());
-        installedList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        installedList.setCellFactory(list -> new InstalledCell());
-        installedList.setPlaceholder(new Label("尚未发现模组，点击“重新扫描”同步 mods 目录"));
-        VBox.setVgrow(installedList, Priority.ALWAYS);
-
-        Button scan = button("重新扫描", "secondary-button");
-        scan.setOnAction(event -> viewModel.rescan());
-        Button enable = button("启用", "ghost-button");
-        enable.setOnAction(event -> operateSelected(true));
-        Button disable = button("禁用", "ghost-button");
-        disable.setOnAction(event -> operateSelected(false));
-        Button uninstall = button("卸载", "danger-button");
-        uninstall.setOnAction(event -> uninstallSelected());
-        Button updates = button("检查更新", "secondary-button");
-        updates.setOnAction(event -> viewModel.checkUpdates(preferredReleaseChannel()));
-        Button updateSelected = button("更新选中", "primary-button");
-        updateSelected.setOnAction(event -> updateSelected());
-        Button updateAll = button("全部更新", "primary-button");
-        updateAll.setOnAction(event -> updateAll());
-        Button history = button("历史版本", "ghost-button");
-        history.setOnAction(event -> chooseHistoryVersion());
-        Button project = button("项目页面", "ghost-button");
-        project.setOnAction(event -> openSelectedProject());
-        Button file = button("文件位置", "ghost-button");
-        file.setOnAction(event -> openSelectedFile());
-        Button importJar = button("导入 JAR", "secondary-button");
-        importJar.setOnAction(event -> importLocalJar());
-
-        HBox rowOne = new HBox(8, scan, enable, disable, uninstall, importJar);
-        HBox rowTwo = new HBox(8, updates, updateSelected, updateAll, history, project, file);
-        VBox pane = new VBox(10, installedList, rowOne, rowTwo);
-        pane.setPadding(new Insets(10, 0, 0, 0));
-        return pane;
+        installedPane = new InstalledModsPane(viewModel, this::operateSelected,
+                this::uninstallSelected,
+                () -> viewModel.checkUpdates(preferredReleaseChannel()),
+                this::updateSelected, this::updateAll, this::chooseHistoryVersion,
+                this::openSelectedProject, this::openSelectedFile, this::importLocalJar);
+        return installedPane;
     }
 
     private Node createUpdatesPane() {
-        updateList.setItems(FXCollections.observableArrayList());
-        updateList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        updateList.setCellFactory(list -> new ListCell<>() {
-            @Override
-            protected void updateItem(ModUpdate update, boolean empty) {
-                super.updateItem(update, empty);
-                if (empty || update == null) {
-                    setGraphic(null);
-                    setText(null);
-                    return;
-                }
-                Label title = new Label(update.installedMod().displayName());
-                title.getStyleClass().add("mod-item-title");
-                Label detail = new Label(update.installedMod().versionNumber() + "  →  "
-                        + update.availableVersion().versionNumber() + "  ·  "
-                        + update.availableVersion().versionType());
-                detail.getStyleClass().add("status-detail");
-                setGraphic(new VBox(3, title, detail));
-            }
-        });
-        updateList.setPlaceholder(new Label("没有可用的 Mod 更新。点击“检查更新”重新扫描。"));
-        VBox.setVgrow(updateList, Priority.ALWAYS);
-
-        Button check = button("检查更新", "secondary-button");
-        check.setOnAction(event -> viewModel.checkUpdates(preferredReleaseChannel()));
-        Button updateSelected = button("更新选中", "primary-button");
-        updateSelected.setOnAction(event -> updateSelectedUpdates());
-        Button updateAll = button("一键更新全部", "primary-button");
-        updateAll.setOnAction(event -> updateAll());
-        HBox actions = new HBox(8, check, updateSelected, updateAll);
-        checkUpdatesButton = check;
-        updateSelectedButton = updateSelected;
-        updateAllButton = updateAll;
-        updateList.getSelectionModel().getSelectedItems().addListener(
-                (ListChangeListener<ModUpdate>) change -> refreshUpdateButtons());
-        refreshUpdateButtons();
-        actions.setAlignment(Pos.CENTER_RIGHT);
-        VBox pane = new VBox(10, updateList, actions);
-        pane.setPadding(new Insets(10, 0, 0, 0));
-        return pane;
+        updatesPane = new ModUpdatesPane(viewModel,
+                () -> viewModel.checkUpdates(preferredReleaseChannel()), this::runUpdates);
+        return updatesPane;
     }
 
     private void bindState() {
@@ -443,8 +367,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         });
         viewModel.installedMods().addListener((ListChangeListener<InstalledMod>) change -> {
             resultList.refresh();
-            installedList.refresh();
-            updateList.setItems(FXCollections.observableArrayList(viewModel.availableUpdates()));
+            installedPane.refresh();
+            updatesPane.refreshItems();
             refreshUpdateButtons();
         });
         viewModel.searchResults().addListener((ListChangeListener<ModProject>) change ->
@@ -454,8 +378,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             int count = newValue == null ? 0 : newValue.intValue();
             installedTab.setText(count > 0 ? "已安装 (" + count + ")" : "已安装");
             updatesTab.setText(count > 0 ? "更新 (" + count + ")" : "更新");
-            updateList.setItems(FXCollections.observableArrayList(viewModel.availableUpdates()));
-            installedList.refresh();
+            updatesPane.refreshItems();
+            installedPane.refresh();
             resultList.refresh();
             refreshUpdateButtons();
         });
@@ -491,7 +415,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                     }
                     detailedProject = result.project();
                     detailTitle.setText(result.project().title());
-                    detailMeta.setText(formatDetails(result.project()));
+                    detailMeta.setText(ModUiFormatter.projectDetails(result.project()));
                     versionChoice.getItems().setAll(result.versions());
                     ModVersion preferred = preferredVersion(result.versions());
                     if (preferred != null) {
@@ -533,7 +457,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                     }
                     if (error != null) {
                         dependencyContent.getChildren().setAll(
-                                dependencyMessage("依赖加载失败：" + errorMessage(error), true));
+                                dependencyMessage("依赖加载失败："
+                                        + ModFailureMessages.errorMessage(error), true));
                     } else {
                         renderDependencyGroups(groups);
                     }
@@ -564,7 +489,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             return;
         }
         for (ModBrowserViewModel.DependencyGroup group : groups) {
-            Label heading = new Label(dependencyTypeLabel(group.type())
+            Label heading = new Label(ModUiFormatter.dependencyTypeLabel(group.type())
                     + "  " + group.projects().size());
             heading.getStyleClass().add("mod-dependency-heading");
             dependencyContent.getChildren().add(heading);
@@ -586,7 +511,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         } else if (project == null) {
             icon.setImage(RemoteImageLoader.brokenPlaceholder());
         }
-        String identity = dependencyIdentity(item);
+        String identity = ModUiFormatter.dependencyIdentity(item);
         Label title = new Label(project == null ? identity : project.title());
         title.getStyleClass().add("mod-item-title");
         Label meta = new Label(item.errorMessage().isBlank()
@@ -606,30 +531,11 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         return row;
     }
 
-    private static String dependencyIdentity(ModBrowserViewModel.DependencyProject item) {
-        String projectId = item.dependency().projectId();
-        if (projectId != null && !projectId.isBlank()) {
-            return projectId;
-        }
-        String versionId = item.dependency().versionId();
-        return versionId == null || versionId.isBlank() ? "未知依赖" : versionId;
-    }
-
     private static Label dependencyMessage(String text, boolean error) {
         Label label = new Label(text);
         label.setWrapText(true);
         label.getStyleClass().add(error ? "mod-error" : "status-detail");
         return label;
-    }
-
-    private static String dependencyTypeLabel(DependencyType type) {
-        return switch (type) {
-            case REQUIRED -> "必需依赖";
-            case OPTIONAL -> "可选依赖";
-            case EMBEDDED -> "内嵌依赖";
-            case INCOMPATIBLE -> "不兼容";
-            case UNKNOWN -> "其他依赖";
-        };
     }
 
     private ModVersion preferredVersion(List<ModVersion> versions) {
@@ -647,130 +553,11 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     }
 
     private void prepareSelectedVersion() {
-        ModVersion version = versionChoice.getValue();
-        if (version == null) {
-            return;
-        }
-        viewModel.preparePlan(version, Set.of(), preferredReleaseChannel()).whenComplete((plan, error) -> {
-            Platform.runLater(() -> handlePreparedPlan(
-                    version, plan, error, "无法准备安装计划"));
-        });
-    }
-
-    private void handlePreparedPlan(
-            ModVersion version,
-            ModInstallationPlan plan,
-            Throwable error,
-            String failureHeader
-    ) {
-        if (error != null) {
-            showPlanFailure(failureHeader, error);
-            return;
-        }
-        previewPlan(version, plan);
-    }
-
-    private void showPlanFailure(String header, Throwable error) {
-        if (isCancellation(error)) {
-            return;
-        }
-        Alert dialog = new Alert(Alert.AlertType.ERROR);
-        dialog.setTitle("模组安装失败");
-        dialog.setHeaderText(header);
-        dialog.setContentText("失败原因：" + planFailureReason(error));
-        dialog.getDialogPane().setPrefWidth(560);
-        dialog.showAndWait();
+        installWorkflow.prepare(versionChoice.getValue(), "无法准备安装计划");
     }
 
     static String planFailureReason(Throwable error) {
-        Throwable cause = unwrap(error);
-        return cause == null || cause.getMessage() == null || cause.getMessage().isBlank()
-                ? "操作失败，请查看日志获取详细信息"
-                : cause.getMessage();
-    }
-
-    private static boolean isCancellation(Throwable error) {
-        return unwrap(error) instanceof CancellationException;
-    }
-
-    private static Throwable unwrap(Throwable error) {
-        Throwable current = error;
-        while ((current instanceof CompletionException || current instanceof ExecutionException)
-                && current.getCause() != null) {
-            current = current.getCause();
-        }
-        return current;
-    }
-
-    private void previewPlan(ModVersion version, ModInstallationPlan plan) {
-        ButtonType install = new ButtonType("确认安装", ButtonBar.ButtonData.OK_DONE);
-        Alert dialog = new Alert(Alert.AlertType.CONFIRMATION);
-        dialog.setTitle("安装计划");
-        dialog.setHeaderText(plan.installable()
-                ? "将安装 " + plan.files().size() + " 个文件"
-                : "安装计划存在冲突");
-        dialog.getButtonTypes().setAll(install, ButtonType.CANCEL);
-
-        VBox content = new VBox(8);
-        content.getChildren().add(new Label("目标目录: " + plan.instance().modsDirectory()));
-        content.getChildren().add(new Label("下载大小: " + formatBytes(plan.totalDownloadSize())));
-        for (var file : plan.files()) {
-            Label label = new Label((file.dependency() ? "依赖  " : "主模组  ")
-                    + file.version().name() + " · " + file.version().versionNumber()
-                    + " · " + formatBytes(file.file().size()));
-            label.setWrapText(true);
-            content.getChildren().add(label);
-        }
-        List<CheckBox> optionalChoices = new ArrayList<>();
-        if (!plan.optionalDependencies().isEmpty()) {
-            content.getChildren().add(new Separator());
-            content.getChildren().add(new Label("可选依赖"));
-            for (ResolvedMod optional : plan.optionalDependencies()) {
-                CheckBox check = new CheckBox(optional.version().name()
-                        + " · " + optional.version().versionNumber());
-                check.setUserData(optional);
-                optionalChoices.add(check);
-                content.getChildren().add(check);
-            }
-        }
-        for (var conflict : plan.conflicts()) {
-            Label label = new Label("冲突: " + conflict.message());
-            label.getStyleClass().add("mod-error");
-            label.setWrapText(true);
-            content.getChildren().add(label);
-        }
-        for (String warning : plan.warnings()) {
-            Label label = new Label("提示: " + warning);
-            label.getStyleClass().add("status-detail");
-            label.setWrapText(true);
-            content.getChildren().add(label);
-        }
-        dialog.getDialogPane().setContent(content);
-        dialog.getDialogPane().setPrefWidth(620);
-        dialog.getDialogPane().lookupButton(install).setDisable(!plan.installable());
-        Optional<ButtonType> choice = dialog.showAndWait();
-        if (choice.orElse(ButtonType.CANCEL) != install) {
-            return;
-        }
-        Set<String> selectedOptional = new LinkedHashSet<>();
-        optionalChoices.stream().filter(CheckBox::isSelected).forEach(check -> {
-            ResolvedMod optional = (ResolvedMod) check.getUserData();
-            selectedOptional.add(optional.version().projectId());
-        });
-        if (selectedOptional.isEmpty()) {
-            viewModel.install(plan);
-        } else {
-            viewModel.preparePlan(
-                    version, selectedOptional, preferredReleaseChannel()).whenComplete((expanded, error) -> {
-                Platform.runLater(() -> {
-                    if (error != null) {
-                        showPlanFailure("无法解析所选可选依赖", error);
-                        return;
-                    }
-                    viewModel.install(expanded);
-                });
-            });
-        }
+        return ModFailureMessages.planFailureReason(error);
     }
 
     private void operateSelected(boolean enabled) {
@@ -795,8 +582,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     }
 
     private void updateSelected() {
-        Set<String> selectedIds = List.copyOf(
-                        installedList.getSelectionModel().getSelectedItems()).stream()
+        Set<String> selectedIds = installedPane.selectedItems().stream()
                 .map(InstalledMod::projectId)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         List<ModUpdate> selected = viewModel.availableUpdates().stream()
@@ -806,7 +592,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     }
 
     private void updateSelectedUpdates() {
-        runUpdates(List.copyOf(updateList.getSelectionModel().getSelectedItems()));
+        runUpdates(updatesPane.selectedUpdates());
     }
 
     private void updateAll() {
@@ -848,22 +634,17 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
 
     static <T> CompletableFuture<SequentialBatchRunner.Result<T>> runSequentialUpdateBatch(
             List<T> updates, Function<T, ? extends CompletableFuture<?>> operation) {
-        return SequentialBatchRunner.run(List.copyOf(updates), operation);
+        return ModBatchUpdates.run(updates, operation);
     }
 
     private void refreshUpdateButtons() {
-        if (checkUpdatesButton == null) {
-            return;
+        if (updatesPane != null) {
+            updatesPane.refreshButtons(updateBatchRunning);
         }
-        boolean busy = updateBatchRunning || viewModel.loadingProperty().get();
-        checkUpdatesButton.setDisable(busy);
-        updateSelectedButton.setDisable(busy
-                || updateList.getSelectionModel().getSelectedItems().isEmpty());
-        updateAllButton.setDisable(busy || viewModel.availableUpdates().isEmpty());
     }
 
     private void chooseHistoryVersion() {
-        InstalledMod selected = installedList.getSelectionModel().getSelectedItem();
+        InstalledMod selected = installedPane.selectedItem();
         if (selected == null || selected.projectId().startsWith("local:")) {
             return;
         }
@@ -888,7 +669,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                     ModVersion version = versions.get(index);
                     viewModel.preparePlan(
                             version, Set.of(), preferredReleaseChannel()).whenComplete((plan, failure) -> {
-                            Platform.runLater(() -> handlePreparedPlan(
+                            Platform.runLater(() -> installWorkflow.handlePreparedPlan(
                                     version, plan, failure, "无法准备安装计划"));
                         });
                 });
@@ -897,17 +678,18 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     }
 
     private void openSelectedProject() {
-        InstalledMod selected = installedList.getSelectionModel().getSelectedItem();
+        InstalledMod selected = installedPane.selectedItem();
         if (selected != null && !selected.projectId().startsWith("local:")) {
-            openUri(URI.create("https://modrinth.com/mod/" + selected.projectId()));
+            externalActions.openUri(URI.create(
+                    "https://modrinth.com/mod/" + selected.projectId()));
         }
     }
 
     private void openSelectedFile() {
-        InstalledMod selected = installedList.getSelectionModel().getSelectedItem();
+        InstalledMod selected = installedPane.selectedItem();
         if (selected != null) {
             Path path = viewModel.instanceProperty().get().gameDirectory().resolve(selected.relativePath());
-            openPath(path.getParent());
+            externalActions.openPath(path.getParent());
         }
     }
 
@@ -922,161 +704,12 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     }
 
     private List<String> selectedInstalledIds() {
-        return installedList.getSelectionModel().getSelectedItems().stream()
-                .map(InstalledMod::projectId).distinct().toList();
+        return installedPane.selectedIds();
     }
 
     /** Refreshes the installed list after a file is dropped on the launcher window. */
     public void refreshInstalledMods() {
         viewModel.refreshInstalled();
-    }
-
-    private void openUri(URI uri) {
-        try {
-            if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().browse(uri);
-            }
-        } catch (IOException error) {
-            statusConsumer.accept("无法打开项目页面: " + error.getMessage());
-        }
-    }
-
-    private void openPath(Path path) {
-        try {
-            if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().open(path.toFile());
-            }
-        } catch (IOException error) {
-            statusConsumer.accept("无法打开文件位置: " + error.getMessage());
-        }
-    }
-
-    private String formatDetails(ModProject project) {
-        List<String> parts = new ArrayList<>();
-        if (!project.author().isBlank()) parts.add(project.author());
-        parts.add("下载 " + project.downloads());
-        if (!project.license().isBlank()) parts.add(project.license());
-        if (!project.clientSide().isBlank()) parts.add("客户端 " + project.clientSide());
-        if (!project.serverSide().isBlank()) parts.add("服务端 " + project.serverSide());
-        return String.join(" · ", parts);
-    }
-
-    private String instanceText(ModInstanceContext context) {
-        return context.minecraftVersion() + " · " + loaderName(context.loaderName())
-                + " · " + context.profileId();
-    }
-
-    private static String loaderName(String loader) {
-        return switch (loader) {
-            case "fabric" -> "Fabric";
-            case "quilt" -> "Quilt";
-            case "forge" -> "Forge";
-            case "neoforge" -> "NeoForge";
-            default -> "原版";
-        };
-    }
-
-    private static String formatBytes(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
-        return String.format("%.1f MB", bytes / 1024.0 / 1024.0);
-    }
-
-    private static Button button(String text, String styleClass) {
-        Button button = new Button(text);
-        button.getStyleClass().addAll("app-button", styleClass, "compact-button");
-        return button;
-    }
-
-    private static ListCell<ModSearchIndex> enumCell() {
-        return new ListCell<>() {
-            @Override
-            protected void updateItem(ModSearchIndex item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : switch (item) {
-                    case RELEVANCE -> "相关度";
-                    case DOWNLOADS -> "下载量";
-                    case FOLLOWS -> "关注数";
-                    case NEWEST -> "最新发布";
-                    case UPDATED -> "最近更新";
-                });
-            }
-        };
-    }
-
-    private ListCell<ModVersion> versionCell() {
-        return new ListCell<>() {
-            @Override
-            protected void updateItem(ModVersion item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(null);
-                if (empty || item == null) {
-                    setGraphic(null);
-                    return;
-                }
-                Label version = new Label(item.versionNumber());
-                version.getStyleClass().add("mod-version-number");
-                HBox badges = new HBox(5, version,
-                        versionBadge(channelLabel(item.versionType()),
-                                "mod-channel-" + normalizedChannel(item.versionType())));
-                item.loaders().stream().limit(2).forEach(loader ->
-                        badges.getChildren().add(versionBadge(loaderDisplay(loader), "mod-loader-badge")));
-                if (item.featured() || item.id().equals(recommendedVersionId)) {
-                    badges.getChildren().add(versionBadge("★ 推荐", "mod-recommended"));
-                }
-                badges.setAlignment(Pos.CENTER_LEFT);
-                setGraphic(badges);
-            }
-        };
-    }
-
-    private static ListCell<ModMetadataProvider> providerCell() {
-        return new ListCell<>() {
-            @Override
-            protected void updateItem(ModMetadataProvider item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : switch (item.source()) {
-                    case MODRINTH -> "Modrinth";
-                    case CURSEFORGE -> "CurseForge";
-                });
-            }
-        };
-    }
-
-    private static Label versionBadge(String text, String styleClass) {
-        Label label = new Label(text);
-        label.getStyleClass().addAll("mod-version-badge", styleClass);
-        return label;
-    }
-
-    private static String normalizedChannel(String type) {
-        String value = type == null ? "release" : type.toLowerCase(java.util.Locale.ROOT);
-        return switch (value) {
-            case "beta" -> "beta";
-            case "alpha" -> "alpha";
-            default -> "release";
-        };
-    }
-
-    private static String channelLabel(String type) {
-        return switch (normalizedChannel(type)) {
-            case "beta" -> "Beta";
-            case "alpha" -> "Alpha";
-            default -> "Release";
-        };
-    }
-
-    private static String loaderDisplay(String loader) {
-        if (loader == null || loader.isBlank()) {
-            return "通用";
-        }
-        return switch (loader.toLowerCase(java.util.Locale.ROOT)) {
-            case "fabric" -> "Fabric";
-            case "forge" -> "Forge";
-            case "neoforge" -> "NeoForge";
-            case "quilt" -> "Quilt";
-            default -> loader;
-        };
     }
 
     @Override
@@ -1085,101 +718,6 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         viewModel.close();
     }
 
-    private final class ProjectCell extends ListCell<ModProject> {
-        @Override
-        protected void updateItem(ModProject project, boolean empty) {
-            super.updateItem(project, empty);
-            if (empty || project == null) {
-                setGraphic(null);
-                setText(null);
-                return;
-            }
-            ImageView icon = new ImageView(RemoteImageLoader.loadingPlaceholder());
-            icon.setFitWidth(42);
-            icon.setFitHeight(42);
-            icon.setPreserveRatio(true);
-            if (project.iconUrl() != null) {
-                RemoteImageLoader.load(project.iconUrl()).thenAccept(image ->
-                        Platform.runLater(() -> {
-                            if (getItem() == project) {
-                                icon.setImage(image);
-                            }
-                        }));
-            } else {
-                icon.setImage(RemoteImageLoader.brokenPlaceholder());
-            }
-            Label title = new Label(project.title());
-            title.getStyleClass().add("mod-item-title");
-            Label description = new Label("正在翻译简介…");
-            description.getStyleClass().add("status-detail");
-            description.setWrapText(true);
-            description.setMaxWidth(270);
-            ChineseDescriptionService.translate(project.description()).thenAccept(translated ->
-                    Platform.runLater(() -> {
-                        if (getItem() == project) {
-                            description.setText(translated == null || translated.isBlank()
-                                    ? project.description() : translated);
-                        }
-                    }));
-            boolean installed = viewModel.installedMods().stream()
-                    .anyMatch(mod -> project.projectId().equals(mod.projectId()));
-            String badges = project.author() + " · ↓ " + project.downloads()
-                    + (installed ? " · 已安装" : "")
-                    + (viewModel.hasUpdate(project.projectId()) ? " · 可更新" : "");
-            Label meta = new Label(badges);
-            meta.getStyleClass().add("mod-item-meta");
-            VBox text = new VBox(3, title, description, meta);
-            HBox row = new HBox(10, icon, text);
-            row.setAlignment(Pos.CENTER_LEFT);
-            setGraphic(row);
-        }
-    }
-
-    private final class InstalledCell extends ListCell<InstalledMod> {
-        @Override
-        protected void updateItem(InstalledMod mod, boolean empty) {
-            super.updateItem(mod, empty);
-            if (empty || mod == null) {
-                setGraphic(null);
-                setText(null);
-                return;
-            }
-            Label state = new Label(mod.enabled() ? "ON" : "OFF");
-            state.getStyleClass().add(mod.enabled() ? "mod-enabled" : "mod-disabled");
-            Label title = new Label(mod.displayName());
-            title.getStyleClass().add("mod-item-title");
-            String detail = (mod.versionNumber().isBlank() ? mod.fileName() : mod.versionNumber())
-                    + " · " + mod.versionType()
-                    + " · " + formatBytes(mod.fileSize())
-                    + (mod.dependency() ? " · 依赖" : "")
-                    + (mod.requiredByProjectId().isBlank() ? "" : " · 被 " + mod.requiredByProjectId() + " 依赖")
-                    + (mod.installedAt() == null ? "" : " · " + mod.installedAt().toString().substring(0, 10))
-                    + (mod.projectId().startsWith("local:") ? " · 本地/未知来源" : " · 在线来源")
-                    + (viewModel.healthMessage(mod.projectId()).isBlank()
-                            ? "" : " · " + viewModel.healthMessage(mod.projectId()))
-                    + (viewModel.hasUpdate(mod.projectId()) ? " · 可更新" : "");
-            Label meta = new Label(detail);
-            meta.getStyleClass().add("status-detail");
-            VBox text = new VBox(3, title, meta);
-            HBox row = new HBox(10, state, text);
-            row.setAlignment(Pos.CENTER_LEFT);
-            setGraphic(row);
-        }
-    }
-
     private record DetailResult(ModProject project, List<ModVersion> versions) {
-    }
-
-    private static String errorMessage(Throwable error) {
-        Throwable cause = unwrap(error);
-        return cause.getMessage() == null || cause.getMessage().isBlank()
-                ? "未知错误" : cause.getMessage();
-    }
-
-    private record CategoryChoice(String label, String id) {
-        @Override
-        public String toString() {
-            return label;
-        }
     }
 }
