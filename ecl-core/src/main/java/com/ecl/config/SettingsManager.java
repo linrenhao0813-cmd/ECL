@@ -1,6 +1,5 @@
 package com.ecl.config;
 
-import com.ecl.util.CryptoUtil;
 import com.ecl.util.GsonProvider;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -17,10 +16,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,35 +30,25 @@ public class SettingsManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(SettingsManager.class);
     private static final Gson GSON = GsonProvider.pretty();
     private static final File SETTINGS_FILE = new File(com.ecl.ECLConfig.getBaseDir(), "settings.json");
-    private static final long AUTO_SAVE_DELAY_MS = 500;
 
     private JsonObject settings = new JsonObject();
     private boolean loadAttempted;
-    private volatile boolean autoSaveEnabled;
-    private volatile boolean dirty;
-    private volatile ScheduledFuture<?> pendingAutoSave;
-    private final ScheduledExecutorService autoSaveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread thread = new Thread(r, "ecl-settings-autosave");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final EncryptedSettingsStore encryptedStore = new EncryptedSettingsStore();
+    private final SettingsAutoSaveScheduler autoSaveScheduler =
+            new SettingsAutoSaveScheduler(this::save);
 
     /**
      * Persist future {@code set*} / {@code remove} changes automatically after a short debounce.
      * Explicit {@link #save()} remains available and is unaffected.
      */
     public void enableAutoSave() {
-        autoSaveEnabled = true;
+        autoSaveScheduler.enable();
     }
 
     /** Flush any pending auto-save and stop the background scheduler. */
     public void close() {
-        ScheduledFuture<?> pending = pendingAutoSave;
-        if (pending != null) {
-            pending.cancel(false);
-        }
-        autoSaveExecutor.shutdownNow();
-        if (dirty) {
+        autoSaveScheduler.close();
+        if (autoSaveScheduler.isDirty()) {
             save();
         }
     }
@@ -103,7 +88,7 @@ public class SettingsManager {
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
             }
-            dirty = false;
+            autoSaveScheduler.markClean();
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to save settings to {}", SETTINGS_FILE, e);
@@ -121,15 +106,7 @@ public class SettingsManager {
 
     /** Mark the in-memory settings as changed and schedule a debounced disk write when enabled. */
     private void markDirty() {
-        if (!autoSaveEnabled) {
-            return;
-        }
-        dirty = true;
-        ScheduledFuture<?> pending = pendingAutoSave;
-        if (pending != null && !pending.isDone()) {
-            return;
-        }
-        pendingAutoSave = autoSaveExecutor.schedule(this::save, AUTO_SAVE_DELAY_MS, TimeUnit.MILLISECONDS);
+        autoSaveScheduler.markDirty();
     }
 
     public synchronized String getString(String key, String defaultValue) {
@@ -293,13 +270,9 @@ public class SettingsManager {
      * If {@code value} is null or empty, the key is removed.
      */
     public synchronized void setEncrypted(String key, String value) {
-        if (value == null || value.isBlank()) {
-            remove("_enc_" + key);
-            return;
-        }
-        String encrypted = CryptoUtil.encrypt(value);
-        if (!encrypted.isBlank()) {
-            setString("_enc_" + key, encrypted);
+        ensureLoaded();
+        if (encryptedStore.set(settings, key, value)) {
+            markDirty();
         }
     }
 
@@ -312,16 +285,8 @@ public class SettingsManager {
      * Returns the decrypted plaintext, or {@code null} if not found or decryptable.
      */
     public synchronized String getEncrypted(String key) {
-        String encrypted = getString("_enc_" + key, null);
-        if (encrypted == null) {
-            return null;
-        }
-        try {
-            return CryptoUtil.decrypt(encrypted);
-        } catch (RuntimeException error) {
-            LOGGER.warn("Ignoring unreadable encrypted setting '{}'", key, error);
-            return null;
-        }
+        ensureLoaded();
+        return encryptedStore.get(settings, key);
     }
 
     public synchronized String getEncrypted(SettingKey<String> key) {
@@ -333,11 +298,7 @@ public class SettingsManager {
      * Used for one-time migration of existing stored tokens.
      */
     public synchronized void migrateToEncrypted(String key) {
-        String plaintext = getString(key, null);
-        if (plaintext != null && !plaintext.isBlank()) {
-            setEncrypted(key, plaintext);
-            remove(key);
-        }
+        SettingsMigration.migrateToEncrypted(this, key);
     }
 
     /**
@@ -345,11 +306,7 @@ public class SettingsManager {
      * 用于 settings 键名变更时的平滑升级。
      */
     void migrateSettingKey(String oldKey, String newKey) {
-        if (settings.has(oldKey) && !settings.has(newKey)) {
-            settings.add(newKey, settings.get(oldKey));
-            LOGGER.info("Migrated settings key '{}' to '{}'", oldKey, newKey);
-        }
-        settings.remove(oldKey);
+        SettingsMigration.migrateSettingKey(settings, oldKey, newKey);
     }
 
     private void ensureLoaded() {

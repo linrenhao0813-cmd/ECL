@@ -237,6 +237,43 @@ class MrpackInstallerTest {
         assertEquals("1.21.5", profile.get("eclMinecraftVersion").getAsString());
     }
 
+    @Test
+    void installContentsKeepsChineseMessageWhenDependenciesMissing() throws Exception {
+        Path archive = tempDir.resolve("no-deps.mrpack");
+        String index = """
+                {
+                  "formatVersion": 1,
+                  "game": "minecraft",
+                  "name": "No Dependencies",
+                  "versionId": "1",
+                  "files": []
+                }
+                """;
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+            zip.putNextEntry(new ZipEntry("modrinth.index.json"));
+            zip.write(index.getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+
+        Path instance = tempDir.resolve("staging");
+        IOException error = assertThrows(IOException.class,
+                () -> new MrpackInstaller().installContents(archive.toFile(), instance, null));
+
+        assertTrue(error.getMessage().contains("整合包索引缺少 dependencies"));
+    }
+
+    @Test
+    void findLoaderPrefersMultiLoaderConflictOverInvalidValue() throws Exception {
+        JsonObject dependencies = new JsonObject();
+        dependencies.addProperty("fabric-loader", "0.16.10");
+        dependencies.addProperty("forge", 12345);
+
+        IOException error = assertThrows(IOException.class,
+                () -> MrpackDependencyResolver.findLoader(dependencies));
+
+        assertTrue(error.getMessage().contains("整合包同时声明了多个模组加载器"));
+    }
+
     private static void writePack(Path archive, String name, String version, String config)
             throws Exception {
         writePack(archive, name, version, "{\"minecraft\":\"1.21.4\"}",

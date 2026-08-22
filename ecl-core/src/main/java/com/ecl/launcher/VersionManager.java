@@ -5,8 +5,6 @@ import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
 import com.ecl.util.Messages;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.io.File;
@@ -18,26 +16,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class VersionManager {
-    private static final Logger LOGGER = LoggerFactory.getLogger(VersionManager.class);
-    private static final Set<String> APRIL_FOOLS_VERSION_IDS = Set.of(
-            "15w14a",
-            "1.RV-Pre1",
-            "3D Shareware v1.34",
-            "20w14infinite",
-            "22w13oneblockatatime",
-            "23w13a_or_b",
-            "24w14potato",
-            "25w14craftmine"
-    );
-
     private volatile JsonObject manifest;
     private volatile Map<String, JsonObject> versionIndex = Map.of();
+    private final VersionManifestStore manifestStore = new VersionManifestStore();
+    private final VersionProfileResolver profileResolver = new VersionProfileResolver(this);
+    private final VersionDownloadTargetResolver downloadTargetResolver =
+            new VersionDownloadTargetResolver(this);
     private final Map<String, String> displayNameCache = new ConcurrentHashMap<>();
     /** Cached scan of local version profiles; null means not computed yet. */
     private volatile List<LocalVersionProfile> localProfilesCache;
@@ -66,17 +53,8 @@ public class VersionManager {
     }
 
     public void refresh() throws IOException {
-        File cache = new File(ECLConfig.getVersionsDir(), "version_manifest.json");
-        try {
-            manifest = HttpUtil.getJsonWithMirrors(ECLConfig.MC_VERSION_MANIFEST_URL, null);
-            HttpUtil.writeJson(cache, manifest);
-            versionIndex = buildVersionIndex(manifest);
-        } catch (IOException networkError) {
-            manifest = loadCachedManifest();
-            if (manifest == null) {
-                throw networkError;
-            }
-        }
+        manifest = manifestStore.refresh();
+        versionIndex = VersionCatalogService.buildIndex(manifest);
     }
 
     public List<String> getReleaseVersions() {
@@ -93,19 +71,7 @@ public class VersionManager {
 
     public List<String> getVersions(VersionCategory category) {
         ensureManifestLoaded();
-        List<String> versions = new ArrayList<>();
-        if (manifest == null) {
-            return versions;
-        }
-
-        JsonArray arr = manifest.getAsJsonArray("versions");
-        for (JsonElement el : arr) {
-            JsonObject v = el.getAsJsonObject();
-            if (matchesCategory(v, category)) {
-                versions.add(JsonUtil.getString(v, "id", ""));
-            }
-        }
-        return versions;
+        return VersionCatalogService.versions(manifest, category);
     }
 
     public List<String> getAllVersions() {
@@ -228,43 +194,7 @@ public class VersionManager {
         if (cached != null) {
             return cached;
         }
-        File versionsDirectory = ECLConfig.getVersionsDir();
-        File[] directories = versionsDirectory.listFiles(File::isDirectory);
-        if (directories == null) {
-            return List.of();
-        }
-        List<LocalVersionProfile> profiles = new ArrayList<>();
-        for (File directory : directories) {
-            String profileId = directory.getName();
-            File jsonFile = new File(directory, profileId + ".json");
-            if (!jsonFile.isFile()) {
-                continue;
-            }
-            try {
-                JsonObject json = HttpUtil.readJson(jsonFile);
-                String loader = JsonUtil.getString(json, "eclModLoader", "").toLowerCase(Locale.ROOT);
-                if (loader.isBlank()) {
-                    loader = detectLoader(json);
-                }
-                if (loader.isBlank()) {
-                    continue;
-                }
-                String minecraftVersion = JsonUtil.getString(json, "eclMinecraftVersion", "");
-                if (minecraftVersion.isBlank()) {
-                    minecraftVersion = JsonUtil.getString(json, "inheritsFrom", "");
-                }
-                if (minecraftVersion.isBlank()) {
-                    continue;
-                }
-                profiles.add(new LocalVersionProfile(profileId, minecraftVersion, loader));
-            } catch (IOException e) {
-                LOGGER.warn("Failed to inspect local version profile {}", profileId, e);
-            }
-        }
-        profiles.sort(Comparator.comparing(LocalVersionProfile::minecraftVersion).reversed()
-                .thenComparing(LocalVersionProfile::loader)
-                .thenComparing(LocalVersionProfile::profileId));
-        List<LocalVersionProfile> result = List.copyOf(profiles);
+        List<LocalVersionProfile> result = new LocalVersionProfileScanner().scan();
         localProfilesCache = result;
         return result;
     }
@@ -282,7 +212,7 @@ public class VersionManager {
         return displayNameCache.computeIfAbsent(versionId, id -> {
             for (LocalVersionProfile profile : getLocalVersionProfiles()) {
                 if (profile.profileId().equals(id)) {
-                    return profile.minecraftVersion() + " · " + loaderDisplayName(profile.loader())
+                    return profile.minecraftVersion() + " · " + LocalVersionProfileScanner.displayName(profile.loader())
                             + "  [" + profile.profileId() + "]";
                 }
             }
@@ -305,7 +235,7 @@ public class VersionManager {
         if (localProfile == null && findVersion(profileId) == null) {
             throw new IOException("Unknown version profile: " + profileId);
         }
-        String downloadVersionId = resolveDownloadVersionId(
+        String downloadVersionId = downloadTargetResolver.resolve(
                 profileId, new java.util.HashSet<>());
         JsonObject manifestVersion = findVersion(downloadVersionId);
         String url = manifestVersion == null
@@ -318,32 +248,7 @@ public class VersionManager {
             throw new IOException("Version profile id is blank");
         }
         ensureManifestLoaded();
-        return resolveMinecraftVersionId(profileId, new java.util.HashSet<>());
-    }
-
-    private String resolveMinecraftVersionId(
-            String profileId,
-            Set<String> visited
-    ) throws IOException {
-        if (!visited.add(profileId)) {
-            throw new IOException("Circular version inheritance while resolving Minecraft version: "
-                    + profileId);
-        }
-        JsonObject json = loadVersionJson(profileId);
-        if (json == null) {
-            if (findVersion(profileId) != null || visited.size() > 1) {
-                return profileId;
-            }
-            throw new IOException("Missing inherited Minecraft version metadata: " + profileId);
-        }
-        String explicit = JsonUtil.getString(json, "eclMinecraftVersion", "");
-        if (!explicit.isBlank()) {
-            return explicit;
-        }
-        String parent = JsonUtil.getString(json, "inheritsFrom", "");
-        return parent.isBlank()
-                ? profileId
-                : resolveMinecraftVersionId(parent, visited);
+        return profileResolver.resolveMinecraftVersionId(profileId, new java.util.HashSet<>());
     }
 
     public String getVersionType(String versionId) {
@@ -368,72 +273,12 @@ public class VersionManager {
             return false;
         }
         try {
-            String jarVersion = resolveClientJarVersion(versionId, new java.util.HashSet<>());
+            String jarVersion = profileResolver.resolveClientJarVersion(versionId, new java.util.HashSet<>());
             File jar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), jarVersion);
             return jar.isFile();
         } catch (IOException e) {
             return false;
         }
-    }
-
-    private String resolveClientJarVersion(String versionId, java.util.Set<String> visited) throws IOException {
-        if (!visited.add(versionId)) {
-            throw new IOException("Circular version inheritance while resolving client JAR: " + versionId);
-        }
-        JsonObject json = loadVersionJson(versionId);
-        if (json == null) {
-            throw new IOException("Missing version JSON: " + versionId);
-        }
-        String explicitJar = JsonUtil.getString(json, "jar", "");
-        if (!explicitJar.isBlank()) {
-            return explicitJar;
-        }
-        String parent = JsonUtil.getString(json, "inheritsFrom", "");
-        if (!parent.isBlank()) {
-            return resolveClientJarVersion(parent, visited);
-        }
-        if (hasClientDownload(json)) {
-            return versionId;
-        }
-        String minecraftVersion = JsonUtil.getString(json, "eclMinecraftVersion", "");
-        return minecraftVersion.isBlank() || minecraftVersion.equals(versionId)
-                ? versionId
-                : resolveClientJarVersion(minecraftVersion, visited);
-    }
-
-    private String resolveDownloadVersionId(
-            String versionId,
-            Set<String> visited
-    ) throws IOException {
-        if (!visited.add(versionId)) {
-            throw new IOException("Circular version inheritance while resolving download target: "
-                    + versionId);
-        }
-        JsonObject json = loadVersionJson(versionId);
-        if (json == null) {
-            return versionId;
-        }
-        String explicitJar = JsonUtil.getString(json, "jar", "");
-        if (!explicitJar.isBlank()) {
-            return explicitJar;
-        }
-        String parent = JsonUtil.getString(json, "inheritsFrom", "");
-        if (!parent.isBlank()) {
-            return resolveDownloadVersionId(parent, visited);
-        }
-        if (hasClientDownload(json)) {
-            return versionId;
-        }
-        String minecraftVersion = JsonUtil.getString(json, "eclMinecraftVersion", "");
-        return minecraftVersion.isBlank() || minecraftVersion.equals(versionId)
-                ? versionId
-                : resolveDownloadVersionId(minecraftVersion, visited);
-    }
-
-    private static boolean hasClientDownload(JsonObject json) {
-        JsonObject downloads = json == null ? null : json.getAsJsonObject("downloads");
-        return downloads != null && downloads.has("client")
-                && downloads.get("client").isJsonObject();
     }
 
     public JsonObject loadVersionJson(String versionId) throws IOException {
@@ -446,104 +291,16 @@ public class VersionManager {
 
     private synchronized void ensureManifestLoaded() {
         if (manifest == null) {
-            manifest = loadCachedManifest();
+            manifest = manifestStore.loadCached();
+            versionIndex = VersionCatalogService.buildIndex(manifest);
         }
     }
 
-    private JsonObject loadCachedManifest() {
-        File cache = new File(ECLConfig.getVersionsDir(), "version_manifest.json");
-        if (!cache.exists()) {
-            return null;
-        }
-        try {
-            JsonObject cached = HttpUtil.readJson(cache);
-            versionIndex = buildVersionIndex(cached);
-            return cached;
-        } catch (IOException e) {
-            LOGGER.warn("Failed to read cached version manifest from {}", cache, e);
-            return null;
-        }
-    }
-
-    private static Map<String, JsonObject> buildVersionIndex(JsonObject manifest) {
-        if (manifest == null || !manifest.has("versions")) {
-            return Map.of();
-        }
-        JsonArray arr = manifest.getAsJsonArray("versions");
-        Map<String, JsonObject> index = new HashMap<>(arr.size() * 2);
-        for (JsonElement el : arr) {
-            if (!el.isJsonObject()) {
-                continue;
-            }
-            JsonObject v = el.getAsJsonObject();
-            String id = JsonUtil.getString(v, "id", "");
-            if (!id.isEmpty()) {
-                index.putIfAbsent(id, v);
-            }
-        }
-        return index;
-    }
-
-    private JsonObject findVersion(String versionId) {
+    JsonObject findVersion(String versionId) {
         if (versionId == null || versionId.isBlank()) {
             return null;
         }
         return versionIndex.get(versionId);
-    }
-
-    private boolean matchesCategory(JsonObject version, VersionCategory category) {
-        VersionCategory selected = category == null ? VersionCategory.FEATURED : category;
-        String type = JsonUtil.getString(version, "type", "");
-        return switch (selected) {
-            case FEATURED -> "release".equals(type) || "snapshot".equals(type) || isAprilFoolsVersion(version);
-            case RELEASE -> "release".equals(type);
-            case PREVIEW -> "snapshot".equals(type);
-            case APRIL_FOOLS -> isAprilFoolsVersion(version);
-            case ALL -> true;
-        };
-    }
-
-    private boolean isAprilFoolsVersion(JsonObject version) {
-        String releaseTime = JsonUtil.getString(version, "releaseTime", "");
-        if ("snapshot".equals(JsonUtil.getString(version, "type", ""))
-                && releaseTime.length() >= 10
-                && "04-01".equals(releaseTime.substring(5, 10))) {
-            return true;
-        }
-
-        String id = JsonUtil.getString(version, "id", "");
-        return APRIL_FOOLS_VERSION_IDS.contains(id);
-    }
-
-    private static String detectLoader(JsonObject json) {
-        String mainClass = JsonUtil.getString(json, "mainClass", "").toLowerCase(Locale.ROOT);
-        if (mainClass.contains("fabricmc")) return "fabric";
-        if (mainClass.contains("quiltmc")) return "quilt";
-        if (mainClass.contains("neoforge")) return "neoforge";
-        if (mainClass.contains("forge")) return "forge";
-        JsonArray libraries = json.getAsJsonArray("libraries");
-        if (libraries != null) {
-            for (JsonElement element : libraries) {
-                if (!element.isJsonObject()) continue;
-                String coordinate = JsonUtil.getString(element.getAsJsonObject(), "name", "")
-                        .toLowerCase(Locale.ROOT);
-                if (coordinate.contains("fabric-loader")) return "fabric";
-                if (coordinate.contains("quilt-loader")) return "quilt";
-                if (coordinate.contains("neoforge")) return "neoforge";
-                if (coordinate.contains("minecraftforge") || coordinate.contains("forge:forge")) return "forge";
-            }
-        }
-        return "";
-    }
-
-    private static String loaderDisplayName(String loader) {
-        return switch (loader.toLowerCase(Locale.ROOT)) {
-            case "fabric" -> "Fabric";
-            case "quilt" -> "Quilt";
-            case "forge" -> "Forge";
-            case "neoforge" -> "NeoForge";
-            default -> loader;
-        };
     }
 
     public record LocalVersionProfile(String profileId, String minecraftVersion, String loader) {
