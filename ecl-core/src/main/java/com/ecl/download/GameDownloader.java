@@ -17,8 +17,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -39,6 +37,7 @@ public class GameDownloader implements DownloadService {
 
     private final ExecutorService versionDownloadExecutor;
     private final ExecutorService fileDownloadExecutor;
+    private final GameDownloadBatchExecutor batchExecutor;
     private final AtomicReference<Future<?>> activeDownload = new AtomicReference<>();
     private volatile DownloadListener configuredListener;
     private volatile boolean verifyExistingFiles = true;
@@ -53,6 +52,7 @@ public class GameDownloader implements DownloadService {
         fileDownloadExecutor = Executors.newFixedThreadPool(
                 Math.max(1, Math.min(8, downloadThreads)),
                 ThreadFactories.daemon("ecl-file-download"));
+        batchExecutor = new GameDownloadBatchExecutor(fileDownloadExecutor);
     }
 
     public void setListener(DownloadListener listener) {
@@ -220,7 +220,7 @@ public class GameDownloader implements DownloadService {
             runListener.onStatus("检测到 " + missingLibraries.size() + " 个缺失的依赖库");
         }
         NativePlatform nativePlatform = NativePlatform.current();
-        List<FileDownloadTask> tasks = new ArrayList<>();
+        List<GameDownloadBatchExecutor.DownloadTask> tasks = new ArrayList<>();
 
         for (JsonElement el : libraries) {
             JsonObject lib = el.getAsJsonObject();
@@ -255,17 +255,18 @@ public class GameDownloader implements DownloadService {
             }
         }
 
-        downloadConcurrently(tasks, "依赖库", runListener);
+        batchExecutor.download(tasks, "依赖库", runListener);
     }
 
-    private void addDownloadIfNeeded(List<FileDownloadTask> tasks, JsonObject artifact, String sourceLabel)
-            throws IOException {
+    private void addDownloadIfNeeded(
+            List<GameDownloadBatchExecutor.DownloadTask> tasks,
+            JsonObject artifact, String sourceLabel) throws IOException {
         String url = artifact.get("url").getAsString();
         String path = artifact.get("path").getAsString();
         String sha1 = artifact.has("sha1") ? artifact.get("sha1").getAsString() : null;
         File target = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
         if (needsDownload(target, sha1)) {
-            tasks.add(new FileDownloadTask(url, target, sha1, sourceLabel));
+            tasks.add(new GameDownloadBatchExecutor.DownloadTask(url, target, sha1, sourceLabel));
         }
     }
 
@@ -290,7 +291,7 @@ public class GameDownloader implements DownloadService {
         boolean skipHashVerification = verifiedMarkerMatches(assetId, indexSha1);
 
         JsonObject objects = HttpUtil.readJson(indexFile).getAsJsonObject("objects");
-        List<FileDownloadTask> tasks = new ArrayList<>();
+        List<GameDownloadBatchExecutor.DownloadTask> tasks = new ArrayList<>();
         for (String name : objects.keySet()) {
             JsonObject obj = objects.getAsJsonObject(name);
             String hash = obj.get("hash").getAsString();
@@ -300,13 +301,13 @@ public class GameDownloader implements DownloadService {
             String subPath = hash.substring(0, 2) + "/" + hash;
             File target = FileUtil.safeResolveUnder(assetDir, subPath);
             if (needsDownload(target, hash, skipHashVerification)) {
-                tasks.add(new FileDownloadTask(
+                tasks.add(new GameDownloadBatchExecutor.DownloadTask(
                         "https://resources.download.minecraft.net/" + subPath,
                         target, hash, "资源文件"));
             }
         }
 
-        downloadConcurrently(tasks, "资源文件", runListener);
+        batchExecutor.download(tasks, "资源文件", runListener);
         // 全部下载成功（或本就没有缺失）后记录校验标记，下次启动免去全量哈希。
         writeVerifiedMarker(assetId, indexSha1);
     }
@@ -378,65 +379,6 @@ public class GameDownloader implements DownloadService {
                 nativeClassifier);
     }
 
-    private void downloadConcurrently(List<FileDownloadTask> tasks, String phase,
-                                      DownloadListener runListener) throws IOException {
-        if (tasks.isEmpty()) {
-            if (runListener != null) runListener.onStatus(phase + "已是最新，无需下载");
-            return;
-        }
-
-        int threadCount = Math.min(ECLConfig.DOWNLOAD_THREADS, tasks.size());
-        if (runListener != null) {
-            runListener.onStatus("使用 " + threadCount + " 个线程下载" + phase + "，共 " + tasks.size() + " 个文件...");
-        }
-
-        ExecutorCompletionService<Void> completionService = new ExecutorCompletionService<>(fileDownloadExecutor);
-        List<Future<Void>> phaseTasks = new ArrayList<>(tasks.size());
-
-        for (FileDownloadTask task : tasks) {
-            phaseTasks.add(completionService.submit(() -> {
-                downloadAndVerify(task, runListener);
-                return null;
-            }));
-        }
-
-        IOException firstError = null;
-        int completed = 0;
-        try {
-            while (completed < tasks.size()) {
-                try {
-                    completionService.take().get();
-                } catch (ExecutionException e) {
-                    Throwable cause = e.getCause();
-                    IOException error = cause instanceof IOException
-                            ? (IOException) cause
-                            : new IOException(cause == null ? e : cause);
-                    if (firstError == null) firstError = error;
-                }
-                completed++;
-                if (runListener != null && (completed == tasks.size() || completed % 25 == 0)) {
-                    runListener.onStatus("下载" + phase + ": " + completed + "/" + tasks.size());
-                }
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException(phase + "下载被中断", e);
-        } finally {
-            if (Thread.currentThread().isInterrupted()) {
-                phaseTasks.forEach(task -> task.cancel(true));
-            }
-        }
-
-        if (firstError != null) {
-            throw new IOException(phase + "下载失败: " + firstError.getMessage(), firstError);
-        }
-    }
-
-    private void downloadAndVerify(FileDownloadTask task, DownloadListener runListener) throws IOException {
-        HttpUtil.downloadFile(task.url, task.target, sourceCallback(task.sourceLabel, runListener));
-        verifyDownloadedFile(task.target, task.sha1);
-    }
-
     private HttpUtil.SourceCallback sourceCallback(String label, DownloadListener runListener) {
         return new HttpUtil.SourceCallback() {
             @Override
@@ -505,20 +447,6 @@ public class GameDownloader implements DownloadService {
             String osName = "windows";
             return new NativePlatform(osName, bits,
                     osName + "-" + FileUtil.nativeArchitecture(architecture));
-        }
-    }
-
-    private static final class FileDownloadTask {
-        private final String url;
-        private final File target;
-        private final String sha1;
-        private final String sourceLabel;
-
-        private FileDownloadTask(String url, File target, String sha1, String sourceLabel) {
-            this.url = url;
-            this.target = target;
-            this.sha1 = sha1;
-            this.sourceLabel = sourceLabel;
         }
     }
 }

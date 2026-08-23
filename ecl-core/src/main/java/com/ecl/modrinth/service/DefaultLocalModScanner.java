@@ -13,12 +13,10 @@ import com.ecl.modrinth.repository.InstalledModRepository;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -37,23 +35,11 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Predicate;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public final class DefaultLocalModScanner implements LocalModScanner {
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultLocalModScanner.class);
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-    private static final long MAX_METADATA_BYTES = 1024 * 1024;
-    private static final List<String> METADATA_FILES = List.of(
-            "fabric.mod.json", "quilt.mod.json", "META-INF/mods.toml",
-            "META-INF/neoforge.mods.toml", "mcmod.info");
-    private static final Pattern TOML_ID = tomlValue("modId");
-    private static final Pattern TOML_NAME = tomlValue("displayName");
-    private static final Pattern TOML_VERSION = tomlValue("version");
-
     private final ModMetadataProvider metadataProvider;
     private final InstalledModRepository repository;
     private final HashVerifier hashVerifier;
@@ -217,8 +203,9 @@ public final class DefaultLocalModScanner implements LocalModScanner {
                         hashes = hashVerifier.calculate(file);
                     }
                     LocalModMeta cachedMetadata = cacheMatches ? metadataFromCache(cached) : null;
-                    JarInspection inspection = cachedMetadata == null
-                            ? inspectJar(file) : new JarInspection(null, cachedMetadata);
+                    LocalModMetadataReader.Inspection inspection = cachedMetadata == null
+                            ? LocalModMetadataReader.inspectJar(file)
+                            : new LocalModMetadataReader.Inspection(null, cachedMetadata);
                     result.add(new ScannedFile(file.toAbsolutePath().normalize(), size, modified,
                             hashes, inspection.damage() != null,
                             inspection.damage() == null ? "" : inspection.damage(),
@@ -229,97 +216,12 @@ public final class DefaultLocalModScanner implements LocalModScanner {
         return result;
     }
 
-    private static JarInspection inspectJar(Path file) {
-        try (JarFile jar = new JarFile(file.toFile())) {
-            for (String metadataName : METADATA_FILES) {
-                JarEntry entry = jar.getJarEntry(metadataName);
-                if (entry == null) {
-                    continue;
-                }
-                if (entry.getSize() > MAX_METADATA_BYTES) {
-                    return new JarInspection("模组元数据超过安全读取上限", LocalModMeta.unknown());
-                }
-                try (InputStream input = jar.getInputStream(entry)) {
-                    byte[] content = input.readNBytes((int) MAX_METADATA_BYTES + 1);
-                    if (content.length > MAX_METADATA_BYTES) {
-                        return new JarInspection("模组元数据解压后超过安全读取上限",
-                                LocalModMeta.unknown());
-                    }
-                    return new JarInspection(null, parseMetadata(metadataName,
-                            new String(content, StandardCharsets.UTF_8)));
-                }
-            }
-            return new JarInspection(null, LocalModMeta.unknown());
-        } catch (IOException e) {
-            return new JarInspection("JAR 损坏或无法读取: " + e.getMessage(), LocalModMeta.unknown());
-        } catch (RuntimeException invalidMetadata) {
-            LOGGER.debug("Cannot parse local mod metadata from {}", file, invalidMetadata);
-            return new JarInspection(null, LocalModMeta.unknown());
-        }
-    }
-
     private static LocalModMeta metadataFromCache(ScanCacheEntry cached) {
         ModLoader loader = ModLoader.fromApiName(cached.loader());
         if (!loader.supportsMods()) {
             return null;
         }
         return new LocalModMeta(cached.modId(), cached.modName(), cached.modVersion(), loader, true);
-    }
-
-    private static LocalModMeta parseMetadata(String entryName, String content) throws IOException {
-        return switch (entryName) {
-            case "fabric.mod.json" -> jsonMetadata(content, ModLoader.FABRIC, false);
-            case "quilt.mod.json" -> jsonMetadata(content, ModLoader.QUILT, true);
-            case "META-INF/mods.toml" -> tomlMetadata(content, ModLoader.FORGE);
-            case "META-INF/neoforge.mods.toml" -> tomlMetadata(content, ModLoader.NEOFORGE);
-            case "mcmod.info" -> legacyForgeMetadata(content);
-            default -> LocalModMeta.unknown();
-        };
-    }
-
-    private static LocalModMeta jsonMetadata(String content, ModLoader loader, boolean quilt)
-            throws IOException {
-        JsonNode root = MAPPER.readTree(content);
-        JsonNode identity = quilt ? root.path("quilt_loader") : root;
-        JsonNode metadata = quilt ? identity.path("metadata") : root;
-        String id = text(identity.path("id"));
-        String name = text(metadata.path("name"));
-        String version = text(identity.path("version"));
-        return new LocalModMeta(id, firstNonBlank(name, id), cleanVersion(version), loader, true);
-    }
-
-    private static LocalModMeta legacyForgeMetadata(String content) throws IOException {
-        JsonNode root = MAPPER.readTree(content);
-        JsonNode mod = root.isArray() && !root.isEmpty() ? root.get(0) : root;
-        String id = text(mod.path("modid"));
-        String name = text(mod.path("name"));
-        return new LocalModMeta(id, firstNonBlank(name, id),
-                cleanVersion(text(mod.path("version"))), ModLoader.FORGE, true);
-    }
-
-    private static LocalModMeta tomlMetadata(String content, ModLoader loader) {
-        String id = match(TOML_ID, content);
-        String name = match(TOML_NAME, content);
-        String version = cleanVersion(match(TOML_VERSION, content));
-        return new LocalModMeta(id, firstNonBlank(name, id), version, loader, true);
-    }
-
-    private static Pattern tomlValue(String key) {
-        return Pattern.compile("(?m)^\\s*" + Pattern.quote(key)
-                + "\\s*=\\s*[\\\"']([^\\\"']*)[\\\"']");
-    }
-
-    private static String match(Pattern pattern, String value) {
-        Matcher matcher = pattern.matcher(value);
-        return matcher.find() ? matcher.group(1).trim() : "";
-    }
-
-    private static String text(JsonNode node) {
-        return node == null || !node.isValueNode() ? "" : node.asText("").trim();
-    }
-
-    private static String cleanVersion(String version) {
-        return version != null && version.contains("${") ? "" : firstNonBlank(version, "");
     }
 
     private static String loaderLabel(ModLoader loader) {
@@ -435,9 +337,6 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             String message,
             LocalModMeta metadata
     ) {
-    }
-
-    private record JarInspection(String damage, LocalModMeta metadata) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

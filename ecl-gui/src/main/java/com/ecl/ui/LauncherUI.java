@@ -14,7 +14,6 @@ import com.ecl.download.ModrinthDownloader;
 import com.ecl.download.ServerJarDownloader;
 import com.ecl.desktop.DesktopShortcutService;
 import com.ecl.game.DefaultGameRepository;
-import com.ecl.game.DefaultIsolationType;
 import com.ecl.game.PlaytimeTracker;
 import com.ecl.launch.Launcher;
 import com.ecl.launcher.ModLoaderInstaller;
@@ -22,8 +21,6 @@ import com.ecl.launcher.VersionManager;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
 import com.ecl.modrinth.pack.MrpackInstaller;
-import com.ecl.modrinth.pack.ModpackUpdate;
-import com.ecl.modrinth.pack.ModpackUpdateService;
 import com.ecl.modrinth.provider.ContentSource;
 import com.ecl.modrinth.ui.ChineseDescriptionService;
 import com.ecl.modrinth.ui.ModBrowserView;
@@ -31,7 +28,6 @@ import com.ecl.modrinth.ui.RemoteImageLoader;
 import com.ecl.server.ServerBrowserView;
 import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.Messages;
-import com.ecl.util.TextUtil;
 import javafx.animation.Animation;
 import javafx.animation.Interpolator;
 import javafx.animation.KeyFrame;
@@ -51,15 +47,12 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.scene.input.DragEvent;
-import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -68,7 +61,6 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -83,15 +75,11 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,7 +96,7 @@ public class LauncherUI extends javafx.application.Application {
     private static final double WINDOW_WIDTH = 1440;
     private static final double WINDOW_HEIGHT = 900;
     private static final double NAV_WIDTH = 200;
-    private static final double LAUNCH_WIDTH = 1180;
+    static final double LAUNCH_WIDTH = 1180;
     private static final double UTILITY_WIDTH = 360;
     private static final String ICON_GRASS_BLOCK = "/icons/ui/grass-block.png";
     private static final String ICON_STONE_BLOCK = "/icons/ui/stone-block.png";
@@ -128,7 +116,7 @@ public class LauncherUI extends javafx.application.Application {
     DownloadService downloader;
     DownloadTaskCenter downloadTaskCenter;
     private ModrinthDownloader modrinthDownloader;
-    private ServerJarDownloader serverJarDownloader;
+    ServerJarDownloader serverJarDownloader;
     ModLoaderInstaller modLoaderInstaller;
     private MrpackInstaller mrpackInstaller;
     WorldBackupService worldBackupService;
@@ -153,7 +141,7 @@ public class LauncherUI extends javafx.application.Application {
     TextField usernameField;
     PasswordField passwordField;
     ProgressBar downloadProgress;
-    private Label statusLabel;
+    Label statusLabel;
     Label detailLabel;
     Button launchBtn;
     Button refreshBtn;
@@ -174,31 +162,36 @@ public class LauncherUI extends javafx.application.Application {
 
     private Label authSummaryLabel;
     private Label authHintLabel;
-    private Label javaSummaryLabel;
-    private Label gameDirSummaryLabel;
-    private Label versionSummaryLabel;
-    private Label memorySummaryLabel;
+    Label javaSummaryLabel;
+    Label gameDirSummaryLabel;
+    Label versionSummaryLabel;
+    Label memorySummaryLabel;
     private Label jvmArgsSummaryLabel;
     private Label runtimeBadgeLabel;
     private Label topAuthBadgeLabel;
     private Label topVersionBadgeLabel;
     private Label topMemoryBadgeLabel;
-    private Label selectedVersionTitleLabel;
-    private Label selectedRuntimeMetaLabel;
-    private Label launchReadinessLabel;
-    private Label homeAccountNameLabel;
-    private Label homeAccountTypeLabel;
-    private Label homeAccountAvatarLabel;
-    private Label homeEnvironmentStatusLabel;
+    Label selectedVersionTitleLabel;
+    Label selectedRuntimeMetaLabel;
+    Label launchReadinessLabel;
+    Label homeAccountNameLabel;
+    Label homeAccountTypeLabel;
+    Label homeAccountAvatarLabel;
+    Label homeEnvironmentStatusLabel;
     private Label topTaskLabel;
     Label playtimeTotalLabel;
     Label playtimeRecentLabel;
     Label playtimeLaunchCountLabel;
     private DownloadTasksPage downloadTasksPage;
-    private TitledPane instanceSettingsPane;
-    private VBox homePage;
+    private final LauncherPageFactory pageFactory = new LauncherPageFactory(this);
+    private final LauncherPathService pathService = new LauncherPathService(this);
+    private final HomePageFactory homePageFactory = new HomePageFactory(this);
+    private final ContentLibraryPageFactory contentLibraryPageFactory =
+            new ContentLibraryPageFactory(this);
+    TitledPane instanceSettingsPane;
+    VBox homePage;
     private HBox workspacePane;
-    private List<ContentTarget> contentTargets;
+    List<ContentTarget> contentTargets;
 
     String javaPath;
     File gameDir;
@@ -223,14 +216,11 @@ public class LauncherUI extends javafx.application.Application {
     final AtomicBoolean applicationStopping = new AtomicBoolean();
     volatile Process activeGameProcess;
     volatile String activeGameVersion;
-    private double windowDragOffsetX;
-    private double windowDragOffsetY;
-    private final Map<ProgressBar, Timeline> progressAnimations = new HashMap<>();
-    private final Map<AppView, Button> navButtons = new HashMap<>();
-    private VBox navButtonColumn;
+    private final LauncherProgressController progressController = new LauncherProgressController();
+    private final LauncherNavigationRail navigationRail = new LauncherNavigationRail(this::setActiveView);
     private Animation contentTransition;
     private ModBrowserView activeModBrowserView;
-    private ServerBrowserView activeServerBrowserView;
+    ServerBrowserView activeServerBrowserView;
     private AppView activeView = AppView.HOME;
 
     @Override
@@ -258,7 +248,7 @@ public class LauncherUI extends javafx.application.Application {
         versionActions = new VersionActions(this);
 
         javaPath = settingsManager.get(ECLConfig.KEY_JAVA_PATH);
-        gameDir = resolveConfiguredGameRootDir(new File(
+        gameDir = pathService.resolveConfiguredGameRootDir(new File(
                 settingsManager.get(ECLConfig.KEY_GAME_DIR)));
         extraJvmArgs = settingsManager.get(ECLConfig.KEY_JVM_ARGS);
         Integer storedMemory = settingsManager.get(ECLConfig.KEY_MAX_MEMORY_MB);
@@ -355,7 +345,7 @@ public class LauncherUI extends javafx.application.Application {
     @Override
     public void stop() {
         applicationStopping.set(true);
-        stopAllProgressAnimations();
+        progressController.stopAll();
         closeActiveModBrowserView();
         closeActiveServerBrowserView();
         if (contentTransition != null) {
@@ -366,7 +356,7 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private void showFirstRunWizard() {
+    void showFirstRunWizard() {
         if (firstRunWizard == null) {
             firstRunWizard = new FirstRunWizard(settingsManager, this::switchLanguage,
                     this::languageDisplayName, this::applyThemeToScene);
@@ -374,7 +364,7 @@ public class LauncherUI extends javafx.application.Application {
         firstRunWizard.show(primaryStage);
     }
 
-    private void exportDiagnosticBundle() {
+    void exportDiagnosticBundle() {
         FileChooser chooser = new FileChooser();
         chooser.setTitle(Messages.get("diagnostic.export"));
         chooser.setInitialFileName("ecl-diagnostics.zip");
@@ -412,83 +402,13 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private void installModDropTarget(Pane root) {
-        root.addEventHandler(DragEvent.DRAG_OVER, event -> {
-            if (hasModFiles(event.getDragboard())) {
-                event.acceptTransferModes(TransferMode.COPY);
-                root.getStyleClass().add("drop-target-active");
-            }
-            event.consume();
-        });
-        root.addEventHandler(DragEvent.DRAG_EXITED, event -> {
-            root.getStyleClass().remove("drop-target-active");
-            event.consume();
-        });
-        root.addEventHandler(DragEvent.DRAG_DROPPED, event -> {
-            root.getStyleClass().remove("drop-target-active");
-            List<Path> files = event.getDragboard().hasFiles()
-                    ? event.getDragboard().getFiles().stream()
-                    .map(File::toPath)
-                    .filter(this::isModJar)
-                    .toList() : List.of();
-            event.setDropCompleted(!files.isEmpty());
-            event.consume();
-            if (!files.isEmpty()) {
-                importDroppedMods(files);
-            } else {
-                setStatus("Mod 导入", "请拖入 .jar 模组文件");
-            }
-        });
-    }
-
-    private boolean hasModFiles(javafx.scene.input.Dragboard board) {
-        return board != null && board.hasFiles()
-                && board.getFiles().stream().anyMatch(file -> isModJar(file.toPath()));
-    }
-
-    private boolean isModJar(Path file) {
-        return file != null && Files.isRegularFile(file)
-                && file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar");
-    }
-
-    private void importDroppedMods(List<Path> files) {
-        String profileId = getSelectedVersion();
-        if (profileId == null || profileId.isBlank()) {
-            setStatus("Mod 导入失败", "请先选择一个 Fabric、Quilt、Forge 或 NeoForge 实例");
-            return;
-        }
-        try {
-            ModInstanceContext instance = VersionProfileModInstanceContext.load(
-                    profileId,
-                    ECLConfig.getVersionsDir().toPath(),
-                    getConfiguredGameRootDir().toPath(),
-                    resolveVersionGameDir(profileId).toPath());
-            if (!instance.loader().supportsMods()) {
-                setStatus("Mod 导入失败", "当前实例不是支持模组的加载器实例");
-                return;
-            }
-            CompletableFuture<List<String>> imported = CompletableFuture.completedFuture(new java.util.ArrayList<>());
-            for (Path file : files) {
-                imported = imported.thenCompose(names ->
-                        controller.modManagementService().importLocalJar(instance, file)
-                                .thenApply(mod -> {
-                                    names.add(file.getFileName().toString());
-                                    return names;
-                                }));
-            }
-            imported.whenComplete((names, error) -> Platform.runLater(() -> {
-                if (error != null) {
-                    setStatus("Mod 导入失败", cleanMessage(error));
-                } else {
-                    setStatus("Mod 导入完成", "已导入 " + names.size()
-                            + " 个模组到 " + instance.modsDirectory());
+        new ModDropImportHandler(controller, this::getSelectedVersion,
+                this::getConfiguredGameRootDir, this::resolveVersionGameDir, this::setStatus,
+                () -> {
                     if (activeModBrowserView != null) {
                         activeModBrowserView.refreshInstalledMods();
                     }
-                }
-            }));
-        } catch (Exception error) {
-            setStatus("Mod 导入失败", cleanMessage(error));
-        }
+                }).install(root);
     }
 
     private HBox createWindowTitleBar() {
@@ -499,13 +419,7 @@ public class LauncherUI extends javafx.application.Application {
         Label title = new Label("ECL");
         title.getStyleClass().addAll("window-title", "brand-label");
 
-        HBox navigation = new HBox(4);
-        navigation.getStyleClass().add("global-nav");
-        navigation.setAlignment(Pos.CENTER);
-        navButtons.clear();
-        for (AppView view : AppView.values()) {
-            navigation.getChildren().add(createNavButton(view));
-        }
+        HBox navigation = navigationRail.createTopNavigation(activeView);
 
         Region leftSpacer = new Region();
         Region rightSpacer = new Region();
@@ -524,14 +438,8 @@ public class LauncherUI extends javafx.application.Application {
         runtimeBadgeLabel = createValueLabel("检查中");
         topMemoryBadgeLabel = createValueLabel("自动");
 
-        Button minimizeButton = createWindowButton("—", () -> primaryStage.setIconified(true));
-        Button maximizeButton = createWindowButton("□", () -> primaryStage.setMaximized(!primaryStage.isMaximized()));
-        Button closeButton = createWindowButton("×", () -> primaryStage.close());
-        closeButton.getStyleClass().add("window-close-button");
-
-        HBox windowControls = new HBox(4, minimizeButton, maximizeButton, closeButton);
-        windowControls.getStyleClass().add("window-controls");
-        windowControls.setAlignment(Pos.CENTER_RIGHT);
+        LauncherWindowChrome windowChrome = new LauncherWindowChrome(primaryStage);
+        HBox windowControls = windowChrome.createControls();
 
         titleBar.getChildren().addAll(
                 title,
@@ -542,21 +450,7 @@ public class LauncherUI extends javafx.application.Application {
                 topAuthBadgeLabel,
                 windowControls
         );
-        titleBar.setOnMousePressed(event -> {
-            windowDragOffsetX = event.getSceneX();
-            windowDragOffsetY = event.getSceneY();
-        });
-        titleBar.setOnMouseDragged(event -> {
-            if (!primaryStage.isMaximized()) {
-                primaryStage.setX(event.getScreenX() - windowDragOffsetX);
-                primaryStage.setY(event.getScreenY() - windowDragOffsetY);
-            }
-        });
-        titleBar.setOnMouseClicked(event -> {
-            if (event.getClickCount() == 2) {
-                primaryStage.setMaximized(!primaryStage.isMaximized());
-            }
-        });
+        windowChrome.installDragBehavior(titleBar);
         return titleBar;
     }
 
@@ -566,13 +460,6 @@ public class LauncherUI extends javafx.application.Application {
         return dot;
     }
 
-    private Button createWindowButton(String text, Runnable action) {
-        Button button = new Button(text);
-        button.getStyleClass().add("window-button");
-        button.setFocusTraversable(false);
-        button.setOnAction(e -> action.run());
-        return button;
-    }
 
     private HBox createHeader() {
         HBox header = new HBox(16);
@@ -626,111 +513,6 @@ public class LauncherUI extends javafx.application.Application {
         return footer;
     }
 
-    private VBox createNavigationRail() {
-        VBox rail = new VBox();
-        rail.getStyleClass().add("nav-rail");
-        rail.setPrefWidth(NAV_WIDTH);
-        rail.setMinWidth(NAV_WIDTH);
-        rail.setMaxWidth(NAV_WIDTH);
-
-        Label header = new Label(Messages.get("nav.command"));
-        header.getStyleClass().add("nav-rail-header");
-        header.setMaxWidth(Double.MAX_VALUE);
-
-        navButtonColumn = new VBox();
-        navButtonColumn.getStyleClass().add("nav-button-column");
-        navButtonColumn.setMaxWidth(Double.MAX_VALUE);
-        VBox.setVgrow(navButtonColumn, Priority.ALWAYS);
-
-        navButtons.clear();
-        for (AppView view : AppView.values()) {
-            navButtonColumn.getChildren().add(createNavButton(view));
-        }
-
-        VBox footer = createNavRailFooter();
-
-        rail.getChildren().addAll(header, navButtonColumn, footer);
-        Platform.runLater(() -> updateNavSelection(false));
-        return rail;
-    }
-
-    private VBox createNavRailFooter() {
-        VBox box = new VBox(8);
-        box.getStyleClass().add("nav-rail-footer");
-
-        Label cpuLabel = new Label(Messages.get("telemetry.cpu"));
-        cpuLabel.getStyleClass().add("telemetry-label");
-        ProgressBar cpuBar = new ProgressBar(0.12);
-        cpuBar.setMaxWidth(Double.MAX_VALUE);
-        Label cpuValue = new Label("12%");
-        cpuValue.getStyleClass().add("telemetry-value");
-        HBox.setHgrow(cpuBar, Priority.ALWAYS);
-        HBox cpuRow = new HBox(8, cpuLabel, cpuBar, cpuValue);
-        cpuRow.setAlignment(Pos.CENTER_LEFT);
-
-        Label ramLabel = new Label(Messages.get("telemetry.memory"));
-        ramLabel.getStyleClass().add("telemetry-label");
-        ProgressBar ramBar = new ProgressBar(0.42);
-        ramBar.setMaxWidth(Double.MAX_VALUE);
-        Label ramValue = new Label("4.2G");
-        ramValue.getStyleClass().add("telemetry-value");
-        HBox.setHgrow(ramBar, Priority.ALWAYS);
-        HBox ramRow = new HBox(8, ramLabel, ramBar, ramValue);
-        ramRow.setAlignment(Pos.CENTER_LEFT);
-
-        box.getChildren().addAll(cpuRow, ramRow);
-        return box;
-    }
-
-    private void showNavCandidate(AppView candidate) {
-        for (Map.Entry<AppView, Button> entry : navButtons.entrySet()) {
-            Button button = entry.getValue();
-            button.getStyleClass().remove("nav-button-selected");
-            if (entry.getKey() == candidate) {
-                button.getStyleClass().add("nav-button-selected");
-            }
-        }
-    }
-
-    private Button createNavButton(AppView view) {
-        Button button = new Button(navTitleFor(view));
-        button.getStyleClass().add("nav-button");
-        if (view == activeView) {
-            button.getStyleClass().add("nav-button-selected");
-        }
-        button.setOnAction(e -> setActiveView(view));
-        navButtons.put(view, button);
-        return button;
-    }
-
-    private String formatNavTitle(AppView view) {
-        return String.format("%02d ▸ %s", view.ordinal() + 1, navTitleFor(view));
-    }
-
-    private String navTitleFor(AppView view) {
-        return switch (view) {
-            case HOME -> Messages.get("nav.short.home");
-            case VERSIONS -> Messages.get("nav.short.versions");
-            case DOWNLOADS -> Messages.get("nav.short.downloads");
-            case MODRINTH -> Messages.get("nav.short.modrinth");
-            case SERVERS -> Messages.get("nav.short.servers");
-            case LOGS -> Messages.get("nav.short.logs");
-            case SETTINGS -> Messages.get("nav.short.settings");
-        };
-    }
-
-    private String navSubtitleFor(AppView view) {
-        return switch (view) {
-            case HOME -> Messages.get("nav.subtitle.home");
-            case VERSIONS -> Messages.get("nav.subtitle.versions");
-            case DOWNLOADS -> Messages.get("nav.subtitle.downloads");
-            case MODRINTH -> Messages.get("nav.subtitle.modrinth");
-            case SERVERS -> Messages.get("nav.subtitle.servers");
-            case SETTINGS -> Messages.get("nav.subtitle.settings");
-            case LOGS -> Messages.get("nav.subtitle.logs");
-        };
-    }
-
     void setActiveView(AppView view) {
         if (view == null || workspacePane == null) {
             return;
@@ -744,16 +526,12 @@ public class LauncherUI extends javafx.application.Application {
         }
         activeView = view;
         renderActiveView(slideDirection);
-        showNavCandidate(view);
+        navigationRail.showSelected(view);
         if (authTypeCombo != null && authSummaryLabel != null) {
             updateAuthFields();
         } else {
             updateRuntimeSummary();
         }
-    }
-
-    private void updateNavSelection(boolean animate) {
-        showNavCandidate(activeView);
     }
 
     void renderActiveView() {
@@ -769,13 +547,16 @@ public class LauncherUI extends javafx.application.Application {
         workspacePane.getChildren().clear();
 
         switch (activeView) {
-            case HOME -> addMainContent(getOrCreateHomePage(), null);
-            case VERSIONS -> addMainContent(createVersionsPage(), null);
-            case DOWNLOADS -> addMainContent(createDownloadTasksPage(), null);
-            case MODRINTH -> addMainContent(createModrinthPage(), null);
-            case SERVERS -> addMainContent(createServersPage(), null);
-            case SETTINGS -> addMainContent(createSettingsPage(), null);
-            case LOGS -> addMainContent(createLogsPage(), null);
+            case HOME -> addMainContent(homePageFactory.getOrCreate(), null);
+            case VERSIONS -> addMainContent(pageFactory.createVersionsPage(), null);
+            case DOWNLOADS -> {
+                downloadTasksPage = pageFactory.createDownloadTasksPage();
+                addMainContent(downloadTasksPage, null);
+            }
+            case MODRINTH -> addMainContent(contentLibraryPageFactory.createPage(), null);
+            case SERVERS -> addMainContent(pageFactory.createServersPage(), null);
+            case SETTINGS -> addMainContent(pageFactory.createSettingsPage(), null);
+            case LOGS -> addMainContent(pageFactory.createLogsPage(), null);
         }
         if (slideDirection != 0) {
             playContentTransition(slideDirection);
@@ -923,226 +704,14 @@ public class LauncherUI extends javafx.application.Application {
         return row;
     }
 
-    private int countCrashReports() {
+    int countCrashReports() {
         File crashDir = new File(getActiveGameDir(), "crash-reports");
         File[] reports = crashDir.listFiles((dir, name) -> name.endsWith(".txt"));
         return reports == null ? 0 : reports.length;
     }
 
     private VBox getOrCreateHomePage() {
-        if (homePage == null) {
-            homePage = createLaunchPane();
-        }
-        return homePage;
-    }
-
-    private VBox createLaunchPane() {
-        VBox pane = new VBox(24);
-        pane.getStyleClass().add("launch-pane");
-        pane.setPrefWidth(LAUNCH_WIDTH);
-        pane.setMaxWidth(LAUNCH_WIDTH);
-        pane.setFillWidth(true);
-        HBox.setHgrow(pane, Priority.ALWAYS);
-
-        Label pageTitle = new Label(Messages.get("home.title"));
-        pageTitle.getStyleClass().add("page-title");
-        Label pageSubtitle = new Label(Messages.get("home.subtitle"));
-        pageSubtitle.getStyleClass().add("page-subtitle");
-        VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
-        pageHeading.getStyleClass().add("page-heading");
-        pageHeading.setAlignment(Pos.CENTER);
-
-        HBox hero = createLaunchHero();
-        GridPane launchForm = createForm();
-        HBox summaryCards = createHomeSummaryCards();
-
-        instanceSettingsPane = new TitledPane(Messages.get("home.instanceAccount"), launchForm);
-        instanceSettingsPane.getStyleClass().add("instance-settings");
-        instanceSettingsPane.setExpanded(false);
-        instanceSettingsPane.setAnimated(false);
-        instanceSettingsPane.setMaxWidth(Double.MAX_VALUE);
-
-        pane.getChildren().addAll(pageHeading, hero, summaryCards, instanceSettingsPane);
-        return pane;
-    }
-
-    private HBox createLaunchHero() {
-        Label eyebrow = new Label(Messages.get("home.currentInstance"));
-        eyebrow.getStyleClass().add("launch-eyebrow");
-
-        selectedVersionTitleLabel = new Label(Messages.get("home.selectVersion"));
-        selectedVersionTitleLabel.getStyleClass().add("launch-version-big");
-
-        selectedRuntimeMetaLabel = new Label(Messages.format("home.runtimeMeta",
-                Runtime.version().feature(), gameLaunch.getMemoryDisplayText()));
-        selectedRuntimeMetaLabel.getStyleClass().add("launch-version-meta");
-
-        launchReadinessLabel = new Label(Messages.get("home.autoCheck"));
-        launchReadinessLabel.getStyleClass().add("ready-pill");
-
-        VBox details = new VBox(16,
-                eyebrow,
-                selectedVersionTitleLabel,
-                selectedRuntimeMetaLabel,
-                launchReadinessLabel,
-                createActionBar());
-        details.getStyleClass().add("launch-details");
-        details.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(details, Priority.ALWAYS);
-
-        StackPane artwork = createHeroArtwork();
-        HBox hero = new HBox(48, details, artwork);
-        hero.getStyleClass().addAll("launch-surface", "launch-hero");
-        hero.setAlignment(Pos.CENTER);
-        return hero;
-    }
-
-    private StackPane createHeroArtwork() {
-        Region glow = new Region();
-        glow.getStyleClass().add("orb-glow");
-        Region outerRing = new Region();
-        outerRing.getStyleClass().add("orb-ring-outer");
-        Region innerRing = new Region();
-        innerRing.getStyleClass().add("orb-ring-inner");
-        Region orb = new Region();
-        orb.getStyleClass().add("orb-core");
-        Label play = new Label("▶");
-        play.getStyleClass().add("orb-play");
-
-        StackPane artwork = new StackPane(glow, outerRing, innerRing, orb, play);
-        artwork.getStyleClass().add("hero-artwork");
-        artwork.setAlignment(Pos.CENTER);
-        return artwork;
-    }
-
-    private HBox createHomeSummaryCards() {
-        VBox accountCard = new VBox(14);
-        accountCard.getStyleClass().addAll("home-card", "account-card");
-        Label accountLabel = new Label(Messages.get("home.account"));
-        accountLabel.getStyleClass().add("card-kicker");
-        homeAccountAvatarLabel = new Label("S");
-        homeAccountAvatarLabel.getStyleClass().add("account-avatar");
-        homeAccountNameLabel = new Label(getAuthDisplayName());
-        homeAccountNameLabel.getStyleClass().add("card-title");
-        homeAccountTypeLabel = new Label(Messages.get("auth.offline"));
-        homeAccountTypeLabel.getStyleClass().add("card-subtitle");
-        VBox accountText = new VBox(3, homeAccountNameLabel, homeAccountTypeLabel);
-        HBox accountProfile = new HBox(14, homeAccountAvatarLabel, accountText);
-        accountProfile.setAlignment(Pos.CENTER_LEFT);
-        Region accountSpacer = new Region();
-        VBox.setVgrow(accountSpacer, Priority.ALWAYS);
-        Button manageAccount = createLinkButton(Messages.get("home.manageAccount"), () -> expandInstanceSettings(authTypeCombo));
-        homeSkinUploadButton = createLinkButton(Messages.get("home.uploadSkin"), () -> skins.chooseAndUploadSkin());
-        Region accountActionSpacer = new Region();
-        HBox.setHgrow(accountActionSpacer, Priority.ALWAYS);
-        HBox accountActions = new HBox(8, manageAccount, accountActionSpacer, homeSkinUploadButton);
-        accountActions.setAlignment(Pos.CENTER_LEFT);
-        accountCard.getChildren().addAll(accountLabel, accountProfile, accountSpacer, accountActions);
-
-        VBox environmentCard = new VBox(12);
-        environmentCard.getStyleClass().addAll("home-card", "environment-card");
-        Label environmentLabel = new Label(Messages.get("home.environment"));
-        environmentLabel.getStyleClass().add("card-kicker");
-        homeEnvironmentStatusLabel = new Label(Messages.get("home.environmentStatus"));
-        homeEnvironmentStatusLabel.getStyleClass().add("card-title");
-        Label environmentCheck = new Label("✓");
-        environmentCheck.getStyleClass().add("environment-check");
-        Region environmentTitleSpacer = new Region();
-        HBox.setHgrow(environmentTitleSpacer, Priority.ALWAYS);
-        HBox environmentTitle = new HBox(
-                homeEnvironmentStatusLabel,
-                environmentTitleSpacer,
-                environmentCheck);
-        environmentTitle.setAlignment(Pos.CENTER_LEFT);
-        javaSummaryLabel = createValueLabel(Messages.format("home.javaSummary", Runtime.version().feature()));
-        memorySummaryLabel = createValueLabel(gameLaunch.getMemoryDisplayText());
-        versionSummaryLabel = createValueLabel(Messages.get("home.versionPending"));
-        environmentCard.getChildren().addAll(
-                environmentLabel,
-                environmentTitle,
-                createSummaryRow(Messages.get("info.java"), javaSummaryLabel),
-                createSummaryRow(Messages.get("home.memory"), memorySummaryLabel),
-                createSummaryRow(Messages.get("home.instance"), versionSummaryLabel));
-
-        VBox taskCard = new VBox(12);
-        taskCard.getStyleClass().addAll("home-card", "task-card");
-        Label taskLabel = new Label(Messages.get("home.currentActivity"));
-        taskLabel.getStyleClass().add("card-kicker");
-        statusLabel = new Label(Messages.get("home.noTasks"));
-        statusLabel.getStyleClass().add("card-title");
-        detailLabel = new Label(Messages.get("home.taskDetail"));
-        detailLabel.getStyleClass().add("card-subtitle");
-        detailLabel.setWrapText(true);
-        downloadProgress = new ProgressBar(0);
-        downloadProgress.getStyleClass().add("download-progress");
-        downloadProgress.setMaxWidth(Double.MAX_VALUE);
-        Region taskSpacer = new Region();
-        VBox.setVgrow(taskSpacer, Priority.ALWAYS);
-        Button viewTasks = createLinkButton(Messages.get("home.viewTasks"), () -> setActiveView(AppView.DOWNLOADS));
-        taskCard.getChildren().addAll(
-                taskLabel,
-                statusLabel,
-                detailLabel,
-                downloadProgress,
-                taskSpacer,
-                viewTasks);
-
-        VBox playtimeCard = new VBox(12);
-        playtimeCard.getStyleClass().addAll("home-card", "playtime-card");
-        Label playtimeTitle = new Label(Messages.get("playtime.title"));
-        playtimeTitle.getStyleClass().add("card-kicker");
-        playtimeTotalLabel = createValueLabel(Messages.get("label.notSelected"));
-        playtimeRecentLabel = createValueLabel(Messages.get("playtime.never"));
-        playtimeLaunchCountLabel = createValueLabel("0");
-        playtimeCard.getChildren().addAll(
-                playtimeTitle,
-                createSummaryRow(Messages.get("playtime.total"), playtimeTotalLabel),
-                createSummaryRow(Messages.get("playtime.lastLaunch"), playtimeRecentLabel),
-                createSummaryRow(Messages.get("playtime.launches"), playtimeLaunchCountLabel),
-                createLinkButton(Messages.get("shortcut.createLink"),
-                        () -> setActiveView(AppView.VERSIONS)));
-
-        double preferredCardWidth = (LAUNCH_WIDTH - 72) / 4.0;
-        for (VBox card : List.of(accountCard, environmentCard, taskCard, playtimeCard)) {
-            card.setMinWidth(0);
-            card.setPrefWidth(preferredCardWidth);
-            card.setMaxWidth(Double.MAX_VALUE);
-            HBox.setHgrow(card, Priority.ALWAYS);
-        }
-
-        HBox cards = new HBox(24, accountCard, environmentCard, taskCard, playtimeCard);
-        cards.getStyleClass().add("home-summary");
-        cards.setFillHeight(true);
-        return cards;
-    }
-
-    private HBox createSummaryRow(String key, Label value) {
-        Label keyLabel = new Label(key);
-        keyLabel.getStyleClass().add("summary-key");
-        value.getStyleClass().add("summary-value");
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox row = new HBox(8, keyLabel, spacer, value);
-        row.getStyleClass().add("summary-row");
-        row.setAlignment(Pos.CENTER_LEFT);
-        return row;
-    }
-
-    private Button createLinkButton(String text, Runnable action) {
-        Button button = new Button(text);
-        button.getStyleClass().addAll("app-button", "link-button");
-        button.setOnAction(event -> action.run());
-        return button;
-    }
-
-    private void expandInstanceSettings(Control focusTarget) {
-        if (instanceSettingsPane == null) {
-            return;
-        }
-        instanceSettingsPane.setExpanded(true);
-        if (focusTarget != null) {
-            Platform.runLater(focusTarget::requestFocus);
-        }
+        return homePageFactory.getOrCreate();
     }
 
     private Region createCornerBracket(String cornerStyle) {
@@ -1164,50 +733,7 @@ public class LauncherUI extends javafx.application.Application {
         return corner;
     }
 
-    private VBox createDownloadTasksPage() {
-        downloadTasksPage = new DownloadTasksPage(downloadTaskCenter, settingsManager);
-        return downloadTasksPage;
-    }
-
-    private VBox createVersionsPage() {
-        VBox page = createMainPage();
-
-        Button refreshVersionsButton = createActionButton(Messages.get("button.refresh"), "primary-button", () -> versionActions.refreshVersions());
-        Button installLoaderButton = createActionButton(Messages.get("loader.install"), "primary-button",
-                this::showLoaderInstallDialog);
-        Button reinstallButton = createActionButton(Messages.get("version.reinstall"), "secondary-button",
-                () -> versionActions.reinstallSelectedVersion());
-        Button deleteButton = createActionButton(Messages.get("version.delete"), "secondary-button",
-                () -> versionActions.deleteSelectedVersion());
-        Button chooseVersionButton = createActionButton(Messages.get("button.back"), "secondary-button", () -> setActiveView(AppView.HOME));
-        Button openVersionsDirButton = createActionButton(Messages.get("button.openDir"), "ghost-button",
-                () -> openLocalFolder(ECLConfig.getVersionsDir(), "版本目录"));
-        Button backupManagerButton = createActionButton(Messages.get("backup.manage"), "ghost-button",
-                this::showBackupManagerDialog);
-        Button desktopShortcutButton = createActionButton(Messages.get("shortcut.desktop"), "ghost-button",
-                () -> createInstanceShortcut(false));
-        Button startMenuShortcutButton = createActionButton(Messages.get("shortcut.startMenu"), "ghost-button",
-                () -> createInstanceShortcut(true));
-
-        HBox actions = new HBox(10, refreshVersionsButton, installLoaderButton, reinstallButton,
-                deleteButton, chooseVersionButton, openVersionsDirButton, backupManagerButton,
-                desktopShortcutButton, startMenuShortcutButton);
-        actions.setAlignment(Pos.CENTER_LEFT);
-
-        VBox versionCard = createSurface(
-                Messages.get("version.page.title"),
-                null,
-                createInfoRow(Messages.get("label.currentFilter"), createStaticValueLabel(versionActions.getSelectedVersionCategory().getLabel())),
-                createInfoRow(Messages.get("label.currentVersion"), createStaticValueLabel(getSelectedVersion() == null ? Messages.get("label.notSelected") : getSelectedVersion())),
-                createInfoRow(Messages.get("info.localDir"), createStaticValueLabel(ECLConfig.getVersionsDir().getAbsolutePath())),
-                actions
-        );
-
-        page.getChildren().add(versionCard);
-        return page;
-    }
-
-    private void createInstanceShortcut(boolean startMenu) {
+    void createInstanceShortcut(boolean startMenu) {
         String profileId = getSelectedVersion();
         if (profileId == null || profileId.isBlank()) {
             setStatus(Messages.get("shortcut.error.title"), Messages.get("shortcut.error.selectInstance"));
@@ -1240,7 +766,7 @@ public class LauncherUI extends javafx.application.Application {
                 configured, runningCommand, workingDirectory, codeSource);
     }
 
-    private void showBackupManagerDialog() {
+    void showBackupManagerDialog() {
         new BackupManagerDialog(this).show();
     }
 
@@ -1253,252 +779,11 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private void showLoaderInstallDialog() {
+    void showLoaderInstallDialog() {
         new LoaderInstallDialog(this).show();
     }
 
-    private VBox createModrinthPage() {
-        VBox page = createMainPage();
-
-        Label pageTitle = new Label(Messages.get("content.page.title"));
-        pageTitle.getStyleClass().add("page-title");
-        Label pageSubtitle = new Label(Messages.get("content.page.subtitle"));
-        pageSubtitle.getStyleClass().add("page-subtitle");
-        VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
-        pageHeading.getStyleClass().add("content-library-heading");
-
-        VBox navigation = new VBox(8);
-        navigation.getStyleClass().add("content-library-nav");
-        navigation.setPrefWidth(210);
-        navigation.setMinWidth(210);
-        navigation.setMaxWidth(210);
-
-        Label navigationTitle = new Label(Messages.get("content.category.title"));
-        navigationTitle.getStyleClass().add("content-library-nav-title");
-        Label navigationHint = new Label(Messages.get("content.category.hint"));
-        navigationHint.getStyleClass().add("content-library-nav-hint");
-        navigation.getChildren().addAll(navigationTitle, navigationHint);
-
-        StackPane content = new StackPane();
-        content.getStyleClass().add("content-library-content");
-        content.setMinWidth(0);
-        HBox.setHgrow(content, Priority.ALWAYS);
-
-        List<Button> categoryButtons = new java.util.ArrayList<>();
-        for (ContentTarget target : contentTargets) {
-            Button categoryButton = createContentLibraryNavButton(target);
-            categoryButtons.add(categoryButton);
-            navigation.getChildren().add(categoryButton);
-            categoryButton.setOnAction(event -> {
-                categoryButtons.forEach(button ->
-                        button.getStyleClass().remove("content-library-nav-item-active"));
-                categoryButton.getStyleClass().add("content-library-nav-item-active");
-                closeActiveModBrowserView();
-                Node selectedContent = switch (target.projectType) {
-                    case "mod" -> createModLibraryContent();
-                    case "server" -> createServerJarLibraryContent();
-                    default -> createContentLibraryBrowser(target);
-                };
-                content.getChildren().setAll(selectedContent);
-            });
-        }
-        Button packUpdatesButton = createPackUpdatesNavButton();
-        navigation.getChildren().add(packUpdatesButton);
-        packUpdatesButton.setOnAction(event -> {
-            categoryButtons.forEach(button ->
-                    button.getStyleClass().remove("content-library-nav-item-active"));
-            packUpdatesButton.getStyleClass().add("content-library-nav-item-active");
-            closeActiveModBrowserView();
-            content.getChildren().setAll(createPackUpdatesContent());
-        });
-
-        HBox library = new HBox(18, navigation, content);
-        library.getStyleClass().add("content-library-layout");
-        library.setAlignment(Pos.TOP_LEFT);
-        HBox.setHgrow(content, Priority.ALWAYS);
-        page.getChildren().addAll(pageHeading, library);
-
-        if (!categoryButtons.isEmpty()) {
-            categoryButtons.getFirst().fire();
-        }
-        return page;
-    }
-
-    private Button createContentLibraryNavButton(ContentTarget target) {
-        Label icon = new Label(target.initial);
-        icon.getStyleClass().add("content-library-nav-icon");
-        Label title = new Label(target.title);
-        title.getStyleClass().add("content-library-nav-item-title");
-        Label detail = new Label(switch (target.projectType) {
-            case "mod" -> Messages.get("content.detail.mods");
-            case "shader" -> Messages.get("content.detail.shaders");
-            case "resourcepack" -> Messages.get("content.detail.resourcepacks");
-            case "modpack" -> Messages.get("content.detail.modpacks");
-            case "server" -> Messages.get("content.detail.server");
-            default -> target.subtitle;
-        });
-        detail.getStyleClass().add("content-library-nav-item-detail");
-        VBox labels = new VBox(2, title, detail);
-        HBox row = new HBox(10, icon, labels);
-        row.setAlignment(Pos.CENTER_LEFT);
-
-        Button button = new Button();
-        button.setGraphic(row);
-        button.getStyleClass().add("content-library-nav-item");
-        button.setMaxWidth(Double.MAX_VALUE);
-        return button;
-    }
-
-    private Button createPackUpdatesNavButton() {
-        Label icon = new Label("↻");
-        icon.getStyleClass().add("content-library-nav-icon");
-        Label title = new Label("整合包更新");
-        title.getStyleClass().add("content-library-nav-item-title");
-        Label detail = new Label("检查已安装整合包的新版本");
-        detail.getStyleClass().add("content-library-nav-item-detail");
-        HBox row = new HBox(10, icon, new VBox(2, title, detail));
-        row.setAlignment(Pos.CENTER_LEFT);
-        Button button = new Button();
-        button.setGraphic(row);
-        button.getStyleClass().add("content-library-nav-item");
-        button.setMaxWidth(Double.MAX_VALUE);
-        return button;
-    }
-
-    private Node createPackUpdatesContent() {
-        VBox page = new VBox(14);
-        page.getStyleClass().add("content-library-content");
-
-        Label title = new Label("整合包更新");
-        title.getStyleClass().add("content-library-section-title");
-        Label hint = new Label("只检查已通过 Modrinth 安装并记录来源的整合包，更新会保留存档等实例文件。");
-        hint.getStyleClass().add("status-detail");
-        hint.setWrapText(true);
-
-        ListView<ModpackUpdate> list = new ListView<>();
-        list.getStyleClass().add("mod-result-list");
-        list.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        list.setPlaceholder(new Label("尚未发现可更新的整合包。"));
-        list.setCellFactory(view -> new ListCell<>() {
-            @Override
-            protected void updateItem(ModpackUpdate item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setGraphic(null);
-                    setText(null);
-                    return;
-                }
-                Label name = new Label(item.instance().name());
-                name.getStyleClass().add("mod-item-title");
-                Label detail = new Label(item.instance().currentVersion() + "  →  "
-                        + item.availableVersion().versionNumber() + "   ·   "
-                        + item.instance().minecraftVersion()
-                        + (item.instance().loader().isBlank() ? "" : " / " + item.instance().loader()));
-                detail.getStyleClass().add("status-detail");
-                detail.setWrapText(true);
-                setGraphic(new VBox(3, name, detail));
-            }
-        });
-        VBox.setVgrow(list, Priority.ALWAYS);
-
-        Label status = createBodyText("点击“检查更新”扫描已安装整合包。");
-        Button[] controls = new Button[3];
-        controls[0] = createActionButton("检查更新", "secondary-button", () ->
-                checkPackUpdates(list, status, controls[0], controls[1], controls[2]));
-        controls[1] = createActionButton("更新选中", "primary-button", () ->
-                applyPackUpdates(list.getSelectionModel().getSelectedItems(), list, status,
-                        controls[0], controls[1], controls[2]));
-        controls[2] = createActionButton("一键更新全部", "primary-button", () ->
-                applyPackUpdates(List.copyOf(list.getItems()), list, status,
-                        controls[0], controls[1], controls[2]));
-        Button check = controls[0];
-        Button updateSelected = controls[1];
-        Button updateAll = controls[2];
-        updateSelected.setDisable(true);
-        updateAll.setDisable(true);
-        list.getSelectionModel().getSelectedItems().addListener(
-                (javafx.collections.ListChangeListener<ModpackUpdate>) change ->
-                        updateSelected.setDisable(list.getSelectionModel().getSelectedItems().isEmpty()));
-        HBox actions = new HBox(8, check, updateSelected, updateAll);
-        actions.setAlignment(Pos.CENTER_RIGHT);
-        page.getChildren().addAll(createSurface("整合包更新检测", null, title, hint, list, status, actions));
-
-        Platform.runLater(() -> checkPackUpdates(list, status, check, updateSelected, updateAll));
-        return page;
-    }
-
-    private void checkPackUpdates(ListView<ModpackUpdate> list, Label status,
-                                  Button check, Button updateSelected, Button updateAll) {
-        setPackUpdateControls(true, check, updateSelected, updateAll);
-        status.setText("正在检查整合包更新...");
-        ModpackUpdateService service = controller.modpackUpdateService();
-        service.checkUpdates(getConfiguredGameRootDir().toPath(), controller.preferredModReleaseChannel())
-                .whenComplete((updates, error) -> Platform.runLater(() -> {
-                    if (error != null) {
-                        list.getItems().clear();
-                        status.setText("检查失败: " + cleanMessage(error));
-                    } else {
-                        list.getItems().setAll(updates);
-                        status.setText(updates.isEmpty()
-                                ? "所有已记录来源的整合包均为最新版本。"
-                                : "发现 " + updates.size() + " 个整合包可更新。");
-                    }
-                    setPackUpdateControls(false, check, updateSelected, updateAll);
-                    updateAll.setDisable(list.getItems().isEmpty());
-                    updateSelected.setDisable(list.getSelectionModel().getSelectedItems().isEmpty());
-                }));
-    }
-
-    private void applyPackUpdates(List<ModpackUpdate> updates, ListView<ModpackUpdate> list,
-                                  Label status, Button check, Button updateSelected, Button updateAll) {
-        if (updates == null || updates.isEmpty()) return;
-        setPackUpdateControls(true, check, updateSelected, updateAll);
-        CompletableFuture<Integer> chain = CompletableFuture.completedFuture(0);
-        for (ModpackUpdate update : updates) {
-            chain = chain.thenCompose(count -> controller.modpackUpdateService()
-                    .applyUpdate(update, getConfiguredGameRootDir().toPath(), new MrpackInstaller.Listener() {
-                        @Override
-                        public void onStatus(String message) {
-                            Platform.runLater(() -> status.setText(message));
-                        }
-
-                        @Override
-                        public void onProgress(long downloaded, long total) {
-                            if (total > 0) {
-                                Platform.runLater(() -> status.setText("正在更新 "
-                                        + update.instance().name() + " · "
-                                        + formatPackBytes(downloaded) + " / " + formatPackBytes(total)));
-                            }
-                        }
-                    }).thenApply(result -> count + 1));
-        }
-        chain.whenComplete((count, error) -> Platform.runLater(() -> {
-            setPackUpdateControls(false, check, updateSelected, updateAll);
-            if (error != null) {
-                status.setText("批量更新中断: " + cleanMessage(error));
-            } else {
-                status.setText("已完成 " + count + " 个整合包更新。");
-                list.getItems().removeAll(updates);
-                updateAll.setDisable(list.getItems().isEmpty());
-            }
-            updateSelected.setDisable(list.getSelectionModel().getSelectedItems().isEmpty());
-        }));
-    }
-
-    private void setPackUpdateControls(boolean busy, Button check, Button updateSelected,
-                                       Button updateAll) {
-        check.setDisable(busy);
-        updateSelected.setDisable(busy);
-        updateAll.setDisable(busy);
-    }
-
-    private static String formatPackBytes(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
-        return String.format("%.1f MB", bytes / 1024.0 / 1024.0);
-    }
-
-    private Node createModLibraryContent() {
+    Node createModLibraryContent() {
         String selectedVersion = getSelectedVersion();
         if (selectedVersion == null || selectedVersion.isBlank()) {
             Button choose = createActionButton(Messages.get("content.chooseInstance"), "primary-button",
@@ -1545,7 +830,7 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private VBox createContentLibraryLoaderPrompt(String profileId, String minecraftVersion) {
+    VBox createContentLibraryLoaderPrompt(String profileId, String minecraftVersion) {
         Button install = createActionButton(Messages.get("content.loader.install"), "primary-button",
                 this::showLoaderInstallDialog);
         return createSurface(Messages.get("content.mods.title"), versionManager.getVersionDisplayName(profileId),
@@ -1553,416 +838,11 @@ public class LauncherUI extends javafx.application.Application {
                 install);
     }
 
-    private Node createServerJarLibraryContent() {
-        Label eyebrow = new Label(Messages.get("server.library.eyebrow"));
-        eyebrow.getStyleClass().add("eyebrow");
-        Label title = new Label(Messages.get("server.library.title"));
-        title.getStyleClass().add("content-library-section-title");
-        Label description = new Label(Messages.get("server.library.description"));
-        description.getStyleClass().add("status-detail");
-        description.setWrapText(true);
-        VBox heading = new VBox(4, eyebrow, title, description);
-
-        ComboBox<VersionManager.VersionCategory> categoryCombo = new ComboBox<>();
-        categoryCombo.getItems().addAll(VersionManager.VersionCategory.values());
-        categoryCombo.setValue(VersionManager.VersionCategory.ALL);
-        categoryCombo.setPrefWidth(176);
-        categoryCombo.setCellFactory(list -> createServerVersionCategoryCell());
-        categoryCombo.setButtonCell(createServerVersionCategoryCell());
-        applyFieldStyle(categoryCombo);
-
-        ComboBox<String> serverVersionCombo = new ComboBox<>();
-        serverVersionCombo.setVisibleRowCount(18);
-        serverVersionCombo.setMaxWidth(Double.MAX_VALUE);
-        serverVersionCombo.setCellFactory(list -> createPlainVersionCell());
-        serverVersionCombo.setButtonCell(createPlainVersionCell());
-        applyFieldStyle(serverVersionCombo);
-        HBox.setHgrow(serverVersionCombo, Priority.ALWAYS);
-
-        Button refreshButton = createActionButton(Messages.get("server.download.refresh"),
-                "secondary-button", () -> { });
-        HBox versionRow = new HBox(8, categoryCombo, serverVersionCombo, refreshButton);
-
-        Label artifactInfo = new Label(Messages.get("server.download.artifactPrompt"));
-        artifactInfo.getStyleClass().add("content-library-description");
-        artifactInfo.setWrapText(true);
-
-        Label channelsLabel = new Label(Messages.get("server.download.channelsPending"));
-        channelsLabel.getStyleClass().add("content-library-target");
-        channelsLabel.setWrapText(true);
-
-        AtomicReference<File> directory = new AtomicReference<>(
-                new File(getConfiguredGameRootDir(), "server-downloads"));
-        Label targetLabel = new Label();
-        targetLabel.getStyleClass().add("content-library-target");
-        targetLabel.setWrapText(true);
-
-        Label status = new Label(Messages.get("server.download.selectVersion"));
-        status.getStyleClass().add("status-detail");
-        status.setWrapText(true);
-
-        ProgressBar progress = new ProgressBar(0);
-        progress.getStyleClass().add("download-progress");
-        progress.setMaxWidth(Double.MAX_VALUE);
-        progress.setVisible(false);
-        progress.managedProperty().bind(progress.visibleProperty());
-
-        Button downloadButton = createActionButton(Messages.get("server.download.action.download"),
-                "primary-button", () -> { });
-        downloadButton.setDisable(true);
-        Button chooseFolderButton = createActionButton(Messages.get("server.download.action.changeFolder"),
-                "secondary-button", () -> { });
-        Button openFolderButton = createActionButton(Messages.get("server.download.action.openFolder"),
-                "secondary-button", () -> { });
-        HBox actions = new HBox(8, downloadButton, chooseFolderButton, openFolderButton);
-        actions.setAlignment(Pos.CENTER_RIGHT);
-
-        Label eulaNotice = new Label(Messages.get("server.download.eula"));
-        eulaNotice.getStyleClass().add("status-detail");
-        eulaNotice.setWrapText(true);
-
-        AtomicReference<ServerJarDownloader.ServerArtifact> artifact = new AtomicReference<>();
-        AtomicLong metadataGeneration = new AtomicLong();
-        AtomicLong downloadGeneration = new AtomicLong();
-
-        Runnable updateTarget = () -> {
-            String version = serverVersionCombo.getValue();
-            String fileName = ServerJarDownloader.suggestedFileName(version);
-            targetLabel.setText(Messages.format("server.download.target",
-                    new File(directory.get(), fileName).getAbsolutePath()));
-        };
-
-        Runnable loadArtifact = () -> loadServerJarArtifact(
-                serverVersionCombo.getValue(), artifact, artifactInfo, channelsLabel, status,
-                progress, downloadButton, metadataGeneration, updateTarget);
-
-        Runnable updateVersions = () -> {
-            String previous = serverVersionCombo.getValue();
-            String currentMinecraftVersion = selectedMinecraftVersionForServerDownload();
-            List<String> versions = new java.util.ArrayList<>(versionManager.getVersions(
-                    categoryCombo.getValue() == null
-                            ? VersionManager.VersionCategory.ALL : categoryCombo.getValue()));
-            if (!currentMinecraftVersion.isBlank() && !versions.contains(currentMinecraftVersion)) {
-                versions.addFirst(currentMinecraftVersion);
-            }
-            serverVersionCombo.getItems().setAll(versions);
-            if (previous != null && versions.contains(previous)) {
-                serverVersionCombo.setValue(previous);
-            } else if (!currentMinecraftVersion.isBlank() && versions.contains(currentMinecraftVersion)) {
-                serverVersionCombo.setValue(currentMinecraftVersion);
-            } else if (!versions.isEmpty()) {
-                serverVersionCombo.setValue(versions.getFirst());
-            } else {
-                artifact.set(null);
-                artifactInfo.setText(Messages.get("server.download.listEmpty"));
-                channelsLabel.setText(Messages.get("server.download.channelsWaitingVersions"));
-                status.setText(Messages.get("server.download.noVersions"));
-                downloadButton.setDisable(true);
-                updateTarget.run();
-            }
-            if (serverVersionCombo.getValue() != null) loadArtifact.run();
-        };
-
-        serverVersionCombo.setOnAction(event -> {
-            updateTarget.run();
-            loadArtifact.run();
-        });
-        categoryCombo.setOnAction(event -> updateVersions.run());
-
-        refreshButton.setOnAction(event -> {
-            refreshButton.setDisable(true);
-            categoryCombo.setDisable(true);
-            serverVersionCombo.setDisable(true);
-            status.setText(Messages.get("server.download.refreshingVersions"));
-            runAsync("ecl-refresh-server-versions", () -> {
-                try {
-                    versionManager.refresh();
-                    Platform.runLater(() -> {
-                        updateVersions.run();
-                        refreshButton.setDisable(false);
-                        categoryCombo.setDisable(false);
-                        serverVersionCombo.setDisable(false);
-                        status.setText(Messages.get("server.download.versionsUpdated"));
-                    });
-                } catch (Exception error) {
-                    Platform.runLater(() -> {
-                        refreshButton.setDisable(false);
-                        categoryCombo.setDisable(false);
-                        serverVersionCombo.setDisable(false);
-                        status.setText(Messages.format(
-                                "server.download.versionsFailed", cleanMessage(error)));
-                    });
-                }
-            });
-        });
-
-        chooseFolderButton.setOnAction(event -> {
-            DirectoryChooser chooser = new DirectoryChooser();
-            chooser.setTitle(Messages.get("server.download.chooseDirectory"));
-            File current = directory.get();
-            if (current.isDirectory()) chooser.setInitialDirectory(current);
-            File selected = chooser.showDialog(primaryStage);
-            if (selected != null) {
-                directory.set(selected);
-                updateTarget.run();
-                status.setText(Messages.get("server.download.directoryChanged"));
-            }
-        });
-        openFolderButton.setOnAction(event -> {
-            try {
-                ensureDirectory(directory.get());
-                openLocalFolder(directory.get(), Messages.get("server.download.directoryName"));
-            } catch (IOException error) {
-                status.setText(Messages.format(
-                        "server.download.openDirectoryFailed", cleanMessage(error)));
-            }
-        });
-
-        downloadButton.setOnAction(event -> {
-            ServerJarDownloader.ServerArtifact selectedArtifact = artifact.get();
-            if (selectedArtifact == null) return;
-            File target = new File(directory.get(),
-                    ServerJarDownloader.suggestedFileName(selectedArtifact.versionId()));
-            try {
-                ensureDirectory(directory.get());
-            } catch (IOException error) {
-                status.setText(Messages.format(
-                        "server.download.createDirectoryFailed", cleanMessage(error)));
-                return;
-            }
-            long generation = downloadGeneration.incrementAndGet();
-            downloadButton.setDisable(true);
-            chooseFolderButton.setDisable(true);
-            serverVersionCombo.setDisable(true);
-            categoryCombo.setDisable(true);
-            refreshButton.setDisable(true);
-            progress.setProgress(0);
-            progress.setVisible(true);
-            status.setText(Messages.format(
-                    "server.download.preparing", selectedArtifact.versionId()));
-            setStatus(Messages.get("server.download.statusTitle"),
-                    selectedArtifact.versionId() + " · " + target.getName());
-
-            DownloadTaskCenter.TaskHandle<Void> serverTask = downloadTaskCenter.submit(
-                    "Server JAR " + selectedArtifact.versionId(), context -> {
-                try {
-                    serverJarDownloader.download(selectedArtifact, target,
-                            createServerDownloadListener(status, progress, generation, downloadGeneration, context));
-                    if (context.isCancelled()) return null;
-                    Platform.runLater(() -> {
-                        if (generation != downloadGeneration.get() || context.isCancelled()) return;
-                        progress.setProgress(1);
-                        status.setText(Messages.format(
-                                "server.download.completedVerified", target.getAbsolutePath()));
-                        setStatus(Messages.get("server.download.completedTitle"), target.getAbsolutePath());
-                        setServerDownloadControlsBusy(false, downloadButton, chooseFolderButton,
-                                serverVersionCombo, categoryCombo, refreshButton);
-                    });
-                } catch (Exception error) {
-                    boolean cancelled = context.isCancelled() || isCancellation(error);
-                    Platform.runLater(() -> {
-                        if (generation != downloadGeneration.get()) return;
-                        if (cancelled) {
-                            status.setText(Messages.get("download.status.cancelled"));
-                            setStatus(Messages.get("download.status.cancelled"), "");
-                        } else {
-                            status.setText(Messages.format("download.status.failed", cleanMessage(error)));
-                            setStatus(Messages.get("status.downloadFailed"), cleanMessage(error));
-                        }
-                        setServerDownloadControlsBusy(false, downloadButton, chooseFolderButton,
-                                serverVersionCombo, categoryCombo, refreshButton);
-                    });
-                    throw error;
-                }
-                return null;
-            });
-        });
-
-        updateVersions.run();
-        updateTarget.run();
-
-        VBox browser = new VBox(12, heading, versionRow, artifactInfo, channelsLabel,
-                targetLabel, status, progress, eulaNotice, actions);
-        browser.getStyleClass().addAll("surface", "content-library-browser");
-        browser.setFillWidth(true);
-        return browser;
+    Node createServerJarLibraryContent() {
+        return new ServerJarDownloadPage(this).build();
     }
 
-    private ListCell<String> createPlainVersionCell() {
-        return new ListCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item);
-            }
-        };
-    }
-
-    private ListCell<VersionManager.VersionCategory> createServerVersionCategoryCell() {
-        return new ListCell<>() {
-            @Override
-            protected void updateItem(VersionManager.VersionCategory item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : switch (item) {
-                    case FEATURED -> Messages.get("server.download.category.featured");
-                    case RELEASE -> Messages.get("version.release");
-                    case PREVIEW -> Messages.get("version.preview");
-                    case APRIL_FOOLS -> Messages.get("version.aprilFools");
-                    case ALL -> Messages.get("version.all");
-                });
-            }
-        };
-    }
-
-    private String selectedMinecraftVersionForServerDownload() {
-        String profile = getSelectedVersion();
-        if (profile == null || profile.isBlank()) return "";
-        try {
-            return versionManager.resolveMinecraftVersionId(profile);
-        } catch (IOException error) {
-            return profile;
-        }
-    }
-
-    private void loadServerJarArtifact(
-            String version,
-            AtomicReference<ServerJarDownloader.ServerArtifact> artifact,
-            Label artifactInfo,
-            Label channelsLabel,
-            Label status,
-            ProgressBar progress,
-            Button downloadButton,
-            AtomicLong metadataGeneration,
-            Runnable updateTarget
-    ) {
-        long generation = metadataGeneration.incrementAndGet();
-        artifact.set(null);
-        downloadButton.setDisable(true);
-        progress.setVisible(false);
-        if (version == null || version.isBlank()) return;
-        artifactInfo.setText(Messages.format("server.download.metadataReading", version));
-        channelsLabel.setText(Messages.get("server.download.channelsResolving"));
-        status.setText(Messages.get("server.download.manifestQuery"));
-
-        runAsync("ecl-resolve-server-" + version, () -> {
-            try {
-                ServerJarDownloader.ServerArtifact resolved = serverJarDownloader.resolve(version,
-                        new ServerJarDownloader.Listener() {
-                            @Override
-                            public void onSource(String sourceName, String candidateUrl, boolean mirror) {
-                                Platform.runLater(() -> {
-                                    if (generation == metadataGeneration.get()) {
-                                        status.setText(Messages.format(
-                                                "server.download.metadataSource", sourceName));
-                                    }
-                                });
-                            }
-
-                            @Override
-                            public void onSourceFailure(String candidateUrl, IOException error) {
-                                Platform.runLater(() -> {
-                                    if (generation == metadataGeneration.get()) {
-                                        status.setText(Messages.get(
-                                                "server.download.metadataSourceFailed"));
-                                    }
-                                });
-                            }
-                        });
-                Platform.runLater(() -> {
-                    if (generation != metadataGeneration.get()) return;
-                    artifact.set(resolved);
-                    String size = resolved.size() < 0
-                            ? Messages.get("server.download.sizeUnknown") : formatBytes(resolved.size());
-                    String sha1 = resolved.sha1() == null || resolved.sha1().isBlank()
-                            ? Messages.get("server.download.shaUnavailable") : resolved.sha1();
-                    artifactInfo.setText(Messages.format("server.download.artifactDetails",
-                            resolved.versionId(), size, sha1));
-                    channelsLabel.setText(Messages.format("server.download.channels",
-                            resolved.channels().stream()
-                            .map(ServerJarDownloader.DownloadChannel::name)
-                            .distinct()
-                            .collect(java.util.stream.Collectors.joining(" → "))));
-                    status.setText(Messages.get("server.download.available"));
-                    downloadButton.setDisable(false);
-                    updateTarget.run();
-                });
-            } catch (Exception error) {
-                Platform.runLater(() -> {
-                    if (generation != metadataGeneration.get()) return;
-                    artifactInfo.setText(Messages.format("server.download.noArtifact", version));
-                    channelsLabel.setText(Messages.get("server.download.channelsUnavailable"));
-                    status.setText(cleanMessage(error));
-                });
-            }
-        });
-    }
-
-    private ServerJarDownloader.Listener createServerDownloadListener(
-            Label status,
-            ProgressBar progress,
-            long generation,
-            AtomicLong downloadGeneration,
-            DownloadTaskCenter.TaskContext taskContext
-    ) {
-        return new ServerJarDownloader.Listener() {
-            @Override
-            public void onStart(long total) {
-                taskContext.updateProgress(0, total);
-                Platform.runLater(() -> {
-                    if (generation == downloadGeneration.get()) progress.setProgress(0);
-                });
-            }
-
-            @Override
-            public void onProgress(long downloaded, long total) {
-                taskContext.updateProgress(downloaded, total);
-                Platform.runLater(() -> {
-                    if (generation != downloadGeneration.get()) return;
-                    progress.setProgress(total > 0 ? (double) downloaded / total : -1);
-                    status.setText(total > 0
-                            ? Messages.format("server.download.progressKnown",
-                                    formatBytes(downloaded), formatBytes(total))
-                            : Messages.format("server.download.progressUnknown",
-                                    formatBytes(downloaded)));
-                });
-            }
-
-            @Override
-            public void onSource(String sourceName, String candidateUrl, boolean mirror) {
-                Platform.runLater(() -> {
-                    if (generation == downloadGeneration.get()) {
-                        status.setText(Messages.format("server.download.usingSource", sourceName));
-                    }
-                });
-            }
-
-            @Override
-            public void onSourceFailure(String candidateUrl, IOException error) {
-                Platform.runLater(() -> {
-                    if (generation == downloadGeneration.get()) {
-                        status.setText(Messages.get("server.download.sourceFailed"));
-                    }
-                });
-            }
-        };
-    }
-
-    private void setServerDownloadControlsBusy(
-            boolean busy,
-            Button downloadButton,
-            Button chooseFolderButton,
-            ComboBox<String> serverVersionCombo,
-            ComboBox<VersionManager.VersionCategory> categoryCombo,
-            Button refreshButton
-    ) {
-        downloadButton.setDisable(busy);
-        chooseFolderButton.setDisable(busy);
-        serverVersionCombo.setDisable(busy);
-        categoryCombo.setDisable(busy);
-        refreshButton.setDisable(busy);
-    }
-
-    private Node createContentLibraryBrowser(ContentTarget target) {
+    Node createContentLibraryBrowser(ContentTarget target) {
         List<String> profileIds = availableContentProfiles(target);
         if (profileIds.isEmpty()) {
             Button choose = createActionButton("返回首页选择实例", "primary-button",
@@ -2132,7 +1012,7 @@ public class LauncherUI extends javafx.application.Application {
     ) {
     }
 
-    private void closeActiveModBrowserView() {
+    void closeActiveModBrowserView() {
         if (activeModBrowserView != null) {
             activeModBrowserView.close();
             activeModBrowserView = null;
@@ -2146,27 +1026,8 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
-    private VBox createServersPage() {
-        VBox page = createMainPage();
-
-        Label pageTitle = new Label(Messages.get("nav.servers"));
-        pageTitle.getStyleClass().add("page-title");
-        Label pageSubtitle = new Label(Messages.get("server.page.subtitle"));
-        pageSubtitle.getStyleClass().add("page-subtitle");
-        VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
-        pageHeading.getStyleClass().add("content-library-heading");
-
-        activeServerBrowserView = new ServerBrowserView(
-                message -> setStatus(Messages.get("nav.servers"), message), this::setQuickServer);
-        activeServerBrowserView.setMaxWidth(Double.MAX_VALUE);
-        VBox.setVgrow(activeServerBrowserView, Priority.ALWAYS);
-
-        page.getChildren().addAll(pageHeading, activeServerBrowserView);
-        return page;
-    }
-
     /** 将地址写入直连服务器配置并持久化，供服务器浏览页“设为直连”调用。 */
-    private void setQuickServer(String address) {
+    void setQuickServer(String address) {
         quickServer = address == null ? "" : address.trim();
         settingsManager.set(ECLConfig.KEY_QUICK_SERVER, quickServer);
         settingsManager.save();
@@ -2175,118 +1036,37 @@ public class LauncherUI extends javafx.application.Application {
                 : "下次启动将直接连接 " + quickServer);
     }
 
-    private VBox createSettingsPage() {
-        VBox page = createMainPage();
-
-        ComboBox<String> languageBox = new ComboBox<>();
-        languageBox.getItems().addAll("zh-CN", "zh-TW", "en");
-        languageBox.setValue(Messages.locale().toLanguageTag());
-        configureLocalizedCombo(languageBox, this::languageDisplayName);
-        languageBox.setOnAction(event -> switchLanguage(languageBox.getValue()));
-
-        ComboBox<String> themeBox = new ComboBox<>();
-        themeBox.getItems().addAll("DARK", "LIGHT");
-        themeBox.setValue(normalizeTheme(settingsManager.get(ECLConfig.KEY_THEME)));
-        configureLocalizedCombo(themeBox, this::themeDisplayName);
-        themeBox.setOnAction(event -> {
-            String theme = normalizeTheme(themeBox.getValue());
-            settingsManager.set(ECLConfig.KEY_THEME, theme);
-            settingsManager.save();
-            applyTheme(theme);
-        });
-
-        Button advancedButton = createActionButton(Messages.get("settings.advanced"),
-                "primary-button", this::showSettingsDialog);
-        Button dataDirButton = createActionButton(Messages.get("settings.openData"), "secondary-button",
-                () -> openLocalFolder(ECLConfig.getBaseDir(), Messages.get("settings.openData")));
-        Button gameDirButton = createActionButton(Messages.get("settings.openGame"), "ghost-button",
-                () -> openLocalFolder(getActiveGameDir(), Messages.get("settings.openGame")));
-        Button wizardButton = createActionButton(Messages.get("wizard.title"), "ghost-button",
-                this::showFirstRunWizard);
-
-        HBox actions = new HBox(10, advancedButton, dataDirButton, gameDirButton, wizardButton);
-        actions.setAlignment(Pos.CENTER_LEFT);
-        VBox settingsCard = createSurface(
-                "// " + Messages.get("settings.system"),
-                Messages.get("settings.subtitle"),
-                createControlRow(Messages.get("settings.language"), languageBox),
-                createControlRow(Messages.get("settings.theme"), themeBox),
-                createInfoRow("Java", createStaticValueLabel(
-                        javaPath == null || javaPath.isBlank() ? "-" : abbreviate(javaPath, 72))),
-                actions
-        );
-        page.getChildren().add(settingsCard);
-        return page;
-    }
-
     @SuppressWarnings("unused")
-    private VBox createLegacySettingsPage() {
-        VBox page = createMainPage();
-
-        Button advancedButton = createActionButton("高级设置", "primary-button", this::showSettingsDialog);
-        Button dataDirButton = createActionButton("打开数据目录", "secondary-button",
-                () -> openLocalFolder(ECLConfig.getBaseDir(), "数据目录"));
-        Button gameDirButton = createActionButton("打开游戏目录", "ghost-button",
-                () -> openLocalFolder(getActiveGameDir(), "游戏目录"));
-
-        HBox actions = new HBox(10, advancedButton, dataDirButton, gameDirButton);
-        actions.setAlignment(Pos.CENTER_LEFT);
-
-        VBox settingsCard = createSurface(
-                "// 系统设置",
-                "Java / 游戏目录 / JVM 参数",
-                createInfoRow("Java", createStaticValueLabel(javaPath == null || javaPath.isBlank() ? "未设置" : abbreviate(javaPath, 72))),
-                createInfoRow("游戏目录", createStaticValueLabel(abbreviate(getActiveGameDir().getAbsolutePath(), 72))),
-                createInfoRow("JVM 参数", createStaticValueLabel(extraJvmArgs == null || extraJvmArgs.isBlank() ? "未设置" : abbreviate(extraJvmArgs, 72))),
-                actions
-        );
-
-        page.getChildren().add(settingsCard);
-        return page;
+    HBox createSummaryRow(String key, Label value) {
+        Label keyLabel = new Label(key);
+        keyLabel.getStyleClass().add("summary-key");
+        value.getStyleClass().add("summary-value");
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox row = new HBox(8, keyLabel, spacer, value);
+        row.getStyleClass().add("summary-row");
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
     }
 
-    private VBox createLogsPage() {
-        VBox page = createMainPage();
-
-        File crashDir = new File(getActiveGameDir(), "crash-reports");
-        File logsDir = new File(getActiveGameDir(), "logs");
-        Button crashButton = createActionButton(Messages.get("logs.openCrash"), "primary-button",
-                () -> openLocalFolder(crashDir, "崩溃报告目录"));
-        Button logsButton = createActionButton(Messages.get("logs.openLogs"), "secondary-button",
-                () -> openLocalFolder(logsDir, "日志目录"));
-        Button modsButton = createActionButton(Messages.get("logs.openMods"), "ghost-button",
-                () -> openLocalFolder(resolveModsDir(getSelectedVersion()), "模组目录"));
-        Button clearConsoleButton = createActionButton(Messages.get("logs.clearConsole"), "ghost-button", () -> {
-            liveGameLog.clear();
-            if (liveConsoleArea != null) liveConsoleArea.clear();
-        });
-        Button diagnosticButton = createActionButton(Messages.get("diagnostic.export"),
-                "secondary-button", this::exportDiagnosticBundle);
-
-        HBox actions = new HBox(10, crashButton, logsButton, modsButton, clearConsoleButton, diagnosticButton);
-        actions.setAlignment(Pos.CENTER_LEFT);
-
-        liveConsoleArea = new TextArea(liveGameLog.toString());
-        liveConsoleArea.setEditable(false);
-        liveConsoleArea.setWrapText(false);
-        liveConsoleArea.setPrefRowCount(18);
-        liveConsoleArea.setStyle("-fx-font-family: 'Consolas'; -fx-font-size: 12px;");
-
-        VBox logsCard = createSurface(
-                Messages.get("logs.title"),
-                Messages.get("logs.subtitle"),
-                createInfoRow(Messages.get("label.diagStatus"), createStaticValueLabel(Messages.get("info.normal"))),
-                createInfoRow(Messages.get("label.crashReports"), createStaticValueLabel(Messages.format("crash.count", countCrashReports()))),
-                createInfoRow(Messages.get("info.gameDir"), createStaticValueLabel(abbreviate(getActiveGameDir().getAbsolutePath(), 72))),
-                actions,
-                liveConsoleArea
-        );
-
-        page.getChildren().add(logsCard);
-        return page;
+    Button createLinkButton(String text, Runnable action) {
+        Button button = new Button(text);
+        button.getStyleClass().addAll("app-button", "link-button");
+        button.setOnAction(event -> action.run());
+        return button;
     }
 
-    private VBox createMainPage() {
+    void expandInstanceSettings(Control focusTarget) {
+        if (instanceSettingsPane == null) {
+            return;
+        }
+        instanceSettingsPane.setExpanded(true);
+        if (focusTarget != null) {
+            Platform.runLater(focusTarget::requestFocus);
+        }
+    }
+
+    VBox createMainPage() {
         VBox page = new VBox(18);
         page.getStyleClass().add("launch-pane");
         page.setPrefWidth(LAUNCH_WIDTH);
@@ -2307,60 +1087,8 @@ public class LauncherUI extends javafx.application.Application {
         return LauncherUiFactory.bodyText(text);
     }
 
-    private VBox createContentPane() {
-        GridPane contentRows = new GridPane();
-        contentRows.getStyleClass().add("content-grid");
-        contentRows.setHgap(10);
-        contentRows.setVgap(10);
-        for (ContentTarget target : contentTargets) {
-            contentRows.getChildren().add(createContentRow(target));
-        }
-        for (int i = 0; i < contentRows.getChildren().size(); i++) {
-            Node row = contentRows.getChildren().get(i);
-            GridPane.setConstraints(row, 0, i);
-            GridPane.setHgrow(row, Priority.ALWAYS);
-            if (row instanceof Region region) {
-                region.setMaxWidth(Double.MAX_VALUE);
-            }
-        }
-        return createSurface(Messages.get("content.recommended.title"),
-                Messages.get("content.recommended.subtitle"), contentRows);
-    }
 
-    private HBox createContentRow(ContentTarget target) {
-        Label icon = new Label(target.initial);
-        icon.getStyleClass().add("content-icon");
-
-        VBox textBox = new VBox(3);
-        Label titleLabel = new Label(target.title);
-        titleLabel.getStyleClass().add("content-title");
-        Label subtitleLabel = new Label(target.subtitle);
-        subtitleLabel.getStyleClass().add("content-subtitle");
-        subtitleLabel.setWrapText(true);
-        textBox.getChildren().addAll(titleLabel, subtitleLabel);
-
-        Button downloadBtn = new Button("下载");
-        downloadBtn.getStyleClass().addAll("app-button", "secondary-button", "compact-button");
-        downloadBtn.setText("搜索");
-        downloadBtn.setTooltip(new Tooltip("在启动器内搜索、下载并导入" + target.title));
-        downloadBtn.setOnAction(e -> showContentDownloadDialog(target));
-
-        Button folderBtn = new Button("目录");
-        folderBtn.getStyleClass().addAll("app-button", "ghost-button", "compact-button");
-        folderBtn.setTooltip(new Tooltip("打开本地" + target.title + "目录"));
-        folderBtn.setOnAction(e -> openLocalFolder(target.folderResolver.apply(getSelectedVersion()), target.title + "目录"));
-
-        HBox actions = new HBox(6, downloadBtn, folderBtn);
-        actions.setAlignment(Pos.CENTER_LEFT);
-
-        HBox row = new HBox(10, icon, textBox, actions);
-        row.getStyleClass().add("content-row");
-        row.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(textBox, Priority.ALWAYS);
-        return row;
-    }
-
-    private GridPane createForm() {
+    GridPane createForm() {
         GridPane grid = new GridPane();
         grid.getStyleClass().add("launch-form");
         grid.setHgap(10);
@@ -2821,7 +1549,7 @@ public class LauncherUI extends javafx.application.Application {
                 : "正式版和快照版可打开 mc 中文 Wiki 更新介绍"));
     }
 
-    private HBox createActionBar() {
+    HBox createActionBar() {
         Label playIcon = new Label("▶");
         playIcon.getStyleClass().add("launch-play-icon");
         launchBtn = new Button("启动游戏");
@@ -3004,7 +1732,7 @@ public class LauncherUI extends javafx.application.Application {
         gameLaunch.updatePlaytimeSummary();
     }
 
-    private String getAuthDisplayName() {
+    String getAuthDisplayName() {
         String authType = authTypeCombo == null ? AUTH_OFFLINE : authTypeCombo.getValue();
         if (AUTH_MICROSOFT.equals(authType)) {
             if (selectedMicrosoftAccount != null
@@ -3064,65 +1792,15 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     void startProgressAnimation(ProgressBar progressBar) {
-        if (progressBar == null) {
-            return;
-        }
-
-        stopProgressAnimation(progressBar, false);
-        progressBar.setVisible(true);
-        progressBar.getProperties().put("pulse-step", 0);
-
-        Timeline timeline = new Timeline(new KeyFrame(Duration.millis(260), e -> advanceProgressPulse(progressBar)));
-        timeline.setCycleCount(Timeline.INDEFINITE);
-        progressAnimations.put(progressBar, timeline);
-        timeline.play();
-        advanceProgressPulse(progressBar);
+        progressController.start(progressBar);
     }
 
     void updateProgress(ProgressBar progressBar, long downloaded, long total) {
-        if (progressBar == null) {
-            return;
-        }
-
-        progressBar.setVisible(true);
-        if (total > 0) {
-            progressBar.setProgress(clamp((double) downloaded / total, 0, 1));
-        } else {
-            progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
-        }
+        progressController.update(progressBar, downloaded, total);
     }
 
     void stopProgressAnimation(ProgressBar progressBar, boolean hide) {
-        if (progressBar == null) {
-            return;
-        }
-
-        Timeline timeline = progressAnimations.remove(progressBar);
-        if (timeline != null) {
-            timeline.stop();
-        }
-        progressBar.getStyleClass().removeAll("progress-pulse-a", "progress-pulse-b", "progress-pulse-c");
-        progressBar.getProperties().remove("pulse-step");
-        if (hide) {
-            progressBar.setVisible(false);
-        }
-    }
-
-    private void stopAllProgressAnimations() {
-        for (ProgressBar progressBar : List.copyOf(progressAnimations.keySet())) {
-            stopProgressAnimation(progressBar, false);
-        }
-    }
-
-    private void advanceProgressPulse(ProgressBar progressBar) {
-        progressBar.getStyleClass().removeAll("progress-pulse-a", "progress-pulse-b", "progress-pulse-c");
-        int step = ((Number) progressBar.getProperties().getOrDefault("pulse-step", 0)).intValue();
-        progressBar.getStyleClass().add(switch (step) {
-            case 0 -> "progress-pulse-a";
-            case 1 -> "progress-pulse-b";
-            default -> "progress-pulse-c";
-        });
-        progressBar.getProperties().put("pulse-step", (step + 1) % 3);
+        progressController.stop(progressBar, hide);
     }
 
     private String normalizeAuthType(String value) {
@@ -3882,104 +2560,43 @@ public class LauncherUI extends javafx.application.Application {
         return versionCombo == null ? null : versionCombo.getValue();
     }
 
-    /**
-     * Content is downloaded into the instance directory of {@code contentVersion}. To keep the
-     * launched game directory identical to the download target (so mods / shaderpacks /
-     * resourcepacks are actually loaded), the launch selection is realigned to that version after
-     * a successful import. Only selects the value when it is already offered by the combo.
-     */
-
     File getConfiguredGameRootDir() {
-        return gameDir == null ? ECLConfig.getGameDir() : gameDir;
+        return pathService.getConfiguredGameRootDir();
     }
 
-    /**
-     * Normalizes a configured root directory into the single source of truth used for every
-     * content path (mods / shaderpacks / resourcepacks / saves). The legacy {@code <base>/game}
-     * location is folded back into the standard game directory so download targets and the launched
-     * game directory can never diverge because of an outdated saved path.
-     */
     File resolveConfiguredGameRootDir(File candidate) {
-        if (candidate == null || (candidate.getPath().isBlank())) {
-            return ECLConfig.getGameDir();
-        }
-        if (isSamePath(candidate, ECLConfig.getLegacyGameDir())) {
-            File defaultGameDir = ECLConfig.getGameDir();
-            settingsManager.set(ECLConfig.KEY_GAME_DIR, defaultGameDir.getAbsolutePath());
-            settingsManager.save();
-            return defaultGameDir;
-        }
-        return candidate;
+        return pathService.resolveConfiguredGameRootDir(candidate);
     }
 
-    private boolean isSamePath(File first, File second) {
-        if (first == null || second == null) {
-            return false;
-        }
-        String firstPath = first.getAbsoluteFile().toPath().normalize().toString();
-        String secondPath = second.getAbsoluteFile().toPath().normalize().toString();
-        return firstPath.equalsIgnoreCase(secondPath);
-    }
-
-    private File getActiveGameDir() {
-        return resolveVersionGameDir(getSelectedVersion());
+    File getActiveGameDir() {
+        return pathService.getActiveGameDir();
     }
 
     File resolveVersionGameDir(String gameVersion) {
-        File rootDir = getConfiguredGameRootDir();
-        if (gameVersion == null || gameVersion.isBlank()) {
-            return rootDir;
-        }
-        try {
-            return gameRepository().runDirectory(gameVersion).toFile();
-        } catch (IOException error) {
-            LOGGER.warn("Cannot resolve run directory for {}; using isolated fallback", gameVersion, error);
-            return resolveVersionInstanceRoot(gameVersion);
-        }
+        return pathService.resolveVersionGameDir(gameVersion);
     }
 
     File resolveVersionInstanceRoot(String gameVersion) {
-        if (gameVersion == null || gameVersion.isBlank()) {
-            return getConfiguredGameRootDir();
-        }
-        return gameRepository().instanceRoot(sanitizeVersionDirectoryName(gameVersion)).toFile();
+        return pathService.resolveVersionInstanceRoot(gameVersion);
     }
 
     DefaultGameRepository gameRepository() {
-        return new DefaultGameRepository(ECLConfig.getVersionsDir().toPath(),
-                getConfiguredGameRootDir().toPath(), DefaultIsolationType.parse(
-                        settingsManager.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE)));
+        return pathService.gameRepository();
     }
 
     void ensureDirectory(File dir) throws IOException {
-        if (!dir.exists() && !dir.mkdirs()) {
-            throw new IOException("无法创建目录: " + dir.getAbsolutePath());
-        }
-    }
-
-    private String sanitizeVersionDirectoryName(String version) {
-        String sanitized = TextUtil.replaceInvalidFilenameChars(version.trim());
-        return sanitized.isBlank() ? "unknown-version" : sanitized;
+        pathService.ensureDirectory(dir);
     }
 
     private static String loaderDisplayName(String loader) {
-        if (loader == null) {
-            return "原版";
-        }
-        return switch (loader.toLowerCase(Locale.ROOT)) {
-            case "fabric" -> "Fabric";
-            case "quilt" -> "Quilt";
-            case "forge" -> "Forge";
-            case "neoforge" -> "NeoForge";
-            default -> loader;
-        };
+        return LauncherPathService.loaderDisplayName(loader);
     }
 
     File resolveModsDir(String gameVersion) {
-        return new File(resolveVersionGameDir(gameVersion), "mods");
+        return pathService.resolveModsDir(gameVersion);
     }
 
-    private void showSettingsDialog() {
+    void showSettingsDialog() {
         new SettingsDialog(this).show();
     }
 
@@ -4013,10 +2630,6 @@ public class LauncherUI extends javafx.application.Application {
 
     ScrollPane createWheelScrollPane(Node content) {
         return LauncherUiFactory.wheelScrollPane(content);
-    }
-
-    private double clamp(double value, double min, double max) {
-        return LauncherUiFactory.clamp(value, min, max);
     }
 
     void openLocalFolder(File folder, String label) {
@@ -4081,40 +2694,40 @@ public class LauncherUI extends javafx.application.Application {
         return LauncherUiFactory.infoRow(key, valueLabel);
     }
 
-    private HBox createControlRow(String key, Node control) {
+    HBox createControlRow(String key, Node control) {
         return LauncherUiFactory.controlRow(key, control);
     }
 
-    private void configureLocalizedCombo(ComboBox<String> combo, Function<String, String> displayName) {
+    void configureLocalizedCombo(ComboBox<String> combo, Function<String, String> displayName) {
         LauncherUiFactory.configureLocalizedCombo(combo, displayName);
     }
 
-    private String languageDisplayName(String tag) {
+    String languageDisplayName(String tag) {
         return LauncherThemeManager.languageDisplayName(tag);
     }
 
-    private String themeDisplayName(String theme) {
+    String themeDisplayName(String theme) {
         return LauncherThemeManager.themeDisplayName(theme);
     }
 
-    private String normalizeTheme(String theme) {
+    String normalizeTheme(String theme) {
         return LauncherThemeManager.normalize(theme);
     }
 
-    private void switchLanguage(String languageTag) {
+    void switchLanguage(String languageTag) {
         if (languageTag == null) return;
         Messages.setLocale(Locale.forLanguageTag(languageTag));
         settingsManager.set(ECLConfig.KEY_LANGUAGE, languageTag);
         settingsManager.save();
         primaryStage.setTitle(Messages.get("app.title"));
-        navButtons.forEach((view, button) -> button.setText(navTitleFor(view)));
+        navigationRail.refreshTexts();
         if (authTypeCombo != null) authTypeCombo.requestLayout();
         homePage = null;
         contentTargets = createContentTargets();
         renderActiveView();
     }
 
-    private void applyTheme(String requestedTheme) {
+    void applyTheme(String requestedTheme) {
         LauncherThemeManager.applyToAllWindows(primaryStage, requestedTheme);
     }
 
@@ -4122,11 +2735,11 @@ public class LauncherUI extends javafx.application.Application {
         LauncherThemeManager.applyToScene(scene, requestedTheme);
     }
 
-    private Label createValueLabel() {
+    Label createValueLabel() {
         return LauncherUiFactory.valueLabel();
     }
 
-    private Label createValueLabel(String text) {
+    Label createValueLabel(String text) {
         return LauncherUiFactory.valueLabel(text);
     }
 

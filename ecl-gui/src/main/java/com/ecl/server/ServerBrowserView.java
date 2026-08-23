@@ -1,7 +1,6 @@
 package com.ecl.server;
 
 import com.ecl.util.Messages;
-import com.ecl.util.ThreadFactories;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -9,30 +8,18 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.TextField;
-import javafx.scene.input.Clipboard;
-import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
-import java.awt.Desktop;
-import java.io.IOException;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -40,23 +27,19 @@ import java.util.function.Consumer;
  * 支持实时在线状态探测，以及把选中的服务器设为启动直连地址。
  */
 public final class ServerBrowserView extends VBox implements AutoCloseable {
-    private static final int MAX_STATUS_PROBES = 32;
     private final ServerCatalog bundledCatalog = ServerCatalog.load();
-    private final ServerDirectoryService directoryService = new ServerDirectoryService();
+    private final ServerDirectoryRefreshController directoryRefreshController =
+            new ServerDirectoryRefreshController(new ServerDirectoryService());
     private final Consumer<String> statusConsumer;
     private final Consumer<String> connectConsumer;
     private final Map<String, ServerStatus> statusMap = new ConcurrentHashMap<>();
     private final Map<ServerCategory, Label> categoryCountLabels =
             new EnumMap<>(ServerCategory.class);
-    private final ExecutorService directoryExecutor =
-            Executors.newSingleThreadExecutor(ThreadFactories.daemon("ecl-server-directory"));
-    private final ExecutorService statusExecutor =
-            Executors.newFixedThreadPool(4, ThreadFactories.daemon("ecl-server-status"));
-    private final Set<String> probingAddresses = ConcurrentHashMap.newKeySet();
-    private final AtomicBoolean refreshing = new AtomicBoolean();
+    private final ServerStatusProbeController statusProbeController =
+            new ServerStatusProbeController();
+    private final ServerCatalogFilter catalogFilter = new ServerCatalogFilter(bundledCatalog);
+    private final ServerBrowserActions actions;
 
-    private ServerCatalog catalog = bundledCatalog;
-    private ServerCategory activeCategory = ServerCategory.ALL;
     private ListView<PublicServer> resultList;
     private TextField searchField;
     private Label resultCountLabel;
@@ -66,12 +49,12 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
     private Button connectButton;
     private Button copyButton;
     private Button websiteButton;
-    private String directorySource = Messages.get("server.source.bundled");
     private volatile boolean closed;
 
     public ServerBrowserView(Consumer<String> statusConsumer, Consumer<String> connectConsumer) {
         this.statusConsumer = statusConsumer == null ? ignored -> { } : statusConsumer;
         this.connectConsumer = connectConsumer == null ? ignored -> { } : connectConsumer;
+        this.actions = new ServerBrowserActions(this.statusConsumer, this.connectConsumer);
         buildView();
         refreshList();
         if (!Boolean.getBoolean("ecl.snapshot")) {
@@ -125,7 +108,7 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         for (ServerCategory category : categories) {
             Button button = createCategoryButton(category);
             button.setOnAction(event -> {
-                activeCategory = category;
+                catalogFilter.selectCategory(category);
                 categoryButtons.forEach(item ->
                         item.getStyleClass().remove("server-category-item-active"));
                 button.getStyleClass().add("server-category-item-active");
@@ -155,7 +138,7 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         button.setAccessibleText(Messages.format(
                 "server.category.accessible", category.label(), count.getText()));
         button.getStyleClass().add("server-category-item");
-        if (category == activeCategory) {
+        if (category == catalogFilter.activeCategory()) {
             button.getStyleClass().add("server-category-item-active");
         }
         button.setMaxWidth(Double.MAX_VALUE);
@@ -163,7 +146,7 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
     }
 
     private int countFor(ServerCategory category) {
-        return catalog.filter(category, "").size();
+        return catalogFilter.count(category);
     }
 
     private Node buildSearchBar() {
@@ -212,7 +195,8 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         resultList.setMinHeight(300);
         resultList.setPrefHeight(480);
         resultList.setPlaceholder(new Label(Messages.get("server.result.empty")));
-        resultList.setCellFactory(list -> new ServerCell());
+        resultList.setCellFactory(list -> new ServerListCell(
+                list, statusMap::get, statusProbeController::isProbing));
         resultList.getSelectionModel().selectedItemProperty().addListener(
                 (observable, oldValue, selected) -> updateActionRow(selected));
         VBox.setVgrow(resultList, Priority.ALWAYS);
@@ -234,13 +218,15 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         connectButton.setOnAction(event -> {
             PublicServer selected = resultList.getSelectionModel().getSelectedItem();
             if (selected != null) {
-                connectConsumer.accept(selected.address());
+                actions.connect(selected);
             }
         });
         copyButton = actionButton(Messages.get("server.action.copy"), "ghost-button");
-        copyButton.setOnAction(event -> copySelectedAddress());
+        copyButton.setOnAction(event -> actions.copyAddress(
+                resultList.getSelectionModel().getSelectedItem()));
         websiteButton = actionButton(Messages.get("server.action.website"), "ghost-button");
-        websiteButton.setOnAction(event -> openSelectedWebsite());
+        websiteButton.setOnAction(event -> actions.openWebsite(
+                resultList.getSelectionModel().getSelectedItem()));
 
         HBox actions = new HBox(8, connectButton, copyButton, websiteButton);
         actions.setAlignment(Pos.CENTER_RIGHT);
@@ -268,31 +254,29 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
     }
 
     private void refreshList() {
-        List<PublicServer> filtered = catalog.filter(activeCategory, searchField.getText());
+        List<PublicServer> filtered = catalogFilter.filter(searchField.getText());
         resultList.getItems().setAll(filtered);
+        ServerCategory activeCategory = catalogFilter.activeCategory();
         String resultCount = activeCategory == ServerCategory.ALL
                 ? Messages.format("server.result.count", filtered.size())
                 : Messages.format("server.result.count.category",
                         filtered.size(), activeCategory.label());
-        resultCountLabel.setText(resultCount + " · " + directorySource);
+        resultCountLabel.setText(resultCount + " · " + catalogFilter.directorySource());
         resultList.getSelectionModel().clearSelection();
         updateActionRow(null);
     }
 
     private void startDirectoryRefresh(boolean forceRefresh) {
-        if (closed || refreshing.getAndSet(true)) {
+        if (!directoryRefreshController.refresh(forceRefresh, () -> closed,
+                this::finishDirectoryRefresh)) {
             return;
         }
         refreshStatusButton.setDisable(true);
         refreshStatusButton.setText(Messages.get("server.status.loading"));
-        CompletableFuture.supplyAsync(
-                        () -> directoryService.load(forceRefresh), directoryExecutor)
-                .whenComplete(this::finishDirectoryRefresh);
     }
 
     private void finishDirectoryRefresh(
             ServerDirectoryService.DirectorySnapshot snapshot, Throwable error) {
-        refreshing.set(false);
         if (closed) {
             return;
         }
@@ -305,53 +289,23 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
                 probeMissingStatuses();
                 return;
             }
-            catalog = bundledCatalog.withDiscoveredServers(snapshot.servers());
+            catalogFilter.applyDirectorySnapshot(snapshot);
             statusMap.clear();
             statusMap.putAll(snapshot.statuses());
-            directorySource = snapshot.cached()
-                    ? Messages.get("server.source.cache")
-                    : "minecraft-java-servers.com";
             updateCategoryCounts();
             refreshList();
             String source = snapshot.cached()
                     ? Messages.get("server.source.cacheShort")
                     : Messages.get("server.source.onlineShort");
             statusConsumer.accept(Messages.format(
-                    "server.status.loaded", source, catalog.servers().size()));
+                    "server.status.loaded", source, catalogFilter.servers().size()));
             probeMissingStatuses();
         });
     }
 
     private void probeMissingStatuses() {
-        if (closed || Boolean.getBoolean("ecl.snapshot")) {
-            return;
-        }
-        int scheduled = 0;
-        for (PublicServer server : catalog.servers()) {
-            ServerStatus existing = statusMap.get(server.address());
-            if ((existing != null && existing.state() != ServerStatusState.UNKNOWN)
-                    || server.address().isBlank()
-                    || !probingAddresses.add(server.address())) {
-                continue;
-            }
-            scheduled++;
-            statusExecutor.execute(() -> {
-                ServerStatus status = ServerStatusService.fetch(server);
-                if (!closed) {
-                    statusMap.put(server.address(), status);
-                }
-                probingAddresses.remove(server.address());
-                if (!closed) {
-                    Platform.runLater(resultList::refresh);
-                }
-            });
-            if (scheduled >= MAX_STATUS_PROBES) {
-                break;
-            }
-        }
-        if (scheduled > 0) {
-            resultList.refresh();
-        }
+        statusProbeController.probe(catalogFilter.servers(), statusMap,
+                () -> closed, () -> resultList.refresh());
     }
 
     private void updateCategoryCounts() {
@@ -359,147 +313,12 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
                 label.setText(Integer.toString(countFor(category))));
     }
 
-    private void copySelectedAddress() {
-        PublicServer selected = resultList.getSelectionModel().getSelectedItem();
-        if (selected == null) {
-            return;
-        }
-        ClipboardContent content = new ClipboardContent();
-        content.putString(selected.address());
-        Clipboard.getSystemClipboard().setContent(content);
-        statusConsumer.accept(Messages.format("server.status.copied", selected.address()));
-    }
-
-    private void openSelectedWebsite() {
-        PublicServer selected = resultList.getSelectionModel().getSelectedItem();
-        if (selected == null) {
-            return;
-        }
-        URI website = selected.websiteUri();
-        if (website == null) {
-            return;
-        }
-        try {
-            if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().browse(website);
-            } else {
-                statusConsumer.accept(Messages.format(
-                        "server.status.browserUnsupported", website));
-            }
-        } catch (IOException | SecurityException error) {
-            statusConsumer.accept(Messages.format("server.status.browserFailed", website));
-        }
-    }
-
     @Override
     public void close() {
         closed = true;
-        directoryExecutor.shutdownNow();
-        statusExecutor.shutdownNow();
+        directoryRefreshController.close();
+        statusProbeController.close();
     }
 
-    private final class ServerCell extends ListCell<PublicServer> {
-        @Override
-        protected void updateItem(PublicServer server, boolean empty) {
-            super.updateItem(server, empty);
-            if (empty || server == null) {
-                setGraphic(null);
-                setText(null);
-                setAccessibleText(null);
-                return;
-            }
 
-            Label icon = new Label(server.iconText());
-            icon.getStyleClass().addAll("server-icon", categoryStyleClass(server.categoryEnum()));
-            Label name = new Label(server.name());
-            name.getStyleClass().add("server-item-title");
-            HBox titleRow = new HBox(8, name, statusBadge(server));
-            titleRow.setAlignment(Pos.CENTER_LEFT);
-
-            Label description = new Label(server.description());
-            description.getStyleClass().add("server-item-description");
-            description.setWrapText(true);
-            description.setMaxWidth(Double.MAX_VALUE);
-
-            String meta = String.join(" · ", nonEmpty(
-                    server.categoryEnum().label(), server.region(),
-                    server.version().isBlank() ? ""
-                            : Messages.format("server.meta.version", server.version()),
-                    server.address()));
-            Label metaLabel = new Label(meta);
-            metaLabel.getStyleClass().add("server-item-address");
-
-            HBox tags = new HBox(5);
-            tags.setAlignment(Pos.CENTER_LEFT);
-            server.tags().forEach(tag -> tags.getChildren().add(tagBadge(tag)));
-
-            VBox text = new VBox(4, titleRow, description, metaLabel, tags);
-            text.setMinWidth(0);
-            HBox.setHgrow(text, Priority.ALWAYS);
-            HBox row = new HBox(12, icon, text);
-            row.prefWidthProperty().bind(resultList.widthProperty().subtract(44));
-            row.setMaxWidth(Double.MAX_VALUE);
-            row.setAlignment(Pos.TOP_LEFT);
-            setGraphic(row);
-            setAccessibleText(server.name() + "，" + meta + "，" + server.description());
-        }
-
-        private Node statusBadge(PublicServer server) {
-            ServerStatus status = statusMap.get(server.address());
-            Label badge = new Label();
-            if (probingAddresses.contains(server.address())) {
-                badge.setText(Messages.get("server.status.checking"));
-                badge.getStyleClass().add("server-status-unknown");
-            } else if (status == null) {
-                badge.setText(Messages.get("server.status.pending"));
-                badge.getStyleClass().add("server-status-unknown");
-            } else {
-                switch (status.state()) {
-                    case ONLINE -> {
-                        badge.setText(Messages.format("server.status.online",
-                                formatPlayerCount(status.playersOnline()),
-                                formatPlayerCount(status.playersMax())));
-                        badge.getStyleClass().add("server-status-online");
-                    }
-                    case OFFLINE -> {
-                        badge.setText(Messages.get("server.status.offline"));
-                        badge.getStyleClass().add("server-status-offline");
-                    }
-                    default -> {
-                        badge.setText(Messages.get("server.status.unknown"));
-                        badge.getStyleClass().add("server-status-unknown");
-                    }
-                }
-            }
-            badge.getStyleClass().add("server-status-badge");
-            return badge;
-        }
-
-        private Label tagBadge(String tag) {
-            Label badge = new Label(tag);
-            badge.getStyleClass().add("server-tag");
-            return badge;
-        }
-    }
-
-    private static String categoryStyleClass(ServerCategory category) {
-        return switch (category) {
-            case SURVIVAL -> "server-cat-survival";
-            case SMP -> "server-cat-smp";
-            case PVP -> "server-cat-pvp";
-            case TECH -> "server-cat-tech";
-            case ENTERTAINMENT -> "server-cat-entertainment";
-            default -> "server-cat-all";
-        };
-    }
-
-    private static List<String> nonEmpty(String... values) {
-        return java.util.Arrays.stream(values)
-                .filter(value -> value != null && !value.isBlank())
-                .toList();
-    }
-
-    private static String formatPlayerCount(int value) {
-        return String.format(Locale.ROOT, "%,d", value);
-    }
 }

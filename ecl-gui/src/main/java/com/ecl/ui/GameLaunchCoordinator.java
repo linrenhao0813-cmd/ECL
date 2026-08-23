@@ -2,11 +2,8 @@ package com.ecl.ui;
 
 import com.ecl.ECLConfig;
 import com.ecl.auth.AuthProvider;
-import com.ecl.auth.MicrosoftAuth;
-import com.ecl.auth.OfflineAuth;
 import com.ecl.auth.OfflineSkin;
 import com.ecl.auth.OfflineSkinStore;
-import com.ecl.auth.YggdrasilAuth;
 import com.ecl.backup.BackupEntry;
 import com.ecl.download.GameDownloader;
 import com.ecl.game.PlaytimeTracker;
@@ -20,13 +17,11 @@ import javafx.application.Platform;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
@@ -34,9 +29,14 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Owns game launch, download-and-launch, process monitoring, console and crash handling. */
 final class GameLaunchCoordinator {
     private final LauncherUI ui;
+    private final LaunchAuthFactory authFactory;
+    private final GameProcessMonitor processMonitor;
 
     GameLaunchCoordinator(LauncherUI ui) {
         this.ui = ui;
+        this.authFactory = new LaunchAuthFactory(ui);
+        this.processMonitor = new GameProcessMonitor(ui, this::appendGameConsoleLine,
+                this::showGameErrorDialog);
     }
 
     void launchGame() {
@@ -210,7 +210,7 @@ final class GameLaunchCoordinator {
             String password = passwordRef.getAndSet(null);
             try {
                 ensureVersionGameDirs(version);
-                AuthProvider auth = buildAuthProvider(authType, server, username, password);
+                AuthProvider auth = authFactory.create(authType, server, username, password);
                 password = null;
                 OfflineSkin offlineSkin = auth.getType() == com.ecl.auth.AuthType.OFFLINE
                         ? new OfflineSkinStore()
@@ -261,7 +261,7 @@ final class GameLaunchCoordinator {
                         ui.primaryStage.setIconified(true);
                     }
                 });
-                monitorGameProcess(gameProcess, version, launchDir, launchStartedAt,
+                processMonitor.monitor(gameProcess, version, launchDir, launchStartedAt,
                         runningInstanceId, minimizeThisLaunch);
             } catch (Exception e) {
                 runOnUiIfActive(() -> {
@@ -307,65 +307,6 @@ final class GameLaunchCoordinator {
             LauncherUI.LOGGER.warn("Cannot register running mod instance for {}", version, e);
             return null;
         }
-    }
-
-    private void monitorGameProcess(GameProcess gameProcess, String version, File launchDir,
-                                    long launchStartedAt,
-                                    UUID runningInstanceId, boolean restoreLauncher) {
-        // 守护线程：关闭启动器窗口后进程能立即退出，不会被该监控线程拖住；
-        // 游戏本体是独立进程，启动器退出不影响其继续运行。
-        Thread.ofPlatform().name("ecl-monitor-game-" + version).daemon(true).start(() -> {
-                LauncherLogBuffer output = new LauncherLogBuffer(
-                        ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
-            com.ecl.launch.ProcessOutputListener outputListener = line -> {
-                output.appendLine(line);
-                appendGameConsoleLine(line);
-            };
-            gameProcess.attachOutputListener(outputListener);
-            Process process = gameProcess.process();
-            try {
-                int exitCode = process.waitFor();
-                if (exitCode == 0) {
-                    runOnUiIfActive(() -> ui.setStatus("游戏已正常退出", version + " 退出码 0。"));
-                    return;
-                }
-
-                CrashAnalyzer.Report report = CrashAnalyzer.analyzeGameExit(version, exitCode, output.toString(), launchDir, launchStartedAt);
-                runOnUiIfActive(() -> {
-                    ui.setStatus("游戏异常退出", report.getTitle());
-                    showGameErrorDialog(report);
-                });
-            } catch (Exception e) {
-                CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
-                runOnUiIfActive(() -> {
-                    ui.setStatus("错误分析失败", report.getTitle());
-                    showGameErrorDialog(report);
-                });
-            } finally {
-                gameProcess.detachOutputListener(outputListener);
-                try {
-                    ui.playtimeTracker.recordSession(ui.resolveVersionInstanceRoot(version).toPath(),
-                            launchStartedAt, System.currentTimeMillis());
-                } catch (IOException statsError) {
-                    LauncherUI.LOGGER.warn("Cannot record playtime statistics for {}", version, statsError);
-                }
-                if (runningInstanceId != null) {
-                    ui.controller.setInstanceRunning(runningInstanceId, false);
-                }
-                if (ui.activeGameProcess == process) {
-                    ui.activeGameProcess = null;
-                    ui.activeGameVersion = null;
-                }
-                runOnUiIfActive(() -> {
-                    ui.updateRuntimeSummary();
-                    if (restoreLauncher) {
-                        ui.primaryStage.setIconified(false);
-                        ui.primaryStage.show();
-                        ui.primaryStage.toFront();
-                    }
-                });
-            }
-        });
     }
 
     private void runOnUiIfActive(Runnable action) {
@@ -415,54 +356,6 @@ final class GameLaunchCoordinator {
     private void showGameErrorDialog(CrashAnalyzer.Report report) {
         CrashDiagnosticDialog.show(ui.primaryStage, report, ui.resolveModsDir(ui.getSelectedVersion()),
                 folder -> ui.openLocalFolder(folder, "诊断目录"));
-    }
-
-    private AuthProvider buildAuthProvider(String authType, String server, String username, String password) {
-        if (LauncherUI.AUTH_MICROSOFT.equals(authType)) {
-            MicrosoftAuth microsoftAuth = ui.microsoftAccounts.authenticateMicrosoftAccount(false);
-            Platform.runLater(() -> {
-                ui.usernameField.setText(microsoftAuth.getUsername());
-                ui.updateRuntimeSummary();
-            });
-            return microsoftAuth;
-        }
-
-        if (LauncherUI.AUTH_YGGDRASIL.equals(authType)) {
-            String effectivePassword = password;
-            if (effectivePassword == null || effectivePassword.isBlank()) {
-                effectivePassword = ui.settingsManager.getEncrypted(
-                        yggdrasilCredentialKey(server, username));
-            }
-            if (server.isBlank() || username.isBlank()
-                    || effectivePassword == null || effectivePassword.isBlank()) {
-                throw new IllegalArgumentException("请填写完整的外置登录信息。");
-            }
-            YggdrasilAuth yggdrasilAuth = new YggdrasilAuth(server);
-            yggdrasilAuth.setCredentials(username, effectivePassword);
-            yggdrasilAuth.login();
-            ui.settingsManager.setEncrypted(yggdrasilCredentialKey(server, username), effectivePassword);
-            ui.settingsManager.remove("_enc_yggdrasilPassword");
-            ui.settingsManager.set(ECLConfig.KEY_YGGDRASIL_SERVER, server);
-            ui.settingsManager.set(ECLConfig.KEY_USERNAME, yggdrasilAuth.getUsername());
-            if (!ui.settingsManager.save()) {
-                LauncherUI.LOGGER.warn("Failed to persist Yggdrasil session settings");
-            }
-            return yggdrasilAuth;
-        }
-
-        String offlineName = username.isBlank() ? "Player" : username;
-        return new OfflineAuth(offlineName);
-    }
-
-    private String yggdrasilCredentialKey(String server, String username) {
-        String normalizedServer = server == null ? "" : server.trim().toLowerCase(Locale.ROOT);
-        while (normalizedServer.endsWith("/")) {
-            normalizedServer = normalizedServer.substring(0, normalizedServer.length() - 1);
-        }
-        String normalizedUsername = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
-        String identity = normalizedServer + "\n" + normalizedUsername;
-        return "yggdrasilPassword."
-                + UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8));
     }
 
     boolean isGameProcessRunning() {

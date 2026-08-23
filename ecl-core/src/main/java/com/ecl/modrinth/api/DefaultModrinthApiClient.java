@@ -1,13 +1,8 @@
 package com.ecl.modrinth.api;
 
-import com.ecl.modrinth.api.dto.ModDependencyDto;
-import com.ecl.modrinth.api.dto.ModFileDto;
 import com.ecl.modrinth.api.dto.ModProjectDto;
 import com.ecl.modrinth.api.dto.ModSearchResponseDto;
 import com.ecl.modrinth.api.dto.ModVersionDto;
-import com.ecl.modrinth.model.DependencyType;
-import com.ecl.modrinth.model.ModDependency;
-import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModProject;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.util.BoundedCache;
@@ -17,7 +12,6 @@ import com.ecl.util.ThreadFactories;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +25,6 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -54,6 +47,7 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
     private final ModrinthApiConfiguration configuration;
     private final ObjectMapper objectMapper;
     private final ModrinthHttpTransport transport;
+    private final ModrinthResponseMapper responseMapper = new ModrinthResponseMapper();
     private final ScheduledExecutorService retryScheduler;
     private final boolean ownsScheduler;
     private final BoundedCache<String, CacheEntry> cache = new BoundedCache<>(MAX_CACHE_ENTRIES);
@@ -118,7 +112,7 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
         return get(uri).thenApply(response -> {
             requireSuccess(response);
             ModSearchResponseDto dto = readJson(response.body(), ModSearchResponseDto.class);
-            List<ModProject> projects = safeList(dto.hits()).stream().map(this::toProject).toList();
+            List<ModProject> projects = responseMapper.projects(dto.hits());
             return new ModSearchResult(projects, dto.offset(), dto.limit(), dto.totalHits());
         });
     }
@@ -129,7 +123,7 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
         URI uri = endpoint("project/" + encodePathSegment(id), Map.of());
         return get(uri).thenApply(response -> {
             requireSuccess(response);
-            return toProject(readJson(response.body(), ModProjectDto.class));
+            return responseMapper.project(readJson(response.body(), ModProjectDto.class));
         });
     }
 
@@ -139,7 +133,7 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
         URI uri = endpoint("version/" + encodePathSegment(id), Map.of());
         return get(uri).thenApply(response -> {
             requireSuccess(response);
-            return toVersion(readJson(response.body(), ModVersionDto.class));
+            return responseMapper.version(readJson(response.body(), ModVersionDto.class));
         });
     }
 
@@ -158,7 +152,7 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
         return get(uri).thenApply(response -> {
             requireSuccess(response);
             List<ModVersionDto> versions = readJson(response.body(), new TypeReference<>() {});
-            return safeList(versions).stream().map(this::toVersion).toList();
+            return responseMapper.versions(versions);
         });
     }
 
@@ -170,7 +164,8 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
         String body = writeJson(Map.of("hashes", normalizedHashes, "algorithm", normalizedAlgorithm));
         return post(endpoint("version_files", Map.of()), body).thenApply(response -> {
             requireSuccess(response);
-            return mapVersions(readJson(response.body(), new TypeReference<Map<String, ModVersionDto>>() {}));
+            return responseMapper.versionsByHash(
+                    readJson(response.body(), new TypeReference<Map<String, ModVersionDto>>() {}));
         });
     }
 
@@ -189,7 +184,8 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
         String body = writeJson(request);
         return post(endpoint("version_files/update", Map.of()), body).thenApply(response -> {
             requireSuccess(response);
-            return mapVersions(readJson(response.body(), new TypeReference<Map<String, ModVersionDto>>() {}));
+            return responseMapper.versionsByHash(
+                    readJson(response.body(), new TypeReference<Map<String, ModVersionDto>>() {}));
         });
     }
 
@@ -308,83 +304,6 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
                 response.statusCode(), retryable);
     }
 
-    private ModProject toProject(ModProjectDto dto) {
-        if (dto == null) {
-            throw new ModrinthApiException("Modrinth returned an empty project", 200, false);
-        }
-        Set<String> categories = new LinkedHashSet<>(safeList(dto.categories()));
-        categories.addAll(safeList(dto.displayCategories()));
-        List<String> loaders = categories.stream()
-                .map(value -> value.toLowerCase(Locale.ROOT))
-                .filter(LOADER_CATEGORIES::contains)
-                .distinct()
-                .toList();
-        String license = licenseName(dto.license());
-        Map<String, String> links = dto.links() == null ? Map.of() : dto.links();
-        String slug = dto.slug() == null ? "" : dto.slug();
-        return new ModProject(
-                nullToEmpty(dto.projectId()),
-                slug,
-                nullToEmpty(dto.title()),
-                nullToEmpty(dto.author()),
-                nullToEmpty(dto.description()),
-                nullToEmpty(dto.body()),
-                dto.downloads(),
-                dto.follows(),
-                parseUri(dto.iconUrl()),
-                parseInstant(dto.updated()),
-                categories,
-                safeList(dto.versions()),
-                loaders,
-                license,
-                nullToEmpty(dto.clientSide()),
-                nullToEmpty(dto.serverSide()),
-                slug.isBlank() ? null : URI.create("https://modrinth.com/mod/" + encodePathSegment(slug)),
-                parseUri(firstNonBlank(dto.sourceUrl(), links.get("source_url"))),
-                parseUri(firstNonBlank(dto.issuesUrl(), links.get("issues_url")))
-        );
-    }
-
-    private ModVersion toVersion(ModVersionDto dto) {
-        List<ModFile> files = safeList(dto.files()).stream().map(this::toFile).toList();
-        List<ModDependency> dependencies = safeList(dto.dependencies()).stream()
-                .map(this::toDependency).toList();
-        return new ModVersion(
-                nullToEmpty(dto.id()),
-                nullToEmpty(dto.projectId()),
-                nullToEmpty(dto.name()),
-                nullToEmpty(dto.versionNumber()),
-                nullToEmpty(dto.versionType()),
-                dto.featured(),
-                nullToEmpty(dto.status()),
-                safeList(dto.gameVersions()),
-                safeList(dto.loaders()),
-                parseInstant(dto.datePublished()),
-                nullToEmpty(dto.changelog()),
-                files,
-                dependencies
-        );
-    }
-
-    private ModFile toFile(ModFileDto dto) {
-        return new ModFile(parseUri(dto.url()), nullToEmpty(dto.filename()), dto.hashes(), dto.primary(),
-                dto.size(), nullToEmpty(dto.fileType()));
-    }
-
-    private ModDependency toDependency(ModDependencyDto dto) {
-        return new ModDependency(nullToEmpty(dto.versionId()), nullToEmpty(dto.projectId()),
-                nullToEmpty(dto.fileName()), DependencyType.fromApiValue(dto.dependencyType()));
-    }
-
-    private Map<String, ModVersion> mapVersions(Map<String, ModVersionDto> versions) {
-        if (versions == null || versions.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, ModVersion> result = new LinkedHashMap<>();
-        versions.forEach((hash, version) -> result.put(hash, toVersion(version)));
-        return Map.copyOf(result);
-    }
-
     private URI endpoint(String relativePath, Map<String, String> query) {
         StringBuilder value = new StringBuilder(relativePath);
         if (query != null && !query.isEmpty()) {
@@ -427,16 +346,6 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
 
     private static ModrinthApiException invalidJsonResponse(String body, JsonProcessingException cause) {
         return new ModrinthApiException("Invalid Modrinth JSON response", 200, false, cause);
-    }
-
-    private static String licenseName(JsonNode license) {
-        if (license == null || license.isNull()) {
-            return "";
-        }
-        if (license.isTextual()) {
-            return license.asText("");
-        }
-        return firstNonBlank(license.path("name").asText(""), license.path("id").asText(""));
     }
 
     private static List<String> normalizeHashes(Collection<String> hashes) {
