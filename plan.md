@@ -1,1025 +1,146 @@
-# ECL Java 源码职责拆分计划
+# ECL 全项目代码审查方案（plan.md）
 
-## 1. 目标
+> 审查日期：2026-08-23 ｜ 范围：ecl-core / ecl-gui / ecl-cli 全部源码（402 个 Java 文件）
+> 方式：按模块分 7 个分区（auth+config / modrinth / download+curseforge+task / game+launch / util+launcher+event / GUI / CLI）逐文件扫描
+> 维度：① 逻辑错误与潜在 bug ② 边界条件与异常处理 ③ 安全隐患 ④ 性能瓶颈 ⑤ 可维护性与规范
+> 总体评价：工程质量高于同类启动器平均水平（zip-slip 防护、原子写、AES-GCM+DPAPI、XXE 防护、路径穿越防御均有正面实现）。主要风险集中在：**下载链路安全校验缺失、并发/竞态、双份实现分叉、状态一致性**。
 
-对项目主源码中的多职责 Java 文件进行拆分，使每个类拥有清晰、可测试的职责，同时保持现有功能、用户界面、配置格式、公共入口和数据目录兼容。
+## 问题统计
 
-本计划覆盖 `ecl-core`、`ecl-gui`、`ecl-cli` 和 `ecl-boot` 的主源码。不是所有文件都需要机械拆分：模型、接口、枚举、异常和职责单一的服务保留原文件；职责混杂的文件按下面的目标结构拆分。
+| 严重度 | 数量 | 说明 |
+|---|---|---|
+| 高 | 18 | 含 2 个安全类（路径穿越、URL scheme 未校验） |
+| 中 | 26 | 并发、异常处理、行为不一致为主 |
+| 低 | 15（精选） | 死代码、命名、退出码语义等 |
 
-## 2. 约束和原则
+---
 
-- 保留 `LauncherUI`、`ModBrowserView`、`HttpUtil`、`EclCli` 等现有公共入口。
-- 新增的实现类优先使用包级可见性，避免扩大公共 API。
-- 拆分过程中不修改 CSS、用户可见文案、配置键、持久化格式和默认目录。
-- JavaFX 控件只能在 JavaFX Application Thread 操作；异步下载、认证和扫描不能回到 UI 线程执行阻塞操作。
-- 下载取消、进度回调、失败/重试语义必须保持不变。
-- MRPACK、备份和 Mod 安装的路径安全、哈希校验、事务提交和回滚行为必须保持不变。
-- 每个阶段都先保留旧 Facade，再迁移调用方，最后删除重复实现。
+## 一、高严重度（18 项，按风险排序）
 
-## 3. 目标包结构
+### 安全类
 
-### 3.1 GUI
+| # | 位置 | 问题 | 影响 | 修复建议 |
+|---|---|---|---|---|
+| H1 | ecl-core `download/install/DownloadAssetsTask.java:44,57-58` | `assetId`/`hash` 未校验格式直接拼接路径，`new File(assetDir, subPath)` 未走 `safeResolveUnder`；旧实现 GameDownloader 的 `[0-9a-fA-F]{40}` 校验在 install 新流程中丢失 | 恶意/损坏的资源索引可写文件到 assets 目录外任意位置（路径穿越） | 补 hash 格式校验 + `FileUtil.safeResolveUnder`，或复用 GameDownloader 原逻辑 |
+| H2 | ecl-core `modrinth/pack/MrpackFileInstaller.java:58-65`、`modrinth/download/ModFileDownloadService.java:95-104` | mrpack 索引 `downloads` URL 与 API 返回 `file.url` 均未校验 scheme/来源，直接交给 HttpUtil | 恶意 .mrpack（hash 也由攻击者控制）或被劫持的 API 可诱导访问 `file://`、内网地址，写入任意内容 | 下载前强制 http/https scheme 校验；mrpack 文件限制主机白名单（cdn.modrinth.com） |
+| H3 | ecl-core `launcher/ModLoaderInstaller.java:224-235` | `mergeDirectory` 路径穿越校验条件 `!destination.startsWith(...) && target.isAbsolute()` —— target 为相对路径时整个校验被短路跳过 | zip-slip 防线依赖调用方巧合传绝对路径，重构后可能静默失效 | 去掉 `&& target.isAbsolute()`，入口统一 `toAbsolutePath().normalize()` 后比较 |
+| H4 | ecl-core `util/HttpRequestExecutor.java:34-46,167-174` | `request()` 响应体整读入内存且无大小上限（`getBytes()` 有 maxBytes，此处没有）；body 读取阶段无超时 | 恶意/被劫持镜像源可致 OOM 或线程永久挂起 | request() 增加 maxBytes 截断；body 读取循环结合限速器并校验累计字节 |
 
-```text
-com.ecl.ui
-├── LauncherUI                      # Application 生命周期和依赖组装
-├── LauncherWindowController         # Stage、标题栏、关闭流程
-├── LauncherNavigationController     # 导航、页面切换、过渡动画
-├── LauncherProgressController       # 状态、进度条、进度动画
-├── LauncherPathService              # 游戏目录、实例目录、mods 目录
-├── LauncherUiSupport                # 文件夹、URL、格式化、异常消息
-├── HomePageView                     # 首页和启动摘要
-├── VersionPageView                  # 版本列表和版本页面
-├── ContentLibraryView               # Mod、光影、资源包、整合包页面
-├── ContentDownloadController        # 内容搜索、下载、安装
-├── ServerPageView                   # 服务器页面
-├── SettingsPageView                 # 设置页面
-└── LoaderPageView                   # Loader 页面
-```
+### 并发 / 数据完整性类
 
-### 3.2 Modrinth GUI
+| # | 位置 | 问题 | 影响 | 修复建议 |
+|---|---|---|---|---|
+| H5 | ecl-core `download/DownloadTaskCenter.java:86-91,394-403` | 构造器设置全局 `HttpUtil.setDownloadRateLimit...`，close 时恢复"创建前快照"；A 创建→B 创建→A close 会覆盖 B 的限速 | 多 TaskCenter 并存时限速配置错乱 | 限速移出 TaskCenter，由配置层统一管理 |
+| H6 | ecl-core `download/DownloadTaskCenter.java:215` + `DownloadTaskExecutor.java:29,48` | `entry.runner` 赋值/清空在锁外执行，cancel() 持锁读到 runner 后 interrupt；线程已归还线程池执行其它任务时会误中断 | 偶发无关下载被取消，难复现 | 锁内确认 status==RUNNING/CANCELLING 后再 interrupt |
+| H7 | ecl-core `download/GameDownloader.java:74-84` | `downloadVersionAsync` 先 `cancelDownload()`（仅中断请求）立即 submit 新任务，新旧任务并发写同一 versions 目录与 `.part` 文件 | 断点文件互相破坏，产物损坏 | 等待旧 Future 终止后再提交新任务 |
+| H8 | ecl-core `modrinth/transaction/FileModInstallationTransaction.java:217-246`、`pack/PackUpdateTransaction.java:218-262` | `recoverIncompleteTransactions` 无法区分"崩溃遗留"与"另一进程进行中"，事务目录无锁/活性检测 | 双开启动器指向同一 game dir 时回滚另一进程正在提交的事务，mod 文件丢失 | 事务目录加 FileLock 或 PID+心跳，恢复前检测持有者存活 |
+| H9 | ecl-core `config/SettingsAutoSaveScheduler.java:30-48` | 竞态：T1 save 中 → B setXxx+markDirty → T1 markClean 将 dirty 置回 false；B 的修改无任务调度、`close()` 兜底也失效 | GUI 开 autoSave 后设置偶发静默丢失 | markClean 用版本号比对"save 开始后无新 markDirty 才清位" |
+| H10 | ecl-core `game/InstanceManager.java:23-39` | renameInstance 多步 move 无回滚；copyInstance 中途失败不清理已拷贝的 target（finally 只删 staging） | 磁盘满/文件占用时产生"半个实例"，启动行为不可预测 | 失败时逆向回滚；copy 失败删除已创建 target |
+| H11 | ecl-core `util/JsonFileStore.java:17-25` | `write()` 直接覆盖目标文件，无 temp+atomic move（同工程其它写路径都做了） | version_manifest.json / profile JSON 写入途中崩溃留下截断文件 | 写同目录临时文件后 `Files.move(ATOMIC_MOVE)`，检查 mkdirs() 返回值 |
 
-```text
-com.ecl.modrinth.ui
-├── ModBrowserView                   # Tab 组装和生命周期
-├── ModSearchPane                   # 搜索控件和搜索结果
-├── ModDetailsPane                  # 项目详情、版本、依赖
-├── InstalledModsPane               # 已安装 Mod
-├── ModUpdatesPane                  # Mod 更新
-└── ModBrowserOperationController   # 安装、卸载、启用、禁用
+### 功能性 bug 类
 
-com.ecl.modrinth.ui.viewmodel
-├── ModBrowserViewModel              # 兼容 Facade
-├── ModSearchViewModel
-├── ModDetailsViewModel
-├── InstalledModsViewModel
-├── ModOperationViewModel
-├── ModUpdateViewModel
-└── ModBrowserOperationState
-```
+| # | 位置 | 问题 | 影响 | 修复建议 |
+|---|---|---|---|---|
+| H12 | ecl-core `launch/LaunchVariables.java:37` + `NativeLibraryExtractor.java:63-65` | natives 目录两套来源：extractor 解压到 `<instance>/natives-windows`，`${natives_directory}` 永远指向 `versions/<id>/natives` | LWJGL2 版本（≤1.12）隔离实例启动必 `UnsatisfiedLinkError`；两处重复解压 | natives 目录单一来源（放入 LaunchOptions/environment），双方读同一值 |
+| H13 | ecl-core `launch/JavaVersionRequirement.java:38-41` + `launcher/ModLoaderInstaller.java:271-281` | 1.17 系列推断为 Java 8（实际要求 16）；pre-release/快照版本 parseInt 失败也落到 Java 8 | 1.17 魔改版本（缺 javaVersion 字段）启动必挂 `UnsupportedClassVersionError`；1.20.5+ 快照装 Forge 触发错误运行时 | `minor==17` 返回 16；快照解析失败按版本段首数字兜底走高版本分支 |
+| H14 | ecl-core `auth/DefaultAccountService.java:48-50` | `list()` 中任一 entry 解码失败即抛异常中止；而 save/remove/setDefault 全依赖 list() | 一条损坏账户 → 账户管理永久不可用，只能手工编辑 accounts.json | list() 对损坏条目降级"跳过+warn"，让 remove 能删坏条目 |
+| H15 | ecl-gui `com/ecl/ui/LauncherUI.java:2466` | `downloadSelectedContent` 的后台 lambda 中 `dialogStatus.setText(...)` 未包 `Platform.runLater`（同 lambda 其它 setText 均有包裹） | 非 FX 线程更新 UI，IllegalStateException 或未定义行为 | `Platform.runLater` + generation 守卫 |
+| H16 | ecl-cli `LaunchCommand.java:101-107` | 非 `--wait`/`--json` 组合下游戏进程 stdout 管道无人读取（PIPE + redirectErrorStream） | 管道缓冲区（Windows ~64KB）写满后游戏进程永久阻塞 | 启动子进程统一 `Redirect.INHERIT`（后台模式重定向到日志文件） |
+| H17 | ecl-cli `LaunchCommand.java:104-107` | `launch()` 进程创建成功即输出 `"started": true` 退出 0 | JVM 参数/Java 路径错误数百毫秒内崩溃，脚本误判成功 | 非 --wait 时等 1-2 秒探测 `isAlive()`，崩溃返回非零 |
+| H18 | ecl-core `download/GameDownloader.java:215-313` vs `download/install/*` | downloadLibraries/downloadAssets 等整段逻辑双份维护且已分叉（hash 校验、verified-marker 只在旧侧，见 H1） | 修 bug 只修一半，安全防线随分叉丢失 | GameDownloader 委托 install 包实现，删除副本（建议随本次下载模块改造一并收敛） |
 
-### 3.3 Core
+---
 
-```text
-com.ecl.auth
-├── MicrosoftAuth                   # 兼容 Facade
-├── MicrosoftDeviceAuthClient
-├── XboxLiveAuthClient
-├── MinecraftServicesClient
-└── MicrosoftSessionState
+## 二、中严重度（26 项）
 
-com.ecl.launcher
-├── VersionManager                  # 兼容 Facade
-├── VersionCatalogService
-├── LocalVersionProfileScanner
-├── VersionProfileResolver
-├── VersionDownloadTargetResolver
-├── ModLoaderInstaller               # 兼容 Facade
-├── LoaderMetadataClient
-├── ProfileLoaderInstaller
-├── InstallerJarRunner
-├── LoaderProfileWriter
-└── LoaderArtifactVerifier
+### 逻辑 / 行为不一致
 
-com.ecl.modrinth.api
-├── DefaultModrinthApiClient         # 兼容 Facade
-├── ModrinthRequestBuilder
-├── ModrinthRetryPolicy
-├── ModrinthResponseMapper
-└── ModrinthModelMapper
+| # | 位置 | 问题 | 修复建议 |
+|---|---|---|---|
+| M1 | core `util/JavaRuntimeUtil.java:104-149,269-309` + `runtime/DefaultJavaManager.java:39-50` | Java 选择策略三处不一致：resolveExact（精确否则下载）/ path 版允许 `>=` / select 取"最小高于者"；Java 探测每次为每个候选 spawn `java -version` 子进程且无缓存，CLI/GUI/启动路径均受影响 | 统一为"精确 > 最低满足的更高版本 > 下载"一套策略；按路径缓存 featureVersion（用现成 BoundedCache） |
+| M2 | core `launch/DefaultLauncher.java:142` + `GameProcess.java:72-88` | `Phase.EXITED` 事件 core 层无发布点、`whenExited()` 无人调用，exitFuture 永不完成；PlaytimeTracker 同样无调用方 | DefaultLauncher.launch 内订阅 whenExited() 并发布 EXITED 事件 |
+| M3 | core `game/InstanceManager.java:60-64` | copyTree 默认 FOLLOW_LINKS 跟随符号链接复制目标内容；visitFileFailed 未处理直接中断 | 过滤 isSymbolicLink；覆写 visitFileFailed 记录并跳过 |
+| M4 | core `pack/DefaultPackService.java:278-284` | safeName 未过滤 Windows 非法字符 `<>:"|?*`、保留名 CON/NUL、尾部点/空格；整合包 name 直接成为实例目录名 | 复用 FileUtil 级白名单校验 |
+| M5 | core `game/DefaultGameRepository.java:140-150` | 与 `FileUtil.requireSafeVersionId` 两套版本 ID 校验规则并存，细节不一致 | 收敛为 FileUtil 一处 |
+| M6 | gui `GameLaunchCoordinator.java:126` | 全局单例 downloader 的 listener 被并发任务覆盖，A 的进度/完成回调丢失（"下载完成但游戏没启动"） | 每次下载独立 downloader 实例或 listener 随任务传递 |
+| M7 | gui `server/ServerDirectoryService.java:139-140` | servers 用 toLowerCase 去重，statuses 用原始大小写作键且 put 非 putIfAbsent → 状态错配 | statuses 统一 toLowerCase(Locale.ROOT) + putIfAbsent |
+| M8 | cli `ModDisableCommand.java:22-24` | 对已禁用 mod 再 disable 生成 `.disabled.disabled`；enable 已启用文件抛 NoSuchFileException | 操作前检查源/目标状态，幂等返回 |
+| M9 | cli `PackImportCommand.java:35-46` | MRPACK 分支忽略 `--instances` 选项，与其它格式语义不一致 | MRPACK + --instances 显式报错或透传 MrpackInstaller |
+| M10 | cli `CliAccountAuthenticator.java:22-30` | 无默认账户时静默回退离线 Player 启动 | 账户库非空但无默认时打明确警告 |
+| M11 | core `modrinth/provider/CurseForgeMetadataProvider.java:157-160` | downloadUrl 为空时合成 `curseforge://` 占位 URI 进入安装计划，到下载阶段才晦涩失败 | selectInstallFile 阶段过滤非 http(s) scheme |
+| M12 | core `modrinth/service/ModInstallationService.java:90-121` | `downloadAll(...).join()` 阻塞 orchestration 线程；取消不传播；CancellationException 被包装成安装失败 | 用 thenCompose 替代 join；CancellationException 原样抛出 |
 
-com.ecl.modrinth.pack
-├── MrpackInstaller                  # 兼容 Facade
-├── MrpackIndexReader
-├── MrpackFileInstaller
-├── MrpackOverrideExtractor
-├── MrpackProfileWriter
-└── MrpackPathPolicy
-```
+### 异常处理 / 边界条件
 
-## 4. 必须优先拆分的文件
+| # | 位置 | 问题 | 修复建议 |
+|---|---|---|---|
+| M13 | core `download/GameDownloadBatchExecutor.java:47-78` | 注释称"首个失败中止"，实际等全部任务结束才抛错且不取消未开始任务 → fail-slow | 首个失败即 cancel 其余 Future |
+| M14 | core `download/GameDownloader.java:158-167` | 线程被中断时 catch 块 return，Future 正常完成，取消被吞为"成功" | 中断时抛 CancellationException |
+| M15 | core `download/CurseForgeDownloader.java:109-123` | 依赖链任一缺失即抛异常（主文件已落盘但结果丢失）；递归串行且无深度上限 | 依赖失败聚合为报告；限制递归深度 |
+| M16 | core `curseforge/CurseForgeApiClient.java:156-169` | 指纹匹配按"下标一致"配对 exactFingerprints/exactMatches，依赖 API 返回顺序 | 以 `match.file.fileFingerprint` 为准配对 |
+| M17 | core `download/install/DownloadLibrariesTask.java:89` + GameDownloader:264 | 不可信 JSON `artifact.get("url").getAsString()` 缺字段时裸 NPE | 判空抛带上下文的 IOException |
+| M18 | core `config/SettingsManager.java:60-66` | 损坏 settings.json 静默置空，下次保存覆盖原文件且无备份 | 解析失败先改名 `settings.json.corrupt` 再重置 |
+| M19 | core `auth/YggdrasilAuth.java:170-196` | 响应缺 accessToken/clientToken 字段时裸 NPE 且逃逸 catch(IOException) 契约；validate() 把网络故障等同 token 失效 | 仿 requireString 判空转 IOException；仅 401/403 返回 false |
+| M20 | core `modrinth/repository/FileInstalledModRepository.java:40-47` | findAll 只 catch RuntimeException，Jackson 的 IOException 子类裸逃逸；索引损坏无恢复路径 | catch IOException 统一包装；损坏时备份并降级 rescan |
+| M21 | core `event/EventBus.java:89-97` | errorSink 自身抛异常会中断整个分发，违背"单 handler 失败不影响其余"承诺 | errorSink.accept 包 try/catch 回退默认日志 |
+| M22 | core `util/HttpJsonClient.java:66-73` + `JsonUtil.java:13-29` | getJson 解析失败抛未受检异常（签名只声明 IOException）；getString 无类型容错（getInt 有） | 包装为 IOException；getString catch RuntimeException 返回默认值 |
+| M23 | cli `EclCli.java:44-57,62-64` | 全局异常处理器丢弃堆栈；缺子命令时退出码 0 | 非预期异常 printStackTrace；usage 后返回 2 |
+| M24 | core `desktop/DesktopShortcutService.java:39-92` | PowerShell waitFor 无超时；bat 回退未转义 `%`；quoteWindowsArgument 用 `\"` 不符合 MSVCRT 规则 | waitFor 加超时；`%`→`%%`；标准 MSVCRT 转义 |
 
-### 4.1 `ecl-gui/.../LauncherUI.java`
+### 安全 / 隐私
 
-当前文件同时包含窗口生命周期、导航、首页、版本、Modrinth、服务器、设置、Loader、认证、皮肤、下载、日志、备份、诊断和路径工具。
+| # | 位置 | 问题 | 修复建议 |
+|---|---|---|---|
+| M25 | core `util/CryptoUtil.java:136-165` | 系统属性 `-Decl.crypto.keyFile` 即关闭密钥加密（明文落盘），无环境区分 | 限定测试 classpath 生效或明文路径每次打 WARN |
+| M26 | gui `modrinth/ui/ChineseDescriptionService.java:42-52` | 模组描述静默外发 Google 非官方翻译端点与 MyMemory API，无开关无告知 | 设置页加可见开关，隐私声明注明 |
 
-迁移范围：
+---
 
-| 当前范围 | 目标类 |
+## 三、低严重度（精选 15 项）
+
+| # | 位置 | 问题 | 修复建议 |
+|---|---|---|---|
+| L1 | core `auth/YggdrasilAuth.java:149-194` | 密码 char[] 转 String 后 finally 置 null 是 no-op 死代码，注释误导 | 删 finally 块；接受 HTTP 层 String 化现实并简化签名 |
+| L2 | core `auth/DefaultAccountService.java:71-76` | addOffline check-then-act 非原子，并发双默认账户 | 整体加 synchronized |
+| L3 | core `auth/offline/OfflineSkinServer.java:104-113,224` | close() 无视引用计数强制停服；请求体 readAllBytes 无上限 | 收敛 Lease 生命周期；限 64KB |
+| L4 | core `download/DownloadTaskNotifier.java:31-47` | listener 在下载线程同步执行 + throttle check-then-act 竞态 | 独立分发线程；throttle 加同步块 |
+| L5 | core `download/DownloadTaskCenter.java:458-464` | 重试字芔回退后速度长期显示失真 | 回退时同步重置基准 |
+| L6 | core `curseforge/CurseForgeFingerprint.java:16-66` | 文件读两遍（count + hash 各扫一次） | 单遍同时完成 |
+| L7 | core `modrinth/pack/MrpackFileInstaller.java:36-105` | 索引文件逐个串行同步下载，未复用并行 ModFileDownloadService；进度分母含服务端文件失真 | 批量提交线程池；分母过滤 isClientFile |
+| L8 | core `modrinth/service/DefaultModUpdateService.java:104-111` | allOf+join，单个项目失败屏蔽全部更新提示 | 逐项 exceptionally 降级 warning |
+| L9 | core `modrinth/pack/MrpackInstaller.java:246-297` | prepareLoader 在事务外写 versions 目录，回滚不清理孤儿 loader profile | loader 安装纳入事务 |
+| L10 | core `pack/`+`api/`+`transaction/` | Gson 与 Jackson 两套 JSON 栈混用 | 统一到 Jackson |
+| L11 | core `launch/ProcessOutputPump.java:122-129` | 持锁同步回调，慢监听器反压游戏进程；重放逻辑重复回放 | 有界队列异步消费；修重放 |
+| L12 | core `launch/NativeLibraryExtractor.java:82-199` | 每次启动全量 SHA-1 指纹（几十 MB 哈希 IO） | 默认 (size, mtime) 指纹，疑似不一致才降级 SHA-1 |
+| L13 | gui `LauncherUI.java`（2810 行） | God class：7+ 职责、约 40 个字段被友元类直改、createHeader/createTrafficDot/getOrCreateHomePage 等死代码 | 删死代码；下载对话框（约 650 行）抽独立类 |
+| L14 | gui `modrinth/ui/ModBrowserView.java:277-285`、`server/ServerStatusProbeController.java:48` | 更新计数触发 3 列表全量刷新；每次探测完成一次全量 refreshView（最多 32 次） | 防抖合并刷新 |
+| L15 | cli 多处 | 退出码语义混乱（业务"未找到"与用法错误同码 2）；非 JSON 模式打印 Map.toString()；`--memory 0/-1` 静默忽略 | 定义语义化退出码；人类可读格式化；非正数报参数错误 |
+
+---
+
+## 四、五维度检查结论
+
+| 维度 | 结论 |
 |---|---|
-| `start`、`stop`、Stage 和窗口初始化 | `LauncherWindowController` |
-| 根布局、导航按钮、页面切换和动画 | `LauncherNavigationController` |
-| 首页、启动卡片、运行摘要 | `HomePageView` |
-| 版本下拉框、版本选择、版本页面 | `VersionPageView` |
-| Modrinth、光影、资源包、整合包页面 | `ContentLibraryView` |
-| 内容搜索、版本选择、下载、安装、整合包导入 | `ContentDownloadController` |
-| 服务器浏览和服务端 JAR 下载 | `ServerPageView` |
-| 设置控件和设置页面 | `SettingsPageView` |
-| Loader 选择和安装页面 | `LoaderPageView` |
-| 进度条、状态文字、进度动画 | `LauncherProgressController` |
-| 游戏目录、实例目录、mods 目录解析 | `LauncherPathService` |
-| 文件夹、URL、字节格式化、异常消息 | `LauncherUiSupport` |
-
-最终 `LauncherUI` 只保留：
-
-- JavaFX `Application` 生命周期；
-- `MainController` 和各业务服务的组装；
-- 页面注册和顶层路由；
-- 全局停止流程。
-
-目标：从约 4,200 行降至约 300～500 行。
-
-### 4.2 `ecl-gui/.../ModBrowserView.java`
-
-拆分为：
-
-- `ModSearchPane`：搜索框、分类、排序、搜索结果列表；
-- `ModDetailsPane`：项目描述、版本列表、依赖列表；
-- 复用现有 `InstalledModsPane`：已安装 Mod；
-- 复用现有 `ModUpdatesPane`：更新列表和批量更新；
-- `ModBrowserOperationController`：安装、卸载、启用、禁用、本地 JAR 导入；
-- `ModBrowserView`：Tab 组装、生命周期和公共刷新入口。
-
-### 4.3 `ecl-gui/.../ModBrowserViewModel.java`
-
-拆分为：
-
-- `ModSearchViewModel`：搜索、分页、排序和搜索结果；
-- `ModDetailsViewModel`：项目详情、版本加载和依赖解析；
-- `InstalledModsViewModel`：本地扫描和已安装 Mod 状态；
-- `ModOperationViewModel`：安装、启用、禁用、卸载和取消；
-- `ModUpdateViewModel`：更新检查、更新选择和更新应用；
-- `ModBrowserOperationState`：loading、progress、error、currentOperation 和 cancel 状态；
-- 原 `ModBrowserViewModel` 保留为兼容 Facade。
-
-## 5. Core 第二批拆分
-
-### 5.1 `MrpackInstaller.java`
-
-当前混合 MRPACK 索引读取、安装、更新、下载、哈希校验、overrides 解压、Loader Profile、路径安全和删除操作。
-
-拆分为：
-
-- `MrpackIndexReader`：读取和校验 `modrinth.index.json`；
-- `MrpackFileInstaller`：下载并安装客户端文件；
-- `MrpackOverrideExtractor`：安全解压 overrides；
-- `MrpackProfileWriter`：写入 Profile 和 Loader 信息；
-- `MrpackPathPolicy`：路径越界、Windows 保留名和安全解析；
-- `MrpackInstallService`：安装、更新和事务流程协调；
-- `MrpackInstaller`：保留原公共入口；
-- 复用现有 `PackUpdateTransaction` 和 `PackManifest`。
-
-### 5.2 `VersionManager.java`
-
-拆分为：
-
-- `VersionCatalogService`：官方版本清单、分类和远程缓存；
-- `LocalVersionProfileScanner`：本地 Loader Profile 扫描和显示名称；
-- `VersionProfileResolver`：`inheritsFrom`、基础 Minecraft 版本和 Client JAR；
-- `VersionDownloadTargetResolver`：Profile、下载版本 ID 和下载 URL 的解析；
-- `VersionManager`：兼容 Facade。
-
-优先复用现有 `VersionRepository`，避免重复实现版本继承解析。
-
-### 5.3 `ModLoaderInstaller.java`
-
-拆分为：
-
-- `LoaderMetadataClient`：Maven/XML 元数据和版本列表；
-- `ProfileLoaderInstaller`：Fabric、Quilt Profile 安装；
-- `InstallerJarRunner`：Forge、NeoForge Installer JAR 执行；
-- `LoaderProfileWriter`：版本 JSON、Profile 目录和基础版本合并；
-- `LoaderArtifactVerifier`：下载文件哈希校验；
-- `ModLoaderInstaller`：根据 Loader 类型选择实现。
-
-### 5.4 `MicrosoftAuth.java`
-
-拆分为：
-
-- `MicrosoftDeviceAuthClient`：Device Code、OAuth Token、轮询和取消；
-- `XboxLiveAuthClient`：Xbox Live 和 XSTS Token；
-- `MinecraftServicesClient`：Minecraft Token、Entitlements 和 Profile；
-- `MicrosoftSessionState`：Access Token、Refresh Token、用户名、UUID、过期时间；
-- `MicrosoftAuth`：保留整体登录、退出和回调流程。
-
-## 6. Core 第三批拆分
-
-### 6.1 Modrinth 和 CurseForge
-
-| 当前文件 | 拆分目标 |
-|---|---|
-| `DefaultModrinthApiClient.java` | `ModrinthRequestBuilder`、`ModrinthRetryPolicy`、`ModrinthResponseMapper`、`ModrinthModelMapper` |
-| `ModrinthDownloader.java` | `ModrinthContentSearchService`、`ModrinthVersionSelectionService`、`ModrinthDependencyDownloadService`，复用现有 `ModFileDownloadService` |
-| `CurseForgeApiClient.java` | `CurseForgeRequestClient`、`CurseForgeResponseMapper`、`CurseForgeProjectService`、`CurseForgeFileService` |
-| `CurseForgeDownloader.java` | `CurseForgeContentSearchService`、`CurseForgeFileDownloadService`、`CurseForgeModpackConverter` |
-| `DefaultModDependencyResolver.java` | `DependencyGraphBuilder`、`ModVersionCompatibilityPolicy`、`DependencyConflictDetector` |
-
-原有公共 Client/Downloader 类保留为 Facade，避免 GUI 和 CLI 同时大范围改动。
-
-### 6.2 游戏下载
-
-`GameDownloader.java` 应收缩为下载流程协调器，继续复用现有：
-
-- `DownloadAssetsTask`；
-- `DownloadClientJarTask`；
-- `DownloadLibrariesTask`；
-- `FetchVersionMetadataTask`；
-- `InstallHelpers`。
-
-新增或提取：
-
-- `GameDownloadCoordinator`；
-- `DownloadPlanBuilder`；
-- `NativeLibraryResolver`；
-- `AssetVerificationService`。
-
-### 6.3 本地 Mod 扫描
-
-`DefaultLocalModScanner.java` 拆分为：
-
-- `ModJarScanner`：遍历实例目录和 JAR；
-- `ModMetadataParser`：统一元数据入口；
-- `FabricModMetadataParser`；
-- `ForgeModMetadataParser`；
-- `QuiltModMetadataParser`；
-- `ModScanCacheStore`：缓存读写；
-- `LocalModScanAggregator`：重复项、警告和最终结果聚合。
-
-### 6.4 设置、备份和离线皮肤
-
-| 当前文件 | 拆分目标 |
-|---|---|
-| `SettingsManager.java` | `SettingsStore`、`EncryptedSettingsStore`、`SettingsMigration`、`SettingsAutoSaveScheduler` |
-| `WorldBackupService.java` | `BackupArchiveWriter`、`BackupArchiveReader`、`BackupValidator`、`BackupRestoreService`、`BackupRetentionService` |
-| `OfflineSkinServer.java` | `OfflineSkinHttpHandler`、`OfflineSkinCharacterRegistry`、`OfflineSkinTextureStore`、`OfflineSkinTextureSigner` |
-
-## 7. 评估后暂不拆分的文件
-
-以下文件虽然代码量较大，但当前职责仍集中，暂不做机械拆分：
-
-- `DownloadTaskCenter`：任务队列、取消、重试、限流和观察者属于同一任务中心；
-- `VersionRepository`：版本 JSON、继承合并和类型转换是一个完整 Repository；
-- `PackUpdateTransaction`：事务计划、提交和回滚共同保证原子性；
-- `FileModInstallationTransaction`：Mod 文件事务边界应保持集中；
-- `DefaultModpackUpdateService`：整合包更新检查和更新计划；
-- `DefaultGameRepository`：游戏实例和目录解析；
-- `DiagnosticBundleService`：诊断包生成；
-- `JavaRuntimeDownloader`：Java 运行时下载；
-- `ServerDirectoryService`、`ServerStatusService`、`ServerCatalog`：服务器领域职责已分开；
-- `LauncherLogBuffer`、`LauncherThemeManager`、`LauncherUiFactory`：通用 GUI 支持类；
-- 所有 DTO、Model、Enum、Exception、Interface 和单一职责的小型工具类。
-
-如果后续这些文件继续增长，再分别提取内部的 `Scheduler`、`Validator` 或 `Journal`，不以行数作为唯一拆分依据。
-
-## 8. CLI、HTTP 和入口类
-
-以下文件保持 Facade 设计，不再继续拆分：
-
-- `ecl-cli/.../EclCli.java`；
-- `ecl-cli/.../*Command.java`；
-- `ecl-core/.../HttpUtil.java`；
-- `ecl-core/.../ModrinthApiClient.java`；
-- `ecl-core/.../ContentDownloader.java`；
-- `ecl-core/.../DownloadService.java`。
-
-`HttpUtil` 已经是兼容门面，底层请求、JSON、下载、镜像和限速逻辑已经由其他类承担。
-
-## 9. 实施顺序
-
-### 阶段 0：建立基线
-
-执行：
-
-```powershell
-.\gradlew.bat check
-.\gradlew.bat build
-.\gradlew.bat captureLauncherUi
-```
-
-保存测试结果、GUI 截图和公共构造器/方法清单。
-
-### 阶段 1：Core 低风险拆分
-
-顺序：
-
-1. `SettingsManager`；
-2. `MicrosoftAuth`；
-3. `VersionManager`；
-4. `ModLoaderInstaller`；
-5. `DefaultModrinthApiClient`。
-
-### 阶段 2：内容和整合包拆分
-
-顺序：
-
-1. `ModrinthDownloader`；
-2. `CurseForgeDownloader`；
-3. `DefaultLocalModScanner`；
-4. `DefaultModDependencyResolver`；
-5. `MrpackInstaller`；
-6. `GameDownloader`。
-
-### 阶段 3：Modrinth GUI 拆分
-
-顺序：
-
-1. `ModBrowserViewModel`；
-2. `ModBrowserView`；
-3. 接入现有 `InstalledModsPane`；
-4. 接入现有 `ModUpdatesPane`；
-5. 删除重复的旧 UI 和状态代码。
-
-### 阶段 4：Launcher GUI 拆分
-
-顺序：
-
-1. `LauncherPathService`；
-2. `LauncherProgressController`；
-3. `LauncherNavigationController`；
-4. `HomePageView`；
-5. `VersionPageView`；
-6. `ContentLibraryView`；
-7. `ServerPageView`；
-8. `SettingsPageView`；
-9. 最后收缩 `LauncherUI`。
-
-### 阶段 5：清理和文档
-
-- 删除重复方法、无用字段和无用 import；
-- 将新增实现类改为包级可见；
-- 保留旧 Facade 的公共方法；
-- 更新 README 和本计划中的实际类名；
-- 检查源码、测试、构建脚本和发布任务中的旧引用。
-
-## 10. 测试和验收
-
-### Core
-
-```powershell
-.\gradlew.bat :ecl-core:test
-```
-
-### GUI
-
-```powershell
-.\gradlew.bat :ecl-gui:test
-.\gradlew.bat captureLauncherUi
-```
-
-### 完整构建
-
-```powershell
-.\gradlew.bat check
-.\gradlew.bat build
-.\gradlew.bat installDist
-.\gradlew.bat packageWindowsApp
-```
-
-### 必须回归的功能
-
-- Minecraft 版本下载、安装和启动；
-- Offline、Microsoft、Yggdrasil 三种登录方式；
-- Fabric、Quilt、Forge、NeoForge 安装；
-- Mod 搜索、项目详情、依赖、安装、启用、禁用、卸载和更新；
-- 本地 JAR 拖拽导入；
-- MRPACK 导入、更新、路径越界拦截和失败回滚；
-- CurseForge 内容下载和整合包转换；
-- 服务器搜索、在线状态、复制地址和直连；
-- 设置迁移、加密账号、自动保存、主题和语言切换；
-- 游戏日志、崩溃诊断、世界备份和恢复；
-- 下载取消、重试、限流、进度显示和应用关闭。
-
-## 11. 完成标准
-
-- `LauncherUI.java` 约 300～500 行，仅负责生命周期和组装；
-- `ModBrowserView.java` 约 200～300 行，仅负责界面组合；
-- `ModBrowserViewModel.java` 约 200～300 行，主要作为兼容 Facade；
-- Core 中的认证、版本、Loader、MRPACK、Modrinth 和设置逻辑均有独立实现类；
-- 每个新实现类有对应单元测试或被现有集成测试覆盖；
-- `check`、`build`、GUI 截图和 Windows 打包全部通过；
-- 用户可见行为、配置格式、公共入口和数据目录保持兼容。
-
-## 12. 当前实施记录
-
-### 已完成：SettingsManager 迁移职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/config/SettingsMigration.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/config/SettingsManager.java`；
-- 保留 `SettingsManager.migrateToEncrypted(String)` 公共方法；
-- 保留 `SettingsManager.migrateSettingKey(String, String)` 包级调用入口；
-- 将旧配置键迁移和明文配置迁移到加密配置的实现移入 `SettingsMigration`；
-- 未修改配置键、settings.json 格式和加密数据格式。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.config.SettingsManagerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本项完成后继续进入阶段 1 的 `MicrosoftAuth` 会话状态提取。
-
-### 已完成：MicrosoftAuth 会话状态提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/auth/MicrosoftSessionState.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/auth/MicrosoftAuth.java`；
-- 将用户名、UUID、Access Token、Refresh Token、过期时间和登录状态集中到 `MicrosoftSessionState`；
-- 保留 `MicrosoftAuth` 原有登录、退出、缓存会话和公共查询方法；
-- 未修改 OAuth、Xbox Live、XSTS、Minecraft Services 的网络流程。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.auth.MicrosoftAuthTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本项完成后继续进入阶段 1 的 `VersionManager` 职责提取。
-
-### 已完成：VersionManager 本地 Profile 扫描提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/launcher/LocalVersionProfileScanner.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/launcher/VersionManager.java`；
-- 将本地版本目录扫描、Loader 检测和 Loader 显示名称提取到 `LocalVersionProfileScanner`；
-- 保留 `VersionManager.LocalVersionProfile`、版本列表合并和显示名称公共行为；
-- 未修改远程版本清单、版本继承解析和下载目标解析。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.launcher.VersionManagerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本项完成后继续进入 `VersionManager` 远程刷新和缓存生命周期提取。
-
-### 已完成：VersionManager 远程清单解析提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/launcher/VersionCatalogService.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/launcher/VersionManager.java`；
-- 将版本分类、April Fools 判断和版本索引构建移入 `VersionCatalogService`；
-- 保留 `VersionManager` 原有版本分类查询和远程清单行为；
-- 暂未移动 HTTP 刷新、磁盘缓存和清单生命周期。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.launcher.VersionManagerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本次首次验证发现并修复了一个被移除的 `HashMap` import，修复后测试通过。下一步继续提取 `VersionManager` 的远程刷新和缓存职责。
-
-### 已完成：VersionManager 清单刷新和缓存提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/launcher/VersionManifestStore.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/launcher/VersionManager.java`；
-- 将官方版本清单的网络刷新、磁盘缓存读取和网络失败回退移入 `VersionManifestStore`；
-- 保留 `VersionManager.refresh()`、缓存文件位置和远程失败时的回退行为；
-- 未修改本地 Profile、版本分类和版本继承解析。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.launcher.VersionManagerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本项完成后继续进入 `VersionManager` 的下载目标解析职责。
-
-### 已完成：VersionManager 版本继承解析提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/launcher/VersionProfileResolver.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/launcher/VersionManager.java`；
-- 将 Minecraft 基础版本、Client JAR 和继承链循环检测移入 `VersionProfileResolver`；
-- 保留 `VersionManager.resolveMinecraftVersionId(String)` 和 `isVersionDownloaded(String)` 的原有行为；
-- 暂未移动下载目标 ID 的解析。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.launcher.VersionManagerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本次首次验证发现并修复了一个对已提取辅助方法的残留调用，修复后测试通过。该项完成后继续提取 `VersionManager` 的下载目标解析职责。
-
-### 已完成：VersionManager 下载目标解析提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/launcher/VersionDownloadTargetResolver.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/launcher/VersionManager.java`；
-- 将 `jar`、`inheritsFrom`、基础 Minecraft 版本和客户端下载信息的递归选择移入 `VersionDownloadTargetResolver`；
-- 保留 `VersionManager.resolveDownloadTarget(String)` 的公共入口、URL 组装和错误行为；
-- `VersionManager` 现在主要负责参数校验、清单查询和结果组装。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.launcher.VersionManagerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-`VersionManager` 的本地 Profile、远程清单、缓存、继承解析和下载目标解析已经完成第一轮职责拆分。下一步进入阶段 1 的 `ModLoaderInstaller`。
-
-### 已完成：ModLoaderInstaller 元数据查询提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/launcher/LoaderMetadataClient.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/launcher/ModLoaderInstaller.java`；
-- 将 Fabric、Quilt、Forge、NeoForge 的版本元数据查询移入 `LoaderMetadataClient`；
-- 将 Maven/XML 解析、版本排序、NeoForge 前缀计算和 Fabric/Quilt Profile URL 组装移入元数据客户端；
-- 保留 `ModLoaderInstaller.listVersions(String, Loader)` 和版本排序兼容入口；
-- 未移动 Loader 安装、Installer JAR 执行、Profile 写入和文件合并逻辑。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.launcher.ModLoaderInstallerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本次首次验证发现并修复了一个 Fabric/Quilt URL 常量的残留引用，修复后测试通过。该项完成后继续提取 `ModLoaderInstaller` 的安装器进程执行职责。
-
-### 已完成：ModLoaderInstaller 和 SettingsManager 五个小切片
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/launcher/InstallerProcessRunner.java`；
-- 新增 `ecl-core/src/main/java/com/ecl/launcher/LoaderArtifactVerifier.java`；
-- 新增 `ecl-core/src/main/java/com/ecl/launcher/LoaderProfileWriter.java`；
-- 新增 `ecl-core/src/main/java/com/ecl/config/EncryptedSettingsStore.java`；
-- 新增 `ecl-core/src/main/java/com/ecl/config/SettingsAutoSaveScheduler.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/launcher/ModLoaderInstaller.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/config/SettingsManager.java`。
-
-完成内容：
-
-- 将 Forge/NeoForge Installer JAR 的进程启动、输出收集、超时和中断处理移入 `InstallerProcessRunner`；
-- 将安装器 SHA 校验移入 `LoaderArtifactVerifier`；
-- 将 Loader Profile 写入和元数据标注移入 `LoaderProfileWriter`；
-- 将 AES-GCM 设置值的读写移入 `EncryptedSettingsStore`；
-- 将设置自动保存的防抖调度、dirty 状态和线程池生命周期移入 `SettingsAutoSaveScheduler`；
-- 保留原有公共 API、加密格式、自动保存行为和 Loader 安装流程。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.launcher.ModLoaderInstallerTest --tests com.ecl.config.SettingsManagerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-下一步进入 `MicrosoftAuth` 的认证协议客户端提取，或继续完成 `ModLoaderInstaller` 的文件合并职责。
-
-### 已完成：MicrosoftAuth Minecraft Services 客户端提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/auth/MinecraftServicesClient.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/auth/MicrosoftAuth.java`；
-- 将 Minecraft Services 登录、Java 版授权检查和玩家档案读取移入 `MinecraftServicesClient`；
-- 保留 Microsoft 登录代次、缓存 Token、取消和公共认证 API；
-- 未修改 Microsoft OAuth、Xbox Live 和 XSTS 流程。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.auth.MicrosoftAuthTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本项完成后继续进入 `MicrosoftAuth` 的 Xbox Live/XSTS 客户端职责提取。
-
-### 已完成：MicrosoftAuth Xbox Live/XSTS 客户端提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/auth/XboxLiveAuthClient.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/auth/MicrosoftAuth.java`；
-- 将 Xbox Live Token、XSTS Token、用户哈希和 XSTS 错误码处理移入 `XboxLiveAuthClient`；
-- 保留 Microsoft 登录流程、代次检查、Token 缓存和公共认证 API；
-- 未修改 Device Code、Refresh Token 和 Microsoft OAuth 流程。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.auth.MicrosoftAuthTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本项完成后继续进入 `MicrosoftAuth` 的 OAuth/Device Code 客户端职责提取。
-
-### 已完成：MicrosoftAuth OAuth/Device Code 客户端提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/auth/MicrosoftOAuthClient.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/auth/MicrosoftAuth.java`；
-- 将 Refresh Token、Device Code、轮询、slow_down 间隔和 OAuth Token 解析移入 `MicrosoftOAuthClient`；
-- 保留 `MicrosoftAuth` 的登录代次检查、状态通知、Device Code 回调和会话提交；
-- 保留 `MicrosoftAuth.nextDevicePollInterval(int)` 的兼容入口。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.auth.MicrosoftAuthTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-`MicrosoftAuth` 的会话状态、Minecraft Services、Xbox Live/XSTS 和 OAuth/Device Code 四类职责已经完成第一轮拆分。下一步进入 `MrpackInstaller`。
-
-### 已完成：MrpackInstaller 路径安全策略提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackPathPolicy.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackInstaller.java`；
-- 将 MRPACK Profile ID 生成、Windows 保留名处理、实例目录校验、相对路径校验和递归清理移入 `MrpackPathPolicy`；
-- 保留安装、更新、回滚流程和路径越界错误行为；
-- 未移动索引读取、文件下载、overrides 解压和事务提交逻辑。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.modrinth.pack.MrpackInstallerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本项完成后继续进入 `MrpackInstaller` 的索引读取和安全校验职责提取。
-
-### 已完成：MrpackInstaller 索引读取提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackIndexReader.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackInstaller.java`；
-- 将 `modrinth.index.json` 的读取、大小限制和 JSON 格式校验移入 `MrpackIndexReader`；
-- 统一安装、内容导入和更新流程的索引读取实现，同时保留原有错误信息；
-- 未移动整合包格式版本、依赖和 Loader 业务校验。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.modrinth.pack.MrpackInstallerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本项完成后继续进入 MRPACK 的索引依赖和 Loader 选择校验职责提取。
-
-### 已完成：MrpackInstaller 依赖和 Loader 校验提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackDependencyResolver.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackInstaller.java`；
-- 将 `dependencies` 对象校验、Minecraft 版本要求和多 Loader 冲突检查移入 `MrpackDependencyResolver`；
-- 保留安装、更新和内容导入流程的原有错误行为；
-- 保留 `LoaderDependency` 的包内使用方式和 Loader 安装协调逻辑。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.modrinth.pack.MrpackInstallerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-本次首次验证发现并修复了迁移后 record 字段访问器引用问题，修复后测试通过。下一步继续提取 MRPACK 的索引文件下载和哈希校验职责。
-
-### 已完成：MrpackInstaller 索引文件下载和哈希校验提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackFileInstaller.java`；
-- 新增 `ecl-core/src/test/java/com/ecl/modrinth/pack/MrpackFileInstallerTest.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackInstaller.java`；
-- 将索引文件下载、SHA-512/SHA-1 哈希校验、客户端 env 过滤和下载大小限制移入 `MrpackFileInstaller`；
-- 保留安装、更新和内容导入流程的原有下载、校验和错误行为；
-- `MrpackInstaller` 现在只保留 overrides 解压、Profile 写入和事务协调职责。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.modrinth.pack.MrpackInstallerTest --tests com.ecl.modrinth.pack.MrpackFileInstallerTest --no-daemon
-BUILD SUCCESSFUL
-MrpackFileInstallerTest: 7 tests, 0 failures
-MrpackInstallerTest: 6 tests, 0 failures
-```
-
-新增 `MrpackFileInstallerTest` 使用 JDK `HttpServer` 覆盖真实下载：sha512/sha1 校验通过、env=unsupported 跳过、哈希不匹配失败、大小不匹配失败、无下载地址失败、全部下载地址失败。下一步继续提取 MRPACK 的 overrides 安全解压职责（`MrpackOverrideExtractor`）。
-
-### 已完成：Mrpack 两个行为回归修复
-
-日期：2026-08-22
-
-问题与修复：
-
-- `installContents` 缺少 dependencies 时的错误文案在拆分时被改为英文 `MRPACK index is missing dependencies`，已改回拆分前的中文 `整合包索引缺少 dependencies`；
-- `MrpackDependencyResolver.findLoader` 的错误优先级被拆分反转为先校验值再查冲突，已改回拆分前的顺序：先抛 `整合包同时声明了多个模组加载器`，再抛 `整合包声明了无效的加载器版本`。
-
-验证结果：
-
-```text
-.\gradlew.bat :ecl-core:test --tests com.ecl.modrinth.pack.MrpackInstallerTest --tests com.ecl.modrinth.pack.MrpackFileInstallerTest --no-daemon
-BUILD SUCCESSFUL
-MrpackInstallerTest: 8 tests, 0 failures（新增 2 个行为回归测试）
-MrpackFileInstallerTest: 7 tests, 0 failures
-```
-
-新增回归测试锁定：`installContentsKeepsChineseMessageWhenDependenciesMissing`、`findLoaderPrefersMultiLoaderConflictOverInvalidValue`。
-
-### 已完成：Mrpack overrides 和 Profile 写入职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackOverrideExtractor.java`；
-- 新增 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackProfileWriter.java`；
-- 新增 `ecl-core/src/test/java/com/ecl/modrinth/pack/MrpackOverrideExtractorTest.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/modrinth/pack/MrpackInstaller.java`；
-- 将 overrides/client-overrides 安全解压、条目数、单文件大小、总大小和压缩比限制移入 `MrpackOverrideExtractor`；
-- 将 MRPACK 初次安装和更新时的 Profile JSON 写入移入 `MrpackProfileWriter`；
-- 保留原有路径安全、事务提交、Profile 字段和用户可见行为。
-
-验证结果：
-
-```text
-./gradlew.bat :ecl-core:test --tests com.ecl.modrinth.pack.MrpackOverrideExtractorTest --tests com.ecl.modrinth.pack.MrpackInstallerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：Launcher GUI 第一批职责拆分
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-gui/src/main/java/com/ecl/ui/LauncherPageFactory.java`；
-- 新增 `ecl-gui/src/main/java/com/ecl/ui/HomePageFactory.java`；
-- 新增 `ecl-gui/src/main/java/com/ecl/ui/ContentLibraryPageFactory.java`；
-- 新增 `ecl-gui/src/main/java/com/ecl/ui/ServerJarDownloadPage.java`；
-- 新增 `ecl-gui/src/main/java/com/ecl/ui/LauncherPathService.java`；
-- 新增 `ecl-gui/src/main/java/com/ecl/ui/LauncherProgressController.java`；
-- 新增 `ecl-gui/src/main/java/com/ecl/ui/LaunchAuthFactory.java`；
-- 新增 `ecl-gui/src/main/java/com/ecl/ui/GameProcessMonitor.java`；
-- 修改 `ecl-gui/src/main/java/com/ecl/ui/LauncherUI.java` 和 `GameLaunchCoordinator.java`。
-
-完成内容：
-
-- 将首页、版本页、下载页、设置页、日志页和服务器 JAR 页面移出 `LauncherUI`；
-- 将内容库导航和整合包更新页面移出 `LauncherUI`；
-- 将游戏目录解析、进度动画、认证创建和游戏进程监控移出对应大类；
-- `LauncherUI.java` 从约 4,200 行降至约 3,100 行；
-- `GameLaunchCoordinator.java` 从约 526 行降至约 419 行；
-- 保留原有页面路由、控件行为、认证配置、下载取消和进程监控行为。
-
-验证结果：
-
-```text
-./gradlew.bat :ecl-gui:test :ecl-core:test :ecl-gui:checkstyleMain :ecl-core:checkstyleMain --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：Modrinth API 响应映射职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/modrinth/api/ModrinthResponseMapper.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/modrinth/api/DefaultModrinthApiClient.java`；
-- 将 Project、Version、File、Dependency DTO 到领域模型的转换、License 解析、URI/时间解析和 hash 映射移入 `ModrinthResponseMapper`；
-- 保留 API Client 的请求、缓存、重试和公共接口行为。
-
-验证结果：
-
-```text
-./gradlew.bat :ecl-core:checkstyleMain :ecl-core:test --tests com.ecl.modrinth.api.DefaultModrinthApiClientTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：GameDownloader 下载批处理职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/download/GameDownloadBatchExecutor.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/download/GameDownloader.java`；
-- 将依赖库/资源文件的并发下载、完成聚合、错误转换、取消处理、哈希校验和下载源回调移入批处理执行器；
-- 保留 `GameDownloader` 的版本流程、监听器、取消和公共 API 行为。
-
-验证结果：
-
-```text
-./gradlew.bat :ecl-core:compileJava :ecl-core:checkstyleMain :ecl-core:test --tests com.ecl.download.GameDownloaderTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：本地 Mod JAR 元数据读取职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-core/src/main/java/com/ecl/modrinth/service/LocalModMetadataReader.java`；
-- 修改 `ecl-core/src/main/java/com/ecl/modrinth/service/DefaultLocalModScanner.java`；
-- 将 Fabric、Quilt、Forge、NeoForge 和旧版 Forge 元数据解析、大小限制和损坏 JAR 检测移入元数据读取器；
-- 保留本地扫描、缓存、在线识别、索引写回和错误行为。
-
-验证结果：
-
-```text
-./gradlew.bat :ecl-core:checkstyleMain :ecl-core:test --tests com.ecl.modrinth.service.LocalModScannerTest --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：ModBrowser 详情面板职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-gui/src/main/java/com/ecl/modrinth/ui/ModDetailsPane.java`；
-- 修改 `ecl-gui/src/main/java/com/ecl/modrinth/ui/ModBrowserView.java`；
-- 将详情控件、版本选择、项目链接、中文简介、更新日志、依赖展示和异步详情刷新移入 `ModDetailsPane`；
-- 保留模组搜索列表、已安装列表、更新操作、安装工作流和页面路由行为。
-
-代码规模：
-
-```text
-ModBrowserView.java
-723 行 → 461 行
-```
-
-验证结果：
-
-```text
-./gradlew.bat :ecl-gui:checkstyleMain :ecl-gui:test --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：ModBrowser 依赖元数据职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-gui/src/main/java/com/ecl/modrinth/ui/viewmodel/ModDependencyBrowserLoader.java`；
-- 修改 `ecl-gui/src/main/java/com/ecl/modrinth/ui/viewmodel/ModBrowserViewModel.java`；
-- 将依赖项目加载、项目请求去重、依赖分组和数据源切换缓存清理移入独立加载器；
-- 保留搜索、安装、更新、错误处理和 ViewModel 公共 API 行为。
-
-代码规模：
-
-```text
-ModBrowserViewModel.java
-655 行 → 607 行
-```
-
-验证结果：
-
-```text
-./gradlew.bat :ecl-gui:checkstyleMain :ecl-gui:test --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：ModBrowser 更新协调职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-gui/src/main/java/com/ecl/modrinth/ui/viewmodel/ModBrowserUpdateCoordinator.java`；
-- 修改 `ecl-gui/src/main/java/com/ecl/modrinth/ui/viewmodel/ModBrowserViewModel.java`；
-- 将更新检查缓存、更新请求、批量更新、下载任务接入、更新结果状态和更新数量同步移入协调器；
-- 保留 ViewModel 的原有公共 API、取消行为、状态消息和 JavaFX 线程切换。
-
-代码规模：
-
-```text
-ModBrowserViewModel.java
-607 行 → 524 行
-```
-
-验证结果：
-
-```text
-./gradlew.bat :ecl-gui:checkstyleMain :ecl-gui:test :ecl-core:checkstyleMain :ecl-core:test --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：服务器列表单元格职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-gui/src/main/java/com/ecl/server/ServerListCell.java`；
-- 修改 `ecl-gui/src/main/java/com/ecl/server/ServerBrowserView.java`；
-- 将服务器卡片渲染、状态徽章、标签和类别样式移入独立列表单元格；
-- `ServerBrowserView` 保留目录刷新、状态探测、筛选和操作逻辑。
-
-验证结果：
-
-```text
-./gradlew.bat :ecl-gui:checkstyleMain :ecl-gui:test :ecl-core:checkstyleMain :ecl-core:test --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：服务器状态探测职责提取
-
-日期：2026-08-22
-
-已完成文件：
-
-- 新增 `ecl-gui/src/main/java/com/ecl/server/ServerStatusProbeController.java`；
-- 修改 `ecl-gui/src/main/java/com/ecl/server/ServerBrowserView.java`；
-- 将状态探测线程池、并发限制、探测中地址集合和刷新回调移入独立控制器；
-- `ServerBrowserView` 保留服务器目录、筛选和用户操作逻辑。
-
-### 已完成：LauncherUI 死代码清理
-
-日期：2026-08-22
-
-- 删除已由页面工厂替代的旧版内容库、旧版设置页和重复页面构建逻辑；
-- 保留启动表单、路由协调和内容下载入口；
-- `LauncherUI.java` 当前约 3,030 行，未改变页面路由和公共行为。
-
-统一验证结果：
-
-```text
-./gradlew.bat :ecl-gui:checkstyleMain :ecl-gui:test :ecl-core:checkstyleMain :ecl-core:test --no-daemon
-BUILD SUCCESSFUL
-```
-
-### 已完成：四个剩余大类的功能职责拆分
-
-日期：2026-08-22
-
-已完成文件：
-
-- `DownloadTaskCenter`：新增 `DownloadTaskEntry`、`DownloadTaskExecutor`、`DownloadTaskNotifier`、`DownloadTaskSnapshots`；
-- `ModBrowserViewModel`：新增 `ModBrowserOperationState`、`ModBrowserSearchController`、`ModInstallationWorkflow`、`InstalledModController`；
-- `ServerBrowserView`：新增 `ServerBrowserActions`、`ServerCatalogFilter`、`ServerDirectoryRefreshController`；
-- `LauncherUI`：新增 `LauncherWindowChrome`、`ModDropImportHandler`。
-
-拆分结果：
-
-- 任务条目、执行、通知和快照与下载任务中心调度分离；
-- 模组搜索、安装、本地管理和异步状态从 ViewModel 分离；
-- 服务器筛选、目录刷新和用户操作从视图分离；
-- 启动器窗口拖动/最小化/最大化及模组拖放导入从 UI 协调器分离。
-
-统一验证结果：
-
-```text
-./gradlew.bat :ecl-gui:checkstyleMain :ecl-gui:test :ecl-core:checkstyleMain :ecl-core:test --no-daemon
-BUILD SUCCESSFUL
-```
+| 1) 逻辑错误/潜在 bug | **有发现**（高 12 项）：natives 目录错位、1.17→Java 8、限速覆盖、误中断线程、并发写、autoSave 竞态、Java 选择策略三处不一致等 |
+| 2) 边界条件/异常处理 | **有发现**（高 4 项、中 12 项）：损坏 JSON 覆盖、账户库锁死、取消被吞、fail-slow、不可信 JSON 裸 NPE 等；整体 null/空列表防护尚可 |
+| 3) 安全隐患 | **有发现**（高 4 项、中 2 项）：DownloadAssetsTask 路径穿越、mrpack URL scheme 未校验、mergeDirectory 校验短路、HTTP 响应无上限、明文密钥后门、翻译静默外发；zip-slip 主防线/XXE/AES-GCM+DPAPI/命令注入防护（ProcessBuilder 列表参数）实现良好 |
+| 4) 性能瓶颈 | **有发现**（中 1 项、低 6 项）：Java 探测无缓存串行 spawn（全局影响最大）、mrpack 串行下载、依赖解析串行 N+1、每次启动全量 SHA-1、GUI 全量刷新；网络/文件 IO 基本已异步化，连接复用无问题 |
+| 5) 可维护性/规范 | **有发现**（高 1 项、低多项）：GameDownloader 与 install 包大段重复且已分叉（最突出）、LauncherUI God class、双 JSON 栈、两套 versionId 校验并存、死代码若干；整体分层清晰、命名规范 |
+
+---
+
+## 五、修复优先级路线（建议）
+
+| 阶段 | 内容 | 条目 |
+|---|---|---|
+| P0（本周，安全+硬故障） | 下载链路安全校验 + 启动硬故障 | H1、H2、H3、H4、H12、H13、H16 |
+| P1（近期，数据完整性） | 并发/竞态/原子性 | H5-H11、H14、H17、M18 |
+| P2（随下载模块改造一并收敛） | 双份实现合并 | H18、M1（Java 策略统一）、M5 |
+| P3（迭代内） | 中危异常处理与行为一致性 | M2-M4、M6-M24 中按模块批量修 |
+| P4（择机重构） | 可维护性 | L10、L13、M25/M26（安全项优先提至 P1） |
+
+### 验收口径
+- P0 修复后补单元测试：恶意 asset index（hash 含 `../`）、恶意 mrpack（file:// URL）、1.17 版本 JSON（无 javaVersion 字段）、CLI `--json` 启动脚本化回归。
+- H18 合并后跑全量下载回归（版本安装 + mod 安装 + 整合包导入），确认 hash 校验、verified-marker 行为不丢失。

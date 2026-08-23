@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/linrenhao0813-cmd/ECL/actions/workflows/ci.yml/badge.svg)](https://github.com/linrenhao0813-cmd/ECL/actions/workflows/ci.yml)
 
-ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器。它提供图形界面和无头 CLI，覆盖游戏版本与加载器安装、账户管理、内容安装、整合包导入导出、服务器浏览，以及诊断与打包等常用流程。
+ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖游戏版本与加载器安装、账户管理、内容安装、整合包导入导出、服务器浏览，以及诊断与打包等常用流程。
 
 > 当前项目版本：`1.0.0`。从源码构建需要 JDK 21。
 
@@ -19,7 +19,6 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器。它提供图形界�
 - 浏览公开 Minecraft 服务器目录，搜索、查看在线状态、复制地址或作为直连地址启动。
 - 自动选择合适的 Java；本机缺少匹配运行时时可下载 Eclipse Temurin JRE。
 - 提供启动日志、崩溃中文诊断、世界备份、浅色/深色主题和简体中文、繁体中文、英文切换；首页与服务器页面的主要界面文案已纳入语言资源。
-- 提供适合脚本和服务器环境的 CLI，支持 JSON 输出。
 
 ## 安全和可靠性
 
@@ -61,38 +60,6 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器。它提供图形界�
 CurseForge 官方 API 需要 API Key。可在应用的高级设置中填写，或通过环境变量 `CURSEFORGE_API_KEY`、JVM 参数 `-Decl.curseforge.apiKey=...` 提供。未配置时，Modrinth 功能仍可正常使用。
 
 公开服务器目录来自第三方服务。目录收录不表示 ECL、Mojang 或 Microsoft 对服务器内容、安全性或运营方式的认可，请自行判断后再连接。
-
-## CLI
-
-通过 Gradle 启动 CLI：
-
-```powershell
-.\gradlew.bat :ecl-cli:run --args="doctor --json"
-```
-
-也可以在打包后的 Windows 应用中使用：
-
-```powershell
-ECL --cli doctor --json
-```
-
-常用命令：
-
-```text
-doctor
-java detect | list
-version list | inspect <version>
-account list | add-offline | remove | default | skin | skin-remove
-account skin <username> <skin.png> [--slim]
-account skin-remove <username>
-launch <version> [--dry-run] [--account <identity>] [--memory <MiB>] [--wait]
-mod list | enable | disable
-pack preview | import | export
-diagnostics <output.zip>
-settings get | set
-```
-
-在任意命令后加 `--help` 查看完整参数；全局 `--json` 输出机器可读结果。`account skin` 为离线账户导入本地 PNG 皮肤，`--slim` 选择纤细模型；`launch --dry-run` 仅预览启动命令，默认会隐藏凭据。
 
 ## 构建与验证
 
@@ -136,7 +103,6 @@ GitHub Actions 会在 Windows 上执行 `build check`，并生成 Windows 应用
 
 ```text
 dist/windows/ECL/ECL.exe
-dist/windows/ECL/ECL-CLI.exe
 ```
 
 该任务生成的是包含 Java 运行时的 Windows 应用镜像，不是单文件安装程序。发布或复制时需要保留整个 `dist/windows/ECL/` 目录；`ECL.exe`、`app/` 和 `runtime/` 必须位于原有相对位置，不能只分发 EXE 文件。
@@ -154,10 +120,9 @@ dist/windows/ECL/ECL-CLI.exe
 ## 项目结构
 
 ```text
-ecl-boot/  GUI 与 CLI 的主入口
+ecl-boot/  JavaFX 图形启动入口
 ecl-core/  认证、下载、游戏启动、实例、整合包与基础服务
 ecl-gui/   JavaFX 界面、样式与资源
-ecl-cli/   picocli 无头命令行入口
 ecl-dist/  jpackage 打包任务
 config/    Checkstyle 与 SpotBugs 配置
 ```
@@ -165,7 +130,7 @@ config/    Checkstyle 与 SpotBugs 配置
 ## 技术栈
 
 - Java 21、JavaFX 21、Gradle 8.5
-- Gson、Jackson、picocli
+- Gson、Jackson
 - SLF4J 与 Logback
 - JUnit 5、Checkstyle、SpotBugs、JaCoCo
 

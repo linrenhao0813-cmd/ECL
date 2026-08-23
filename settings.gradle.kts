@@ -19,6 +19,5 @@ include(
     "ecl-boot",
     "ecl-core",
     "ecl-gui",
-    "ecl-cli",
     "ecl-dist"
 )

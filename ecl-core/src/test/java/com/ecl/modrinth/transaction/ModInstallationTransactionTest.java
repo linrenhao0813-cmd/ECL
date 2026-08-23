@@ -81,13 +81,16 @@ class ModInstallationTransactionTest {
     }
 
     @Test
-    void recoveryRemovesAbandonedTransactionWithoutJournal() throws Exception {
-        FileModInstallationTransaction abandoned = new FileModInstallationTransaction(game);
-        Path directory = abandoned.temporaryDirectory();
+    void recoverySkipsTransactionWhoseLockIsStillHeld() throws Exception {
+        FileModInstallationTransaction active = new FileModInstallationTransaction(game);
+        Path directory = active.temporaryDirectory();
         Files.writeString(directory.resolve("orphan.part"), "orphan");
+
         FileModInstallationTransaction.recoverIncompleteTransactions(game);
+
+        assertTrue(Files.exists(directory));
+        active.close();
         assertFalse(Files.exists(directory));
-        abandoned.close();
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.ecl.launcher;
 
 import com.ecl.ECLConfig;
+import com.ecl.launch.JavaVersionRequirement;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.FileUtil;
 import com.ecl.util.JavaRuntimeUtil;
@@ -222,15 +223,16 @@ public final class ModLoaderInstaller {
     }
 
     private static void mergeDirectory(Path source, Path target) throws IOException {
-        if (!Files.exists(source)) {
+        Path sourceRoot = source.toAbsolutePath().normalize();
+        Path targetRoot = target.toAbsolutePath().normalize();
+        if (!Files.exists(sourceRoot)) {
             return;
         }
-        try (var stream = Files.walk(source)) {
+        try (var stream = Files.walk(sourceRoot)) {
             for (Path item : stream.toList()) {
-                Path relative = source.relativize(item);
-                Path destination = target.resolve(relative).normalize();
-                if (!destination.startsWith(target.toAbsolutePath().normalize())
-                        && target.isAbsolute()) {
+                Path relative = sourceRoot.relativize(item.toAbsolutePath().normalize());
+                Path destination = targetRoot.resolve(relative).normalize();
+                if (!destination.startsWith(targetRoot)) {
                     throw new IOException("安装器输出路径越界: " + relative);
                 }
                 if (Files.isDirectory(item)) {
@@ -269,15 +271,7 @@ public final class ModLoaderInstaller {
     }
 
     private static int requiredJavaForMinecraft(String version) {
-        String[] parts = version.split("\\.");
-        try {
-            int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
-            int patch = parts.length > 2 ? Integer.parseInt(parts[2].replaceAll("\\D.*$", "")) : 0;
-            if (minor > 20 || (minor == 20 && patch >= 5)) return 21;
-            if (minor >= 18) return 17;
-        } catch (NumberFormatException ignored) {
-        }
-        return 8;
+        return JavaVersionRequirement.inferFromVersionId(version);
     }
 
 }

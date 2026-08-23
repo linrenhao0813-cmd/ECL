@@ -8,6 +8,7 @@ import com.ecl.game.VersionMetadata;
 import com.ecl.game.VersionRepository;
 import com.ecl.util.JavaRuntimeUtil;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -84,8 +85,7 @@ public final class DefaultLauncher implements Launcher {
             }
 
             if (allowWrites) {
-                NativeLibraryExtractor.extract(metadata, environment, versionId,
-                        options.instanceDirectory());
+                NativeLibraryExtractor.extract(metadata, options);
             }
             return commandBuilder.build(options, metadata, javaExecutable, extraJvmArgs);
         } catch (LaunchException alreadyClassified) {
@@ -125,6 +125,17 @@ public final class DefaultLauncher implements Launcher {
         Map<String, String> processEnvironment = builder.environment();
         processEnvironment.putAll(command.environment());
         builder.redirectErrorStream(true);
+        if (options.processOutputFile() != null) {
+            File outputFile = options.processOutputFile();
+            File parent = outputFile.getParentFile();
+            if (parent != null && !parent.isDirectory()
+                    && !parent.mkdirs() && !parent.isDirectory()) {
+                skinInjection.close();
+                throw new LaunchException(LaunchException.Kind.PROCESS_CREATION,
+                        "无法创建游戏日志目录: " + parent);
+            }
+            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(outputFile));
+        }
 
         Process process;
         try {
@@ -140,6 +151,8 @@ public final class DefaultLauncher implements Launcher {
                 ? null : command.workingDirectory().toPath();
         GameProcess gameProcess = new GameProcess(process, versionId, workingDirectory);
         publish(GameLifecycleEvent.Phase.STARTED, versionId, 0, workingDirectory);
+        gameProcess.whenExited().thenAccept(exited -> publish(
+                GameLifecycleEvent.Phase.EXITED, versionId, exited.exitCode(), workingDirectory));
         return gameProcess;
     }
 

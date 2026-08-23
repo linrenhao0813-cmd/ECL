@@ -26,7 +26,10 @@ final class DownloadTaskExecutor implements AutoCloseable {
     }
 
     private <T> void execute(DownloadTaskEntry<T> entry, DownloadTaskCenter center) {
-        entry.runner = Thread.currentThread();
+        Thread runner = Thread.currentThread();
+        if (!center.registerRunner(entry, runner)) {
+            return;
+        }
         try {
             if (entry.cancelRequested) {
                 throw new CancellationException("已取消");
@@ -45,7 +48,7 @@ final class DownloadTaskExecutor implements AutoCloseable {
                 center.finishFailure(entry, error);
             }
         } finally {
-            entry.runner = null;
+            center.clearRunner(entry, runner);
         }
     }
 

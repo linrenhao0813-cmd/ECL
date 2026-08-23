@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -97,6 +98,17 @@ class HttpUtilTest {
         server.createContext("/multiline", exchange -> respond(exchange, 200, body));
 
         assertEquals(body, HttpUtil.get(baseUrl + "/multiline"));
+    }
+
+    @Test
+    void boundedRequestRejectsOversizedResponseBodies() {
+        server.createContext("/large-json", exchange -> respond(exchange, 200, "0123456789"));
+
+        IOException error = assertThrows(IOException.class, () -> HttpRequestExecutor.request(
+                "GET", baseUrl + "/large-json", null, null, Map.of(),
+                5_000, 5_000, 5));
+
+        assertTrue(error.getMessage().contains("exceeds"));
     }
 
     @Test

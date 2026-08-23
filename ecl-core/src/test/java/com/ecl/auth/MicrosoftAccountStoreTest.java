@@ -64,7 +64,7 @@ class MicrosoftAccountStoreTest {
     }
 
     @Test
-    void unreadableAccountAbortsUpdateAndPreservesCiphertext() throws Exception {
+    void unreadableAccountDoesNotBlockAddingAReplacement() throws Exception {
         Path storeFile = tempDir.resolve("accounts.json");
         Files.writeString(storeFile, """
                 [
@@ -79,13 +79,14 @@ class MicrosoftAccountStoreTest {
                 """);
         MicrosoftAccountStore store = new MicrosoftAccountStore(storeFile);
 
-        assertFalse(store.save(new MicrosoftAccountStore.Account(
+        assertTrue(store.save(new MicrosoftAccountStore.Account(
                 "new", "NewAccount", "new-refresh", "new-access", 2)));
 
         String raw = Files.readString(storeFile);
         assertTrue(raw.contains("not-valid-ciphertext"));
         assertTrue(raw.contains("also-invalid"));
-        assertFalse(raw.contains("new-refresh"));
+        assertFalse(raw.contains("new-refresh"), "replacement credentials stay encrypted");
+        assertEquals("NewAccount", store.list().getFirst().username());
     }
 
     @Test

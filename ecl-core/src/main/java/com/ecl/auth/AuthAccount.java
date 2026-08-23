@@ -1,6 +1,6 @@
 package com.ecl.auth;
 
-/** Persistable account model shared by GUI and CLI. */
+/** Persistable account model used by launcher authentication services. */
 public record AuthAccount(
         AuthType type,
         String uuid,

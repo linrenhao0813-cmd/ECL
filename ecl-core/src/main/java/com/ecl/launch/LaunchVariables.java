@@ -34,7 +34,7 @@ final class LaunchVariables {
         variables.put("${assets_root}", assetsRoot.getAbsolutePath());
         variables.put("${assets_index_name}", assetIndexName(version));
         variables.put("${user_type}", auth.getType().name().toLowerCase());
-        variables.put("${natives_directory}", options.environment().nativesDirectory(options.versionId()).getAbsolutePath());
+        variables.put("${natives_directory}", options.nativesDirectory().getAbsolutePath());
         variables.put("${library_directory}", librariesDir.getAbsolutePath());
         variables.put("${classpath_separator}", File.pathSeparator);
         variables.put("${launcher_name}", options.environment().launcherName());

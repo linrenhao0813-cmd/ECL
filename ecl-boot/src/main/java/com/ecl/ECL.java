@@ -4,9 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import com.ecl.cli.EclCli;
 
 /**
  * Main entry point for ECL.
@@ -18,11 +16,6 @@ public class ECL {
     private static final String GSON_VERSION = "2.10.1";
 
     public static void main(String[] args) {
-        if (isCliMode(args)) {
-            System.exit(EclCli.execute(withoutCliFlag(args)));
-            return;
-        }
-
         if (!hasClass("javafx.application.Application") && !"1".equals(System.getenv(BOOTSTRAPPED_ENV))) {
             try {
                 relaunchWithCachedDependencies(args);
@@ -35,15 +28,6 @@ public class ECL {
         }
 
         ECLauncher.main(args);
-    }
-
-    private static boolean isCliMode(String[] args) {
-        return Arrays.asList(args).contains("--cli")
-                || Boolean.parseBoolean(System.getProperty("java.awt.headless", "false"));
-    }
-
-    private static String[] withoutCliFlag(String[] args) {
-        return Arrays.stream(args).filter(arg -> !"--cli".equals(arg)).toArray(String[]::new);
     }
 
     private static boolean hasClass(String className) {

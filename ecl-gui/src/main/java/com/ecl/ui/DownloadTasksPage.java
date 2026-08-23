@@ -4,6 +4,7 @@ import com.ecl.ECLConfig;
 import com.ecl.config.SettingsManager;
 import com.ecl.download.DownloadTaskCenter;
 import com.ecl.util.Messages;
+import com.ecl.util.HttpUtil;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -80,6 +81,7 @@ final class DownloadTasksPage extends VBox {
         rate.setOnAction(event -> {
             long bytes = parseDownloadRate(rate.getValue());
             taskCenter.setBandwidthLimitBytesPerSecond(bytes);
+            HttpUtil.setDownloadRateLimitBytesPerSecond(bytes);
             settingsManager.set(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB,
                     (int) (bytes / 1024));
             settingsManager.save();

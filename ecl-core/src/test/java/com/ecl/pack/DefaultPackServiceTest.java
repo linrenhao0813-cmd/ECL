@@ -104,7 +104,9 @@ class DefaultPackServiceTest {
             }
 
             Path root = Files.createDirectories(temp.resolve("remote-instances"));
-            PackImportResult result = new DefaultPackService().importPack(archive, root, "Imported");
+            PackImportResult result = new DefaultPackService(
+                    new com.ecl.modrinth.pack.MrpackInstaller(java.util.Set.of("127.0.0.1")))
+                    .importPack(archive, root, "Imported");
 
             assertEquals("real-mod-content",
                     Files.readString(result.instanceDirectory().resolve("mods/example.jar")));

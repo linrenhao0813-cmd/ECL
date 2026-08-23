@@ -14,7 +14,11 @@ public final class JsonUtil {
         if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
             return defaultValue;
         }
-        return object.get(key).getAsString();
+        try {
+            return object.get(key).getAsString();
+        } catch (RuntimeException ignored) {
+            return defaultValue;
+        }
     }
 
     public static int getInt(JsonObject object, String key, int defaultValue) {

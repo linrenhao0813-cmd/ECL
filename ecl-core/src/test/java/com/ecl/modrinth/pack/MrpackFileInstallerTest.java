@@ -20,6 +20,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -58,7 +59,7 @@ class MrpackFileInstallerTest {
             Path instance = tempDir.resolve("instance");
             List<String> statuses = new ArrayList<>();
 
-            int count = MrpackFileInstaller.installIndexedFiles(index, instance, statuses::add);
+            int count = installFromLocalServer(index, instance, statuses::add);
 
             assertEquals(1, count);
             assertArrayEquals(content, Files.readAllBytes(instance.resolve("mods/mod.jar")));
@@ -86,7 +87,7 @@ class MrpackFileInstallerTest {
             JsonObject index = indexWithFiles(item);
             Path instance = tempDir.resolve("instance");
 
-            int count = MrpackFileInstaller.installIndexedFiles(index, instance, message -> { });
+            int count = installFromLocalServer(index, instance, message -> { });
 
             assertEquals(1, count);
             assertArrayEquals(content, Files.readAllBytes(instance.resolve("mods/sha1.jar")));
@@ -123,7 +124,7 @@ class MrpackFileInstallerTest {
             Path instance = tempDir.resolve("instance");
 
             IOException error = assertThrows(IOException.class,
-                    () -> MrpackFileInstaller.installIndexedFiles(index, instance, message -> { }));
+                    () -> installFromLocalServer(index, instance, message -> { }));
 
             assertTrue(error.getMessage().contains("整合包文件下载失败"));
             assertTrue(error.getCause().getMessage().contains("整合包文件校验失败"));
@@ -143,7 +144,7 @@ class MrpackFileInstallerTest {
             Path instance = tempDir.resolve("instance");
 
             IOException error = assertThrows(IOException.class,
-                    () -> MrpackFileInstaller.installIndexedFiles(index, instance, message -> { }));
+                    () -> installFromLocalServer(index, instance, message -> { }));
 
             assertTrue(error.getMessage().contains("整合包文件下载失败"));
             assertTrue(error.getCause().getMessage()
@@ -182,7 +183,7 @@ class MrpackFileInstallerTest {
             Path instance = tempDir.resolve("instance");
 
             IOException error = assertThrows(IOException.class,
-                    () -> MrpackFileInstaller.installIndexedFiles(index, instance, message -> { }));
+                    () -> installFromLocalServer(index, instance, message -> { }));
 
             assertTrue(error.getMessage().contains("整合包文件下载失败"));
         } finally {
@@ -199,6 +200,31 @@ class MrpackFileInstallerTest {
         });
         server.start();
         return server;
+    }
+
+    @Test
+    void rejectsFileSchemeAndUntrustedHostsBeforeDownload() {
+        JsonObject fileUrl = indexWithFile("mods/evil.jar", "file:///etc/passwd", 1, null);
+        JsonObject untrusted = indexWithFile(
+                "mods/evil.jar", "https://example.invalid/evil.jar", 1, null);
+        Path instance = tempDir.resolve("instance");
+
+        IOException fileError = assertThrows(IOException.class,
+                () -> MrpackFileInstaller.installIndexedFiles(
+                        fileUrl, instance, message -> { }));
+        IOException hostError = assertThrows(IOException.class,
+                () -> MrpackFileInstaller.installIndexedFiles(
+                        untrusted, instance, message -> { }));
+
+        assertTrue(fileError.getCause().getMessage().contains("not trusted"));
+        assertTrue(hostError.getCause().getMessage().contains("not trusted"));
+    }
+
+    private static int installFromLocalServer(JsonObject index, Path instance,
+                                              MrpackInstaller.Listener listener)
+            throws IOException {
+        return MrpackFileInstaller.installIndexedFiles(
+                index, instance, listener, Set.of("127.0.0.1"));
     }
 
     private static JsonObject indexWithFile(String path, String url, long size, String sha512) {

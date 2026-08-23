@@ -4,6 +4,7 @@ import com.ecl.ECLConfig;
 import com.ecl.game.MavenCoordinates;
 import com.ecl.task.Task;
 import com.ecl.util.FileUtil;
+import com.ecl.util.JsonUtil;
 import com.ecl.util.RuleEvaluator;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -86,8 +87,12 @@ public final class DownloadLibrariesTask extends Task<Void> {
 
     private void addIfNeeded(List<InstallHelpers.FileDownload> tasks, JsonObject artifact, String label)
             throws IOException {
-        String url = artifact.get("url").getAsString();
-        String path = artifact.get("path").getAsString();
+        String path = JsonUtil.getString(artifact, "path", "");
+        String url = JsonUtil.getString(artifact, "url", "");
+        if (path.isBlank() || url.isBlank()) {
+            throw new IOException(label + "下载信息缺少 path 或 url: "
+                    + (path.isBlank() ? "<unknown>" : path));
+        }
         String sha1 = artifact.has("sha1") ? artifact.get("sha1").getAsString() : null;
         File target = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
         if (InstallHelpers.needsDownload(target, sha1, verifyExistingFiles)) {
@@ -105,7 +110,7 @@ public final class DownloadLibrariesTask extends Task<Void> {
             JsonObject downloads = library.has("downloads") ? library.getAsJsonObject("downloads") : null;
             if (downloads != null && downloads.has("artifact")) {
                 JsonObject artifact = downloads.getAsJsonObject("artifact");
-                String path = artifact.get("path").getAsString();
+                String path = JsonUtil.getString(artifact, "path", "");
                 File target = safeLibraryTarget(path);
                 if (target != null && !target.exists()) {
                     missing.add(library.has("name") ? library.get("name").getAsString() : path);

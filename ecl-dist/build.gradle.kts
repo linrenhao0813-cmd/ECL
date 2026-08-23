@@ -5,9 +5,7 @@ plugins {
 }
 
 val bootProject = project(":ecl-boot")
-val cliProject = project(":ecl-cli")
 val bootJar = bootProject.tasks.named<Jar>("jar")
-val cliJar = cliProject.tasks.named<Jar>("jar")
 val installDist = bootProject.tasks.named("installDist")
 
 fun normalizeForDelete(directory: File) {
@@ -32,14 +30,6 @@ tasks.register<Exec>("packageWindowsApp") {
         normalizeForDelete(outputDir)
         delete(outputDir)
         outputDir.mkdirs()
-        val cliLauncher = layout.buildDirectory.file("jpackage/ecl-cli.properties").get().asFile
-        cliLauncher.parentFile.mkdirs()
-        cliLauncher.writeText(
-            "main-class=com.ecl.cli.EclCli\n" +
-                    "main-jar=${cliJar.get().archiveFileName.get()}\n" +
-                    "win-console=true\n",
-            Charsets.UTF_8
-        )
 
         commandLine(
             File(System.getProperty("java.home"), "bin/jpackage.exe"),
@@ -51,7 +41,6 @@ tasks.register<Exec>("packageWindowsApp") {
             "--input", bootProject.layout.buildDirectory.dir("install/ECL/lib").get().asFile,
             "--main-jar", bootJar.get().archiveFileName.get(),
             "--main-class", "com.ecl.ECL",
-            "--add-launcher", "ECL-CLI=${cliLauncher.absolutePath}",
             "--icon", rootProject.file("ecl-gui/src/main/resources/icons/ecl-icon.ico"),
             "--java-options", "-Dfile.encoding=UTF-8"
         )

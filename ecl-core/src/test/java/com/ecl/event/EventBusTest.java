@@ -85,6 +85,23 @@ class EventBusTest {
     }
 
     @Test
+    void failingErrorSinkDoesNotBlockOtherHandlers() {
+        EventBus bus = new EventBus();
+        List<String> received = new ArrayList<>();
+        bus.setErrorSink((event, error) -> {
+            throw new IllegalStateException("sink failed");
+        });
+        bus.register(BaseEvent.class, event -> {
+            throw new IllegalStateException("handler failed");
+        });
+        bus.register(BaseEvent.class, event -> received.add("survived"));
+
+        bus.post(new BaseEvent());
+
+        assertEquals(List.of("survived"), received);
+    }
+
+    @Test
     void handlersRunInRegistrationOrder() {
         EventBus bus = new EventBus();
         List<Integer> order = new ArrayList<>();

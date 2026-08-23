@@ -43,6 +43,7 @@ import com.ecl.modrinth.pack.DefaultModpackUpdateService;
 import com.ecl.modrinth.pack.ModpackUpdateService;
 import com.ecl.modrinth.transaction.InstallationPlanBuilder;
 import com.ecl.util.ThreadFactories;
+import com.ecl.util.HttpUtil;
 
 import java.io.IOException;
 import java.util.Map;
@@ -95,6 +96,7 @@ public final class MainController implements AutoCloseable {
         int configuredConcurrency = settingsManager.get(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT);
         configuredConcurrency = Math.max(1, Math.min(8, configuredConcurrency));
         long configuredRate = Math.max(0L, settingsManager.get(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB)) * 1024L;
+        HttpUtil.setDownloadRateLimitBytesPerSecond(configuredRate);
         gameDownloader = new GameDownloader(configuredConcurrency);
         downloadTaskCenter = new DownloadTaskCenter(configuredConcurrency, configuredRate);
         curseForgeDownloader = new CurseForgeDownloader(this::curseForgeApiKey);

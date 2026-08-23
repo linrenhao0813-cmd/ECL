@@ -150,7 +150,6 @@ public final class CurseForgeApiClient {
         JsonObject response = request("POST", "/fingerprints/" + MINECRAFT_GAME_ID,
                 Map.of(), body.toString());
         JsonObject data = object(response, "data");
-        JsonArray exactFingerprints = array(data, "exactFingerprints");
         Map<Long, ApiFile> result = new LinkedHashMap<>();
         JsonArray matches = array(data, "exactMatches");
         for (int index = 0; index < matches.size(); index++) {
@@ -160,10 +159,6 @@ public final class CurseForgeApiClient {
             if (!match.has("file") || !match.get("file").isJsonObject()) continue;
             ApiFile matchedFile = file(match.getAsJsonObject("file"));
             long fingerprint = matchedFile.fingerprint();
-            if (fingerprint == 0 && index < exactFingerprints.size()
-                    && exactFingerprints.get(index).isJsonPrimitive()) {
-                fingerprint = exactFingerprints.get(index).getAsLong();
-            }
             if (fingerprint != 0) {
                 result.put(fingerprint, matchedFile);
             }

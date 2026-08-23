@@ -27,6 +27,7 @@ public final class LaunchOptions {
     private final String serverAddress;
     private final int processorCount;
     private final OfflineSkin offlineSkin;
+    private final File processOutputFile;
 
     private LaunchOptions(Builder builder) {
         this.versionId = builder.versionId;
@@ -46,6 +47,7 @@ public final class LaunchOptions {
         this.serverAddress = builder.serverAddress == null ? "" : builder.serverAddress.trim();
         this.processorCount = Math.max(0, builder.processorCount);
         this.offlineSkin = builder.offlineSkin;
+        this.processOutputFile = builder.processOutputFile;
     }
 
     public String versionId() {
@@ -115,6 +117,18 @@ public final class LaunchOptions {
         return offlineSkin;
     }
 
+    /** The native staging directory shared by extraction and command substitution. */
+    public File nativesDirectory() {
+        return instanceDirectory == null
+                ? environment.nativesDirectory(versionId)
+                : new File(instanceDirectory, "natives-windows");
+    }
+
+    /** Optional console log destination when the caller will not retain the output pipe. */
+    public File processOutputFile() {
+        return processOutputFile;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -135,6 +149,7 @@ public final class LaunchOptions {
         private String serverAddress = "";
         private int processorCount;
         private OfflineSkin offlineSkin;
+        private File processOutputFile;
 
         public Builder versionId(String versionId) {
             this.versionId = versionId;
@@ -204,6 +219,11 @@ public final class LaunchOptions {
 
         public Builder offlineSkin(OfflineSkin offlineSkin) {
             this.offlineSkin = offlineSkin;
+            return this;
+        }
+
+        public Builder processOutputFile(File processOutputFile) {
+            this.processOutputFile = processOutputFile;
             return this;
         }
 

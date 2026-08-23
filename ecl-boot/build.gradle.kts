@@ -7,7 +7,6 @@ plugins {
 dependencies {
     implementation(project(":ecl-core"))
     implementation(project(":ecl-gui"))
-    implementation(project(":ecl-cli"))
 }
 
 application {

@@ -147,7 +147,6 @@ public class YggdrasilAuth implements AuthProvider {
     }
 
     public void authenticate(String username, char[] password) throws IOException {
-        // Convert char[] to String at the last possible moment
         String passwordStr = new String(password);
         try {
             JsonObject agent = new JsonObject();
@@ -167,8 +166,8 @@ public class YggdrasilAuth implements AuthProvider {
                 throw new IOException("Authentication failed: " + message);
             }
 
-            this.accessToken = json.get("accessToken").getAsString();
-            this.clientToken = json.get("clientToken").getAsString();
+            this.accessToken = requireString(json, "accessToken");
+            this.clientToken = requireString(json, "clientToken");
 
             JsonObject profile = json.getAsJsonObject("selectedProfile");
             if (profile == null && json.has("availableProfiles") && json.getAsJsonArray("availableProfiles").size() > 0) {
@@ -176,19 +175,13 @@ public class YggdrasilAuth implements AuthProvider {
             }
 
             if (profile != null) {
-                this.uuid = profile.get("id").getAsString();
-                this.username = profile.get("name").getAsString();
+                this.uuid = requireString(profile, "id");
+                this.username = requireString(profile, "name");
             }
 
             this.loggedIn = true;
 
-            // Clear password String immediately after use
-            passwordStr = null;
         } finally {
-            // Ensure password String is cleared even on exception
-            if (passwordStr != null) {
-                passwordStr = null;
-            }
             clearPassword();
         }
     }
@@ -198,13 +191,16 @@ public class YggdrasilAuth implements AuthProvider {
             return false;
         }
 
-        JsonObject payload = tokenPayload();
-        try {
-            postJson(authServer + "validate", payload);
+        HttpUtil.Response response = HttpUtil.postJsonResponse(
+                authServer + "validate", tokenPayload());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return true;
-        } catch (IOException e) {
+        }
+        if (response.statusCode() == 401 || response.statusCode() == 403) {
             return false;
         }
+        response.requireSuccess();
+        return true;
     }
 
     public void refresh() throws IOException {
@@ -236,5 +232,20 @@ public class YggdrasilAuth implements AuthProvider {
         payload.addProperty("accessToken", accessToken);
         payload.addProperty("clientToken", clientToken);
         return payload;
+    }
+
+    private static String requireString(JsonObject object, String key) throws IOException {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
+            throw new IOException("Authentication response is missing " + key);
+        }
+        try {
+            String value = object.get(key).getAsString();
+            if (value.isBlank()) {
+                throw new IOException("Authentication response has blank " + key);
+            }
+            return value;
+        } catch (RuntimeException invalid) {
+            throw new IOException("Authentication response has invalid " + key, invalid);
+        }
     }
 }

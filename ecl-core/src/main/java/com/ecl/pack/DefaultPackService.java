@@ -30,6 +30,15 @@ import java.util.zip.ZipOutputStream;
 /** Safe, transactional import/export for ECL, MultiMC, CurseForge and Modrinth archives. */
 public final class DefaultPackService implements PackService {
     private static final int MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
+    private final MrpackInstaller mrpackInstaller;
+
+    public DefaultPackService() {
+        this(new MrpackInstaller());
+    }
+
+    DefaultPackService(MrpackInstaller mrpackInstaller) {
+        this.mrpackInstaller = Objects.requireNonNull(mrpackInstaller, "mrpackInstaller");
+    }
 
     @Override
     public PackPreview preview(Path archive) throws IOException {
@@ -63,7 +72,7 @@ public final class DefaultPackService implements PackService {
         try {
             if (preview.format() == PackFormat.MRPACK) {
                 Path payload = staging.resolve("instance");
-                int installed = new MrpackInstaller().installContents(archive.toFile(), payload, null);
+                int installed = mrpackInstaller.installContents(archive.toFile(), payload, null);
                 move(payload, target);
                 return new PackImportResult(preview.format(), name, target, installed);
             }
@@ -277,9 +286,7 @@ public final class DefaultPackService implements PackService {
 
     private static String safeName(String name) throws IOException {
         String value = name == null ? "" : name.trim();
-        if (value.isBlank() || value.contains("/") || value.contains("\\") || value.contains("..")) {
-            throw new IOException("实例名称无效");
-        }
+        FileUtil.requireSafeVersionId(value);
         return value;
     }
 

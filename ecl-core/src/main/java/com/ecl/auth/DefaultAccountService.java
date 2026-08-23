@@ -4,6 +4,7 @@ import com.ecl.ECLConfig;
 import com.ecl.exception.AuthException;
 import com.ecl.util.CryptoUtil;
 import com.ecl.util.GsonProvider;
+import com.ecl.util.JsonUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -19,10 +20,15 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** JSON account repository with AES-GCM encrypted credentials and atomic writes. */
 public final class DefaultAccountService implements AccountService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(DefaultAccountService.class);
+
     private final Path file;
     private final AuthProviderRegistry providers;
 
@@ -37,19 +43,29 @@ public final class DefaultAccountService implements AccountService {
 
     @Override
     public synchronized List<AuthAccount> list() {
+        return snapshot().accounts();
+    }
+
+    private AccountSnapshot snapshot() {
         JsonArray array = read();
         List<AuthAccount> accounts = new ArrayList<>();
+        List<JsonElement> unreadable = new ArrayList<>();
         for (JsonElement element : array) {
-            if (!element.isJsonObject()) continue;
+            if (!element.isJsonObject()) {
+                unreadable.add(element.deepCopy());
+                continue;
+            }
             JsonObject item = element.getAsJsonObject();
             try {
                 AuthAccount account = decode(item);
                 if (!account.username().isBlank()) accounts.add(account);
             } catch (RuntimeException failure) {
-                throw new AuthException("Account file contains an unreadable entry; no changes were made", failure);
+                LOGGER.warn("Skipping unreadable account entry with identity hint {}",
+                        identityHint(item), failure);
+                unreadable.add(item.deepCopy());
             }
         }
-        return List.copyOf(accounts);
+        return new AccountSnapshot(List.copyOf(accounts), List.copyOf(unreadable));
     }
 
     @Override
@@ -57,18 +73,21 @@ public final class DefaultAccountService implements AccountService {
         if (account == null || account.username().isBlank()) {
             throw new IllegalArgumentException("Account username is required");
         }
-        List<AuthAccount> accounts = new ArrayList<>(list());
+        AccountSnapshot snapshot = snapshot();
+        List<AuthAccount> accounts = new ArrayList<>(snapshot.accounts());
+        List<JsonElement> unreadable = new ArrayList<>(snapshot.unreadable());
         accounts.removeIf(existing -> existing.identity().equalsIgnoreCase(account.identity()));
+        unreadable.removeIf(entry -> account.identity().equalsIgnoreCase(rawIdentity(entry)));
         if (account.defaultAccount()) {
             accounts.replaceAll(existing -> withDefault(existing, false));
         }
         accounts.add(account);
-        write(accounts);
+        write(accounts, unreadable);
         return account;
     }
 
     @Override
-    public AuthAccount addOffline(String username) {
+    public synchronized AuthAccount addOffline(String username) {
         OfflineAuth provider = new OfflineAuth(username);
         AuthAccount account = new AuthAccount(AuthType.OFFLINE, provider.getUUID(), provider.getUsername(),
                 provider.getUsername(), "", "", 0, "", list().isEmpty());
@@ -77,13 +96,16 @@ public final class DefaultAccountService implements AccountService {
 
     @Override
     public synchronized boolean remove(String identity) {
-        List<AuthAccount> accounts = new ArrayList<>(list());
+        AccountSnapshot snapshot = snapshot();
+        List<AuthAccount> accounts = new ArrayList<>(snapshot.accounts());
+        List<JsonElement> unreadable = new ArrayList<>(snapshot.unreadable());
         boolean changed = accounts.removeIf(account -> account.identity().equalsIgnoreCase(identity));
+        changed |= unreadable.removeIf(entry -> rawIdentity(entry).equalsIgnoreCase(identity));
         if (changed) {
             if (!accounts.isEmpty() && accounts.stream().noneMatch(AuthAccount::defaultAccount)) {
                 accounts.set(0, withDefault(accounts.get(0), true));
             }
-            write(accounts);
+            write(accounts, unreadable);
         }
         return changed;
     }
@@ -97,11 +119,12 @@ public final class DefaultAccountService implements AccountService {
 
     @Override
     public synchronized void setDefault(String identity) {
-        List<AuthAccount> accounts = new ArrayList<>(list());
+        AccountSnapshot snapshot = snapshot();
+        List<AuthAccount> accounts = new ArrayList<>(snapshot.accounts());
         boolean found = accounts.stream().anyMatch(account -> account.identity().equalsIgnoreCase(identity));
         if (!found) throw new IllegalArgumentException("Unknown account: " + identity);
         accounts.replaceAll(account -> withDefault(account, account.identity().equalsIgnoreCase(identity)));
-        write(accounts);
+        write(accounts, snapshot.unreadable());
     }
 
     @Override
@@ -119,7 +142,7 @@ public final class DefaultAccountService implements AccountService {
         }
     }
 
-    private void write(List<AuthAccount> accounts) {
+    private void write(List<AuthAccount> accounts, List<JsonElement> unreadable) {
         Path absolute = file.toAbsolutePath();
         Path parent = absolute.getParent();
         Path temp = null;
@@ -128,6 +151,7 @@ public final class DefaultAccountService implements AccountService {
             temp = Files.createTempFile(parent, "accounts-", ".tmp");
             JsonArray array = new JsonArray();
             accounts.forEach(account -> array.add(encode(account)));
+            unreadable.forEach(entry -> array.add(entry.deepCopy()));
             try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
                 GsonProvider.pretty().toJson(array, writer);
             }
@@ -174,6 +198,28 @@ public final class DefaultAccountService implements AccountService {
                 account.authServerUrl(), selected);
     }
 
+    private static String identityHint(JsonObject item) {
+        String type = JsonUtil.getString(item, "type", "UNKNOWN");
+        String value = JsonUtil.getString(item, "uuid", "");
+        if (value.isBlank()) {
+            value = JsonUtil.getString(item, "username", "unknown");
+        }
+        return type + ":" + value;
+    }
+
+    private static String rawIdentity(JsonElement entry) {
+        if (entry == null || !entry.isJsonObject()) {
+            return "";
+        }
+        JsonObject item = entry.getAsJsonObject();
+        String type = JsonUtil.getString(item, "type", "OFFLINE").toUpperCase(Locale.ROOT);
+        String value = JsonUtil.getString(item, "uuid", "");
+        if (value.isBlank()) {
+            value = JsonUtil.getString(item, "username", "");
+        }
+        return value.isBlank() ? "" : type + ":" + value.toLowerCase(Locale.ROOT);
+    }
+
     private static String decrypt(JsonObject item, String key) {
         String encrypted = text(item, key, "");
         return encrypted.isBlank() ? "" : CryptoUtil.decrypt(encrypted);
@@ -189,5 +235,8 @@ public final class DefaultAccountService implements AccountService {
 
     private static boolean bool(JsonObject item, String key) {
         return item.has(key) && item.get(key).getAsBoolean();
+    }
+
+    private record AccountSnapshot(List<AuthAccount> accounts, List<JsonElement> unreadable) {
     }
 }

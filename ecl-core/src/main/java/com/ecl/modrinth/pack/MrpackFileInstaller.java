@@ -9,23 +9,34 @@ import com.google.gson.JsonObject;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Locale;
+import java.util.Set;
 
 /** Downloads and installs the client files declared by an MRPACK index with hash verification. */
 final class MrpackFileInstaller {
     private static final long MAX_INDEXED_FILE_BYTES = 2L * 1024 * 1024 * 1024;
     private static final long MAX_TOTAL_INDEXED_BYTES = 20L * 1024 * 1024 * 1024;
     private static final int MAX_INDEXED_FILES = 100_000;
+    private static final Set<String> TRUSTED_DOWNLOAD_HOSTS = Set.of("cdn.modrinth.com");
 
     private MrpackFileInstaller() {
     }
 
     static int installIndexedFiles(JsonObject index, Path instanceRoot,
                                    MrpackInstaller.Listener listener) throws IOException {
+        return installIndexedFiles(index, instanceRoot, listener, TRUSTED_DOWNLOAD_HOSTS);
+    }
+
+    static int installIndexedFiles(JsonObject index, Path instanceRoot,
+                                   MrpackInstaller.Listener listener,
+                                   Set<String> trustedDownloadHosts) throws IOException {
         JsonArray files = index.has("files") && index.get("files").isJsonArray()
                 ? index.getAsJsonArray("files") : new JsonArray();
         if (files.size() > MAX_INDEXED_FILES) {
@@ -57,7 +68,8 @@ final class MrpackFileInstaller {
             IOException lastError = null;
             for (JsonElement download : downloads) {
                 try {
-                    String url = download.getAsString();
+                    String url = requireTrustedDownloadUrl(
+                            download.getAsString(), trustedDownloadHosts).toString();
                     listener.onStatus("正在下载整合包文件 " + (completed + 1) + "/" + files.size()
                             + ": " + relative);
                     long remainingBudget = Math.min(declaredSize,
@@ -104,6 +116,24 @@ final class MrpackFileInstaller {
             completed++;
         }
         return completed;
+    }
+
+    private static URI requireTrustedDownloadUrl(String value, Set<String> trustedHosts)
+            throws IOException {
+        try {
+            URI uri = new URI(value);
+            String scheme = uri.getScheme() == null
+                    ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+            String host = uri.getHost() == null
+                    ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+            if (!("http".equals(scheme) || "https".equals(scheme))
+                    || uri.getUserInfo() != null || !trustedHosts.contains(host)) {
+                throw new IOException("MRPACK download URL is not trusted: " + value);
+            }
+            return uri;
+        } catch (URISyntaxException | IllegalArgumentException error) {
+            throw new IOException("MRPACK download URL is invalid: " + value, error);
+        }
     }
 
     private static boolean isClientFile(JsonObject item) {

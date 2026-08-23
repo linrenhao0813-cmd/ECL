@@ -99,6 +99,10 @@ public final class NativeLibraryExtractor {
         }
     }
 
+    public static void extract(VersionMetadata metadata, LaunchOptions options) throws IOException {
+        extract(metadata, options.environment(), options.versionId(), options.instanceDirectory());
+    }
+
     private static Set<File> collectNativeFiles(VersionMetadata metadata, LaunchEnvironment environment,
                                                String nativeClassifier, String osArch,
                                                File instanceDirectory) {

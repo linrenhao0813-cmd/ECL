@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
@@ -158,7 +159,7 @@ public class GameDownloader implements DownloadService {
         } catch (Exception e) {
             if (Thread.currentThread().isInterrupted()) {
                 if (runListener != null) runListener.onStatus("下载已取消");
-                return;
+                throw new CancellationException("download cancelled");
             }
             if (runListener != null) runListener.onError("下载失败: " + e.getMessage());
             // Keep the listener as a UI notification only; the Future must also fail so every

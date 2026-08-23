@@ -3,6 +3,7 @@ package com.ecl.auth;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
+import com.google.gson.JsonParser;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -12,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DefaultAccountServiceTest {
     @TempDir
@@ -49,7 +49,7 @@ class DefaultAccountServiceTest {
     }
 
     @Test
-    void unreadableCredentialAbortsSaveAndPreservesOriginalFile() throws Exception {
+    void unreadableCredentialDoesNotLockAccountManagement() throws Exception {
         System.setProperty("ecl.crypto.keyFile", temp.resolve("secret.key").toString());
         com.ecl.util.CryptoUtil.resetKeyCache();
         Path file = temp.resolve("accounts.json");
@@ -58,7 +58,24 @@ class DefaultAccountServiceTest {
         Files.writeString(file, original, StandardCharsets.UTF_8);
         DefaultAccountService service = new DefaultAccountService(file, new AuthProviderRegistry());
 
-        assertThrows(com.ecl.exception.AuthException.class, () -> service.addOffline("Steve"));
-        assertEquals(original, Files.readString(file, StandardCharsets.UTF_8));
+        AuthAccount saved = service.addOffline("Steve");
+
+        assertEquals("Steve", saved.username());
+        assertEquals(1, service.list().size());
+        assertTrue(Files.readString(file, StandardCharsets.UTF_8).contains("not-ciphertext"));
+        assertTrue(service.remove("MICROSOFT:id"));
+        assertFalse(Files.readString(file, StandardCharsets.UTF_8).contains("not-ciphertext"));
+    }
+
+    @Test
+    void malformedIdentityHintCannotAbortAccountListing() throws Exception {
+        Path file = temp.resolve("accounts.json");
+        Files.writeString(file, "[{\"type\":{},\"uuid\":[],\"username\":\"Broken\"}]");
+        DefaultAccountService service = new DefaultAccountService(file, new AuthProviderRegistry());
+
+        assertTrue(service.list().isEmpty());
+        service.addOffline("Steve");
+
+        assertEquals(2, JsonParser.parseString(Files.readString(file)).getAsJsonArray().size());
     }
 }

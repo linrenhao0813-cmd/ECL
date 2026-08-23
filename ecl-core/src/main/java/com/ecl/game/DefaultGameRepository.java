@@ -1,5 +1,6 @@
 package com.ecl.game;
 
+import com.ecl.util.FileUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -9,12 +10,6 @@ import java.util.stream.Stream;
 
 /** Filesystem-backed version metadata and instance path policy. */
 public final class DefaultGameRepository implements GameRepository {
-    private static final java.util.regex.Pattern INVALID_INSTANCE_CHARACTERS =
-            java.util.regex.Pattern.compile("[<>:\"/\\\\|?*\\x00-\\x1F]");
-    private static final java.util.Set<String> RESERVED_INSTANCE_NAMES = java.util.Set.of(
-            "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5",
-            "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
-            "LPT6", "LPT7", "LPT8", "LPT9", "MODPACK", "MINECRAFTINSTANCE", "MANIFEST");
     private final Path versionsDirectory;
     private final Path sharedGameDirectory;
     private final VersionRepository versions;
@@ -138,14 +133,11 @@ public final class DefaultGameRepository implements GameRepository {
     }
 
     private static String requireSafeVersionId(String versionId) {
-        String trimmed = versionId == null ? "" : versionId.trim();
-        String stem = trimmed.contains(".") ? trimmed.substring(0, trimmed.indexOf('.')) : trimmed;
-        if (trimmed.isBlank() || trimmed.contains("..")
-                || INVALID_INSTANCE_CHARACTERS.matcher(trimmed).find()
-                || trimmed.endsWith(".") || trimmed.endsWith(" ")
-                || RESERVED_INSTANCE_NAMES.contains(stem.toUpperCase(java.util.Locale.ROOT))) {
-            throw new IllegalArgumentException("Invalid version id");
+        try {
+            FileUtil.requireSafeVersionId(versionId);
+            return versionId.trim();
+        } catch (IOException error) {
+            throw new IllegalArgumentException("Invalid version id", error);
         }
-        return trimmed;
     }
 }

@@ -98,6 +98,26 @@ class ModFileDownloadServiceTest {
         }
     }
 
+    @Test
+    void rejectsNonHttpDownloadSchemes(@TempDir Path tempDirectory) throws Exception {
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            ModDownloadRequest request = new ModDownloadRequest(
+                    URI.create("file:///etc/passwd"), "unsafe.jar",
+                    tempDirectory.resolve("unsafe.jar"), Map.of(), 0);
+            var result = new ModFileDownloadService(executor, new HashVerifier())
+                    .downloadAll(List.of(request), null);
+
+            ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> result.get(5, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof IOException
+                    || failure.getCause().getCause() instanceof IOException);
+            assertFalse(Files.exists(request.temporaryFile()));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private static void respond(com.sun.net.httpserver.HttpExchange exchange, byte[] body)
             throws IOException {
         exchange.sendResponseHeaders(200, body.length);

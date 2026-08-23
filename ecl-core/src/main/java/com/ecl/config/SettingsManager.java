@@ -29,13 +29,21 @@ import org.slf4j.LoggerFactory;
 public class SettingsManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(SettingsManager.class);
     private static final Gson GSON = GsonProvider.pretty();
-    private static final File SETTINGS_FILE = new File(com.ecl.ECLConfig.getBaseDir(), "settings.json");
+    private final File settingsFile;
 
     private JsonObject settings = new JsonObject();
     private boolean loadAttempted;
     private final EncryptedSettingsStore encryptedStore = new EncryptedSettingsStore();
     private final SettingsAutoSaveScheduler autoSaveScheduler =
             new SettingsAutoSaveScheduler(this::save);
+
+    public SettingsManager() {
+        this(new File(com.ecl.ECLConfig.getBaseDir(), "settings.json"));
+    }
+
+    SettingsManager(File settingsFile) {
+        this.settingsFile = Objects.requireNonNull(settingsFile, "settingsFile");
+    }
 
     /**
      * Persist future {@code set*} / {@code remove} changes automatically after a short debounce.
@@ -55,13 +63,20 @@ public class SettingsManager {
 
     public synchronized void load() {
         loadAttempted = true;
-        if (SETTINGS_FILE.exists()) {
-            try (Reader reader = Files.newBufferedReader(SETTINGS_FILE.toPath(), StandardCharsets.UTF_8)) {
+        if (settingsFile.exists()) {
+            try (Reader reader = Files.newBufferedReader(settingsFile.toPath(), StandardCharsets.UTF_8)) {
                 settings = JsonParser.parseReader(reader).getAsJsonObject();
                 // 兼容迁移：旧键 "versionCategory" → "versionCategory2"
                 migrateSettingKey("versionCategory", "versionCategory2");
             } catch (Exception e) {
-                LOGGER.warn("Failed to load settings from {}", SETTINGS_FILE, e);
+                Path corrupt = settingsFile.toPath().resolveSibling(settingsFile.getName() + ".corrupt");
+                try {
+                    Files.move(settingsFile.toPath(), corrupt, StandardCopyOption.REPLACE_EXISTING);
+                    LOGGER.warn("Moved unreadable settings file to {}", corrupt, e);
+                } catch (IOException backupFailure) {
+                    e.addSuppressed(backupFailure);
+                    LOGGER.warn("Failed to back up unreadable settings file {}", settingsFile, e);
+                }
                 settings = new JsonObject();
             }
         } else {
@@ -71,13 +86,14 @@ public class SettingsManager {
 
     public synchronized boolean save() {
         ensureLoaded();
+        long savedVersion = autoSaveScheduler.currentVersion();
         Path tempFile = null;
         try {
-            File parent = SETTINGS_FILE.getParentFile();
+            File parent = settingsFile.getParentFile();
             if (parent != null && !parent.exists()) {
                 Files.createDirectories(parent.toPath());
             }
-            Path target = SETTINGS_FILE.toPath();
+            Path target = settingsFile.toPath();
             Path parentPath = target.toAbsolutePath().getParent();
             tempFile = Files.createTempFile(parentPath, "settings-", ".json.tmp");
             try (Writer writer = Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8)) {
@@ -88,10 +104,10 @@ public class SettingsManager {
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
             }
-            autoSaveScheduler.markClean();
+            autoSaveScheduler.markClean(savedVersion);
             return true;
         } catch (IOException e) {
-            LOGGER.error("Failed to save settings to {}", SETTINGS_FILE, e);
+            LOGGER.error("Failed to save settings to {}", settingsFile, e);
             return false;
         } finally {
             if (tempFile != null) {

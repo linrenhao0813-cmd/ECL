@@ -12,6 +12,8 @@ import java.util.concurrent.CompletableFuture;
 
 /** Executes synchronous and asynchronous HTTP requests. */
 final class HttpRequestExecutor {
+    static final int DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+
     private HttpRequestExecutor() {
     }
 
@@ -19,12 +21,22 @@ final class HttpRequestExecutor {
                                      Map<String, String> headers) throws IOException {
         return request(method, url, contentType, body, headers,
                 HttpClientProvider.DEFAULT_CONNECT_TIMEOUT_MS,
-                HttpClientProvider.DEFAULT_READ_TIMEOUT_MS);
+                HttpClientProvider.DEFAULT_READ_TIMEOUT_MS, DEFAULT_MAX_RESPONSE_BYTES);
     }
 
     static HttpUtil.Response request(String method, String url, String contentType, String body,
                                      Map<String, String> headers, int connectTimeout,
                                      int readTimeout) throws IOException {
+        return request(method, url, contentType, body, headers,
+                connectTimeout, readTimeout, DEFAULT_MAX_RESPONSE_BYTES);
+    }
+
+    static HttpUtil.Response request(String method, String url, String contentType, String body,
+                                     Map<String, String> headers, int connectTimeout,
+                                     int readTimeout, int maxResponseBytes) throws IOException {
+        if (maxResponseBytes <= 0) {
+            throw new IllegalArgumentException("maxResponseBytes must be positive");
+        }
         DownloadRateLimiter.checkInterrupted();
         HttpRequest.Builder builder = baseRequest(url, readTimeout, headers);
         if (contentType != null) {
@@ -36,7 +48,14 @@ final class HttpRequestExecutor {
                     .forConnectTimeout(connectTimeout)
                     .send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
             URI resolvedUri = response.uri();
-            return new HttpUtil.Response(response.statusCode(), readStream(response.body()),
+            long declaredLength = response.headers().firstValueAsLong("Content-Length")
+                    .orElse(-1L);
+            if (declaredLength > maxResponseBytes) {
+                response.body().close();
+                throw new IOException("HTTP response exceeds " + maxResponseBytes + " bytes: " + url);
+            }
+            return new HttpUtil.Response(response.statusCode(),
+                    readStream(response.body(), maxResponseBytes),
                     resolvedUri == null ? url : resolvedUri.toString(),
                     response.headers().map());
         } catch (InterruptedException interrupted) {
@@ -165,11 +184,34 @@ final class HttpRequestExecutor {
 
     /** Reads and closes a response stream. */
     static String readStream(InputStream inputStream) throws IOException {
+        return readStream(inputStream, DEFAULT_MAX_RESPONSE_BYTES);
+    }
+
+    static String readStream(InputStream inputStream, int maxBytes) throws IOException {
         if (inputStream == null) {
             return "";
         }
+        if (maxBytes <= 0) {
+            throw new IllegalArgumentException("maxBytes must be positive");
+        }
         try (InputStream input = inputStream) {
-            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            byte[] buffer = new byte[Math.min(64 * 1024, maxBytes + 1)];
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream(
+                    Math.min(maxBytes, 64 * 1024));
+            int total = 0;
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read == 0) {
+                    continue;
+                }
+                DownloadRateLimiter.acquire(read);
+                if (read > maxBytes - total) {
+                    throw new IOException("HTTP response exceeds " + maxBytes + " bytes");
+                }
+                output.write(buffer, 0, read);
+                total += read;
+            }
+            return output.toString(StandardCharsets.UTF_8);
         }
     }
 

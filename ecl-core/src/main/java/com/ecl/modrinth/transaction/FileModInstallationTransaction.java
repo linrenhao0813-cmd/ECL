@@ -1,5 +1,6 @@
 package com.ecl.modrinth.transaction;
 
+import com.ecl.util.FileLockLease;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -29,6 +30,7 @@ public final class FileModInstallationTransaction implements ModInstallationTran
     private final Path temporaryDirectory;
     private final Path backupDirectory;
     private final List<Stage> stages = new ArrayList<>();
+    private FileLockLease directoryLock;
     private boolean committed;
     private boolean closed;
 
@@ -41,6 +43,10 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         Files.createDirectories(transactionRoot);
         this.temporaryDirectory = Files.createDirectory(
                 transactionRoot.resolve(UUID.randomUUID().toString()));
+        this.directoryLock = FileLockLease.tryAcquire(lockFile(temporaryDirectory));
+        if (directoryLock == null) {
+            throw new IOException("Unable to lock new mod transaction: " + temporaryDirectory);
+        }
         this.backupDirectory = temporaryDirectory.resolve("backups");
         Files.createDirectories(backupDirectory);
     }
@@ -87,6 +93,7 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         if (stages.isEmpty()) {
             committed = true;
             cleanupDirectory(temporaryDirectory);
+            releaseDirectoryLock();
             return;
         }
         List<JournalEntry> entries = prepareEntries();
@@ -109,6 +116,7 @@ public final class FileModInstallationTransaction implements ModInstallationTran
             }
             throw e;
         }
+        releaseDirectoryLock();
     }
 
     private List<JournalEntry> prepareEntries() {
@@ -171,6 +179,7 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         }
         try {
             cleanupDirectory(temporaryDirectory);
+            releaseDirectoryLock();
         } catch (IOException e) {
             LOGGER.warn("Failed to clean transaction directory {}", temporaryDirectory, e);
         }
@@ -222,7 +231,13 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         }
         try (var directories = Files.list(transactionRoot)) {
             for (Path directory : directories.filter(Files::isDirectory).toList()) {
-                recoverDirectory(gameRoot, directory);
+                try (FileLockLease lock = FileLockLease.tryAcquire(lockFile(directory))) {
+                    if (lock == null) {
+                        LOGGER.debug("Skipping active mod transaction {}", directory);
+                        continue;
+                    }
+                    recoverDirectory(gameRoot, directory);
+                }
             }
         }
     }
@@ -324,6 +339,17 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         }
     }
 
+    private static Path lockFile(Path directory) {
+        return directory.resolveSibling(directory.getFileName() + ".lock");
+    }
+
+    private void releaseDirectoryLock() throws IOException {
+        if (directoryLock != null) {
+            directoryLock.close();
+            directoryLock = null;
+        }
+    }
+
     private static Path normalizeRequired(Path value, String name) {
         return Objects.requireNonNull(value, name).toAbsolutePath().normalize();
     }
@@ -344,6 +370,11 @@ public final class FileModInstallationTransaction implements ModInstallationTran
     public synchronized void close() {
         if (!committed) {
             rollback();
+        }
+        try {
+            releaseDirectoryLock();
+        } catch (IOException error) {
+            LOGGER.warn("Failed to release mod transaction lock {}", temporaryDirectory, error);
         }
         closed = true;
     }

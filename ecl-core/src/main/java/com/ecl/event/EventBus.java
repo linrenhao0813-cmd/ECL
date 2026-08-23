@@ -92,7 +92,12 @@ public final class EventBus {
                     EventHandler<Event> cast = (EventHandler<Event>) handler;
                     cast.handle(event);
                 } catch (Throwable error) {
-                    errorSink.accept(event, error);
+                    try {
+                        errorSink.accept(event, error);
+                    } catch (Throwable sinkFailure) {
+                        LOGGER.warn("Event error sink failed for {}", event.name(), sinkFailure);
+                        LOGGER.warn("Original event handler failure for {}", event.name(), error);
+                    }
                 }
             }
         });

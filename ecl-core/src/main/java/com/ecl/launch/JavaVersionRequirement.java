@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
  * {@code javaVersion.majorVersion} declared in the metadata; when the metadata omits it, falls back
  * to recognising well-known release and snapshot version shapes.
  */
-final class JavaVersionRequirement {
+public final class JavaVersionRequirement {
 
     private static final Pattern RELEASE_VERSION_PATTERN =
             Pattern.compile("^(\\d+)\\.(\\d+)(?:\\.(\\d+))?(?:[-+_].*)?$");
@@ -30,7 +30,7 @@ final class JavaVersionRequirement {
         return inferFromVersionId(metadata.id());
     }
 
-    static int inferFromVersionId(String versionId) {
+    public static int inferFromVersionId(String versionId) {
         int[] release = parseReleaseVersion(versionId);
         if (release != null) {
             int minor = release[1];
@@ -38,7 +38,10 @@ final class JavaVersionRequirement {
             if (minor > 20 || minor == 20 && patch >= 5) {
                 return 21;
             }
-            return minor >= 18 ? 17 : 8;
+            if (minor >= 18) {
+                return 17;
+            }
+            return minor == 17 ? 16 : 8;
         }
 
         int[] snapshot = parseSnapshotVersion(versionId);
@@ -50,7 +53,10 @@ final class JavaVersionRequirement {
         if (year > 24 || year == 24 && week >= 14) {
             return 21;
         }
-        return year > 21 || year == 21 && week >= 37 ? 17 : 8;
+        if (year > 21 || year == 21 && week >= 37) {
+            return 17;
+        }
+        return year == 21 && week >= 19 ? 16 : 8;
     }
 
     private static int[] parseReleaseVersion(String id) {

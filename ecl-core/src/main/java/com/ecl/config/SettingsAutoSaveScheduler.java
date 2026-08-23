@@ -18,37 +18,63 @@ final class SettingsAutoSaveScheduler implements AutoCloseable {
     private volatile boolean enabled;
     private volatile boolean dirty;
     private volatile ScheduledFuture<?> pending;
+    private long changeVersion;
+    private boolean closed;
 
     SettingsAutoSaveScheduler(Runnable saveAction) {
         this.saveAction = saveAction;
     }
 
-    void enable() {
+    synchronized void enable() {
         enabled = true;
     }
 
-    void markDirty() {
-        if (!enabled) {
+    synchronized void markDirty() {
+        changeVersion++;
+        if (!enabled || closed) {
             return;
         }
         dirty = true;
-        ScheduledFuture<?> current = pending;
-        if (current != null && !current.isDone()) {
+        if (pending != null && !pending.isDone()) {
             return;
         }
-        pending = executor.schedule(saveAction, AUTO_SAVE_DELAY_MS, TimeUnit.MILLISECONDS);
+        scheduleLocked();
     }
 
     boolean isDirty() {
         return dirty;
     }
 
-    void markClean() {
-        dirty = false;
+    synchronized long currentVersion() {
+        return changeVersion;
+    }
+
+    synchronized void markClean(long savedVersion) {
+        if (savedVersion == changeVersion) {
+            dirty = false;
+        }
+    }
+
+    private void runSave() {
+        try {
+            saveAction.run();
+        } finally {
+            synchronized (this) {
+                pending = null;
+                if (dirty && enabled && !closed) {
+                    scheduleLocked();
+                }
+            }
+        }
+    }
+
+    private void scheduleLocked() {
+        pending = executor.schedule(this::runSave, AUTO_SAVE_DELAY_MS, TimeUnit.MILLISECONDS);
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        closed = true;
         ScheduledFuture<?> current = pending;
         if (current != null) {
             current.cancel(false);

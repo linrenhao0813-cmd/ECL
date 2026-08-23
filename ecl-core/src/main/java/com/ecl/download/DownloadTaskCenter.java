@@ -1,7 +1,5 @@
 package com.ecl.download;
 
-import com.ecl.util.HttpUtil;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -76,7 +74,6 @@ public final class DownloadTaskCenter implements AutoCloseable {
     private int maxConcurrent;
     private int runningCount;
     private long bandwidthLimitBytesPerSecond;
-    private final long previousRateLimitBytesPerSecond;
     private boolean closed;
 
     public DownloadTaskCenter() {
@@ -86,8 +83,6 @@ public final class DownloadTaskCenter implements AutoCloseable {
     public DownloadTaskCenter(int maxConcurrent, long bandwidthLimitBytesPerSecond) {
         this.maxConcurrent = clampConcurrency(maxConcurrent);
         this.bandwidthLimitBytesPerSecond = Math.max(0, bandwidthLimitBytesPerSecond);
-        this.previousRateLimitBytesPerSecond = HttpUtil.getDownloadRateLimitBytesPerSecond();
-        HttpUtil.setDownloadRateLimitBytesPerSecond(this.bandwidthLimitBytesPerSecond);
     }
 
     public <T> TaskHandle<T> submit(String title, Operation<T> operation) {
@@ -186,7 +181,6 @@ public final class DownloadTaskCenter implements AutoCloseable {
         synchronized (lock) {
             bandwidthLimitBytesPerSecond = normalized;
         }
-        HttpUtil.setDownloadRateLimitBytesPerSecond(normalized);
     }
 
     public boolean cancel(String taskId) {
@@ -212,7 +206,10 @@ public final class DownloadTaskCenter implements AutoCloseable {
                 entry.detail = "正在取消";
                 entry.updatedAtMillis = System.currentTimeMillis();
             }
-            if (entry.runner != null) entry.runner.interrupt();
+            if ((entry.status == Status.RUNNING || entry.status == Status.CANCELLING)
+                    && entry.runner != null) {
+                entry.runner.interrupt();
+            }
             changed = true;
         }
         runCancellation(cancellationHook);
@@ -360,6 +357,27 @@ public final class DownloadTaskCenter implements AutoCloseable {
         pump();
     }
 
+    boolean registerRunner(DownloadTaskEntry<?> entry, Thread runner) {
+        synchronized (lock) {
+            if (entry.status != Status.RUNNING && entry.status != Status.CANCELLING) {
+                return false;
+            }
+            entry.runner = runner;
+            if (entry.cancelRequested) {
+                runner.interrupt();
+            }
+            return true;
+        }
+    }
+
+    void clearRunner(DownloadTaskEntry<?> entry, Thread runner) {
+        synchronized (lock) {
+            if (entry.runner == runner) {
+                entry.runner = null;
+            }
+        }
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void complete(DownloadTaskEntry<?> entry, Object result) {
         ((CompletableFuture) entry.completion).complete(result);
@@ -398,8 +416,6 @@ public final class DownloadTaskCenter implements AutoCloseable {
         }
         cancelAll();
         executor.close();
-        // 限速是进程级共享状态：本实例退出时恢复其创建前的值，避免误清其他实例的配置。
-        HttpUtil.setDownloadRateLimitBytesPerSecond(previousRateLimitBytesPerSecond);
     }
 
     public static final class TaskHandle<T> {

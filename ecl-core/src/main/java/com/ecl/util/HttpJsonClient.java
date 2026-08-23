@@ -64,12 +64,20 @@ final class HttpJsonClient {
     }
 
     static JsonObject getJson(String url) throws IOException {
-        return JsonParser.parseString(get(url)).getAsJsonObject();
+        try {
+            return JsonParser.parseString(get(url)).getAsJsonObject();
+        } catch (RuntimeException parseFailure) {
+            throw new IOException("Invalid JSON response from " + url, parseFailure);
+        }
     }
 
     static JsonObject getJsonWithMirrors(String url, DownloadSourceCallback callback)
             throws IOException {
-        return JsonParser.parseString(getWithMirrors(url, callback)).getAsJsonObject();
+        try {
+            return JsonParser.parseString(getWithMirrors(url, callback)).getAsJsonObject();
+        } catch (RuntimeException parseFailure) {
+            throw new IOException("Invalid JSON response from " + url, parseFailure);
+        }
     }
 
     private static int timeoutFor(boolean mirror) {

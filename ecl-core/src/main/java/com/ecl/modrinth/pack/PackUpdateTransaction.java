@@ -1,5 +1,6 @@
 package com.ecl.modrinth.pack;
 
+import com.ecl.util.FileLockLease;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -39,6 +40,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
     private final Path backupDirectory;
     private final List<Stage> stages = new ArrayList<>();
     private final int failAfterAppliedEntries;
+    private FileLockLease directoryLock;
     private boolean committed;
     private boolean closed;
 
@@ -63,6 +65,10 @@ public final class PackUpdateTransaction implements AutoCloseable {
         Files.createDirectories(transactionRoot);
         this.transactionDirectory = Files.createDirectory(
                 transactionRoot.resolve(this.instanceRoot.getFileName() + "-" + UUID.randomUUID()));
+        this.directoryLock = FileLockLease.tryAcquire(lockFile(transactionDirectory));
+        if (directoryLock == null) {
+            throw new IOException("Unable to lock new pack transaction: " + transactionDirectory);
+        }
         this.stagingDirectory = Files.createDirectory(transactionDirectory.resolve("staged"));
         this.backupDirectory = Files.createDirectory(transactionDirectory.resolve("backups"));
     }
@@ -109,7 +115,6 @@ public final class PackUpdateTransaction implements AutoCloseable {
             writeJournal(new Journal("APPLIED", entries));
             committed = true;
             cleanupDirectory(transactionDirectory);
-            cleanupTransactionRoot();
         } catch (IOException | RuntimeException error) {
             IOException rollbackFailure = rollbackEntries(entries);
             if (rollbackFailure != null) {
@@ -117,6 +122,8 @@ public final class PackUpdateTransaction implements AutoCloseable {
             }
             throw error;
         }
+        releaseDirectoryLock();
+        cleanupTransactionRoot();
     }
 
     private List<JournalEntry> prepareEntries() {
@@ -176,6 +183,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
         }
         try {
             cleanupDirectory(transactionDirectory);
+            releaseDirectoryLock();
             cleanupTransactionRoot();
         } catch (IOException error) {
             LOGGER.warn("Failed to clean pack transaction directory {}", transactionDirectory, error);
@@ -241,6 +249,17 @@ public final class PackUpdateTransaction implements AutoCloseable {
     }
 
     private static void recoverDirectory(Path instanceRoot, Path profileFile, Path directory)
+            throws IOException {
+        try (FileLockLease lock = FileLockLease.tryAcquire(lockFile(directory))) {
+            if (lock == null) {
+                LOGGER.debug("Skipping active pack transaction {}", directory);
+                return;
+            }
+            recoverLockedDirectory(instanceRoot, profileFile, directory);
+        }
+    }
+
+    private static void recoverLockedDirectory(Path instanceRoot, Path profileFile, Path directory)
             throws IOException {
         Path journalPath = directory.resolve(JOURNAL_FILE);
         if (!Files.isRegularFile(journalPath)) {
@@ -372,6 +391,17 @@ public final class PackUpdateTransaction implements AutoCloseable {
         }
     }
 
+    private static Path lockFile(Path directory) {
+        return directory.resolveSibling(directory.getFileName() + ".lock");
+    }
+
+    private void releaseDirectoryLock() throws IOException {
+        if (directoryLock != null) {
+            directoryLock.close();
+            directoryLock = null;
+        }
+    }
+
     private static String portable(Path path) {
         return path.toString().replace('\\', '/');
     }
@@ -386,6 +416,11 @@ public final class PackUpdateTransaction implements AutoCloseable {
     public synchronized void close() {
         if (!committed) {
             rollback();
+        }
+        try {
+            releaseDirectoryLock();
+        } catch (IOException error) {
+            LOGGER.warn("Failed to release pack transaction lock {}", transactionDirectory, error);
         }
         closed = true;
     }

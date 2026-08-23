@@ -44,7 +44,6 @@ final class GameDownloadBatchExecutor {
             }));
         }
 
-        IOException firstError = null;
         int completed = 0;
         try {
             while (completed < tasks.size()) {
@@ -55,9 +54,8 @@ final class GameDownloadBatchExecutor {
                     IOException failure = cause instanceof IOException
                             ? (IOException) cause
                             : new IOException(cause == null ? error : cause);
-                    if (firstError == null) {
-                        firstError = failure;
-                    }
+                    phaseTasks.forEach(task -> task.cancel(true));
+                    throw new IOException(phase + "下载失败: " + failure.getMessage(), failure);
                 }
                 completed++;
                 if (listener != null && (completed == tasks.size() || completed % 25 == 0)) {
@@ -73,9 +71,6 @@ final class GameDownloadBatchExecutor {
             }
         }
 
-        if (firstError != null) {
-            throw new IOException(phase + "下载失败: " + firstError.getMessage(), firstError);
-        }
     }
 
     private void downloadAndVerify(DownloadTask task,

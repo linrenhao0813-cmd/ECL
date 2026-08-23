@@ -24,18 +24,47 @@ public final class InstanceManager {
         Path sourceVersion = versionDirectory(sourceId); Path targetVersion = versionDirectory(targetId);
         Path sourceInstance = instanceDirectory(sourceId); Path targetInstance = instanceDirectory(targetId);
         requireSource(sourceVersion); requireUnused(targetVersion); requireUnused(targetInstance);
-        copyTree(sourceVersion, targetVersion);
-        if (Files.exists(sourceInstance)) copyTree(sourceInstance, targetInstance);
-        renameVersionJson(targetVersion, sourceId, targetId);
+        try {
+            copyTree(sourceVersion, targetVersion);
+            if (Files.exists(sourceInstance)) copyTree(sourceInstance, targetInstance);
+            renameVersionJson(targetVersion, sourceId, targetId);
+        } catch (IOException | RuntimeException failure) {
+            deleteCreatedTarget(targetInstance, failure);
+            deleteCreatedTarget(targetVersion, failure);
+            throw failure;
+        }
     }
 
     public void renameInstance(String sourceId, String targetId) throws IOException {
         Path sourceVersion = versionDirectory(sourceId); Path targetVersion = versionDirectory(targetId);
         Path sourceInstance = instanceDirectory(sourceId); Path targetInstance = instanceDirectory(targetId);
         requireSource(sourceVersion); requireUnused(targetVersion); requireUnused(targetInstance);
-        Files.createDirectories(targetVersion.getParent()); Files.move(sourceVersion, targetVersion);
-        if (Files.exists(sourceInstance)) { Files.createDirectories(targetInstance.getParent()); Files.move(sourceInstance, targetInstance); }
-        renameVersionJson(targetVersion, sourceId, targetId);
+        boolean versionMoved = false;
+        boolean instanceMoved = false;
+        try {
+            Files.createDirectories(targetVersion.getParent());
+            Files.move(sourceVersion, targetVersion);
+            versionMoved = true;
+            if (Files.exists(sourceInstance)) {
+                Files.createDirectories(targetInstance.getParent());
+                Files.move(sourceInstance, targetInstance);
+                instanceMoved = true;
+            }
+            renameVersionJson(targetVersion, sourceId, targetId);
+        } catch (IOException | RuntimeException failure) {
+            if (instanceMoved) {
+                rollbackMove(targetInstance, sourceInstance, failure);
+            }
+            if (versionMoved) {
+                rollbackMove(targetVersion, sourceVersion, failure);
+                try {
+                    renameVersionJson(sourceVersion, targetId, sourceId);
+                } catch (IOException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+            }
+            throw failure;
+        }
     }
 
     public void deleteInstance(String id) throws IOException {
@@ -57,10 +86,38 @@ public final class InstanceManager {
         Path oldFile = directory.resolve(oldId + ".json"); Path newFile = directory.resolve(newId + ".json");
         if (Files.isRegularFile(oldFile)) Files.move(oldFile, newFile, StandardCopyOption.REPLACE_EXISTING);
     }
+
+    private static void deleteCreatedTarget(Path target, Throwable failure) {
+        try {
+            if (Files.exists(target)) {
+                FileUtil.deleteDirectory(target);
+            }
+        } catch (IOException cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
+        }
+    }
+
+    private static void rollbackMove(Path moved, Path original, Throwable failure) {
+        try {
+            if (Files.exists(moved) && !Files.exists(original)) {
+                Files.createDirectories(original.getParent());
+                Files.move(moved, original);
+            }
+        } catch (IOException rollbackFailure) {
+            failure.addSuppressed(rollbackFailure);
+        }
+    }
+
     private static void copyTree(Path source, Path target) throws IOException {
         Files.walkFileTree(source, new SimpleFileVisitor<>() {
             @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException { Files.createDirectories(target.resolve(source.relativize(dir))); return FileVisitResult.CONTINUE; }
-            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException { Files.copy(file, target.resolve(source.relativize(file)), StandardCopyOption.COPY_ATTRIBUTES); return FileVisitResult.CONTINUE; }
+            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (!attrs.isSymbolicLink()) {
+                    Files.copy(file, target.resolve(source.relativize(file)),
+                            StandardCopyOption.COPY_ATTRIBUTES);
+                }
+                return FileVisitResult.CONTINUE;
+            }
         });
     }
 }

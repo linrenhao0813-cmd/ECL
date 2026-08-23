@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Field;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -102,6 +103,19 @@ class SettingsManagerTest {
 
         assertEquals("SNAPSHOT", manager.getString("versionCategory2", ""));
         assertFalse(settings.has("versionCategory"));
+    }
+
+    @Test
+    void corruptSettingsAreBackedUpBeforeReset() throws Exception {
+        Path file = tempDir.resolve("settings.json");
+        Files.writeString(file, "{not-json");
+        SettingsManager fileManager = new SettingsManager(file.toFile());
+
+        fileManager.load();
+
+        assertTrue(Files.exists(tempDir.resolve("settings.json.corrupt")));
+        assertFalse(Files.exists(file));
+        assertEquals("fallback", fileManager.getString("missing", "fallback"));
     }
 
     // ---- Type-safe SettingKey API ----

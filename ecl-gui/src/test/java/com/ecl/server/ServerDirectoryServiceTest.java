@@ -71,6 +71,23 @@ class ServerDirectoryServiceTest {
                 snapshot.servers().stream().map(PublicServer::address).toList());
     }
 
+    @Test
+    void statusKeysMatchThePreservedServerAddressCase() {
+        ServerDirectoryService service = new ServerDirectoryService(
+                temporaryDirectory.resolve("mixed-case.json"),
+                url -> response(1, 1,
+                        server("Mixed", "Play.Example.COM", "SMP"),
+                        server("Duplicate", "play.example.com", "PvP")));
+
+        ServerDirectoryService.DirectorySnapshot snapshot = service.load(true);
+        PublicServer server = snapshot.servers().getFirst();
+
+        assertEquals(1, snapshot.servers().size());
+        assertEquals("Play.Example.COM", server.address());
+        assertEquals(ServerStatusState.ONLINE,
+                snapshot.statuses().get(server.address()).state());
+    }
+
     private static JsonObject response(int page, int totalPages, JsonObject... servers) {
         JsonObject response = new JsonObject();
         JsonArray data = new JsonArray();

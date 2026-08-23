@@ -43,20 +43,36 @@ public final class MrpackInstaller {
 
     private final LoaderInstallation loaderInstallation;
     private final TransactionFactory transactionFactory;
+    private final java.util.Set<String> trustedDownloadHosts;
 
     public MrpackInstaller() {
-        this(new ModLoaderInstaller()::install, PackUpdateTransaction::new);
+        this(new ModLoaderInstaller()::install, PackUpdateTransaction::new,
+                java.util.Set.of("cdn.modrinth.com"));
+    }
+
+    public MrpackInstaller(java.util.Set<String> trustedDownloadHosts) {
+        this(new ModLoaderInstaller()::install, PackUpdateTransaction::new,
+                trustedDownloadHosts);
     }
 
     MrpackInstaller(ModLoaderInstaller loaderInstaller) {
-        this(loaderInstaller::install, PackUpdateTransaction::new);
+        this(loaderInstaller::install, PackUpdateTransaction::new,
+                java.util.Set.of("cdn.modrinth.com"));
     }
 
     MrpackInstaller(LoaderInstallation loaderInstallation, TransactionFactory transactionFactory) {
+        this(loaderInstallation, transactionFactory, java.util.Set.of("cdn.modrinth.com"));
+    }
+
+    private MrpackInstaller(LoaderInstallation loaderInstallation,
+                            TransactionFactory transactionFactory,
+                            java.util.Set<String> trustedDownloadHosts) {
         this.loaderInstallation = java.util.Objects.requireNonNull(
                 loaderInstallation, "loaderInstallation");
         this.transactionFactory = java.util.Objects.requireNonNull(
                 transactionFactory, "transactionFactory");
+        this.trustedDownloadHosts = java.util.Set.copyOf(
+                java.util.Objects.requireNonNull(trustedDownloadHosts, "trustedDownloadHosts"));
     }
 
     /** Install the client files and overrides from an MRPACK into an existing staging directory. */
@@ -77,7 +93,8 @@ public final class MrpackInstaller {
                     index, "整合包索引缺少 dependencies");
             MrpackDependencyResolver.requireMinecraftVersion(
                     dependencies, "MRPACK does not declare a Minecraft version");
-            int installed = MrpackFileInstaller.installIndexedFiles(index, root, safeListener);
+            int installed = MrpackFileInstaller.installIndexedFiles(
+                    index, root, safeListener, trustedDownloadHosts);
             MrpackOverrideExtractor.ExtractionBudget budget =
                     new MrpackOverrideExtractor.ExtractionBudget();
             installed += MrpackOverrideExtractor.extract(zip, "overrides/", root, budget);
@@ -136,7 +153,8 @@ public final class MrpackInstaller {
                     ".ecl-pack-install-" + profileId + "-");
             try {
                 safeListener.onStatus("正在安装整合包文件...");
-                int fileCount = MrpackFileInstaller.installIndexedFiles(index, staging, safeListener);
+                int fileCount = MrpackFileInstaller.installIndexedFiles(
+                        index, staging, safeListener, trustedDownloadHosts);
                 MrpackOverrideExtractor.ExtractionBudget extractionBudget =
                         new MrpackOverrideExtractor.ExtractionBudget();
                 MrpackOverrideExtractor.extract(zip, "overrides/", staging, extractionBudget);

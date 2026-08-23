@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -101,6 +102,12 @@ public final class ModFileDownloadService {
         if (downloadUri == null || downloadUri.getScheme() == null) {
             throw new java.util.concurrent.CompletionException(
                     new IOException("无法解析模组下载地址: " + request.fileName()));
+        }
+        String scheme = downloadUri.getScheme().toLowerCase(Locale.ROOT);
+        if (!("http".equals(scheme) || "https".equals(scheme))
+                || downloadUri.getHost() == null || downloadUri.getUserInfo() != null) {
+            throw new java.util.concurrent.CompletionException(
+                    new IOException("拒绝不安全的模组下载地址: " + request.fileName()));
         }
         RuntimeException failure = null;
         for (int attempt = 1; attempt <= 2; attempt++) {

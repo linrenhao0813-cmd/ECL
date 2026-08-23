@@ -6,7 +6,6 @@ javafx = "21"
 junit = "5.11.4"
 jna = "5.15.0"
 logback = "1.5.16"
-picocli = "4.7.6"
 slf4j = "2.0.16"
 spotbugs-plugin = "6.0.26"
 
@@ -17,7 +16,6 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
-picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 
 [plugins]

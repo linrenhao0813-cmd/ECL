@@ -136,8 +136,10 @@ public final class ServerDirectoryService {
             if (parsed == null) {
                 continue;
             }
-            servers.putIfAbsent(parsed.server().address().toLowerCase(Locale.ROOT), parsed.server());
-            statuses.put(parsed.server().address(), parsed.status());
+            String addressKey = parsed.server().address().toLowerCase(Locale.ROOT);
+            if (servers.putIfAbsent(addressKey, parsed.server()) == null) {
+                statuses.put(parsed.server().address(), parsed.status());
+            }
         }
         return new DirectorySnapshot(List.copyOf(servers.values()), Map.copyOf(statuses),
                 fetchedAt, cached);

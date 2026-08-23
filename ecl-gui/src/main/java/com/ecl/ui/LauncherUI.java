@@ -2463,7 +2463,11 @@ public class LauncherUI extends javafx.application.Application {
                     File installArchive = result.getMainFile();
                     boolean converted = source == ContentSource.CURSEFORGE;
                     if (converted) {
-                        dialogStatus.setText("正在解析 CurseForge 整合包清单...");
+                        Platform.runLater(() -> {
+                            if (generation == downloadGeneration.get()) {
+                                dialogStatus.setText("正在解析 CurseForge 整合包清单...");
+                            }
+                        });
                         installArchive = controller.curseForgeDownloader()
                                 .convertModpackToMrpack(result.getMainFile());
                     }
