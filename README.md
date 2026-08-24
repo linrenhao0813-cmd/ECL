@@ -19,11 +19,13 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖游戏版本�
 - 浏览公开 Minecraft 服务器目录，搜索、查看在线状态、复制地址或作为直连地址启动。
 - 自动选择合适的 Java；本机缺少匹配运行时时可下载 Eclipse Temurin JRE。
 - 按实例保存 Java 路径、内存模式、最大内存和自定义 JVM 参数；在高级设置中编辑已选择实例时会同步更新该实例配置。
-- 提供启动日志、崩溃中文诊断、世界备份、浅色/深色主题和简体中文、繁体中文、英文切换；首页与服务器页面的主要界面文案已纳入语言资源。
+- 首页按实例展示累计游玩时长、最近启动时间和启动次数；打包版可为所选实例创建桌面或开始菜单快捷方式。
+- 提供启动日志、崩溃中文诊断、诊断包导出、世界备份、浅色/深色主题和简体中文、繁体中文、英文切换；首页与服务器页面的主要界面文案已纳入语言资源。
 
 ## 实例配置与操作基础
 
 - 实例启动配置保存在 `<实例目录>/.ecl/config/launch-profile.json`，采用带 `schemaVersion` 的 UTF-8 JSON，并通过临时文件与原子替换写入。
+- 游玩时长、启动次数和最近启动记录保存在 `<实例目录>/.ecl/config/playtime.json`。
 - 实例第一次读取启动配置时，会迁移现有全局 `javaPath`、`maxMemoryMb` 和 `jvmArgs`；旧全局设置继续保留，作为其他尚未迁移实例的默认值。
 - Mod 安装、启用、禁用、卸载、索引修复和整合包更新共享实例操作协调器；同一实例的文件变更会串行执行，不同实例互不阻塞。
 - 协调器支持为自动修复、备份恢复等语义化操作生成 `operationId`，并将运行中、成功或失败状态写入 `<实例目录>/.ecl/operations/`。自动修复执行器和对应界面仍属于后续开发内容。
@@ -39,13 +41,15 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖游戏版本�
 
 ## 快速开始
 
-在仓库根目录执行：
+获取源码并在仓库根目录启动：
 
 ```powershell
+git clone https://github.com/linrenhao0813-cmd/ECL.git
+cd ECL
 .\gradlew.bat run
 ```
 
-首次构建会下载 Gradle 与项目依赖。运行启动器、登录、下载游戏或在线内容时也需要网络连接。
+首次构建会通过 Gradle Wrapper 下载 Gradle 8.5 与项目依赖。运行启动器、登录、下载游戏或在线内容时也需要网络连接。
 
 ## 环境要求
 
@@ -99,6 +103,16 @@ ecl-boot/build/install/ECL/
 
 GitHub Actions 会在 Windows 上执行 `build check`，并生成 Windows 应用镜像作为工作流产物。
 
+### 界面快照
+
+需要对启动器首页进行视觉检查时，可生成固定状态的 JavaFX 界面快照：
+
+```powershell
+.\gradlew.bat captureLauncherUi
+```
+
+默认输出为 `ecl-gui/build/visual-qa/ecl-home.png`。该任务使用隔离的数据目录，不会读取或修改当前用户的 ECL 配置。
+
 ### 原生应用镜像
 
 以下任务使用 Windows JDK 21 自带的 `jpackage.exe`，并会先构建分发目录：
@@ -138,7 +152,7 @@ config/    Checkstyle 与 SpotBugs 配置
 ## 技术栈
 
 - Java 21、JavaFX 21、Gradle 8.5
-- Gson、Jackson
+- Gson、Jackson、JNA、TwelveMonkeys ImageIO
 - SLF4J 与 Logback
 - JUnit 5、Checkstyle、SpotBugs、JaCoCo
 
