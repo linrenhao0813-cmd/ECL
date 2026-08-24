@@ -31,10 +31,14 @@ final class LaunchAuthFactory {
 
         if (LauncherUI.AUTH_YGGDRASIL.equals(authType)) {
             String effectivePassword = password;
-            if (effectivePassword == null || effectivePassword.isBlank()) {
-                effectivePassword = ui.settingsManager.getEncrypted(
-                        yggdrasilCredentialKey(server, username));
-            }
+                if (effectivePassword == null || effectivePassword.isBlank()) {
+                    effectivePassword = ui.settingsManager.getEncrypted(
+                            yggdrasilCredentialKey(server, username));
+                    if (ui.settingsManager.consumeUnreadableEncryptedSetting() != null) {
+                        Platform.runLater(() -> ui.setStatus("保存的登录凭证不可读取",
+                                "外置账户密码解密失败，请重新输入密码并登录。"));
+                    }
+                }
             if (server.isBlank() || username.isBlank()
                     || effectivePassword == null || effectivePassword.isBlank()) {
                 throw new IllegalArgumentException("请填写完整的外置登录信息。");

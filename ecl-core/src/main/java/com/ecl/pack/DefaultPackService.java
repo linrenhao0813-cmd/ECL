@@ -287,6 +287,9 @@ public final class DefaultPackService implements PackService {
     private static String safeName(String name) throws IOException {
         String value = name == null ? "" : name.trim();
         FileUtil.requireSafeVersionId(value);
+        if (value.chars().anyMatch(character -> "?*\"<>|".indexOf(character) >= 0)) {
+            throw new IOException("Pack name contains characters that are invalid on Windows: " + value);
+        }
         return value;
     }
 

@@ -50,7 +50,7 @@ final class LocalVersionProfileScanner {
                     continue;
                 }
                 profiles.add(new VersionManager.LocalVersionProfile(profileId, minecraftVersion, loader));
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 LOGGER.warn("Failed to inspect local version profile {}", profileId, e);
             }
         }
@@ -76,7 +76,11 @@ final class LocalVersionProfileScanner {
         if (mainClass.contains("quiltmc")) return "quilt";
         if (mainClass.contains("neoforge")) return "neoforge";
         if (mainClass.contains("forge")) return "forge";
-        JsonArray libraries = json.getAsJsonArray("libraries");
+        JsonElement librariesElement = json.get("libraries");
+        if (librariesElement == null || !librariesElement.isJsonArray()) {
+            return "";
+        }
+        JsonArray libraries = librariesElement.getAsJsonArray();
         if (libraries != null) {
             for (JsonElement element : libraries) {
                 if (!element.isJsonObject()) continue;

@@ -30,6 +30,10 @@ public final class LaunchOptions {
     private final File processOutputFile;
 
     private LaunchOptions(Builder builder) {
+        if (builder.minMemoryMb < 0 || builder.maxMemoryMb < 0
+                || builder.minMemoryMb > builder.maxMemoryMb) {
+            throw new IllegalArgumentException("Xms must not exceed Xmx and memory values must be non-negative");
+        }
         this.versionId = builder.versionId;
         this.auth = builder.auth;
         this.gameDirectory = builder.gameDirectory;

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -111,6 +112,26 @@ class GameProcessTest {
         assertTrue(replayed.await(5, TimeUnit.SECONDS));
         assertTrue(lines.contains("early-line"));
         gameProcess.close();
+    }
+
+    @Test
+    void mirrorsOutputToFileWithoutDisconnectingListeners() throws Exception {
+        Process process = new ProcessBuilder(
+                javaExecutable(), "-cp", System.getProperty("java.class.path"),
+                GameProcessTest.class.getName() + "$OneLineMain")
+                .directory(tempDir.toFile())
+                .redirectErrorStream(true)
+                .start();
+        Path outputFile = tempDir.resolve("game.log");
+        GameProcess gameProcess = new GameProcess(process, "logged", tempDir, outputFile.toFile());
+        List<String> lines = new CopyOnWriteArrayList<>();
+        gameProcess.attachOutputListener(lines::add);
+
+        gameProcess.whenExited().get(20, TimeUnit.SECONDS);
+        gameProcess.close();
+
+        assertTrue(lines.contains("early-line"));
+        assertTrue(Files.readString(outputFile).contains("early-line"));
     }
 
     /** Helper main that sleeps; used to verify force-termination of a live JVM. */

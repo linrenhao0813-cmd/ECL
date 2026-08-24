@@ -90,13 +90,13 @@ final class MrpackFileInstaller {
                                 public void onComplete(File file) {
                                 }
                             }, null, remainingBudget);
-                    verifyHashes(destination, item);
                     long downloadedSize = Files.size(destination);
                     if (downloadedSize != declaredSize) {
                         Files.deleteIfExists(destination);
                         throw new IOException(
                                 "MRPACK file size does not match its manifest: " + relative);
                     }
+                    verifyHashes(destination, item);
                     if (downloadedSize > MAX_INDEXED_FILE_BYTES
                             || downloadedSize > MAX_TOTAL_INDEXED_BYTES - totalBytes) {
                         Files.deleteIfExists(destination);
@@ -146,7 +146,7 @@ final class MrpackFileInstaller {
 
     private static void verifyHashes(Path file, JsonObject item) throws IOException {
         if (!item.has("hashes") || !item.get("hashes").isJsonObject()) {
-            return;
+            throw new IOException("MRPACK file is missing a usable hash: " + file.getFileName());
         }
         JsonObject hashes = item.getAsJsonObject("hashes");
         String algorithm;
@@ -158,7 +158,7 @@ final class MrpackFileInstaller {
             algorithm = "SHA-1";
             expected = hashes.get("sha1").getAsString();
         } else {
-            return;
+            throw new IOException("MRPACK file is missing a supported hash: " + file.getFileName());
         }
         try {
             MessageDigest digest = MessageDigest.getInstance(algorithm);

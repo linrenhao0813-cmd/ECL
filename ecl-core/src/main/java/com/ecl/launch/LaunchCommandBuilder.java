@@ -156,8 +156,7 @@ public final class LaunchCommandBuilder {
             }
         }
         if (args.isEmpty() && version.arguments().legacyMinecraftArguments() != null) {
-            String[] legacy = version.arguments().legacyMinecraftArguments().trim().split("\\s+");
-            for (String raw : legacy) {
+            for (String raw : splitLegacyArguments(version.arguments().legacyMinecraftArguments())) {
                 String argument = LaunchVariables.substitute(raw, variables);
                 if (!argument.isEmpty()) {
                     args.add(argument);
@@ -165,6 +164,42 @@ public final class LaunchCommandBuilder {
             }
         }
         return args;
+    }
+
+    static List<String> splitLegacyArguments(String rawArguments) {
+        if (rawArguments == null || rawArguments.isBlank()) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean quoted = false;
+        char quote = 0;
+        boolean escaped = false;
+        for (int index = 0; index < rawArguments.length(); index++) {
+            char character = rawArguments.charAt(index);
+            if (escaped) {
+                current.append(character);
+                escaped = false;
+            } else if (character == '\\' && quoted && index + 1 < rawArguments.length()
+                    && rawArguments.charAt(index + 1) == quote) {
+                escaped = true;
+            } else if ((character == '"' || character == '\'')
+                    && (!quoted || character == quote)) {
+                quoted = !quoted;
+                quote = quoted ? character : 0;
+            } else if (Character.isWhitespace(character) && !quoted) {
+                if (!current.isEmpty()) {
+                    result.add(current.toString());
+                    current.setLength(0);
+                }
+            } else {
+                current.append(character);
+            }
+        }
+        if (!current.isEmpty()) {
+            result.add(current.toString());
+        }
+        return List.copyOf(result);
     }
 
     private boolean matchRules(ArgumentToken.Conditional token) {

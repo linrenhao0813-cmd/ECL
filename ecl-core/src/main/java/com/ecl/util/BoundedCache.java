@@ -74,17 +74,25 @@ public final class BoundedCache<K, V> {
         return null;
     }
 
-    public synchronized V computeIfAbsent(K key, Function<? super K, ? extends V> factory) {
-        long now = ticker.getAsLong();
-        removeExpired(now);
-        Entry<V> existing = entries.get(key);
+    public V computeIfAbsent(K key, Function<? super K, ? extends V> factory) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(factory, "factory");
+        V existing = get(key);
         if (existing != null) {
-            return existing.value();
+            return existing;
         }
-        V value = Objects.requireNonNull(factory.apply(key), "computed value");
-        entries.put(Objects.requireNonNull(key, "key"), new Entry<>(value, now));
-        trimToLimit();
-        return value;
+        V computed = Objects.requireNonNull(factory.apply(key), "computed value");
+        synchronized (this) {
+            long now = ticker.getAsLong();
+            removeExpired(now);
+            Entry<V> current = entries.get(key);
+            if (current != null) {
+                return current.value();
+            }
+            entries.put(key, new Entry<>(computed, now));
+            trimToLimit();
+            return computed;
+        }
     }
 
     public synchronized boolean remove(K key, V value) {

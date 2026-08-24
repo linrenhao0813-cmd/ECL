@@ -1,6 +1,7 @@
 package com.ecl.config;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,8 +14,11 @@ final class SettingsMigration {
 
     static void migrateSettingKey(JsonObject settings, String oldKey, String newKey) {
         if (settings.has(oldKey) && !settings.has(newKey)) {
-            settings.add(newKey, settings.get(oldKey));
-            LOGGER.info("Migrated settings key '{}' to '{}'", oldKey, newKey);
+            JsonElement value = settings.get(oldKey);
+            if (value != null && !value.isJsonNull()) {
+                settings.add(newKey, value);
+                LOGGER.info("Migrated settings key '{}' to '{}'", oldKey, newKey);
+            }
         }
         settings.remove(oldKey);
     }

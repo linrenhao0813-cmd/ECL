@@ -77,8 +77,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CancellationException;
 import java.util.function.Function;
 import org.slf4j.Logger;
@@ -216,6 +218,7 @@ public class LauncherUI extends javafx.application.Application {
     final AtomicBoolean applicationStopping = new AtomicBoolean();
     volatile Process activeGameProcess;
     volatile String activeGameVersion;
+    final Map<Process, String> activeGameProcesses = new ConcurrentHashMap<>();
     private final LauncherProgressController progressController = new LauncherProgressController();
     private final LauncherNavigationRail navigationRail = new LauncherNavigationRail(this::setActiveView);
     private Animation contentTransition;
@@ -935,6 +938,7 @@ public class LauncherUI extends javafx.application.Application {
         AtomicLong searchGeneration = new AtomicLong();
         AtomicLong versionGeneration = new AtomicLong();
         AtomicLong downloadGeneration = new AtomicLong();
+        AtomicLong activeDownloadGeneration = new AtomicLong();
         AtomicLong descriptionGeneration = new AtomicLong();
 
         resultList.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, selected) -> {
@@ -993,7 +997,8 @@ public class LauncherUI extends javafx.application.Application {
             downloadSelectedContent(sourceCombo.getValue(), target,
                     resultList.getSelectionModel().getSelectedItem(),
                     versionComboBox.getValue(), instance, directory, status, progress,
-                    searchButton, downloadButton, targetProfileCombo, downloadGeneration);
+                    searchButton, downloadButton, targetProfileCombo, downloadGeneration,
+                    activeDownloadGeneration);
         });
 
         VBox browser = new VBox(12, heading, targetProfileCombo, searchBar, resultList,
@@ -1474,7 +1479,7 @@ public class LauncherUI extends javafx.application.Application {
         startProgressAnimation(downloadProgress);
         setStatus("正在安装加载器", loader.displayName() + " / Minecraft " + minecraftVersion);
         DownloadTaskCenter.TaskHandle<Void> loaderTask = downloadTaskCenter.submit(
-                "Loader " + loader.displayName(), context -> {
+                "Loader " + loader.displayName(), () -> context -> {
             try {
                 ModLoaderInstaller.InstallResult result = modLoaderInstaller.install(
                         minecraftVersion, loader, "", new ModLoaderInstaller.Listener() {
@@ -1872,6 +1877,32 @@ public class LauncherUI extends javafx.application.Application {
         }
     }
 
+    void registerActiveGameProcess(Process process, String version) {
+        if (process == null) {
+            return;
+        }
+        activeGameProcesses.put(process, version);
+        activeGameProcess = process;
+        activeGameVersion = version;
+    }
+
+    void unregisterActiveGameProcess(Process process) {
+        if (process == null) {
+            return;
+        }
+        activeGameProcesses.remove(process);
+        if (activeGameProcess == process) {
+            Map.Entry<Process, String> replacement = activeGameProcesses.entrySet().stream()
+                    .findFirst().orElse(null);
+            activeGameProcess = replacement == null ? null : replacement.getKey();
+            activeGameVersion = replacement == null ? null : replacement.getValue();
+        }
+    }
+
+    boolean hasRunningGameProcess() {
+        return activeGameProcesses.keySet().stream().anyMatch(Process::isAlive);
+    }
+
     private void showContentDownloadDialog(ContentTarget target) {
         List<String> profileIds = availableContentProfiles(target);
         if (profileIds.isEmpty()) {
@@ -1954,13 +1985,18 @@ public class LauncherUI extends javafx.application.Application {
         AtomicLong searchGeneration = new AtomicLong();
         AtomicLong versionGeneration = new AtomicLong();
         AtomicLong downloadGeneration = new AtomicLong();
+        AtomicLong activeDownloadGeneration = new AtomicLong();
         AtomicLong descriptionGeneration = new AtomicLong();
         dialog.setOnHidden(e -> {
             searchGeneration.incrementAndGet();
             versionGeneration.incrementAndGet();
             downloadGeneration.incrementAndGet();
             descriptionGeneration.incrementAndGet();
-            stopProgressAnimation(modProgress, true);
+            if (activeDownloadGeneration.getAndSet(0) != 0) {
+                stopProgressAnimation(modProgress, true);
+                stopProgressAnimation(downloadProgress, true);
+                setControlsBusy(false);
+            }
         });
 
         Label dialogStatus = new Label("正在加载 Modrinth 列表");
@@ -2070,7 +2106,8 @@ public class LauncherUI extends javafx.application.Application {
                     searchBtn,
                     importBtn,
                     targetProfileCombo,
-                    downloadGeneration);
+                    downloadGeneration,
+                    activeDownloadGeneration);
         });
 
         HBox actions = new HBox(10, importBtn, folderBtn, closeBtn);
@@ -2391,7 +2428,8 @@ public class LauncherUI extends javafx.application.Application {
             Button searchBtn,
             Button importBtn,
             ComboBox<String> targetProfileCombo,
-            AtomicLong downloadGeneration
+            AtomicLong downloadGeneration,
+            AtomicLong activeDownloadGeneration
     ) {
         if (project == null || selectedVersion == null) {
             dialogStatus.setText("请先选择一个" + target.title + "及其具体版本。");
@@ -2399,6 +2437,7 @@ public class LauncherUI extends javafx.application.Application {
         }
 
         long generation = downloadGeneration.incrementAndGet();
+        activeDownloadGeneration.set(generation);
         String loader = target.usesLoader() ? instance.loader() : null;
         String gameVersion = instance.minecraftVersion();
         setControlsBusy(true);
@@ -2415,7 +2454,7 @@ public class LauncherUI extends javafx.application.Application {
                         + " -> " + gameVersion + loaderLabel);
 
         DownloadTaskCenter.TaskHandle<Void> contentTask = downloadTaskCenter.submit(
-                "Content " + project.getTitle(), context -> {
+                "Content " + project.getTitle(), () -> context -> {
             if (generation != downloadGeneration.get()) {
                 // The download dialog was closed; do not start the transfer or touch the UI.
                 return null;
@@ -2516,6 +2555,7 @@ public class LauncherUI extends javafx.application.Application {
                     }
                     modProgress.setProgress(1);
                     downloadProgress.setProgress(1);
+                    activeDownloadGeneration.compareAndSet(generation, 0);
                     stopProgressAnimation(modProgress, false);
                     stopProgressAnimation(downloadProgress, true);
                     setControlsBusy(false);
@@ -2545,6 +2585,7 @@ public class LauncherUI extends javafx.application.Application {
                         return;
                     }
                     String message = cleanMessage(e);
+                    activeDownloadGeneration.compareAndSet(generation, 0);
                     stopProgressAnimation(modProgress, true);
                     stopProgressAnimation(downloadProgress, true);
                     setControlsBusy(false);

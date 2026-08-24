@@ -3,10 +3,12 @@ package com.ecl.task;
 import com.ecl.util.ThreadFactories;
 
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -64,7 +66,15 @@ public final class TaskExecutor implements AutoCloseable {
         dispatch(TaskEvent.queued(task));
         FutureTask<T> future = new FutureTask<>(new TaskRunner<>(task));
         task.attach(this);
-        executor.execute(future);
+        try {
+            executor.execute(future);
+        } catch (RejectedExecutionException rejected) {
+            task.detach();
+            dispatch(TaskEvent.failed(task, rejected));
+            CompletableFuture<T> failed = new CompletableFuture<>();
+            failed.completeExceptionally(rejected);
+            return new TaskFuture<>(task, failed);
+        }
         return new TaskFuture<>(task, future);
     }
 
@@ -162,6 +172,17 @@ public final class TaskExecutor implements AutoCloseable {
             if (!inProgress.add(node)) {
                 throw new TaskCancellationException("Cyclic task dependency at " + node.name());
             }
+            CompletableFuture<Object> shared = node.executionFuture();
+            if (!node.claimExecution()) {
+                try {
+                    return shared.get();
+                } catch (java.util.concurrent.ExecutionException failed) {
+                    throw rethrow(failed.getCause());
+                } finally {
+                    inProgress.remove(node);
+                    executed.add(node);
+                }
+            }
             try {
                 if (node.isCancelled()) {
                     throw TaskCancellationException.of(node);
@@ -181,8 +202,10 @@ public final class TaskExecutor implements AutoCloseable {
                 }
                 node.afterExecute();
                 dispatch(TaskEvent.finished(node));
+                shared.complete(result);
                 return result;
             } catch (Throwable failure) {
+                shared.completeExceptionally(failure);
                 if (isCancellation(failure)) {
                     dispatch(TaskEvent.cancelled(node));
                     if (failure instanceof InterruptedException interrupted) {

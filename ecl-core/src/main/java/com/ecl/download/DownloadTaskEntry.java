@@ -7,6 +7,7 @@ final class DownloadTaskEntry<T> {
     final String id;
     final String title;
     final DownloadTaskCenter.Operation<T> operation;
+    DownloadTaskCenter.OperationFactory<T> operationFactory;
     final CompletableFuture<T> completion = new CompletableFuture<>();
     final long createdAtMillis = System.currentTimeMillis();
     volatile Thread runner;
@@ -28,5 +29,6 @@ final class DownloadTaskEntry<T> {
         this.id = id;
         this.title = title;
         this.operation = operation;
+        this.operationFactory = () -> operation;
     }
 }

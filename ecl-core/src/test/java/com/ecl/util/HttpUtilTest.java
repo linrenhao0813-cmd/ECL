@@ -214,6 +214,32 @@ class HttpUtilTest {
     }
 
     @Test
+    void promotesACompletePartialWhenServerReturnsRangeNotSatisfiable(@TempDir Path tempDir)
+            throws IOException {
+        byte[] complete = "download-body".getBytes(StandardCharsets.UTF_8);
+        AtomicReference<String> range = new AtomicReference<>();
+        server.createContext("/complete-part", exchange -> {
+            range.set(exchange.getRequestHeaders().getFirst("Range"));
+            exchange.getResponseHeaders().add("Content-Range", "bytes */13");
+            exchange.sendResponseHeaders(416, -1);
+            exchange.close();
+        });
+
+        File target = tempDir.resolve("file.txt").toFile();
+        Files.write(Path.of(target + ".part"), complete);
+        Files.writeString(Path.of(target + ".part.meta"), """
+                {"source":"%s/complete-part","etag":"\\\"version-1\\\"","lastModified":""}
+                """.formatted(baseUrl), StandardCharsets.UTF_8);
+
+        HttpUtil.downloadFile(baseUrl + "/complete-part", target);
+
+        assertEquals("bytes=13-", range.get());
+        assertArrayEquals(complete, Files.readAllBytes(target.toPath()));
+        assertFalse(Files.exists(Path.of(target + ".part")));
+        assertFalse(Files.exists(Path.of(target + ".part.meta")));
+    }
+
+    @Test
     void invalidContentRangeIsDiscardedAndRetriedFromZero(@TempDir Path tempDir) throws IOException {
         byte[] complete = "download-body".getBytes(StandardCharsets.UTF_8);
         AtomicInteger requests = new AtomicInteger();

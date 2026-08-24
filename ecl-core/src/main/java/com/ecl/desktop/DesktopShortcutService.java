@@ -55,7 +55,10 @@ public final class DesktopShortcutService {
                                      IOException originalError) throws IOException {
         Path batch = directory.resolve(name + ".bat");
         try {
-            Files.writeString(batch, "@echo off\r\nstart \"\" \"" + target + "\" " + arguments + "\r\n",
+            String escapedTarget = escapeBatchCommand(target.toString());
+            String escapedArguments = escapeBatchCommand(arguments);
+            Files.writeString(batch, "@echo off\r\nsetlocal DisableDelayedExpansion\r\nstart \"\" \""
+                            + escapedTarget + "\" " + escapedArguments + "\r\n",
                     StandardCharsets.UTF_8);
             return batch;
         } catch (IOException fallbackError) {
@@ -89,5 +92,20 @@ public final class DesktopShortcutService {
             return "\"" + value.replace("\"", "\\\"") + "\"";
         }
         return value;
+    }
+
+    /** Escape text that is written directly into a cmd batch command. */
+    static String escapeBatchCommand(String value) {
+        StringBuilder escaped = new StringBuilder(value.length() + 16);
+        for (int i = 0; i < value.length(); i++) {
+            char character = value.charAt(i);
+            switch (character) {
+                case '%' -> escaped.append("%%");
+                case '^', '&', '|', '<', '>', '(', ')' -> escaped.append('^').append(character);
+                case '\r', '\n' -> escaped.append(' ');
+                default -> escaped.append(character);
+            }
+        }
+        return escaped.toString();
     }
 }

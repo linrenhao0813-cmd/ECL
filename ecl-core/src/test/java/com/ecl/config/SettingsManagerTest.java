@@ -66,6 +66,15 @@ class SettingsManagerTest {
     }
 
     @Test
+    void reportsUnreadableEncryptedSettingsForUserRecovery() {
+        settings.addProperty("_enc_microsoftRefreshToken", "not-a-valid-ciphertext");
+
+        assertNull(manager.getEncrypted("microsoftRefreshToken"));
+        assertEquals("microsoftRefreshToken", manager.consumeUnreadableEncryptedSetting());
+        assertNull(manager.consumeUnreadableEncryptedSetting());
+    }
+
+    @Test
     void rejectsUnsupportedValuesWithoutApplyingEarlierEntries() {
         manager.setString("existing", "original");
         Map<String, Object> entries = new LinkedHashMap<>();

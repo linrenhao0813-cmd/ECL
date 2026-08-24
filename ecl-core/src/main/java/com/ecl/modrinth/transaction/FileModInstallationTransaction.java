@@ -7,11 +7,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -295,7 +298,12 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         Path target = temporaryDirectory.resolve(JOURNAL_FILE);
         Path temp = Files.createTempFile(temporaryDirectory, "journal-", ".tmp");
         try {
-            Files.writeString(temp, MAPPER.writeValueAsString(journal), StandardCharsets.UTF_8);
+            byte[] bytes = MAPPER.writeValueAsString(journal).getBytes(StandardCharsets.UTF_8);
+            try (FileChannel channel = FileChannel.open(temp, StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING)) {
+                channel.write(ByteBuffer.wrap(bytes));
+                channel.force(true);
+            }
             move(temp, target);
         } finally {
             Files.deleteIfExists(temp);

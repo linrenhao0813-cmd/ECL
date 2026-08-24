@@ -262,8 +262,8 @@ public class GameDownloader implements DownloadService {
     private void addDownloadIfNeeded(
             List<GameDownloadBatchExecutor.DownloadTask> tasks,
             JsonObject artifact, String sourceLabel) throws IOException {
-        String url = artifact.get("url").getAsString();
-        String path = artifact.get("path").getAsString();
+        String url = requiredString(artifact, "url", sourceLabel + " URL");
+        String path = requiredString(artifact, "path", sourceLabel + " path");
         String sha1 = artifact.has("sha1") ? artifact.get("sha1").getAsString() : null;
         File target = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
         if (needsDownload(target, sha1)) {
@@ -272,11 +272,13 @@ public class GameDownloader implements DownloadService {
     }
 
     private void downloadAssets(JsonObject versionJson, DownloadListener runListener) throws IOException {
-        JsonObject assetIndex = versionJson.getAsJsonObject("assetIndex");
-        if (assetIndex == null) return;
+        JsonElement assetIndexElement = versionJson.get("assetIndex");
+        if (assetIndexElement == null || !assetIndexElement.isJsonObject()) return;
+        JsonObject assetIndex = assetIndexElement.getAsJsonObject();
 
-        String assetId = assetIndex.get("id").getAsString();
-        String assetUrl = assetIndex.get("url").getAsString();
+        String assetId = requiredString(assetIndex, "id", "asset index id");
+        FileUtil.requireSafeVersionId(assetId);
+        String assetUrl = requiredString(assetIndex, "url", "asset index URL");
         File assetDir = new File(ECLConfig.getAssetsDir(), "objects");
         File indexFile = FileUtil.safeResolveUnder(ECLConfig.getAssetsDir(), "indexes/" + assetId + ".json");
 
@@ -368,6 +370,23 @@ public class GameDownloader implements DownloadService {
 
     private static boolean hasSha1(String sha1) {
         return InstallHelpers.hasSha1(sha1);
+    }
+
+    private static String requiredString(JsonObject object, String key, String description)
+            throws IOException {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()
+                || !object.get(key).isJsonPrimitive()) {
+            throw new IOException("Missing or invalid " + description);
+        }
+        try {
+            String value = object.get(key).getAsString();
+            if (value == null || value.isBlank()) {
+                throw new IOException("Missing or blank " + description);
+            }
+            return value;
+        } catch (RuntimeException invalid) {
+            throw new IOException("Invalid " + description, invalid);
+        }
     }
 
     static String nativeClassifierKey(JsonObject library, String osName, String archBits) {

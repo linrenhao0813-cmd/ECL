@@ -2,6 +2,7 @@ package com.ecl.auth;
 
 import com.ecl.exception.AuthException;
 import com.ecl.util.HttpUtil;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.slf4j.Logger;
@@ -159,7 +160,7 @@ public class YggdrasilAuth implements AuthProvider {
             payload.addProperty("clientToken", clientToken);
 
             String response = postJson(authServer + "authenticate", payload);
-            JsonObject json = JsonParser.parseString(response).getAsJsonObject();
+            JsonObject json = parseResponseObject(response, "authenticate");
 
             if (json.has("error")) {
                 String message = json.has("errorMessage") ? json.get("errorMessage").getAsString() : json.get("error").getAsString();
@@ -169,9 +170,25 @@ public class YggdrasilAuth implements AuthProvider {
             this.accessToken = requireString(json, "accessToken");
             this.clientToken = requireString(json, "clientToken");
 
-            JsonObject profile = json.getAsJsonObject("selectedProfile");
-            if (profile == null && json.has("availableProfiles") && json.getAsJsonArray("availableProfiles").size() > 0) {
-                profile = json.getAsJsonArray("availableProfiles").get(0).getAsJsonObject();
+            JsonElement selectedElement = json.get("selectedProfile");
+            if (selectedElement != null && !selectedElement.isJsonNull()
+                    && !selectedElement.isJsonObject()) {
+                throw new IOException("Authentication response has invalid selectedProfile");
+            }
+            JsonObject profile = selectedElement == null || selectedElement.isJsonNull()
+                    ? null : selectedElement.getAsJsonObject();
+            JsonElement availableElement = json.get("availableProfiles");
+            if (profile == null && availableElement != null && !availableElement.isJsonNull()
+                    && !availableElement.isJsonArray()) {
+                throw new IOException("Authentication response has invalid availableProfiles");
+            }
+            if (profile == null && availableElement != null && availableElement.isJsonArray()
+                    && !availableElement.getAsJsonArray().isEmpty()) {
+                JsonElement first = availableElement.getAsJsonArray().get(0);
+                if (!first.isJsonObject()) {
+                    throw new IOException("Authentication response has invalid available profile");
+                }
+                profile = first.getAsJsonObject();
             }
 
             if (profile != null) {
@@ -210,12 +227,15 @@ public class YggdrasilAuth implements AuthProvider {
 
         JsonObject payload = tokenPayload();
         String response = postJson(authServer + "refresh", payload);
-        JsonObject json = JsonParser.parseString(response).getAsJsonObject();
+        JsonObject json = parseResponseObject(response, "refresh");
 
         if (json.has("accessToken")) {
             this.accessToken = json.get("accessToken").getAsString();
         }
-        if (json.has("selectedProfile")) {
+        if (json.has("selectedProfile") && !json.get("selectedProfile").isJsonNull()) {
+            if (!json.get("selectedProfile").isJsonObject()) {
+                throw new IOException("Refresh response has invalid selectedProfile");
+            }
             JsonObject profile = json.getAsJsonObject("selectedProfile");
             this.uuid = profile.get("id").getAsString();
             this.username = profile.get("name").getAsString();
@@ -246,6 +266,20 @@ public class YggdrasilAuth implements AuthProvider {
             return value;
         } catch (RuntimeException invalid) {
             throw new IOException("Authentication response has invalid " + key, invalid);
+        }
+    }
+
+    private static JsonObject parseResponseObject(String response, String operation) throws IOException {
+        try {
+            JsonElement parsed = JsonParser.parseString(response);
+            if (!parsed.isJsonObject()) {
+                throw new IOException("Yggdrasil " + operation + " response is not an object");
+            }
+            return parsed.getAsJsonObject();
+        } catch (IOException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw new IOException("Yggdrasil " + operation + " response is invalid", error);
         }
     }
 }

@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
 /** Mirror-aware file downloader with resumable partial files and byte limits. */
 final class ResumableFileDownloader {
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes (\\d+)-(\\d+)/(\\d+)");
+    private static final Pattern UNSATISFIABLE_RANGE = Pattern.compile("bytes \\*/(\\d+)");
 
     private ResumableFileDownloader() {
     }
@@ -54,6 +55,9 @@ final class ResumableFileDownloader {
             } catch (IOException failure) {
                 lastError = failure;
                 DownloadSourceCallbacks.notifyFailure(source, candidate, failure);
+                if (Thread.currentThread().isInterrupted()) {
+                    throw failure;
+                }
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 lastError = new IOException("Download interrupted", interrupted);
@@ -98,6 +102,34 @@ final class ResumableFileDownloader {
             HttpResponse<InputStream> response = HttpClientProvider.defaultClient().send(
                     requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
             int statusCode = response.statusCode();
+            if (statusCode == 416 && existingBytes > 0) {
+                long totalSize = unsatisfiedRangeTotal(response);
+                response.body().close();
+                if (totalSize < 0) {
+                    throw new IOException("HTTP 416 without a valid Content-Range for " + candidate);
+                }
+                if (existingBytes == totalSize) {
+                    if (totalSize > maxBytes) {
+                        throw new DownloadLimitExceededException(
+                                "Download exceeds byte limit: " + totalSize + " > " + maxBytes);
+                    }
+                    promote(partial.toPath(), target.toPath());
+                    Files.deleteIfExists(metadataFile.toPath());
+                    if (progress != null) {
+                        progress.onStart(totalSize);
+                        progress.onProgress(totalSize, totalSize);
+                        progress.onComplete(target);
+                    }
+                    return;
+                }
+                if (totalSize >= 0 && existingBytes > totalSize) {
+                    Files.deleteIfExists(partial.toPath());
+                    Files.deleteIfExists(metadataFile.toPath());
+                    existingBytes = 0;
+                    metadata = null;
+                    continue;
+                }
+            }
             if (statusCode < 200 || statusCode >= 300) {
                 String errorBody = HttpRequestExecutor.readStream(response.body());
                 if (errorBody.isBlank()) {
@@ -181,6 +213,19 @@ final class ResumableFileDownloader {
             return start == existingBytes && end >= start && total > end && validatorMatches
                     && (responseLength < 0 || responseLength == rangeLength) ? total : -1;
         } catch (ArithmeticException | NumberFormatException invalid) {
+            return -1;
+        }
+    }
+
+    private static long unsatisfiedRangeTotal(HttpResponse<?> response) {
+        String header = response.headers().firstValue("Content-Range").orElse("");
+        Matcher matcher = UNSATISFIABLE_RANGE.matcher(header);
+        if (!matcher.matches()) {
+            return -1;
+        }
+        try {
+            return Long.parseLong(matcher.group(1));
+        } catch (NumberFormatException invalid) {
             return -1;
         }
     }

@@ -23,10 +23,24 @@ import java.util.Locale;
  * shared version/library store.
  */
 public final class ModLoaderInstaller {
+    private final Path versionsDirectory;
+    private final Path librariesDirectory;
     private final LoaderMetadataClient metadataClient = new LoaderMetadataClient();
     private final InstallerProcessRunner installerProcessRunner = new InstallerProcessRunner();
     private final LoaderArtifactVerifier artifactVerifier = new LoaderArtifactVerifier();
     private final LoaderProfileWriter profileWriter = new LoaderProfileWriter();
+
+    public ModLoaderInstaller() {
+        this(ECLConfig.getVersionsDir().toPath(), ECLConfig.getLibrariesDir().toPath());
+    }
+
+    /** Create an installer whose generated files are written below the supplied roots. */
+    public ModLoaderInstaller(Path versionsDirectory, Path librariesDirectory) {
+        this.versionsDirectory = java.util.Objects.requireNonNull(versionsDirectory, "versionsDirectory")
+                .toAbsolutePath().normalize();
+        this.librariesDirectory = java.util.Objects.requireNonNull(librariesDirectory, "librariesDirectory")
+                .toAbsolutePath().normalize();
+    }
 
     public enum Loader {
         FABRIC("fabric", "Fabric"),
@@ -154,7 +168,7 @@ public final class ModLoaderInstaller {
 
             Path installedProfile = findInstalledProfile(minecraftDir.resolve("versions"),
                     minecraftVersion, loader);
-            mergeDirectory(minecraftDir.resolve("libraries"), ECLConfig.getLibrariesDir().toPath());
+            mergeDirectory(minecraftDir.resolve("libraries"), librariesDirectory);
             String profileId = installedProfile.getFileName().toString();
             Path targetProfile = safeProfileDirectory(profileId);
             mergeDirectory(installedProfile, targetProfile);
@@ -180,7 +194,9 @@ public final class ModLoaderInstaller {
                         return name.contains(loader.id())
                                 || (loader == Loader.FORGE && name.contains("forge"));
                     })
-                    .max(Comparator.comparing(path -> path.getFileName().toString()))
+                    .min(Comparator.comparing(
+                            path -> path.getFileName().toString(),
+                            ModLoaderInstaller::compareVersionsDescending))
                     .orElseThrow(() -> new IOException("官方安装器没有生成可识别的 "
                             + loader.displayName() + " 版本"));
         }
@@ -218,8 +234,13 @@ public final class ModLoaderInstaller {
         return LoaderMetadataClient.compareVersionsDescending(left, right);
     }
 
-    private static Path safeProfileDirectory(String profileId) throws IOException {
-        return FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), profileId).toPath();
+    private Path safeProfileDirectory(String profileId) throws IOException {
+        FileUtil.requireSafeVersionId(profileId);
+        Path result = versionsDirectory.resolve(profileId).normalize();
+        if (!result.startsWith(versionsDirectory)) {
+            throw new IOException("Loader profile escapes the versions directory: " + profileId);
+        }
+        return result;
     }
 
     private static void mergeDirectory(Path source, Path target) throws IOException {

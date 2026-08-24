@@ -7,6 +7,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -24,6 +25,7 @@ public final class ProcessOutputPump implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(ProcessOutputPump.class);
 
     private final InputStream input;
+    private final OutputStream mirror;
     private final BoundedLogBuffer capture;
     private final List<ProcessOutputListener> listeners = new CopyOnWriteArrayList<>();
     private final Object listenerLock = new Object();
@@ -32,6 +34,7 @@ public final class ProcessOutputPump implements AutoCloseable {
     private int pendingChars;
     private final AtomicBoolean started = new AtomicBoolean();
     private final AtomicBoolean stopped = new AtomicBoolean();
+    private final AtomicBoolean mirrorFailed = new AtomicBoolean();
     private volatile Thread runningThread;
 
     /**
@@ -39,7 +42,16 @@ public final class ProcessOutputPump implements AutoCloseable {
      * @param captureCapacity  max characters retained for {@link #capturedText()}
      */
     public ProcessOutputPump(InputStream input, int captureCapacity) {
+        this(input, captureCapacity, null);
+    }
+
+    /**
+     * Create a pump that also mirrors each decoded output line to {@code mirror}. The process pipe
+     * remains owned by this pump, so listeners and the bounded capture continue to see output.
+     */
+    public ProcessOutputPump(InputStream input, int captureCapacity, OutputStream mirror) {
         this.input = input;
+        this.mirror = mirror;
         this.capture = new BoundedLogBuffer(captureCapacity);
         this.pendingCapacityChars = captureCapacity;
     }
@@ -52,7 +64,6 @@ public final class ProcessOutputPump implements AutoCloseable {
                 while (!pendingLines.isEmpty()) {
                     String line = pendingLines.peekFirst();
                     if (!notifyListener(listener, line)) {
-                        pendingChars -= pendingLines.removeFirst().length() + 1;
                         break;
                     }
                     pendingChars -= pendingLines.removeFirst().length() + 1;
@@ -86,27 +97,33 @@ public final class ProcessOutputPump implements AutoCloseable {
     /** Stop pumping. Idempotent; interrupts the reader so {@link #start()}-ed threads wind down. */
     @Override
     public void close() {
-        if (stopped.get()) {
+        Thread thread = runningThread;
+        if (thread == Thread.currentThread()) {
+            stopped.set(true);
+            closeInput();
             return;
         }
-        Thread thread = runningThread;
-        if (thread != null && thread != Thread.currentThread()) {
+        if (thread != null && thread.isAlive()) {
             try {
                 // Give finite, already-buffered streams a chance to drain before forcing shutdown.
                 thread.join(250);
-                if (thread.isAlive() && stopped.compareAndSet(false, true)) {
-                    input.close();
+                if (thread.isAlive()) {
+                    stopped.set(true);
+                    closeInput();
                     thread.interrupt();
                     thread.join(1_000);
                 }
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 stopped.set(true);
-                thread.interrupt();
-            } catch (IOException ignored) {
-                stopped.set(true);
-                thread.interrupt();
+                closeInput();
+                if (thread != null) {
+                    thread.interrupt();
+                }
             }
+        } else {
+            stopped.set(true);
+            closeInput();
         }
         stopped.set(true);
     }
@@ -119,6 +136,7 @@ public final class ProcessOutputPump implements AutoCloseable {
                     break;
                 }
                 capture.appendLine(line);
+                mirrorLine(line);
                 synchronized (listenerLock) {
                     if (listeners.isEmpty()) {
                         addPendingLine(line);
@@ -131,6 +149,41 @@ public final class ProcessOutputPump implements AutoCloseable {
             }
         } catch (IOException ignored) {
             // The process ended or its pipe broke; nothing meaningful left to read.
+        } finally {
+            closeMirror();
+        }
+    }
+
+    private void mirrorLine(String line) {
+        if (mirror == null || mirrorFailed.get()) {
+            return;
+        }
+        try {
+            mirror.write(line.getBytes(StandardCharsets.UTF_8));
+            mirror.write('\n');
+        } catch (IOException error) {
+            if (mirrorFailed.compareAndSet(false, true)) {
+                LOGGER.warn("Unable to mirror process output to the configured log file", error);
+            }
+        }
+    }
+
+    private void closeInput() {
+        try {
+            input.close();
+        } catch (IOException ignored) {
+            // The reader is already being stopped; there is no useful recovery here.
+        }
+    }
+
+    private void closeMirror() {
+        if (mirror == null) {
+            return;
+        }
+        try {
+            mirror.close();
+        } catch (IOException error) {
+            LOGGER.debug("Unable to close process output log", error);
         }
     }
 

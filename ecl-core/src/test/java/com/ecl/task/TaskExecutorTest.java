@@ -350,4 +350,16 @@ class TaskExecutorTest {
             executor.close();
         }
     }
+
+    @Test
+    void rejectedSubmissionReturnsAlreadyCompletedFailedFuture() {
+        TaskExecutor executor = new TaskExecutor();
+        executor.close();
+
+        Task<Void> task = leaf("rejected", null);
+        TaskFuture<Void> future = executor.submit(task);
+
+        assertTrue(future.isDone());
+        assertThrows(TaskExecutionException.class, future::awaitUnchecked);
+    }
 }

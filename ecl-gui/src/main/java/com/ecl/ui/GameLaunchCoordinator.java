@@ -125,7 +125,7 @@ final class GameLaunchCoordinator {
                                 + "，正在补齐基础客户端、依赖库和资源文件。");
 
         com.ecl.download.DownloadTaskCenter.TaskHandle<Void> task = ui.downloadTaskCenter.submit(
-                "Minecraft " + downloadVersion, context -> {
+                "Minecraft " + downloadVersion, () -> context -> {
                     AtomicReference<String> downloadFailure = new AtomicReference<>();
                     ui.downloader.setListener(new GameDownloader.DownloadListener() {
                         @Override
@@ -254,13 +254,13 @@ final class GameLaunchCoordinator {
                 long launchStartedAt = process.info().startInstant()
                         .map(Instant::toEpochMilli)
                         .orElseGet(System::currentTimeMillis);
+                long launchStartedNanos = System.nanoTime();
                 try {
                     ui.playtimeTracker.recordLaunch(ui.resolveVersionInstanceRoot(version).toPath(), launchStartedAt);
                 } catch (IOException statsError) {
                     LauncherUI.LOGGER.warn("Cannot record launch statistics for {}", version, statsError);
                 }
-                ui.activeGameProcess = process;
-                ui.activeGameVersion = version;
+                ui.registerActiveGameProcess(process, version);
                 UUID runningInstanceId = registerRunningModInstance(version);
                 boolean minimizeThisLaunch = ui.closeAfterLaunch;
 
@@ -276,10 +276,11 @@ final class GameLaunchCoordinator {
                     }
                 });
                 processMonitor.monitor(gameProcess, version, launchDir, launchStartedAt,
+                        launchStartedNanos,
                         runningInstanceId, minimizeThisLaunch);
             } catch (Exception e) {
+                CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
                 runOnUiIfActive(() -> {
-                    CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
                     ui.setStatus("启动失败", report.getTitle());
                     showGameErrorDialog(report);
                     ui.setControlsBusy(false);
@@ -373,8 +374,7 @@ final class GameLaunchCoordinator {
     }
 
     boolean isGameProcessRunning() {
-        Process process = ui.activeGameProcess;
-        return process != null && process.isAlive();
+        return ui.hasRunningGameProcess();
     }
 
     void updatePlaytimeSummary() {

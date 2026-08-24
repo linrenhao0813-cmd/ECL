@@ -91,7 +91,7 @@ final class ModInstallationWorkflow {
                     progress.overallDownloaded(), progress.overallTotal(), progress.fileName()));
         }
         DownloadTaskCenter.TaskHandle<ModInstallationResult> task = taskCenter.submit(
-                "Mod installation", context -> {
+                "Mod installation", () -> context -> {
                     CompletableFuture<ModInstallationResult> inner = installationService.install(plan, progress -> {
                         context.updateStatus("Downloading " + progress.fileName());
                         context.updateProgress(progress.overallDownloaded(), progress.overallTotal());

@@ -108,15 +108,15 @@ class CryptoUtilTest {
     }
 
     @Test
-    void explicitPlaintextTestKeyRemainsReadable() throws Exception {
+    void legacyRawKeyIsMigratedToProtectedEncoding() throws Exception {
         Path keyFile = temp.resolve("secret.key");
         Files.write(keyFile, new byte[32]);
         CryptoUtil.resetKeyCache();
 
         assertThrows(IllegalStateException.class, () -> CryptoUtil.decrypt("not-base64"));
-        assertEquals(32, Files.size(keyFile));
+        assertTrue(Files.size(keyFile) > 32);
 
         CryptoUtil.encrypt("trigger-migration");
-        assertEquals(32, Files.size(keyFile));
+        assertTrue(Files.size(keyFile) > 32);
     }
 }

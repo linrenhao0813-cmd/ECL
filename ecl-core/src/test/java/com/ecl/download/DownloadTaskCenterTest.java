@@ -9,7 +9,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DownloadTaskCenterTest {
@@ -38,7 +40,7 @@ class DownloadTaskCenterTest {
     void failedTaskCanBeRetried() throws Exception {
         try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
             AtomicInteger attempts = new AtomicInteger();
-            var first = center.submit("retry me", context -> {
+            var first = center.submit("retry me", () -> context -> {
                 if (attempts.incrementAndGet() == 1) throw new IOException("temporary failure");
                 return null;
             });
@@ -138,6 +140,21 @@ class DownloadTaskCenterTest {
             assertEquals(DownloadTaskCenter.MAX_RETAINED_FINISHED_TASKS,
                     center.snapshots().size());
             assertEquals("completed-5", center.snapshots().getFirst().title());
+        }
+    }
+
+    @Test
+    void closedCenterRejectsFactoryBeforeCreatingAnOperation() {
+        try (DownloadTaskCenter center = new DownloadTaskCenter()) {
+            center.close();
+            AtomicBoolean created = new AtomicBoolean();
+
+            assertThrows(IllegalStateException.class, () -> center.submit(
+                    "closed", () -> {
+                        created.set(true);
+                        return context -> null;
+                    }));
+            assertFalse(created.get());
         }
     }
 }

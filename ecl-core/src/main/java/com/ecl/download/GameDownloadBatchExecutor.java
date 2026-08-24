@@ -39,8 +39,14 @@ final class GameDownloadBatchExecutor {
         List<Future<Void>> phaseTasks = new ArrayList<>(tasks.size());
         for (DownloadTask task : tasks) {
             phaseTasks.add(completionService.submit(() -> {
-                downloadAndVerify(task, listener);
-                return null;
+                try {
+                    downloadAndVerify(task, listener);
+                    return null;
+                } finally {
+                    // Download cancellation may set the worker's interrupt flag. Clear it before
+                    // the shared executor reuses this thread for an unrelated task.
+                    Thread.interrupted();
+                }
             }));
         }
 

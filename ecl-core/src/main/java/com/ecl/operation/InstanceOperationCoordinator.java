@@ -15,7 +15,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class InstanceOperationCoordinator implements InstanceOperationLock {
     public static final String OPERATIONS_RELATIVE_PATH = ".ecl/operations";
 
-    private final ConcurrentHashMap<UUID, ReentrantLock> locks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, LockEntry> locks = new ConcurrentHashMap<>();
     private final Clock clock;
 
     public InstanceOperationCoordinator() {
@@ -28,16 +28,28 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
 
     @Override
     public AutoCloseable acquire(UUID instanceId) {
-        ReentrantLock lock = locks.computeIfAbsent(
-                Objects.requireNonNull(instanceId, "instanceId"), ignored -> new ReentrantLock());
-        lock.lock();
-        return lock::unlock;
+        UUID id = Objects.requireNonNull(instanceId, "instanceId");
+        LockEntry entry;
+        synchronized (locks) {
+            entry = locks.computeIfAbsent(id, ignored -> new LockEntry());
+            entry.users++;
+        }
+        entry.lock.lock();
+        return () -> {
+            entry.lock.unlock();
+            synchronized (locks) {
+                entry.users--;
+                if (entry.users == 0) {
+                    locks.remove(id, entry);
+                }
+            }
+        };
     }
 
     @Override
     public boolean isLocked(UUID instanceId) {
-        ReentrantLock lock = locks.get(Objects.requireNonNull(instanceId, "instanceId"));
-        return lock != null && lock.isLocked();
+        LockEntry entry = locks.get(Objects.requireNonNull(instanceId, "instanceId"));
+        return entry != null && entry.lock.isLocked();
     }
 
     public <T> Result<T> execute(Path instanceRoot, UUID instanceId, OperationJournal.Kind kind,
@@ -82,5 +94,10 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
         public Result {
             Objects.requireNonNull(operationId, "operationId");
         }
+    }
+
+    private static final class LockEntry {
+        private final ReentrantLock lock = new ReentrantLock();
+        private int users;
     }
 }

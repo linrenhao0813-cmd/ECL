@@ -37,38 +37,76 @@ public final class MrpackInstaller {
     }
 
     @FunctionalInterface
+    interface StagedLoaderInstallation {
+        ModLoaderInstaller.InstallResult install(
+                Path versionsDirectory,
+                Path librariesDirectory,
+                String minecraftVersion,
+                ModLoaderInstaller.Loader loader,
+                String loaderVersion,
+                ModLoaderInstaller.Listener listener
+        ) throws IOException;
+    }
+
+    @FunctionalInterface
     interface TransactionFactory {
         PackUpdateTransaction create(Path instanceRoot, Path profileFile) throws IOException;
     }
 
     private final LoaderInstallation loaderInstallation;
+    private final StagedLoaderInstallation stagedLoaderInstallation;
     private final TransactionFactory transactionFactory;
     private final java.util.Set<String> trustedDownloadHosts;
 
     public MrpackInstaller() {
-        this(new ModLoaderInstaller()::install, PackUpdateTransaction::new,
+        this(new ModLoaderInstaller()::install,
+                (versions, libraries, minecraft, loader, version, listener) ->
+                        new ModLoaderInstaller(versions, libraries).install(
+                                minecraft, loader, version, listener),
+                PackUpdateTransaction::new,
                 java.util.Set.of("cdn.modrinth.com"));
     }
 
     public MrpackInstaller(java.util.Set<String> trustedDownloadHosts) {
-        this(new ModLoaderInstaller()::install, PackUpdateTransaction::new,
+        this(new ModLoaderInstaller()::install,
+                (versions, libraries, minecraft, loader, version, listener) ->
+                        new ModLoaderInstaller(versions, libraries).install(
+                                minecraft, loader, version, listener),
+                PackUpdateTransaction::new,
                 trustedDownloadHosts);
     }
 
     MrpackInstaller(ModLoaderInstaller loaderInstaller) {
-        this(loaderInstaller::install, PackUpdateTransaction::new,
+        this(loaderInstaller::install,
+                (versions, libraries, minecraft, loader, version, listener) ->
+                        new ModLoaderInstaller(versions, libraries).install(
+                                minecraft, loader, version, listener),
+                PackUpdateTransaction::new,
                 java.util.Set.of("cdn.modrinth.com"));
     }
 
     MrpackInstaller(LoaderInstallation loaderInstallation, TransactionFactory transactionFactory) {
-        this(loaderInstallation, transactionFactory, java.util.Set.of("cdn.modrinth.com"));
+        this(loaderInstallation,
+                (versions, libraries, minecraft, loader, version, listener) ->
+                        loaderInstallation.install(minecraft, loader, version, listener),
+                transactionFactory, java.util.Set.of("cdn.modrinth.com"));
+    }
+
+    MrpackInstaller(StagedLoaderInstallation stagedLoaderInstallation,
+                    TransactionFactory transactionFactory) {
+        this((minecraft, loader, version, listener) ->
+                        new ModLoaderInstaller().install(minecraft, loader, version, listener),
+                stagedLoaderInstallation, transactionFactory, java.util.Set.of("cdn.modrinth.com"));
     }
 
     private MrpackInstaller(LoaderInstallation loaderInstallation,
+                            StagedLoaderInstallation stagedLoaderInstallation,
                             TransactionFactory transactionFactory,
                             java.util.Set<String> trustedDownloadHosts) {
         this.loaderInstallation = java.util.Objects.requireNonNull(
                 loaderInstallation, "loaderInstallation");
+        this.stagedLoaderInstallation = java.util.Objects.requireNonNull(
+                stagedLoaderInstallation, "stagedLoaderInstallation");
         this.transactionFactory = java.util.Objects.requireNonNull(
                 transactionFactory, "transactionFactory");
         this.trustedDownloadHosts = java.util.Set.copyOf(
@@ -261,8 +299,10 @@ public final class MrpackInstaller {
             Path stagedManifest = staging.resolve(PackManifest.FILE_NAME);
             newManifest.write(stagedManifest);
 
+            Path loaderStaging = staging.resolve(".ecl-loader");
             LoaderState loaderState = prepareLoader(
-                    profile, minecraftVersion, loaderDependency, safeListener);
+                    profile, minecraftVersion, loaderDependency, safeListener,
+                    loaderStaging.resolve("versions"), loaderStaging.resolve("libraries"), transaction);
             MrpackProfileWriter.update(
                     profile, safeProfileId, loaderState.parentProfile(), minecraftVersion,
                     packVersion, loaderState.loaderId(), loaderState.loaderVersion(),
@@ -291,7 +331,9 @@ public final class MrpackInstaller {
     }
 
     private LoaderState prepareLoader(JsonObject profile, String minecraftVersion,
-                                      LoaderDependency requested, Listener listener)
+                                      LoaderDependency requested, Listener listener,
+                                      Path stagedVersions, Path stagedLibraries,
+                                      PackUpdateTransaction transaction)
             throws IOException {
         if (requested == null) {
             return new LoaderState(minecraftVersion, "", "");
@@ -309,8 +351,13 @@ public final class MrpackInstaller {
         }
         listener.onStatus("正在准备整合包需要的 " + requested.loader().displayName()
                 + " " + requested.version() + "...");
-        ModLoaderInstaller.InstallResult installed = loaderInstallation.install(
-                minecraftVersion, requested.loader(), requested.version(), listener);
+        ModLoaderInstaller.InstallResult installed = stagedLoaderInstallation.install(
+                stagedVersions, stagedLibraries, minecraftVersion, requested.loader(),
+                requested.version(), listener);
+        transaction.stageExternalDirectory(stagedVersions,
+                ECLConfig.getVersionsDir().toPath());
+        transaction.stageExternalDirectory(stagedLibraries,
+                ECLConfig.getLibrariesDir().toPath());
         return new LoaderState(installed.profileId(), installed.loader().id(),
                 installed.loaderVersion());
     }

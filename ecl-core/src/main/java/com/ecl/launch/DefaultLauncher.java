@@ -125,8 +125,8 @@ public final class DefaultLauncher implements Launcher {
         Map<String, String> processEnvironment = builder.environment();
         processEnvironment.putAll(command.environment());
         builder.redirectErrorStream(true);
-        if (options.processOutputFile() != null) {
-            File outputFile = options.processOutputFile();
+        File outputFile = options.processOutputFile();
+        if (outputFile != null) {
             File parent = outputFile.getParentFile();
             if (parent != null && !parent.isDirectory()
                     && !parent.mkdirs() && !parent.isDirectory()) {
@@ -134,7 +134,6 @@ public final class DefaultLauncher implements Launcher {
                 throw new LaunchException(LaunchException.Kind.PROCESS_CREATION,
                         "无法创建游戏日志目录: " + parent);
             }
-            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(outputFile));
         }
 
         Process process;
@@ -149,7 +148,15 @@ public final class DefaultLauncher implements Launcher {
 
         Path workingDirectory = command.workingDirectory() == null
                 ? null : command.workingDirectory().toPath();
-        GameProcess gameProcess = new GameProcess(process, versionId, workingDirectory);
+        GameProcess gameProcess;
+        try {
+            gameProcess = new GameProcess(process, versionId, workingDirectory, outputFile);
+        } catch (IOException outputFailure) {
+            process.destroyForcibly();
+            skinInjection.close();
+            throw new LaunchException(LaunchException.Kind.PROCESS_CREATION,
+                    "无法打开游戏日志文件: " + outputFailure.getMessage(), outputFailure);
+        }
         publish(GameLifecycleEvent.Phase.STARTED, versionId, 0, workingDirectory);
         gameProcess.whenExited().thenAccept(exited -> publish(
                 GameLifecycleEvent.Phase.EXITED, versionId, exited.exitCode(), workingDirectory));

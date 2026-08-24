@@ -26,9 +26,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Detects and downloads compatible Modrinth pack updates from persisted profile metadata. */
 public final class DefaultModpackUpdateService implements ModpackUpdateService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(DefaultModpackUpdateService.class);
     private final ModMetadataProvider metadataProvider;
     private final Executor executor;
     private final InstanceOperationLock operationLock;
@@ -56,7 +59,12 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
         return CompletableFuture.supplyAsync(() -> scanInstalled(root), executor)
                 .thenCompose(instances -> {
                     List<CompletableFuture<ModpackUpdate>> requests = instances.stream()
-                            .map(instance -> checkOne(instance, effectiveChannel))
+                            .map(instance -> checkOne(instance, effectiveChannel)
+                                    .exceptionally(error -> {
+                                        LOGGER.warn("Failed to check modpack updates for {}",
+                                                instance.profileId(), error);
+                                        return null;
+                                    }))
                             .toList();
                     if (requests.isEmpty()) {
                         return CompletableFuture.completedFuture(List.of());

@@ -1,5 +1,7 @@
 package com.ecl.event;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -23,12 +25,16 @@ import org.slf4j.LoggerFactory;
 public final class EventBus {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(EventBus.class);
+    private static final int MAX_EVENTS_PER_DRAIN = 10_000;
 
     private final Map<Class<? extends Event>, CopyOnWriteArrayList<EventHandler<? super Event>>>
             handlersByType = new ConcurrentHashMap<>();
 
     private volatile BiConsumer<Event, Throwable> errorSink =
             (event, error) -> LOGGER.warn("Event handler failed for {}", event.name(), error);
+    private final ThreadLocal<Deque<Event>> pendingEvents =
+            ThreadLocal.withInitial(ArrayDeque::new);
+    private final ThreadLocal<Boolean> dispatching = ThreadLocal.withInitial(() -> false);
 
     /**
      * Register a handler for an event type. Handlers registered for a base type also receive
@@ -82,6 +88,29 @@ public final class EventBus {
         if (event == null) {
             return;
         }
+        Deque<Event> queue = pendingEvents.get();
+        queue.addLast(event);
+        if (dispatching.get()) {
+            return;
+        }
+        dispatching.set(true);
+        int dispatched = 0;
+        try {
+            while (!queue.isEmpty()) {
+                if (++dispatched > MAX_EVENTS_PER_DRAIN) {
+                    LOGGER.warn("Dropping re-entrant events after {} dispatches", MAX_EVENTS_PER_DRAIN);
+                    queue.clear();
+                    break;
+                }
+                dispatchOne(queue.removeFirst());
+            }
+        } finally {
+            pendingEvents.remove();
+            dispatching.remove();
+        }
+    }
+
+    private void dispatchOne(Event event) {
         handlersByType.forEach((type, handlers) -> {
             if (!type.isInstance(event)) {
                 return;

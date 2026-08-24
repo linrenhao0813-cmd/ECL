@@ -71,7 +71,7 @@ final class LoaderInstallDialog {
             cancel.setDisable(true);
             ui.setControlsBusy(true);
             ui.startProgressAnimation(ui.downloadProgress);
-            ui.downloadTaskCenter.submit("Loader " + loader.displayName(), context -> {
+            ui.downloadTaskCenter.submit("Loader " + loader.displayName(), () -> context -> {
                 try {
                     ModLoaderInstaller.InstallResult result = ui.modLoaderInstaller.install(
                             gameVersion, loader, versionField.getText().trim(),

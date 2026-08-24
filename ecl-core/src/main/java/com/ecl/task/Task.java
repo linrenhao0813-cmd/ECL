@@ -2,6 +2,7 @@ package com.ecl.task;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * A unit of asynchronous work with an optional dependency graph.
@@ -26,6 +27,8 @@ public abstract class Task<T> {
     private volatile boolean cancelled;
     private volatile double progressFraction;
     private transient TaskExecutor executor;
+    private transient CompletableFuture<Object> executionFuture;
+    private transient boolean executionClaimed;
 
     protected Task(String name) {
         this(name, 1.0);
@@ -127,5 +130,20 @@ public abstract class Task<T> {
 
     final void detach() {
         this.executor = null;
+    }
+
+    final synchronized CompletableFuture<Object> executionFuture() {
+        if (executionFuture == null) {
+            executionFuture = new CompletableFuture<>();
+        }
+        return executionFuture;
+    }
+
+    final synchronized boolean claimExecution() {
+        if (executionClaimed) {
+            return false;
+        }
+        executionClaimed = true;
+        return true;
     }
 }

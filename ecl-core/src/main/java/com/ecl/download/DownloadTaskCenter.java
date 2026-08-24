@@ -32,6 +32,12 @@ public final class DownloadTaskCenter implements AutoCloseable {
         T run(TaskContext context) throws Exception;
     }
 
+    /** Creates a fresh operation instance for each attempt, including retries. */
+    @FunctionalInterface
+    public interface OperationFactory<T> {
+        Operation<T> create();
+    }
+
     @FunctionalInterface
     public interface Listener {
         void onChanged(List<TaskSnapshot> tasks);
@@ -86,16 +92,26 @@ public final class DownloadTaskCenter implements AutoCloseable {
     }
 
     public <T> TaskHandle<T> submit(String title, Operation<T> operation) {
-        return submit(title, operation, 0);
+        Objects.requireNonNull(operation, "operation");
+        return submit(title, () -> operation, 0);
     }
 
-    private <T> TaskHandle<T> submit(String title, Operation<T> operation, int previousAttempts) {
-        Objects.requireNonNull(operation, "operation");
+    /** Submit a task whose operation is recreated for every retry attempt. */
+    public <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory) {
+        return submit(title, operationFactory, 0);
+    }
+
+    private <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory,
+                                     int previousAttempts) {
+        Objects.requireNonNull(operationFactory, "operationFactory");
         DownloadTaskEntry<T> entry;
         synchronized (lock) {
             ensureOpen();
+            Operation<T> operation = Objects.requireNonNull(
+                    operationFactory.create(), "operationFactory.create()");
             String id = "download-" + sequence.incrementAndGet();
             entry = new DownloadTaskEntry<>(id, title == null || title.isBlank() ? "下载任务" : title, operation);
+            entry.operationFactory = operationFactory;
             entry.attempts = Math.max(0, previousAttempts);
             entries.put(id, entry);
             queue.addLast(entry);
@@ -227,7 +243,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
                 return null;
             }
         }
-        return submit(original.title, original.operation, original.attempts);
+        return submit(original.title, original.operationFactory, original.attempts);
     }
 
     public int clearFinished() {

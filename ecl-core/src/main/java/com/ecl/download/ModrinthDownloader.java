@@ -33,6 +33,7 @@ import java.util.concurrent.CompletionException;
  * legacy content-library contract and performs verified file installation.</p>
  */
 public class ModrinthDownloader implements ContentDownloader {
+    private static final int MAX_DEPENDENCY_DEPTH = 32;
     private final ModrinthApiClient apiClient;
 
     public interface DownloadListener {
@@ -245,6 +246,10 @@ public class ModrinthDownloader implements ContentDownloader {
                                  boolean includeRequiredDependencies, String... allowedExtensions)
             throws IOException {
         ensureCompatibleVersion(version, gameVersion, loader);
+        if (dependencyPath.size() >= MAX_DEPENDENCY_DEPTH) {
+            throw new IOException("Modrinth dependency chain exceeds " + MAX_DEPENDENCY_DEPTH
+                    + " levels");
+        }
         String versionId = version.id();
         boolean tracked = versionId != null && !versionId.isBlank();
         if (tracked) {

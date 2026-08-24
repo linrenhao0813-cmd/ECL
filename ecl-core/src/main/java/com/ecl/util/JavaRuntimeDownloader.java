@@ -54,7 +54,9 @@ final class JavaRuntimeDownloader {
         }
 
         Files.createDirectories(runtimesRoot);
-        if (Files.exists(target)) deleteRecursively(target);
+        if (Files.exists(target) && !deleteRecursively(target)) {
+            throw new IOException("Existing Java runtime directory could not be removed: " + target);
+        }
         Path archive = Files.createTempFile(runtimesRoot, "java-" + featureVersion + "-", extension);
         Path staging = Files.createTempDirectory(runtimesRoot, "java-extract-");
         Path publish = Files.createTempDirectory(runtimesRoot, "java-publish-");
@@ -203,15 +205,17 @@ final class JavaRuntimeDownloader {
         }
     }
 
-    private static void deleteRecursively(Path root) {
+    private static boolean deleteRecursively(Path root) {
         if (root == null || !Files.exists(root)) {
-            return;
+            return true;
         }
         try (var stream = Files.walk(root)) {
             for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
                 Files.deleteIfExists(path);
             }
+            return !Files.exists(root);
         } catch (IOException ignored) {
+            return false;
         }
     }
 

@@ -96,6 +96,11 @@ final class MicrosoftAccountCoordinator {
                 : new MicrosoftAuth.CachedSession(
                         selected.refreshToken(), selected.accessToken(),
                         selected.accessTokenExpiresAt(), selected.username(), selected.uuid());
+        String unreadableCredential = ui.settingsManager.consumeUnreadableEncryptedSetting();
+        if (unreadableCredential != null) {
+            Platform.runLater(() -> ui.setStatus("保存的登录凭证不可读取",
+                    "加密密钥或凭证已损坏，请重新登录 Microsoft 账户。"));
+        }
         MicrosoftAuth microsoftAuth = new MicrosoftAuth(cachedSession, new MicrosoftAuth.LoginListener() {
             @Override
             public void onDeviceCode(MicrosoftAuth.DeviceCode deviceCode) {
@@ -117,6 +122,7 @@ final class MicrosoftAccountCoordinator {
         microsoftAuth.login();
         MicrosoftAuth.CachedSession authenticatedSession = microsoftAuth.getCachedSession();
         String refreshToken = authenticatedSession.refreshToken();
+        synchronized (ui.settingsManager) {
         if (refreshToken != null && !refreshToken.isBlank()) {
             ui.settingsManager.setEncrypted("microsoftRefreshToken", refreshToken);
         }
@@ -135,6 +141,7 @@ final class MicrosoftAccountCoordinator {
         ui.selectedMicrosoftAccount = storedAccount;
         if (!ui.settingsManager.save()) {
             Platform.runLater(() -> ui.setStatus("微软登录信息保存失败", "登录已成功，但无法保存刷新令牌，请检查目录权限或查看日志。"));
+        }
         }
         return microsoftAuth;
     }

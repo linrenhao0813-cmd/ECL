@@ -189,7 +189,7 @@ public class VersionManager {
         return 0;
     }
 
-    public List<LocalVersionProfile> getLocalVersionProfiles() {
+    public synchronized List<LocalVersionProfile> getLocalVersionProfiles() {
         List<LocalVersionProfile> cached = localProfilesCache;
         if (cached != null) {
             return cached;
@@ -200,7 +200,7 @@ public class VersionManager {
     }
 
     /** Drop cached local profile scans and display names after install/delete/rename of versions. */
-    public void invalidateLocalVersionProfiles() {
+    public synchronized void invalidateLocalVersionProfiles() {
         displayNameCache.clear();
         localProfilesCache = null;
     }

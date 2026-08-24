@@ -189,7 +189,7 @@ final class ModBrowserUpdateCoordinator {
             return updateService.applyUpdate(update);
         }
         DownloadTaskCenter.TaskHandle<Object> task = downloadTaskCenter.submit(
-                "Mod update", context -> {
+                "Mod update", () -> context -> {
                     CompletableFuture<?> inner = updateService.applyUpdate(update);
                     context.registerCancellation(() -> inner.cancel(true));
                     return inner.join();

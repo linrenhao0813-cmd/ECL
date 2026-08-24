@@ -24,7 +24,8 @@ final class GameProcessMonitor {
     }
 
     void monitor(GameProcess gameProcess, String version, File launchDir,
-                 long launchStartedAt, UUID runningInstanceId, boolean restoreLauncher) {
+                 long launchStartedAt, long launchStartedNanos,
+                 UUID runningInstanceId, boolean restoreLauncher) {
         // 守护线程：关闭启动器窗口后进程能立即退出，不会被该监控线程拖住；
         // 游戏本体是独立进程，启动器退出不影响其继续运行。
         Thread.ofPlatform().name("ecl-monitor-game-" + version).daemon(true).start(() -> {
@@ -59,17 +60,15 @@ final class GameProcessMonitor {
                 gameProcess.detachOutputListener(outputListener);
                 try {
                     ui.playtimeTracker.recordSession(ui.resolveVersionInstanceRoot(version).toPath(),
-                            launchStartedAt, System.currentTimeMillis());
+                            launchStartedAt, System.currentTimeMillis(),
+                            System.nanoTime() - launchStartedNanos);
                 } catch (IOException statsError) {
                     LauncherUI.LOGGER.warn("Cannot record playtime statistics for {}", version, statsError);
                 }
                 if (runningInstanceId != null) {
                     ui.controller.setInstanceRunning(runningInstanceId, false);
                 }
-                if (ui.activeGameProcess == process) {
-                    ui.activeGameProcess = null;
-                    ui.activeGameVersion = null;
-                }
+                ui.unregisterActiveGameProcess(process);
                 runOnUiIfActive(() -> {
                     ui.updateRuntimeSummary();
                     if (restoreLauncher) {

@@ -17,14 +17,19 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
+import java.util.Locale;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 
 /**
  * AES-256-GCM encryption for sensitive launcher data (tokens, refresh tokens).
  *
- * <p>The AES key is protected by Windows DPAPI. A plaintext key file is permitted only when the
- * internal {@code ecl.crypto.keyFile} test override is set.
+ * <p>The AES key is protected by Windows DPAPI. On non-Windows systems a local AES-GCM wrapper is
+ * used so account persistence remains available without loading the Windows-only DPAPI library.
+ * The optional {@code ecl.crypto.keyFile} property only redirects the key-file location; it never
+ * disables key protection.
  */
 public final class CryptoUtil {
     private static final String ALGORITHM = "AES/GCM/NoPadding";
@@ -33,6 +38,7 @@ public final class CryptoUtil {
     private static final String KEY_ALGORITHM = "AES";
     private static final int KEY_SIZE = 256;
     private static final byte[] DPAPI_HEADER = "ECL-DPAPI-1\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] LOCAL_HEADER = "ECL-LOCAL-1\n".getBytes(StandardCharsets.US_ASCII);
 
     private static volatile SecretKey cachedKey;
 
@@ -111,7 +117,8 @@ public final class CryptoUtil {
                     throw new IOException("Invalid account encryption key length");
                 }
                 k = new SecretKeySpec(encoded, KEY_ALGORITHM);
-                boolean legacyPlaintext = !allowsPlaintextTestKey() && !startsWith(stored, DPAPI_HEADER);
+                boolean legacyPlaintext = !startsWith(stored, DPAPI_HEADER)
+                        && !startsWith(stored, LOCAL_HEADER);
                 if (legacyPlaintext) {
                     writeKeyFile(keyFile.toPath(), encodeStoredKey(encoded));
                 }
@@ -119,7 +126,11 @@ public final class CryptoUtil {
                 if (!create) throw new IOException("Account encryption key does not exist");
                 k = generateKey();
                 byte[] encoded = k.getEncoded();
-                Files.createDirectories(keyFile.getParentFile().toPath());
+                File parent = keyFile.getAbsoluteFile().getParentFile();
+                if (parent == null) {
+                    throw new IOException("Account encryption key has no parent directory");
+                }
+                Files.createDirectories(parent.toPath());
                 writeKeyFile(keyFile.toPath(), encodeStoredKey(encoded));
             }
             cachedKey = k;
@@ -139,17 +150,28 @@ public final class CryptoUtil {
         return new File(ECLConfig.getBaseDir(), ".secret.key");
     }
 
-    private static byte[] encodeStoredKey(byte[] key) {
-        if (allowsPlaintextTestKey()) return key.clone();
-        byte[] protectedKey = Crypt32Util.cryptProtectData(key);
-        ByteBuffer buffer = ByteBuffer.allocate(DPAPI_HEADER.length + protectedKey.length);
-        buffer.put(DPAPI_HEADER);
-        buffer.put(protectedKey);
-        return buffer.array();
+    private static byte[] encodeStoredKey(byte[] key)
+            throws IOException, NoSuchAlgorithmException {
+        if (!isWindows()) {
+            return encodeLocalKey(key);
+        }
+        try {
+            byte[] protectedKey = Crypt32Util.cryptProtectData(key);
+            ByteBuffer buffer = ByteBuffer.allocate(DPAPI_HEADER.length + protectedKey.length);
+            buffer.put(DPAPI_HEADER);
+            buffer.put(protectedKey);
+            return buffer.array();
+        } catch (RuntimeException failure) {
+            throw new IOException("Unable to protect account key with Windows DPAPI", failure);
+        }
     }
 
-    private static byte[] decodeStoredKey(byte[] stored) throws IOException {
+    private static byte[] decodeStoredKey(byte[] stored)
+            throws IOException, NoSuchAlgorithmException {
         if (startsWith(stored, DPAPI_HEADER)) {
+            if (!isWindows()) {
+                throw new IOException("Windows DPAPI account key cannot be opened on this operating system");
+            }
             try {
                 return Crypt32Util.cryptUnprotectData(
                         Arrays.copyOfRange(stored, DPAPI_HEADER.length, stored.length));
@@ -157,11 +179,63 @@ public final class CryptoUtil {
                 throw new IOException("Unable to unlock account key with Windows DPAPI", failure);
             }
         }
+        if (startsWith(stored, LOCAL_HEADER)) {
+            return decodeLocalKey(stored);
+        }
         return stored.clone();
     }
 
-    private static boolean allowsPlaintextTestKey() {
-        return !System.getProperty("ecl.crypto.keyFile", "").isBlank();
+    private static byte[] encodeLocalKey(byte[] key)
+            throws IOException, NoSuchAlgorithmException {
+        try {
+            byte[] iv = new byte[GCM_IV_LENGTH];
+            SecureRandom.getInstanceStrong().nextBytes(iv);
+            Cipher cipher = Cipher.getInstance(ALGORITHM);
+            cipher.init(Cipher.ENCRYPT_MODE, localWrappingKey(),
+                    new GCMParameterSpec(GCM_TAG_LENGTH, iv));
+            byte[] wrapped = cipher.doFinal(key);
+            ByteBuffer buffer = ByteBuffer.allocate(LOCAL_HEADER.length + iv.length + wrapped.length);
+            buffer.put(LOCAL_HEADER);
+            buffer.put(iv);
+            buffer.put(wrapped);
+            return buffer.array();
+        } catch (GeneralSecurityException failure) {
+            throw new IOException("Unable to protect account key with the local fallback", failure);
+        }
+    }
+
+    private static byte[] decodeLocalKey(byte[] stored)
+            throws IOException, NoSuchAlgorithmException {
+        if (stored.length < LOCAL_HEADER.length + GCM_IV_LENGTH + 1) {
+            throw new IOException("Invalid locally protected account encryption key");
+        }
+        try {
+            ByteBuffer buffer = ByteBuffer.wrap(stored, LOCAL_HEADER.length,
+                    stored.length - LOCAL_HEADER.length);
+            byte[] iv = new byte[GCM_IV_LENGTH];
+            buffer.get(iv);
+            byte[] wrapped = new byte[buffer.remaining()];
+            buffer.get(wrapped);
+            Cipher cipher = Cipher.getInstance(ALGORITHM);
+            cipher.init(Cipher.DECRYPT_MODE, localWrappingKey(),
+                    new GCMParameterSpec(GCM_TAG_LENGTH, iv));
+            return cipher.doFinal(wrapped);
+        } catch (GeneralSecurityException | RuntimeException failure) {
+            throw new IOException("Unable to unlock the locally protected account key", failure);
+        }
+    }
+
+    private static SecretKey localWrappingKey() throws NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update("ECL-local-key-wrapper-v1\n".getBytes(StandardCharsets.UTF_8));
+        digest.update(System.getProperty("user.name", "").getBytes(StandardCharsets.UTF_8));
+        digest.update(System.getProperty("user.home", "").getBytes(StandardCharsets.UTF_8));
+        digest.update(System.getProperty("os.name", "").getBytes(StandardCharsets.UTF_8));
+        return new SecretKeySpec(digest.digest(), KEY_ALGORITHM);
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
     private static boolean startsWith(byte[] value, byte[] prefix) {

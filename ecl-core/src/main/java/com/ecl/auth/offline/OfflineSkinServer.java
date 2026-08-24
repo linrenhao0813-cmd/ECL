@@ -25,6 +25,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -171,6 +172,10 @@ public final class OfflineSkinServer implements AutoCloseable {
 
     private void handle(HttpExchange exchange) throws IOException {
         try {
+            if (!isTrustedRequest(exchange)) {
+                respond(exchange, 403, "Forbidden".getBytes(StandardCharsets.UTF_8), "text/plain");
+                return;
+            }
             String path = exchange.getRequestURI().getPath();
             String method = exchange.getRequestMethod();
             switch (method + " " + path) {
@@ -194,6 +199,55 @@ public final class OfflineSkinServer implements AutoCloseable {
         }
     }
 
+    /**
+     * The service is intentionally loopback-only, but loopback alone is not enough: a DNS-rebinding
+     * page can still connect to 127.0.0.1. Require the expected Host and reject browser-originated
+     * cross-origin requests before any profile or texture data is exposed.
+     */
+    private boolean isTrustedRequest(HttpExchange exchange) {
+        InetAddress remote = exchange.getRemoteAddress() == null
+                ? null : exchange.getRemoteAddress().getAddress();
+        if (remote == null || !remote.isLoopbackAddress()) {
+            return false;
+        }
+        String host = exchange.getRequestHeaders().getFirst("Host");
+        if (!isAllowedHost(host)) {
+            return false;
+        }
+        return sameOriginOrAbsent(exchange.getRequestHeaders().getFirst("Origin"))
+                && sameOriginOrAbsent(exchange.getRequestHeaders().getFirst("Referer"));
+    }
+
+    private boolean isAllowedHost(String hostHeader) {
+        if (hostHeader == null || hostHeader.isBlank()) {
+            return false;
+        }
+        String host = hostHeader.trim().toLowerCase(Locale.ROOT);
+        int port = server.getAddress().getPort();
+        return host.equals("127.0.0.1:" + port)
+                || host.equals("localhost:" + port)
+                || host.equals("[::1]:" + port);
+    }
+
+    private boolean sameOriginOrAbsent(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        try {
+            java.net.URI origin = java.net.URI.create(value.trim());
+            java.net.URI expected = java.net.URI.create(baseUrl);
+            int port = origin.getPort() < 0 ? expected.getPort() : origin.getPort();
+            return "http".equalsIgnoreCase(origin.getScheme())
+                    && port == expected.getPort()
+                    && ("127.0.0.1".equalsIgnoreCase(origin.getHost())
+                    || "localhost".equalsIgnoreCase(origin.getHost())
+                    || "[::1]".equalsIgnoreCase(origin.getHost())
+                    || "::1".equalsIgnoreCase(origin.getHost()));
+        } catch (IllegalArgumentException malformed) {
+            return false;
+        }
+    }
+
     private JsonObject metadata() {
         JsonObject meta = new JsonObject();
         meta.addProperty("serverName", "ECL");
@@ -212,7 +266,7 @@ public final class OfflineSkinServer implements AutoCloseable {
         return root;
     }
 
-    private JsonObject status() {
+    private synchronized JsonObject status() {
         JsonObject status = new JsonObject();
         status.addProperty("user.count", charactersByUuid.size());
         status.addProperty("token.count", 0);
@@ -226,7 +280,7 @@ public final class OfflineSkinServer implements AutoCloseable {
         try {
             JsonArray names = JsonParser.parseString(body).getAsJsonArray();
             for (var element : names) {
-                Character character = charactersByName.get(element.getAsString());
+                Character character = characterByName(element.getAsString());
                 if (character != null) {
                     response.add(character.simpleResponse());
                 }
@@ -240,7 +294,7 @@ public final class OfflineSkinServer implements AutoCloseable {
     private void hasJoined(HttpExchange exchange) throws IOException {
         String username = exchange.getRequestURI().getRawQuery() == null ? null
                 : queryParameter(exchange.getRequestURI().getRawQuery(), "username");
-        Character character = username == null ? null : charactersByName.get(username);
+        Character character = username == null ? null : characterByName(username);
         if (character == null) {
             respond(exchange, 204, new byte[0], "text/plain");
         } else {
@@ -250,7 +304,7 @@ public final class OfflineSkinServer implements AutoCloseable {
 
     private void profile(HttpExchange exchange, String path) throws IOException {
         String uuid = path.substring("/sessionserver/session/minecraft/profile/".length());
-        Character character = charactersByUuid.get(uuid);
+        Character character = characterByUuid(uuid);
         if (character == null) {
             respond(exchange, 204, new byte[0], "text/plain");
         } else {
@@ -278,6 +332,14 @@ public final class OfflineSkinServer implements AutoCloseable {
         charactersByUuid.remove(character.uuid, character);
         charactersByName.remove(character.name, character);
         pruneUnusedTextures();
+    }
+
+    private synchronized Character characterByName(String username) {
+        return charactersByName.get(username);
+    }
+
+    private synchronized Character characterByUuid(String uuid) {
+        return charactersByUuid.get(uuid);
     }
 
     private void pruneUnusedTextures() {

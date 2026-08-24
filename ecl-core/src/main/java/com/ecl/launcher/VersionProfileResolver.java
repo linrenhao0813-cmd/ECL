@@ -1,6 +1,7 @@
 package com.ecl.launcher;
 
 import com.ecl.util.JsonUtil;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.io.IOException;
@@ -62,7 +63,14 @@ final class VersionProfileResolver {
     }
 
     static boolean hasClientDownload(JsonObject json) {
-        JsonObject downloads = json == null ? null : json.getAsJsonObject("downloads");
+        if (json == null) {
+            return false;
+        }
+        JsonElement downloadsElement = json.get("downloads");
+        if (downloadsElement == null || !downloadsElement.isJsonObject()) {
+            return false;
+        }
+        JsonObject downloads = downloadsElement.getAsJsonObject();
         return downloads != null && downloads.has("client")
                 && downloads.get("client").isJsonObject();
     }

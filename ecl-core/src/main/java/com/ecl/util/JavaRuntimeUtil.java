@@ -305,6 +305,13 @@ public final class JavaRuntimeUtil {
             if (process != null && process.isAlive()) {
                 process.destroyForcibly();
             }
+            if (process != null) {
+                try {
+                    process.getInputStream().close();
+                } catch (IOException ignored) {
+                    // The process is already being discarded.
+                }
+            }
         }
     }
 

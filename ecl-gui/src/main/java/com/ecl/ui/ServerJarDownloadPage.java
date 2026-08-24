@@ -242,7 +242,7 @@ final class ServerJarDownloadPage {
         ui.setStatus(Messages.get("server.download.statusTitle"),
                 artifact.versionId() + " · " + target.getName());
 
-        ui.downloadTaskCenter.submit("Server JAR " + artifact.versionId(), context -> {
+        ui.downloadTaskCenter.submit("Server JAR " + artifact.versionId(), () -> context -> {
             try {
                 ui.serverJarDownloader.download(artifact, target,
                         createDownloadListener(status, progress, generation, downloadGeneration, context));

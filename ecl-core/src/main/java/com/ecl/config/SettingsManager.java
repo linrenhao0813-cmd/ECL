@@ -64,6 +64,11 @@ public class SettingsManager {
     public synchronized void load() {
         loadAttempted = true;
         if (settingsFile.exists()) {
+            if (Files.isSymbolicLink(settingsFile.toPath())) {
+                LOGGER.warn("Ignoring unreadable symbolic-link settings file {}", settingsFile);
+                settings = new JsonObject();
+                return;
+            }
             try (Reader reader = Files.newBufferedReader(settingsFile.toPath(), StandardCharsets.UTF_8)) {
                 settings = JsonParser.parseReader(reader).getAsJsonObject();
                 // 兼容迁移：旧键 "versionCategory" → "versionCategory2"
@@ -303,6 +308,15 @@ public class SettingsManager {
     public synchronized String getEncrypted(String key) {
         ensureLoaded();
         return encryptedStore.get(settings, key);
+    }
+
+    /**
+     * Return and clear the key of the last encrypted setting that could not be decrypted. Callers
+     * can keep the compatibility behavior of {@link #getEncrypted(String)} while showing a useful
+     * recovery message instead of silently treating the user as logged out.
+     */
+    public synchronized String consumeUnreadableEncryptedSetting() {
+        return encryptedStore.consumeFailureKey();
     }
 
     public synchronized String getEncrypted(SettingKey<String> key) {

@@ -113,10 +113,6 @@ public class MicrosoftAuth implements AuthProvider {
             microsoftToken = loginWithDeviceCode(gen);
         }
 
-        if (microsoftToken.refreshToken() != null && !microsoftToken.refreshToken().isBlank()) {
-            commitRefreshToken(gen, microsoftToken.refreshToken());
-        }
-
         ensureActiveGeneration(gen);
         notifyStatus("正在验证 Xbox Live 身份...");
         XboxLiveAuthClient.Token xboxToken = xboxLiveAuthClient.authenticate(microsoftToken.accessToken());
@@ -137,7 +133,7 @@ public class MicrosoftAuth implements AuthProvider {
         String profileName = profile.name();
         String profileUuid = profile.uuid();
         commitAuthenticatedSession(gen, profileName, profileUuid,
-                minecraftToken.accessToken(), minecraftToken.expiresAt());
+                minecraftToken.accessToken(), minecraftToken.expiresAt(), microsoftToken.refreshToken());
         notifyStatusIfCurrent(gen, "微软正版登录成功: " + profileName);
         ensureActiveGeneration(gen);
     }
@@ -239,10 +235,15 @@ public class MicrosoftAuth implements AuthProvider {
         }
     }
 
-    private void commitRefreshToken(long gen, String newRefreshToken) throws LoginCancelledException {
+    private void commitAuthenticatedSession(long gen, String profileName, String profileUuid,
+                                            String minecraftAccessToken, long expiresAt,
+                                            String refreshToken) throws LoginCancelledException {
         synchronized (stateLock) {
             ensureActiveGenerationLocked(gen);
-            sessionState.commitRefreshToken(newRefreshToken);
+            sessionState.commitAuthenticated(profileName, profileUuid, minecraftAccessToken, expiresAt);
+            if (refreshToken != null && !refreshToken.isBlank()) {
+                sessionState.commitRefreshToken(refreshToken);
+            }
         }
     }
 

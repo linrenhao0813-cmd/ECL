@@ -226,8 +226,13 @@ final class SettingsDialog {
         PasswordField curseForgeApiKeyField = new PasswordField();
         String storedCurseForgeKey = ui.settingsManager.getEncrypted(
                 ECLConfig.KEY_CURSEFORGE_API_KEY);
+        boolean unreadableCurseForgeKey =
+                ui.settingsManager.consumeUnreadableEncryptedSetting() != null;
         curseForgeApiKeyField.setText(storedCurseForgeKey == null ? "" : storedCurseForgeKey);
         curseForgeApiKeyField.setPromptText("可留空，或使用 CURSEFORGE_API_KEY 环境变量");
+        if (unreadableCurseForgeKey) {
+            curseForgeApiKeyField.setPromptText("已保存的 API Key 解密失败，请重新输入");
+        }
         ui.applyFieldStyle(curseForgeApiKeyField);
 
         VBox dialogRoot = new VBox(18,

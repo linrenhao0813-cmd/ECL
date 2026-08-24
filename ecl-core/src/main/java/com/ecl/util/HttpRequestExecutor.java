@@ -204,7 +204,6 @@ final class HttpRequestExecutor {
                 if (read == 0) {
                     continue;
                 }
-                DownloadRateLimiter.acquire(read);
                 if (read > maxBytes - total) {
                     throw new IOException("HTTP response exceeds " + maxBytes + " bytes");
                 }

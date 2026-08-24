@@ -238,6 +238,47 @@ class MrpackInstallerTest {
     }
 
     @Test
+    void loaderFilesRollbackWhenPackTransactionCommitFails() throws Exception {
+        Path initial = tempDir.resolve("loader-rollback-initial.mrpack");
+        writePack(initial, "Loader Rollback Pack", "1", "{\"minecraft\":\"1.21.4\"}",
+                Map.of("config/example.txt", "old=true"));
+        Path gameRoot = tempDir.resolve("game-loader-rollback");
+        MrpackInstaller.InstallResult installed = new MrpackInstaller().install(
+                initial.toFile(), gameRoot.toFile(), "Loader Rollback Pack", "project", "v1", null);
+
+        String loaderProfileId = "fabric-loader-0.16.10-1.21.5";
+        MrpackInstaller updater = new MrpackInstaller(
+                (versions, libraries, minecraft, loader, version, listener) -> {
+                    Path profileDirectory = versions.resolve(loaderProfileId);
+                    Files.createDirectories(profileDirectory);
+                    Files.writeString(profileDirectory.resolve(loaderProfileId + ".json"),
+                            "{\"id\":\"" + loaderProfileId + "\"}");
+                    Path library = libraries.resolve("fabric/test-loader.jar");
+                    Files.createDirectories(library.getParent());
+                    Files.writeString(library, "loader");
+                    return new com.ecl.launcher.ModLoaderInstaller.InstallResult(
+                            loaderProfileId, minecraft, loader, version);
+                },
+                (instance, profile) -> new PackUpdateTransaction(instance, profile, 1));
+        Path updated = tempDir.resolve("loader-rollback-updated.mrpack");
+        writePack(updated, "Loader Rollback Pack", "2",
+                "{\"minecraft\":\"1.21.5\",\"fabric-loader\":\"0.16.10\"}",
+                Map.of("config/example.txt", "new=true"));
+
+        assertThrows(IOException.class, () -> updater.update(
+                updated.toFile(), gameRoot.toFile(), installed.profileId(),
+                "project", "v2", null));
+
+        Path loaderProfile = ECLConfig.getVersionsDir().toPath()
+                .resolve(loaderProfileId).resolve(loaderProfileId + ".json");
+        assertFalse(Files.exists(loaderProfile));
+        assertFalse(Files.exists(ECLConfig.getLibrariesDir().toPath()
+                .resolve("fabric/test-loader.jar")));
+        assertEquals("old=true", Files.readString(
+                installed.instanceDirectory().resolve("config/example.txt")));
+    }
+
+    @Test
     void installContentsKeepsChineseMessageWhenDependenciesMissing() throws Exception {
         Path archive = tempDir.resolve("no-deps.mrpack");
         String index = """

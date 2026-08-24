@@ -27,7 +27,7 @@ public final class PlaytimeTracker {
 
     public synchronized void recordSession(Path instanceRoot, long startedAtMillis, long endedAtMillis)
             throws IOException {
-        long seconds = Math.max(0, (endedAtMillis - startedAtMillis) / 1000);
+        long seconds = elapsedSeconds(endedAtMillis - startedAtMillis);
         Path file = statsFile(instanceRoot);
         Files.createDirectories(file.getParent());
         JsonObject value = read(file);
@@ -35,6 +35,23 @@ public final class PlaytimeTracker {
         value.addProperty("sessionSeconds", seconds);
         value.addProperty("lastExitedAt", Instant.ofEpochMilli(endedAtMillis).toString());
         write(file, value);
+    }
+
+    /** Record a session with a monotonic elapsed duration while retaining wall-clock timestamps. */
+    public synchronized void recordSession(Path instanceRoot, long startedAtMillis, long endedAtMillis,
+                                            long elapsedNanos) throws IOException {
+        long seconds = Math.max(0, elapsedNanos / 1_000_000_000L);
+        Path file = statsFile(instanceRoot);
+        Files.createDirectories(file.getParent());
+        JsonObject value = read(file);
+        value.addProperty("totalSeconds", number(value, "totalSeconds") + seconds);
+        value.addProperty("sessionSeconds", seconds);
+        value.addProperty("lastExitedAt", Instant.ofEpochMilli(endedAtMillis).toString());
+        write(file, value);
+    }
+
+    private static long elapsedSeconds(long elapsedMillis) {
+        return Math.max(0, elapsedMillis / 1000);
     }
 
     public synchronized long totalSeconds(Path instanceRoot) throws IOException {

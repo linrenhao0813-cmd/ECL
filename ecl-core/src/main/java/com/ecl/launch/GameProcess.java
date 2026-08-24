@@ -1,6 +1,11 @@
 package com.ecl.launch;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -13,6 +18,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class GameProcess implements AutoCloseable {
 
     private static final int DEFAULT_OUTPUT_CAPTURE_CHARS = 80_000;
+    private static final long GRACEFUL_CLOSE_TIMEOUT_SECONDS = 1;
+    private static final long FORCE_CLOSE_TIMEOUT_SECONDS = 1;
 
     private final Process process;
     private final String versionId;
@@ -33,6 +40,27 @@ public final class GameProcess implements AutoCloseable {
         this.versionId = versionId;
         this.workingDirectory = workingDirectory;
         outputPump();
+    }
+
+    /**
+     * Create a process handle and optionally mirror its merged output to an append-only log file.
+     * The output pipe remains available to listeners and crash analysis.
+     */
+    public GameProcess(Process process, String versionId, Path workingDirectory,
+                       File processOutputFile) throws IOException {
+        this.process = process;
+        this.versionId = versionId;
+        this.workingDirectory = workingDirectory;
+        if (processOutputFile == null) {
+            outputPump();
+            return;
+        }
+        OutputStream output = Files.newOutputStream(processOutputFile.toPath(),
+                StandardOpenOption.CREATE, StandardOpenOption.APPEND, StandardOpenOption.WRITE);
+        ProcessOutputPump pump = new ProcessOutputPump(
+                process.getInputStream(), DEFAULT_OUTPUT_CAPTURE_CHARS, output);
+        outputPump = pump;
+        pump.start();
     }
 
     public String versionId() {
@@ -63,6 +91,15 @@ public final class GameProcess implements AutoCloseable {
         int code = process.waitFor();
         completeExit(code);
         return this;
+    }
+
+    /** Wait for at most {@code timeout}; returns whether the process exited in time. */
+    public boolean waitForExit(long timeout, TimeUnit unit) throws InterruptedException {
+        if (!process.waitFor(timeout, unit)) {
+            return false;
+        }
+        completeExit(process.exitValue());
+        return true;
     }
 
     /**
@@ -149,9 +186,9 @@ public final class GameProcess implements AutoCloseable {
     public void close() {
         destroy();
         try {
-            if (!process.waitFor(5, TimeUnit.SECONDS)) {
+            if (!process.waitFor(GRACEFUL_CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 destroyForcibly();
-                process.waitFor(5, TimeUnit.SECONDS);
+                process.waitFor(FORCE_CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             }
             if (!process.isAlive()) {
                 completeExit(process.exitValue());

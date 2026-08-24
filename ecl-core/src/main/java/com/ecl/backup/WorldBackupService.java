@@ -377,7 +377,11 @@ public final class WorldBackupService {
     }
 
     private void writeMetadata(Path path, BackupMetadata metadata) throws IOException {
-        try (Writer writer = Files.newBufferedWriter(path, StandardOpenOption.CREATE_NEW,
+        if (Files.isSymbolicLink(path)) {
+            throw new IOException("Backup metadata temporary path cannot be a symbolic link: " + path);
+        }
+        try (Writer writer = Files.newBufferedWriter(path, StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
                 StandardOpenOption.WRITE)) {
             GsonProvider.pretty().toJson(metadata, writer);
         }
