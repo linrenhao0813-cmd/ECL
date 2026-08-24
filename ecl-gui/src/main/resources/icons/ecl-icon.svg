@@ -1,16 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <rect width="256" height="256" rx="24" fill="#151915"/>
-  <rect x="16" y="16" width="224" height="224" rx="10" fill="#232820"/>
-  <path d="M16 16h224v32H48v160H16z" fill="#3f4a37"/>
-  <path d="M48 208h192v32H16v-32z" fill="#0e120d"/>
-  <path d="M48 48h160v32H80v48h112v32H80v48h128v32H48z" fill="#5fa64a"/>
-  <path d="M80 80h128v16H96v32H80z" fill="#8fca6a"/>
-  <path d="M80 160h112v16H96v32H80z" fill="#8fca6a"/>
-  <path d="M208 80h-32v32h-32v16h48V96h16z" fill="#2f5f2b"/>
-  <path d="M192 160h-48v16h32v32h32v-48z" fill="#2f5f2b"/>
-  <path d="M48 48h32v160H48z" fill="#78ad5a"/>
-  <path d="M80 48h128v32H80z" fill="#6fb455"/>
-  <path d="M80 128h112v32H80z" fill="#6fb455"/>
-  <path d="M80 208h128v32H80z" fill="#6fb455"/>
-  <path d="M32 32h16v16H32zM208 32h16v16h-16zM32 208h16v16H32zM208 208h16v16h-16z" fill="#eef6df" opacity=".22"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#64748b" flood-opacity=".28"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <path d="M48 83C54 59 77 43 104 43h89c13 0 21 7 21 16 0 9-8 15-21 15h-89c-18 0-34 5-45 15Z" fill="#35c7b5"/>
+    <path d="M48 83c12-8 28-11 51-11h54c23 0 42 7 60 21l14 11-14 12c-17-13-35-19-58-19h-56c-20 0-34 4-45 12-8 6-18 3-22-5-4-8 1-16 16-21Z" fill="#203c64"/>
+    <path d="M48 137c11-12 28-19 51-22l57-8c17-2 31-1 43 3l-17 24c-8-3-17-4-27-3l-57 8c-18 2-32 8-43 18-8 7-18 5-23-3-5-7-1-14 16-17Z" fill="#67b7d8"/>
+    <path d="M195 110c9 0 17 2 25 6l-28 23-17 3c8-12 14-23 20-32Z" fill="#e9a4c5"/>
+    <path d="M57 158c11-9 27-14 47-17l58-8c-7 11-14 21-22 29l-32 5c-17 3-30 9-40 18-8 7-18 5-23-3-5-7-1-16 12-24Z" fill="#203c64"/>
+    <path d="M47 181c11-10 26-16 44-19l32-5c-8 8-12 15-12 22 0 8 5 13 14 16h47c17 0 30-5 40-14 8-7 18-6 23 2 5 7 1 16-12 24-13 8-30 12-51 12h-48c-25 0-48-13-58-32-4-3-6-4-7-6Z" fill="#35c7b5"/>
+  </g>
 </svg>
