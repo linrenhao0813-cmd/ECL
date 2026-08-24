@@ -6,13 +6,13 @@ import com.ecl.auth.OfflineSkin;
 import com.ecl.auth.OfflineSkinStore;
 import com.ecl.backup.BackupEntry;
 import com.ecl.download.GameDownloader;
+import com.ecl.game.InstanceLaunchProfile;
 import com.ecl.game.PlaytimeTracker;
 import com.ecl.launcher.CrashAnalyzer;
 import com.ecl.launch.GameProcess;
 import com.ecl.launch.LaunchOptions;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
-import com.ecl.util.TextUtil;
 import javafx.application.Platform;
 
 import java.io.File;
@@ -62,7 +62,11 @@ final class GameLaunchCoordinator {
         }
 
         String configuredJavaPath = ui.javaPath == null ? "" : ui.javaPath.trim();
-        if (!configuredJavaPath.isBlank() && !com.ecl.util.JavaRuntimeUtil.isUsableJavaPath(configuredJavaPath)) {
+        boolean profileNeedsMigration = !java.nio.file.Files.isRegularFile(
+                ui.controller.instanceLaunchProfiles()
+                        .profileFile(ui.resolveVersionInstanceRoot(selectedVersion).toPath()));
+        if (profileNeedsMigration && !configuredJavaPath.isBlank()
+                && !com.ecl.util.JavaRuntimeUtil.isUsableJavaPath(configuredJavaPath)) {
             ui.setStatus("Java 路径无效", "高级设置里的 Java 路径不可用，请重新选择 java.exe 或 JDK 根目录。 ");
             return;
         }
@@ -207,9 +211,20 @@ final class GameLaunchCoordinator {
 
         ui.runAsync("ecl-launch-game", () -> {
             File launchDir = ui.resolveVersionGameDir(version);
+            File instanceRoot = ui.resolveVersionInstanceRoot(version);
             String password = passwordRef.getAndSet(null);
             try {
                 ensureVersionGameDirs(version);
+                InstanceLaunchProfile launchProfile = ui.controller.instanceLaunchProfiles()
+                        .load(instanceRoot.toPath());
+                String instanceJavaPath = launchProfile.javaMode() == InstanceLaunchProfile.JavaMode.AUTO
+                        ? "" : launchProfile.javaPath();
+                if (!instanceJavaPath.isBlank()
+                        && !com.ecl.util.JavaRuntimeUtil.isUsableJavaPath(instanceJavaPath)) {
+                    throw new IOException("Instance Java path is not usable: " + instanceJavaPath);
+                }
+                int instanceMemoryMb = launchProfile.memoryMode() == InstanceLaunchProfile.MemoryMode.AUTO
+                        ? ECLConfig.calculateAutoMemoryMb() : launchProfile.maxMemoryMb();
                 AuthProvider auth = authFactory.create(authType, server, username, password);
                 password = null;
                 OfflineSkin offlineSkin = auth.getType() == com.ecl.auth.AuthType.OFFLINE
@@ -222,12 +237,11 @@ final class GameLaunchCoordinator {
                         .auth(auth)
                         .offlineSkin(offlineSkin)
                         .gameDirectory(launchDir)
-                        .instanceDirectory(ui.resolveVersionInstanceRoot(version))
+                        .instanceDirectory(instanceRoot)
                         .environment(ui.controller.launchEnvironment())
-                        .maxMemoryMb(getEffectiveMaxMemoryMb())
-                        .jvmArguments(TextUtil.parseCommandLine(
-                                ui.extraJvmArgs == null ? "" : ui.extraJvmArgs))
-                        .javaExecutablePath(ui.javaPath)
+                        .maxMemoryMb(instanceMemoryMb)
+                        .jvmArguments(launchProfile.customJvmArguments())
+                        .javaExecutablePath(instanceJavaPath)
                         .gameResolution(ui.gameWidth, ui.gameHeight)
                         .fullscreen(ui.gameFullscreen)
                         .serverAddress(ui.quickServer)

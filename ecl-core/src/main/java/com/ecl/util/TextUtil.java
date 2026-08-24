@@ -81,4 +81,27 @@ public final class TextUtil {
         }
         return List.copyOf(arguments);
     }
+
+    /** Formats arguments so {@link #parseCommandLine(String)} can reconstruct them exactly. */
+    public static String formatCommandLine(List<String> arguments) {
+        if (arguments == null || arguments.isEmpty()) {
+            return "";
+        }
+        List<String> formatted = new ArrayList<>(arguments.size());
+        for (String argument : arguments) {
+            if (argument == null) {
+                continue;
+            }
+            if (!argument.isEmpty()
+                    && argument.chars().noneMatch(character -> Character.isWhitespace(character)
+                    || character == '\'' || character == '"')) {
+                formatted.add(argument);
+                continue;
+            }
+            formatted.add("\"" + argument
+                    .replace("\\", "\\\\")
+                    .replace("\"", "\\\"") + "\"");
+        }
+        return String.join(" ", formatted);
+    }
 }

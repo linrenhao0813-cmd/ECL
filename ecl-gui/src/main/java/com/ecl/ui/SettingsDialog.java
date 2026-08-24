@@ -5,8 +5,10 @@ import com.ecl.game.DefaultGameRepository;
 import com.ecl.game.DefaultIsolationType;
 import com.ecl.game.InstanceGameSettings;
 import com.ecl.game.InstanceGameSettingsStore;
+import com.ecl.game.InstanceLaunchProfile;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.util.JavaRuntimeUtil;
+import com.ecl.util.TextUtil;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -27,6 +29,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Path;
+import java.util.List;
 
 /** Owns the advanced settings dialog and persists its form values. */
 final class SettingsDialog {
@@ -37,13 +40,16 @@ final class SettingsDialog {
     }
 
     void show() {
+        String selectedInstanceId = ui.getSelectedVersion();
+        InstanceLaunchProfile selectedLaunchProfile = loadExistingProfile(selectedInstanceId);
         Stage dialog = new Stage();
         dialog.initOwner(ui.primaryStage);
         dialog.initModality(Modality.APPLICATION_MODAL);
         dialog.setTitle("高级设置");
         ui.applyWindowIcon(dialog);
 
-        TextField javaField = new TextField(ui.javaPath);
+        TextField javaField = new TextField(selectedLaunchProfile == null
+                ? ui.javaPath : selectedLaunchProfile.javaPath());
         javaField.setPromptText("java.exe 或 JDK 根目录");
         ui.applyFieldStyle(javaField);
 
@@ -102,7 +108,6 @@ final class SettingsDialog {
         });
         ui.applyFieldStyle(isolationPolicyField);
 
-        String selectedInstanceId = ui.getSelectedVersion();
         ComboBox<String> instanceDirectoryModeField = new ComboBox<>();
         instanceDirectoryModeField.getItems().setAll("跟随默认策略", "使用独立实例目录", "使用自定义目录");
         TextField customInstanceDirectoryField = new TextField();
@@ -154,11 +159,16 @@ final class SettingsDialog {
         VBox instanceDirectoryBox = new VBox(10,
                 instanceDirectoryModeField, customInstanceDirectoryBox);
 
-        TextField memoryField = new TextField(ui.maxMemoryMb == ECLConfig.AUTO_MEMORY_MB ? "" : Integer.toString(ui.maxMemoryMb));
+        int initialMemoryMb = selectedLaunchProfile == null
+                ? ui.maxMemoryMb : selectedLaunchProfile.maxMemoryMb();
+        TextField memoryField = new TextField(initialMemoryMb == ECLConfig.AUTO_MEMORY_MB
+                ? "" : Integer.toString(initialMemoryMb));
         memoryField.setPromptText("自动（当前 " + ECLConfig.calculateAutoMemoryMb() + " MB）");
         ui.applyFieldStyle(memoryField);
 
-        TextField jvmField = new TextField(ui.extraJvmArgs);
+        TextField jvmField = new TextField(selectedLaunchProfile == null
+                ? ui.extraJvmArgs
+                : TextUtil.formatCommandLine(selectedLaunchProfile.customJvmArguments()));
         jvmField.setPromptText("例如：-XX:+UseG1GC -Dfile.encoding=UTF-8");
         ui.applyFieldStyle(jvmField);
 
@@ -270,6 +280,13 @@ final class SettingsDialog {
                 ui.setStatus("错误: 内存格式无效", memoryError.getMessage());
                 return;
             }
+            List<String> configuredJvmArguments;
+            try {
+                configuredJvmArguments = TextUtil.parseCommandLine(jvmField.getText());
+            } catch (IllegalArgumentException jvmError) {
+                ui.setStatus("JVM 参数无效", jvmError.getMessage());
+                return;
+            }
             int configuredWidth;
             int configuredHeight;
             int configuredProcessors;
@@ -351,8 +368,26 @@ final class SettingsDialog {
                         }
                         default -> repository.inheritRunDirectoryPolicy(selectedInstanceId);
                     }
+                    Path instanceRoot = ui.resolveVersionInstanceRoot(selectedInstanceId).toPath();
+                    InstanceLaunchProfile currentProfile = ui.controller.instanceLaunchProfiles()
+                            .load(instanceRoot);
+                    InstanceLaunchProfile updatedProfile = new InstanceLaunchProfile(
+                            currentProfile.schemaVersion(),
+                            ui.javaPath.isBlank() ? InstanceLaunchProfile.JavaMode.AUTO
+                                    : InstanceLaunchProfile.JavaMode.CUSTOM,
+                            ui.javaPath,
+                            currentProfile.performancePreset(),
+                            ui.maxMemoryMb == ECLConfig.AUTO_MEMORY_MB
+                                    ? InstanceLaunchProfile.MemoryMode.AUTO
+                                    : InstanceLaunchProfile.MemoryMode.CUSTOM,
+                            ui.maxMemoryMb,
+                            currentProfile.generatedJvmOptions(),
+                            configuredJvmArguments,
+                            currentProfile.autoRepair(),
+                            currentProfile.backupPolicyId());
+                    ui.controller.instanceLaunchProfiles().save(instanceRoot, updatedProfile);
                 } catch (IOException | RuntimeException directoryError) {
-                    ui.setStatus("实例目录保存失败", directoryError.getMessage());
+                    ui.setStatus("实例设置保存失败", directoryError.getMessage());
                     return;
                 }
             }
@@ -383,5 +418,22 @@ final class SettingsDialog {
         ui.applyThemeToScene(scene, ui.settingsManager.get(ECLConfig.KEY_THEME));
         dialog.show();
     
+    }
+
+    private InstanceLaunchProfile loadExistingProfile(String instanceId) {
+        if (instanceId == null || instanceId.isBlank()) {
+            return null;
+        }
+        Path instanceRoot = ui.resolveVersionInstanceRoot(instanceId).toPath();
+        Path profileFile = ui.controller.instanceLaunchProfiles().profileFile(instanceRoot);
+        if (!java.nio.file.Files.isRegularFile(profileFile)) {
+            return null;
+        }
+        try {
+            return ui.controller.instanceLaunchProfiles().load(instanceRoot);
+        } catch (IOException invalidProfile) {
+            LauncherUI.LOGGER.warn("Cannot load launch profile for {}", instanceId, invalidProfile);
+            return null;
+        }
     }
 }

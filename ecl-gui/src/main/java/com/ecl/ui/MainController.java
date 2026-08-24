@@ -11,6 +11,7 @@ import com.ecl.download.ModrinthDownloader;
 import com.ecl.launch.DefaultLauncher;
 import com.ecl.launch.LaunchEnvironment;
 import com.ecl.launch.Launcher;
+import com.ecl.game.InstanceLaunchProfileStore;
 import com.ecl.game.VersionRepository;
 import com.ecl.launcher.VersionManager;
 import com.ecl.modrinth.api.DefaultModrinthApiClient;
@@ -26,13 +27,11 @@ import com.ecl.modrinth.provider.ModMetadataProviderRegistry;
 import com.ecl.modrinth.provider.ModrinthMetadataProvider;
 import com.ecl.modrinth.repository.FileInstalledModRepository;
 import com.ecl.modrinth.repository.InstalledModRepository;
-import com.ecl.modrinth.service.DefaultInstanceOperationLock;
 import com.ecl.modrinth.service.DefaultLocalModScanner;
 import com.ecl.modrinth.service.DefaultModDependencyResolver;
 import com.ecl.modrinth.service.DefaultModManagementService;
 import com.ecl.modrinth.service.DefaultModUpdateService;
 import com.ecl.modrinth.service.DefaultModVersionSelector;
-import com.ecl.modrinth.service.InstanceOperationLock;
 import com.ecl.modrinth.service.LocalModScanner;
 import com.ecl.modrinth.service.ModDependencyResolver;
 import com.ecl.modrinth.service.ModInstallationService;
@@ -42,6 +41,7 @@ import com.ecl.modrinth.service.ModVersionSelector;
 import com.ecl.modrinth.pack.DefaultModpackUpdateService;
 import com.ecl.modrinth.pack.ModpackUpdateService;
 import com.ecl.modrinth.transaction.InstallationPlanBuilder;
+import com.ecl.operation.InstanceOperationCoordinator;
 import com.ecl.util.ThreadFactories;
 import com.ecl.util.HttpUtil;
 
@@ -81,15 +81,32 @@ public final class MainController implements AutoCloseable {
     private final ModUpdateService modUpdateService;
     private final ModpackUpdateService modpackUpdateService;
     private final InstallationPlanBuilder installationPlanBuilder;
-    private final InstanceOperationLock modOperationLock;
+    private final InstanceLaunchProfileStore instanceLaunchProfiles;
+    private final InstanceOperationCoordinator instanceOperations;
     private final Map<ContentSource, ModSourceServices> sourceServices = new ConcurrentHashMap<>();
     private final Map<UUID, ModInstanceContext> modInstances = new ConcurrentHashMap<>();
     private final Set<UUID> runningInstances = ConcurrentHashMap.newKeySet();
 
     public MainController() {
+        this(defaultDependencies());
+    }
+
+    private MainController(Dependencies dependencies) {
+        this(dependencies.settingsManager(), dependencies.instanceLaunchProfiles(),
+                dependencies.instanceOperations());
+    }
+
+    /** Constructor boundary for instance-scoped services that need deterministic wiring. */
+    public MainController(SettingsManager settingsManager,
+                          InstanceLaunchProfileStore instanceLaunchProfiles,
+                          InstanceOperationCoordinator instanceOperations) {
         ECLConfig.ensureDirs();
-        settingsManager = new SettingsManager();
-        settingsManager.load();
+        this.settingsManager = java.util.Objects.requireNonNull(settingsManager, "settingsManager");
+        this.instanceLaunchProfiles = java.util.Objects.requireNonNull(
+                instanceLaunchProfiles, "instanceLaunchProfiles");
+        this.instanceOperations = java.util.Objects.requireNonNull(
+                instanceOperations, "instanceOperations");
+        this.settingsManager.load();
         settingsManager.enableAutoSave(); // GUI 设置变更自动落盘（防抖 500ms）
         versionManager = new VersionManager();
         versionRepository = new VersionRepository(ECLConfig.getVersionsDir());
@@ -116,7 +133,6 @@ public final class MainController implements AutoCloseable {
                 configuredConcurrency, ThreadFactories.daemon("ecl-mod-download"));
         installedModRepository = new FileInstalledModRepository();
         modVersionSelector = new DefaultModVersionSelector();
-        modOperationLock = new DefaultInstanceOperationLock();
         modDependencyResolver = new DefaultModDependencyResolver(
                 metadataProvider, modVersionSelector, instance -> {
                     try {
@@ -139,19 +155,19 @@ public final class MainController implements AutoCloseable {
                             .getDownloadUrl(projectId, fileId));
                 });
         modInstallationService = new ModInstallationService(
-                installedModRepository, fileDownloadService, modOperationLock,
+                installedModRepository, fileDownloadService, instanceOperations,
                 backgroundExecutor, runningInstances::contains);
         modManagementService = new DefaultModManagementService(
-                installedModRepository, modOperationLock, backgroundExecutor,
+                installedModRepository, instanceOperations, backgroundExecutor,
                 runningInstances::contains, hashVerifier);
         localModScanner = new DefaultLocalModScanner(
                 metadataProvider, installedModRepository, hashVerifier, modVersionSelector,
-                modOperationLock, backgroundExecutor, runningInstances::contains);
+                instanceOperations, backgroundExecutor, runningInstances::contains);
         modUpdateService = new DefaultModUpdateService(
                 metadataProvider, modVersionSelector, modDependencyResolver,
                 installationPlanBuilder, modInstallationService, modInstances::get);
         modpackUpdateService = new DefaultModpackUpdateService(
-                metadataProvider, backgroundExecutor, modOperationLock,
+                metadataProvider, backgroundExecutor, instanceOperations,
                 runningInstances::contains);
         sourceServices.put(ContentSource.MODRINTH,
                 new ModSourceServices(modDependencyResolver, localModScanner, modUpdateService));
@@ -185,7 +201,7 @@ public final class MainController implements AutoCloseable {
                     }, 32, 256);
             LocalModScanner scanner = new DefaultLocalModScanner(
                     provider, installedModRepository, new HashVerifier(), modVersionSelector,
-                    modOperationLock, backgroundExecutor, runningInstances::contains);
+                    instanceOperations, backgroundExecutor, runningInstances::contains);
             ModUpdateService updater = new DefaultModUpdateService(
                     provider, modVersionSelector, resolver, installationPlanBuilder,
                     modInstallationService, modInstances::get);
@@ -201,6 +217,8 @@ public final class MainController implements AutoCloseable {
     public LocalModScanner localModScanner() { return localModScanner; }
     public ModUpdateService modUpdateService() { return modUpdateService; }
     public ModpackUpdateService modpackUpdateService() { return modpackUpdateService; }
+    public InstanceLaunchProfileStore instanceLaunchProfiles() { return instanceLaunchProfiles; }
+    public InstanceOperationCoordinator instanceOperations() { return instanceOperations; }
     public Launcher gameLauncher() { return gameLauncher; }
     public LaunchEnvironment launchEnvironment() { return launchEnvironment; }
 
@@ -284,6 +302,22 @@ public final class MainController implements AutoCloseable {
             Thread.currentThread().interrupt();
             executor.shutdownNow();
         }
+    }
+
+    private static Dependencies defaultDependencies() {
+        SettingsManager settings = new SettingsManager();
+        InstanceLaunchProfileStore profiles = new InstanceLaunchProfileStore(() ->
+                new InstanceLaunchProfileStore.LegacyLaunchSettings(
+                        settings.get(ECLConfig.KEY_JAVA_PATH),
+                        settings.get(ECLConfig.KEY_MAX_MEMORY_MB),
+                        settings.get(ECLConfig.KEY_JVM_ARGS)));
+        return new Dependencies(settings, profiles, new InstanceOperationCoordinator());
+    }
+
+    private record Dependencies(
+            SettingsManager settingsManager,
+            InstanceLaunchProfileStore instanceLaunchProfiles,
+            InstanceOperationCoordinator instanceOperations) {
     }
 
     public record ModSourceServices(ModDependencyResolver dependencyResolver,

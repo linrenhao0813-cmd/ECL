@@ -41,4 +41,12 @@ class TextUtilTest {
         assertThrows(IllegalArgumentException.class,
                 () -> TextUtil.parseCommandLine("-Dpath=\"C:\\Program Files"));
     }
+
+    @Test
+    void formatsArgumentsForLosslessParsing() {
+        java.util.List<String> arguments = java.util.List.of(
+                "-XX:+UseG1GC", "-Dmessage=hello world", "-Dpath=C:\\Program Files\\", "");
+
+        assertEquals(arguments, TextUtil.parseCommandLine(TextUtil.formatCommandLine(arguments)));
+    }
 }
