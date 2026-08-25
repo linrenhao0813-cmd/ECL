@@ -1,7 +1,6 @@
 package com.ecl.download;
 
 import com.ecl.ECLConfig;
-import com.ecl.download.install.InstallHelpers;
 import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
