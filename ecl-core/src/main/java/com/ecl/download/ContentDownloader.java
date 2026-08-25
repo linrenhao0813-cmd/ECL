@@ -3,6 +3,7 @@ package com.ecl.download;
 import com.ecl.modrinth.model.ContentDownloadResult;
 import com.ecl.modrinth.model.ContentProject;
 import com.ecl.modrinth.model.ContentVersion;
+import com.ecl.modrinth.download.ModrinthDownloader;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;

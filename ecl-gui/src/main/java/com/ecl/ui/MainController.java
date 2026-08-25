@@ -7,7 +7,7 @@ import com.ecl.download.GameDownloader;
 import com.ecl.download.ContentDownloader;
 import com.ecl.download.CurseForgeDownloader;
 import com.ecl.download.DownloadTaskCenter;
-import com.ecl.download.ModrinthDownloader;
+import com.ecl.modrinth.download.ModrinthDownloader;
 import com.ecl.launch.DefaultLauncher;
 import com.ecl.launch.LaunchEnvironment;
 import com.ecl.launch.Launcher;

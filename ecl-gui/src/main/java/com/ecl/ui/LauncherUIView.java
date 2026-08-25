@@ -10,7 +10,7 @@ import com.ecl.diagnostic.DiagnosticBundleService;
 import com.ecl.download.DownloadService;
 import com.ecl.download.ContentDownloader;
 import com.ecl.download.DownloadTaskCenter;
-import com.ecl.download.ModrinthDownloader;
+import com.ecl.modrinth.download.ModrinthDownloader;
 import com.ecl.download.ServerJarDownloader;
 import com.ecl.desktop.DesktopShortcutService;
 import com.ecl.game.DefaultGameRepository;

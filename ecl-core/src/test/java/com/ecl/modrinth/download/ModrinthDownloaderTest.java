@@ -1,4 +1,4 @@
-package com.ecl.download;
+package com.ecl.modrinth.download;
 
 import com.ecl.util.FileUtil;
 import com.ecl.modrinth.model.ContentProject;

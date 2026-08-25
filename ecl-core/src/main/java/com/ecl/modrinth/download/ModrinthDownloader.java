@@ -1,5 +1,6 @@
-package com.ecl.download;
+package com.ecl.modrinth.download;
 
+import com.ecl.download.ContentDownloader;
 import com.ecl.modrinth.api.DefaultModrinthApiClient;
 import com.ecl.modrinth.api.ModSearchIndex;
 import com.ecl.modrinth.api.ModSearchQuery;

@@ -5,6 +5,7 @@ import com.ecl.curseforge.CurseForgeApiClient.ApiDependency;
 import com.ecl.curseforge.CurseForgeApiClient.ApiFile;
 import com.ecl.curseforge.CurseForgeApiClient.ApiProject;
 import com.ecl.modrinth.download.HashVerifier;
+import com.ecl.modrinth.download.ModrinthDownloader;
 import com.ecl.modrinth.model.ContentDownloadResult;
 import com.ecl.modrinth.model.ContentProject;
 import com.ecl.modrinth.model.ContentVersion;
