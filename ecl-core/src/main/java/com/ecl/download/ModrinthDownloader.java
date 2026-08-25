@@ -6,6 +6,9 @@ import com.ecl.modrinth.api.ModSearchQuery;
 import com.ecl.modrinth.api.ModrinthApiClient;
 import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.model.DependencyType;
+import com.ecl.modrinth.model.ContentDownloadResult;
+import com.ecl.modrinth.model.ContentProject;
+import com.ecl.modrinth.model.ContentVersion;
 import com.ecl.modrinth.model.ModDependency;
 import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModProject;
@@ -54,112 +57,8 @@ public class ModrinthDownloader implements ContentDownloader {
         this.apiClient = java.util.Objects.requireNonNull(apiClient, "apiClient");
     }
 
-    public static class Project {
-        private final String projectId;
-        private final String slug;
-        private final String title;
-        private final String author;
-        private final String description;
-        private final String iconUrl;
-        private final long downloads;
-        private final long follows;
-        private final String projectType;
-
-        public Project(String projectId, String slug, String title, String author, String description,
-                       long downloads, long follows) {
-            this(projectId, slug, title, author, description, null, downloads, follows);
-        }
-
-        public Project(String projectId, String slug, String title, String author, String description,
-                       String iconUrl, long downloads, long follows) {
-            this(projectId, slug, title, author, description, iconUrl, downloads, follows, "");
-        }
-
-        public Project(String projectId, String slug, String title, String author, String description,
-                       String iconUrl, long downloads, long follows, String projectType) {
-            this.projectId = projectId;
-            this.slug = slug;
-            this.title = title;
-            this.author = author;
-            this.description = description;
-            this.iconUrl = iconUrl;
-            this.downloads = downloads;
-            this.follows = follows;
-            this.projectType = projectType == null ? "" : projectType;
-        }
-
-        public String getProjectId() {
-            return projectId;
-        }
-
-        public String getTitle() {
-            return title;
-        }
-
-        public String getDescription() {
-            return description;
-        }
-
-        public String getAuthor() {
-            return author;
-        }
-
-        public String getIconUrl() {
-            return iconUrl;
-        }
-
-        public long getDownloads() {
-            return downloads;
-        }
-
-        public long getFollows() {
-            return follows;
-        }
-
-        public String getProjectType() {
-            return projectType;
-        }
-
-        @Override
-        public String toString() {
-            return title + (author == null || author.isBlank() ? "" : " / " + author)
-                    + "    下载 " + TextUtil.formatCount(downloads);
-        }
-    }
-
-    public record ProjectVersion(String versionId, String name, String versionNumber, String versionType) {
-        @Override
-        public String toString() {
-            String displayVersion = versionNumber == null || versionNumber.isBlank()
-                    ? versionId : versionNumber;
-            String displayName = name == null || name.isBlank() || name.equals(displayVersion)
-                    ? "" : name + " · ";
-            String displayType = versionType == null || versionType.isBlank()
-                    ? "" : " · " + versionType;
-            return displayName + displayVersion + displayType;
-        }
-    }
-
-    public static class DownloadResult {
-        private final File mainFile;
-        private final List<File> files;
-
-        public DownloadResult(File mainFile, List<File> files) {
-            this.mainFile = mainFile;
-            this.files = List.copyOf(files);
-        }
-
-        public File getMainFile() {
-            return mainFile;
-        }
-
-        public List<File> getFiles() {
-            return files;
-        }
-    }
-
     @Override
-    public List<Project> searchProjects(String query, String gameVersion, String projectType,
+    public List<ContentProject> searchProjects(String query, String gameVersion, String projectType,
                                         String loader, int limit) throws IOException {
         String trimmedQuery = query == null ? "" : query.trim();
         if (trimmedQuery.isBlank()) {
@@ -169,17 +68,17 @@ public class ModrinthDownloader implements ContentDownloader {
     }
 
     @Override
-    public List<Project> listOfficialProjects(String gameVersion, String projectType,
+    public List<ContentProject> listOfficialProjects(String gameVersion, String projectType,
                                               String loader, int limit) throws IOException {
         return search("", gameVersion, projectType, loader, ModSearchIndex.DOWNLOADS, limit);
     }
 
-    public List<Project> searchMods(String query, String gameVersion, String loader, int limit)
+    public List<ContentProject> searchMods(String query, String gameVersion, String loader, int limit)
             throws IOException {
         return searchProjects(query, gameVersion, "mod", loader, limit);
     }
 
-    private List<Project> search(String query, String gameVersion, String projectType, String loader,
+    private List<ContentProject> search(String query, String gameVersion, String projectType, String loader,
                                  ModSearchIndex index, int limit) throws IOException {
         requireText(gameVersion, "请先选择游戏版本");
         requireText(projectType, "内容类型无效");
@@ -192,7 +91,7 @@ public class ModrinthDownloader implements ContentDownloader {
     }
 
     @Override
-    public List<ProjectVersion> listProjectVersions(Project project, String gameVersion, String loader)
+    public List<ContentVersion> listProjectVersions(ContentProject project, String gameVersion, String loader)
             throws IOException {
         requireProject(project);
         List<ModVersion> versions = await(apiClient.getProjectVersions(
@@ -200,12 +99,12 @@ public class ModrinthDownloader implements ContentDownloader {
         return versions.stream().map(this::toProjectVersion).toList();
     }
 
-    public DownloadResult downloadLatest(Project project, String gameVersion, String loader,
+    public ContentDownloadResult downloadLatest(ContentProject project, String gameVersion, String loader,
                                          File targetDir, boolean includeRequiredDependencies,
                                          DownloadListener listener, String... allowedExtensions)
             throws IOException {
         requireProject(project);
-        List<ProjectVersion> versions = listProjectVersions(project, gameVersion, loader);
+        List<ContentVersion> versions = listProjectVersions(project, gameVersion, loader);
         if (versions.isEmpty()) {
             throw new IOException("没有找到兼容 " + gameVersion + " / " + loader + " 的可下载文件");
         }
@@ -213,13 +112,13 @@ public class ModrinthDownloader implements ContentDownloader {
                 includeRequiredDependencies, listener, allowedExtensions);
     }
 
-    public DownloadResult downloadLatest(Project project, String gameVersion, String loader,
+    public ContentDownloadResult downloadLatest(ContentProject project, String gameVersion, String loader,
                                          File targetDir, DownloadListener listener) throws IOException {
         return downloadLatest(project, gameVersion, loader, targetDir, true, listener, ".jar");
     }
 
     @Override
-    public DownloadResult downloadVersion(Project project, ProjectVersion selectedVersion,
+    public ContentDownloadResult downloadVersion(ContentProject project, ContentVersion selectedVersion,
                                           String gameVersion, String loader, File targetDir,
                                           boolean includeRequiredDependencies,
                                           DownloadListener listener, String... allowedExtensions)
@@ -241,7 +140,7 @@ public class ModrinthDownloader implements ContentDownloader {
         if (files.isEmpty()) {
             throw new IOException("这个版本没有可下载文件");
         }
-        return new DownloadResult(files.get(0), files);
+        return new ContentDownloadResult(files.get(0), files);
     }
 
     private File downloadVersion(ModVersion version, String gameVersion, String loader, File targetDir,
@@ -440,14 +339,14 @@ public class ModrinthDownloader implements ContentDownloader {
         }
     }
 
-    private static Project toProject(ModProject project, String projectType) {
-        return new Project(project.projectId(), project.slug(), project.title(), project.author(),
+    private static ContentProject toProject(ModProject project, String projectType) {
+        return new ContentProject(project.projectId(), project.slug(), project.title(), project.author(),
                 project.description(), project.iconUrl() == null ? null : project.iconUrl().toString(),
                 project.downloads(), project.follows(), projectType);
     }
 
-    private ProjectVersion toProjectVersion(ModVersion version) {
-        return new ProjectVersion(version.id(), version.name(), version.versionNumber(),
+    private ContentVersion toProjectVersion(ModVersion version) {
+        return new ContentVersion(version.id(), version.name(), version.versionNumber(),
                 version.versionType());
     }
 
@@ -464,7 +363,7 @@ public class ModrinthDownloader implements ContentDownloader {
         return targetDir;
     }
 
-    private static void requireProject(Project project) throws IOException {
+    private static void requireProject(ContentProject project) throws IOException {
         if (project == null) {
             throw new IOException("请选择一个下载项目");
         }

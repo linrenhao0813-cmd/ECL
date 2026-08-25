@@ -1,24 +1,27 @@
 package com.ecl.download;
 
+import com.ecl.modrinth.model.ContentDownloadResult;
+import com.ecl.modrinth.model.ContentProject;
+import com.ecl.modrinth.model.ContentVersion;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
 
 /** Common download boundary used by the content-library UI. */
 public interface ContentDownloader {
-    List<ModrinthDownloader.Project> searchProjects(
+    List<ContentProject> searchProjects(
             String query, String gameVersion, String projectType, String loader, int limit)
             throws IOException;
 
-    List<ModrinthDownloader.Project> listOfficialProjects(
+    List<ContentProject> listOfficialProjects(
             String gameVersion, String projectType, String loader, int limit) throws IOException;
 
-    List<ModrinthDownloader.ProjectVersion> listProjectVersions(
-            ModrinthDownloader.Project project, String gameVersion, String loader) throws IOException;
+    List<ContentVersion> listProjectVersions(
+            ContentProject project, String gameVersion, String loader) throws IOException;
 
-    ModrinthDownloader.DownloadResult downloadVersion(
-            ModrinthDownloader.Project project,
-            ModrinthDownloader.ProjectVersion selectedVersion,
+    ContentDownloadResult downloadVersion(
+            ContentProject project,
+            ContentVersion selectedVersion,
             String gameVersion,
             String loader,
             File targetDir,

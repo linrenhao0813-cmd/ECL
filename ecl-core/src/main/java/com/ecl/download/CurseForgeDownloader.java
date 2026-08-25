@@ -5,6 +5,9 @@ import com.ecl.curseforge.CurseForgeApiClient.ApiDependency;
 import com.ecl.curseforge.CurseForgeApiClient.ApiFile;
 import com.ecl.curseforge.CurseForgeApiClient.ApiProject;
 import com.ecl.modrinth.download.HashVerifier;
+import com.ecl.modrinth.model.ContentDownloadResult;
+import com.ecl.modrinth.model.ContentProject;
+import com.ecl.modrinth.model.ContentVersion;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
@@ -56,7 +59,7 @@ public final class CurseForgeDownloader implements ContentDownloader {
     }
 
     @Override
-    public List<ModrinthDownloader.Project> searchProjects(
+    public List<ContentProject> searchProjects(
             String query, String gameVersion, String projectType, String loader, int limit)
             throws IOException {
         if (query == null || query.isBlank()) throw new IOException("请输入要搜索的内容名称");
@@ -64,25 +67,25 @@ public final class CurseForgeDownloader implements ContentDownloader {
     }
 
     @Override
-    public List<ModrinthDownloader.Project> listOfficialProjects(
+    public List<ContentProject> listOfficialProjects(
             String gameVersion, String projectType, String loader, int limit) throws IOException {
         return projects(api.search("", gameVersion, projectType, loader, 0, limit, true).projects());
     }
 
     @Override
-    public List<ModrinthDownloader.ProjectVersion> listProjectVersions(
-            ModrinthDownloader.Project project, String gameVersion, String loader) throws IOException {
+    public List<ContentVersion> listProjectVersions(
+            ContentProject project, String gameVersion, String loader) throws IOException {
         requireProject(project);
         return api.getFiles(project.getProjectId(), gameVersion, loader).stream()
-                .map(file -> new ModrinthDownloader.ProjectVersion(
+                .map(file -> new ContentVersion(
                         versionId(file), file.displayName(), file.displayName(), file.releaseType()))
                 .toList();
     }
 
     @Override
-    public ModrinthDownloader.DownloadResult downloadVersion(
-            ModrinthDownloader.Project project,
-            ModrinthDownloader.ProjectVersion selectedVersion,
+    public ContentDownloadResult downloadVersion(
+            ContentProject project,
+            ContentVersion selectedVersion,
             String gameVersion,
             String loader,
             File targetDir,
@@ -106,7 +109,7 @@ public final class CurseForgeDownloader implements ContentDownloader {
             downloadDependencies(file, gameVersion, loader, targetDir, listener,
                     new HashSet<>(Set.of(versionId(file))), downloaded);
         }
-        return new ModrinthDownloader.DownloadResult(main, List.copyOf(downloaded));
+        return new ContentDownloadResult(main, List.copyOf(downloaded));
     }
 
     private void downloadDependencies(ApiFile parent, String gameVersion, String loader, File targetDir,
@@ -316,13 +319,13 @@ public final class CurseForgeDownloader implements ContentDownloader {
         }
     }
 
-    private static List<ModrinthDownloader.Project> projects(List<ApiProject> values) {
-        return values.stream().map(value -> new ModrinthDownloader.Project(
+    private static List<ContentProject> projects(List<ApiProject> values) {
+        return values.stream().map(value -> new ContentProject(
                 value.id(), value.slug(), value.title(), value.author(), value.summary(),
                 value.iconUrl(), value.downloads(), 0, value.projectType())).toList();
     }
 
-    private static void requireProject(ModrinthDownloader.Project project) throws IOException {
+    private static void requireProject(ContentProject project) throws IOException {
         if (project == null) throw new IOException("请选择一个下载项目");
     }
 

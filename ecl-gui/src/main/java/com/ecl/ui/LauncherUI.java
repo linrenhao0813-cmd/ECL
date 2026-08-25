@@ -19,6 +19,9 @@ import com.ecl.launch.Launcher;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.launcher.VersionManager;
 import com.ecl.modrinth.instance.ModInstanceContext;
+import com.ecl.modrinth.model.ContentDownloadResult;
+import com.ecl.modrinth.model.ContentProject;
+import com.ecl.modrinth.model.ContentVersion;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
 import com.ecl.modrinth.pack.MrpackInstaller;
 import com.ecl.modrinth.provider.ContentSource;
@@ -121,7 +124,7 @@ public class LauncherUI extends javafx.application.Application {
     private ModrinthDownloader modrinthDownloader;
     ServerJarDownloader serverJarDownloader;
     ModLoaderInstaller modLoaderInstaller;
-    private MrpackInstaller mrpackInstaller;
+    MrpackInstaller mrpackInstaller;
     WorldBackupService worldBackupService;
     MicrosoftAccountStore microsoftAccountStore;
     MinecraftSkinService minecraftSkinService;
@@ -889,7 +892,7 @@ public class LauncherUI extends javafx.application.Application {
         ComboBox<ContentSource> sourceCombo = createContentSourceCombo();
         HBox searchBar = new HBox(8, sourceCombo, searchField, searchButton);
 
-        ListView<ModrinthDownloader.Project> resultList = new ListView<>();
+        ListView<ContentProject> resultList = new ListView<>();
         resultList.getStyleClass().add("mod-result-list");
         resultList.setPrefHeight(330);
         resultList.setPlaceholder(new Label("没有找到兼容内容"));
@@ -900,7 +903,7 @@ public class LauncherUI extends javafx.application.Application {
         projectDescription.setWrapText(true);
         projectDescription.setMinHeight(86);
 
-        ComboBox<ModrinthDownloader.ProjectVersion> versionComboBox = new ComboBox<>();
+        ComboBox<ContentVersion> versionComboBox = new ComboBox<>();
         versionComboBox.setPromptText("选择具体版本");
         versionComboBox.setDisable(true);
         versionComboBox.setMaxWidth(Double.MAX_VALUE);
@@ -1904,6 +1907,9 @@ public class LauncherUI extends javafx.application.Application {
         return activeGameProcesses.keySet().stream().anyMatch(Process::isAlive);
     }
 
+
+
+
     private void showContentDownloadDialog(ContentTarget target) {
         List<String> profileIds = availableContentProfiles(target);
         if (profileIds.isEmpty()) {
@@ -1959,12 +1965,12 @@ public class LauncherUI extends javafx.application.Application {
         HBox searchBar = new HBox(10, sourceCombo, searchField, searchBtn);
         HBox.setHgrow(searchField, Priority.ALWAYS);
 
-        ListView<ModrinthDownloader.Project> resultList = new ListView<>();
+        ListView<ContentProject> resultList = new ListView<>();
         resultList.getStyleClass().add("mod-result-list");
         resultList.setPrefHeight(220);
         resultList.setCellFactory(list -> createContentProjectCell(target));
 
-        ComboBox<ModrinthDownloader.ProjectVersion> projectVersionCombo = new ComboBox<>();
+        ComboBox<ContentVersion> projectVersionCombo = new ComboBox<>();
         projectVersionCombo.setPromptText("选择具体版本");
         projectVersionCombo.setDisable(true);
         applyFieldStyle(projectVersionCombo);
@@ -2196,9 +2202,9 @@ public class LauncherUI extends javafx.application.Application {
     private void loadProjectVersions(
             ContentSource source,
             ContentTarget target,
-            ModrinthDownloader.Project project,
+            ContentProject project,
             ContentInstance instance,
-            ComboBox<ModrinthDownloader.ProjectVersion> projectVersionCombo,
+            ComboBox<ContentVersion> projectVersionCombo,
             Label dialogStatus,
             Button importBtn,
             AtomicLong versionGeneration
@@ -2211,7 +2217,7 @@ public class LauncherUI extends javafx.application.Application {
 
         runAsync("ecl-load-" + source.id() + "-versions", () -> {
             try {
-                List<ModrinthDownloader.ProjectVersion> versions =
+                List<ContentVersion> versions =
                         controller.contentDownloader(source).listProjectVersions(
                                 project, instance.minecraftVersion(), loader).stream()
                                 .filter(version -> controller.preferredModReleaseChannel()
@@ -2250,7 +2256,7 @@ public class LauncherUI extends javafx.application.Application {
 
     private void searchModrinthContent(ContentSource source, ContentTarget target,
                                        ContentInstance instance, TextField searchField,
-                                       ListView<ModrinthDownloader.Project> resultList, Label dialogStatus,
+                                       ListView<ContentProject> resultList, Label dialogStatus,
                                        Button searchBtn, Button importBtn, AtomicLong searchGeneration) {
         long generation = searchGeneration.incrementAndGet();
         String query = searchField.getText();
@@ -2272,7 +2278,7 @@ public class LauncherUI extends javafx.application.Application {
         runAsync("ecl-search-" + source.id() + "-" + target.projectType, () -> {
             try {
                 ContentDownloader contentDownloader = controller.contentDownloader(source);
-                List<ModrinthDownloader.Project> projects = officialList
+                List<ContentProject> projects = officialList
                         ? contentDownloader.listOfficialProjects(
                                 gameVersion, target.projectType, loader, 24)
                         : contentDownloader.searchProjects(
@@ -2283,7 +2289,7 @@ public class LauncherUI extends javafx.application.Application {
                     }
                     resultList.getItems().setAll(projects);
                     RemoteImageLoader.prefetch(projects.stream()
-                            .map(ModrinthDownloader.Project::getIconUrl)
+                            .map(ContentProject::getIconUrl)
                             .filter(java.util.Objects::nonNull)
                             .map(this::safeUri)
                             .filter(java.util.Objects::nonNull)
@@ -2315,10 +2321,10 @@ public class LauncherUI extends javafx.application.Application {
         });
     }
 
-    private ListCell<ModrinthDownloader.Project> createContentProjectCell(ContentTarget target) {
+    private ListCell<ContentProject> createContentProjectCell(ContentTarget target) {
         return new ListCell<>() {
             @Override
-            protected void updateItem(ModrinthDownloader.Project project, boolean empty) {
+            protected void updateItem(ContentProject project, boolean empty) {
                 super.updateItem(project, empty);
                 setText(null);
                 if (empty || project == null) {
@@ -2399,7 +2405,7 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     private void setTranslatedProjectDescription(
-            ModrinthDownloader.Project project,
+            ContentProject project,
             Label descriptionLabel,
             AtomicLong descriptionGeneration,
             long expectedGeneration
@@ -2420,8 +2426,8 @@ public class LauncherUI extends javafx.application.Application {
     private void downloadSelectedContent(
             ContentSource source,
             ContentTarget target,
-            ModrinthDownloader.Project project,
-            ModrinthDownloader.ProjectVersion selectedVersion,
+            ContentProject project,
+            ContentVersion selectedVersion,
             ContentInstance instance,
             File importDir,
             Label dialogStatus,
@@ -2461,7 +2467,7 @@ public class LauncherUI extends javafx.application.Application {
                 return null;
             }
             try {
-                ModrinthDownloader.DownloadResult result = controller.contentDownloader(source).downloadVersion(
+                ContentDownloadResult result = controller.contentDownloader(source).downloadVersion(
                         project,
                         selectedVersion,
                         gameVersion,
@@ -2633,6 +2639,7 @@ public class LauncherUI extends javafx.application.Application {
     void ensureDirectory(File dir) throws IOException {
         pathService.ensureDirectory(dir);
     }
+
 
     private static String loaderDisplayName(String loader) {
         return LauncherPathService.loaderDisplayName(loader);

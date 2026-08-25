@@ -1,6 +1,7 @@
 package com.ecl.download;
 
 import com.ecl.util.FileUtil;
+import com.ecl.modrinth.model.ContentProject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -20,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ModrinthDownloaderTest {
     @Test
     void contentProjectRetainsCoverUrl() {
-        ModrinthDownloader.Project project = new ModrinthDownloader.Project(
+        ContentProject project = new ContentProject(
                 "project", "project", "Project", "Author", "Description",
                 "https://cdn.modrinth.com/data/project/icon.png", 12, 3);
 
