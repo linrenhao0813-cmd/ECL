@@ -9,10 +9,11 @@ dependencies {
     implementation("org.openjfx:javafx-base:${libs.versions.javafx.get()}:win")
     implementation("org.openjfx:javafx-graphics:${libs.versions.javafx.get()}:win")
     implementation("org.openjfx:javafx-controls:${libs.versions.javafx.get()}:win")
-    implementation("com.twelvemonkeys.imageio:imageio-webp:3.13.1")
+    implementation(libs.imageio.webp)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.register<JavaExec>("captureLauncherUi") {

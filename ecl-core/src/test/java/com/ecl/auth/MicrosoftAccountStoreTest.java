@@ -123,6 +123,57 @@ class MicrosoftAccountStoreTest {
         assertEquals("new-refresh", saved.refreshToken());
     }
 
+    @Test
+    void legacyPlaintextTokensAreSkippedWithoutAbortingMigration() throws Exception {
+        JsonObject legacy = new JsonObject();
+        legacy.addProperty("uuid", "plain-uuid");
+        legacy.addProperty("username", "PlainLegacy");
+        // 模拟旧版写入的明文 token：不是本版本密文格式。
+        legacy.addProperty("refreshToken", "plaintext-refresh-token");
+        legacy.addProperty("accessToken", "also-plaintext");
+        legacy.addProperty("accessTokenExpiresAt", 1);
+        JsonArray array = new JsonArray();
+        array.add(legacy);
+        Files.writeString(tempDir.resolve("microsoft-accounts.json"),
+                GsonProvider.pretty().toJson(array));
+
+        MicrosoftAccountStore store = new MicrosoftAccountStore();
+
+        // 迁移不因无法解密的字段中止：账号入库、旧文件归档。
+        assertEquals(1, store.list().size());
+        assertEquals("", store.list().getFirst().refreshToken());
+        assertTrue(Files.exists(tempDir.resolve("microsoft-accounts.json.migrated")));
+    }
+
+    @Test
+    void corruptedCiphertextFieldIsSkippedWhileOtherAccountsMigrate() throws Exception {
+        JsonObject valid = new JsonObject();
+        valid.addProperty("uuid", "valid-uuid");
+        valid.addProperty("username", "Valid");
+        valid.addProperty("accessToken", CryptoUtil.encrypt("access-ok"));
+        valid.addProperty("refreshToken", CryptoUtil.encrypt("refresh-ok"));
+        valid.addProperty("accessTokenExpiresAt", 1);
+        JsonObject corrupt = new JsonObject();
+        corrupt.addProperty("uuid", "corrupt-uuid");
+        corrupt.addProperty("username", "Corrupt");
+        // 长度合法的 Base64 密文但 GCM 校验必然失败（固定字节，无需随机源）。
+        corrupt.addProperty("accessToken", java.util.Base64.getEncoder()
+                .encodeToString(new byte[29]));
+        corrupt.addProperty("refreshToken", CryptoUtil.encrypt("refresh-ok"));
+        corrupt.addProperty("accessTokenExpiresAt", 2);
+        JsonArray array = new JsonArray();
+        array.add(valid);
+        array.add(corrupt);
+        Files.writeString(tempDir.resolve("microsoft-accounts.json"),
+                GsonProvider.pretty().toJson(array));
+
+        MicrosoftAccountStore store = new MicrosoftAccountStore();
+
+        assertEquals(2, store.list().size());
+        assertEquals("refresh-ok", store.list().getFirst().refreshToken());
+        assertTrue(Files.exists(tempDir.resolve("microsoft-accounts.json.migrated")));
+    }
+
     private void writeLegacyAccount(String uuid, String username, String accessToken,
                                     String refreshToken, long expiry) throws Exception {
         JsonObject object = new JsonObject();

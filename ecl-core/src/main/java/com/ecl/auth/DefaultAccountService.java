@@ -166,6 +166,7 @@ public final class DefaultAccountService implements AccountService {
             if (temp != null) try {
                 Files.deleteIfExists(temp);
             } catch (IOException ignored) {
+                // Best-effort cleanup of the temporary file only.
             }
         }
     }

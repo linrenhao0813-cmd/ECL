@@ -3,6 +3,8 @@ package com.ecl.util;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
 import java.util.Map;
@@ -10,6 +12,8 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 public final class RuleEvaluator {
+    private static final Logger LOGGER = LoggerFactory.getLogger(RuleEvaluator.class);
+
     private RuleEvaluator() {
     }
 
@@ -67,7 +71,8 @@ public final class RuleEvaluator {
     private static boolean matchesPattern(String pattern, String value) {
         try {
             return Pattern.compile(pattern).matcher(value).find();
-        } catch (PatternSyntaxException ignored) {
+        } catch (PatternSyntaxException unexpected) {
+            LOGGER.debug("Ignoring malformed rule pattern '{}'", pattern, unexpected);
             return pattern.equalsIgnoreCase(value);
         }
     }

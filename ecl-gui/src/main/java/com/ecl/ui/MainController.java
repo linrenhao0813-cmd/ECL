@@ -148,7 +148,8 @@ public final class MainController implements AutoCloseable {
                     } catch (IOException e) {
                         throw new IllegalStateException("无法读取实例模组索引", e);
                     }
-                }, 32, 256);
+                }, com.ecl.modrinth.service.DependencyResolverLimits.MAX_DEPTH,
+                com.ecl.modrinth.service.DependencyResolverLimits.MAX_DEPENDENCIES);
         installationPlanBuilder = new InstallationPlanBuilder();
         HashVerifier hashVerifier = new HashVerifier();
         ModFileDownloadService fileDownloadService =
@@ -240,6 +241,7 @@ public final class MainController implements AutoCloseable {
         try {
             return ReleaseChannel.valueOf(configured);
         } catch (IllegalArgumentException | NullPointerException ignored) {
+            // An invalid or missing saved channel falls back to the default.
             return ReleaseChannel.RELEASE_AND_BETA;
         }
     }
@@ -287,14 +289,15 @@ public final class MainController implements AutoCloseable {
     }
 
     private <T> T withThreadName(String threadName, Supplier<T> action) {
-            Thread current = Thread.currentThread();
-            String previousName = current.getName();
-            current.setName(threadName);
-            try {
-                return action.get();
-            } finally {
-                current.setName(previousName);
-            }
+        // Carry the logical task name in the SLF4J MDC instead of renaming a shared pool
+        // thread, so thread dumps keep the real thread name and logs correlate per task.
+        String taskName = threadName == null || threadName.isBlank() ? "ecl-task" : threadName;
+        org.slf4j.MDC.put("task", " " + taskName);
+        try {
+            return action.get();
+        } finally {
+            org.slf4j.MDC.remove("task");
+        }
     }
 
     @Override

@@ -242,18 +242,31 @@ final class VersionActions {
         if (ui.versionCombo == null || ui.versionTypeCombo == null || ui.versionManager == null) {
             return;
         }
-        try {
-            List<String> versions = ui.versionManager.mergeLocalLoaderProfiles(
-                    ui.versionManager.getVersions(getSelectedVersionCategory()));
-            ui.versionCombo.getItems().setAll(versions);
-            if (preferredVersion != null && versions.contains(preferredVersion)) {
-                ui.versionCombo.getSelectionModel().select(preferredVersion);
-            } else if (!versions.isEmpty()) {
-                ui.versionCombo.getSelectionModel().select(0);
+        VersionManager.VersionCategory category = getSelectedVersionCategory();
+        // 本地版本档案扫描与合并放到后台线程，完成后在 FX 线程回填下拉框，
+        // 避免首页构建时同步扫描解析全部本地版本 JSON 造成卡顿。
+        ui.runAsync("ecl-restore-versions", () -> {
+            try {
+                List<String> versions = ui.versionManager.mergeLocalLoaderProfiles(
+                        ui.versionManager.getVersions(category));
+                Platform.runLater(() -> {
+                    if (ui.versionCombo == null) {
+                        return;
+                    }
+                    ui.versionCombo.getItems().setAll(versions);
+                    if (preferredVersion != null && versions.contains(preferredVersion)) {
+                        ui.versionCombo.getSelectionModel().select(preferredVersion);
+                    } else if (preferredVersion != null) {
+                        // 与同步旧行为一致：目标版本不在列表时仍直接设置为当前值。
+                        ui.versionCombo.setValue(preferredVersion);
+                    } else if (!versions.isEmpty()) {
+                        ui.versionCombo.getSelectionModel().select(0);
+                    }
+                });
+            } catch (Exception e) {
+                LauncherUI.LOGGER.warn("Failed to restore version choices", e);
             }
-        } catch (Exception e) {
-            LauncherUI.LOGGER.warn("Failed to restore version choices", e);
-        }
+        });
     }
 
     void refreshVersions() {

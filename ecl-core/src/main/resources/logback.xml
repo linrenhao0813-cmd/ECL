@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder><pattern>%date{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern></encoder>
+        <encoder><pattern>%date{HH:mm:ss.SSS} %-5level [%thread%X{task}] %logger{36} - %msg%n</pattern></encoder>
     </appender>
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${user.home}/.ecl/logs/ecl.log</file>
@@ -10,7 +10,7 @@
             <maxFileSize>5MB</maxFileSize>
             <maxHistory>7</maxHistory>
         </rollingPolicy>
-        <encoder><pattern>%date %-5level [%thread] %logger{36} - %msg%n</pattern></encoder>
+        <encoder><pattern>%date %-5level [%thread%X{task}] %logger{36} - %msg%n</pattern></encoder>
     </appender>
     <root level="INFO"><appender-ref ref="CONSOLE"/><appender-ref ref="FILE"/></root>
 </configuration>

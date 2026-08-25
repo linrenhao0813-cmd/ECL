@@ -2,16 +2,19 @@ package com.ecl.modrinth.pack;
 
 import com.ecl.ECLConfig;
 import com.ecl.util.TextUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Locale;
 import java.util.UUID;
 
 /** Centralizes MRPACK profile, instance and archive path safety rules. */
 final class MrpackPathPolicy {
+    private static final Logger LOGGER = LoggerFactory.getLogger(MrpackPathPolicy.class);
+
     private MrpackPathPolicy() {
     }
 
@@ -48,24 +51,41 @@ final class MrpackPathPolicy {
         return profileDir;
     }
 
-    static void deleteProfile(String profileId) {
+    static boolean deleteProfile(String profileId) {
         Path root = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
         Path target = root.resolve(profileId).normalize();
         if (target.startsWith(root) && !target.equals(root)) {
-            deleteRecursively(target);
+            return deleteRecursively(target);
         }
+        return false;
     }
 
-    static void deleteRecursively(Path root) {
+    /**
+     * Recursively deletes {@code root} and reports whether every entry was removed.
+     * Failures are logged so silent data loss is visible; callers surface the boolean in UI.
+     */
+    static boolean deleteRecursively(Path root) {
         if (root == null || !Files.exists(root)) {
-            return;
+            return false;
         }
+        boolean complete = true;
         try (var stream = Files.walk(root)) {
             for (Path path : stream.sorted(java.util.Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(path);
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException failure) {
+                    complete = false;
+                    LOGGER.warn("Failed to delete path while removing {}: {}", root, path, failure);
+                }
             }
-        } catch (IOException ignored) {
+        } catch (IOException failure) {
+            complete = false;
+            LOGGER.warn("Failed to walk directory tree while removing {}", root, failure);
         }
+        if (!complete) {
+            LOGGER.warn("Directory removal incomplete for {}", root);
+        }
+        return complete;
     }
 
     static Path safeInstanceDirectory(Path gameRoot, String profileId) throws IOException {
@@ -94,8 +114,6 @@ final class MrpackPathPolicy {
     }
 
     private static boolean isWindowsReservedName(String value) {
-        String name = value.replaceFirst("\\..*$", "").toUpperCase(Locale.ROOT);
-        return name.equals("CON") || name.equals("PRN") || name.equals("AUX")
-                || name.equals("NUL") || name.matches("COM[1-9]") || name.matches("LPT[1-9]");
+        return TextUtil.isWindowsReservedName(value);
     }
 }

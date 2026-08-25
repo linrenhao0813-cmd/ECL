@@ -76,6 +76,7 @@ final class LauncherExecutableResolver {
             return path.getFileName() != null
                     && "ecl.exe".equalsIgnoreCase(path.getFileName().toString());
         } catch (RuntimeException ignored) {
+            // An unparsable command line is simply not a packaged ECL executable.
             return false;
         }
     }

@@ -11,6 +11,8 @@ final class DownloadTaskNotifier {
             new CopyOnWriteArrayList<>();
     private final Supplier<List<DownloadTaskCenter.TaskSnapshot>> snapshots;
     private volatile long lastNotifiedAt;
+    /** Set whenever a change is reported; cleared after a snapshot is actually broadcast. */
+    private final java.util.concurrent.atomic.AtomicBoolean dirty = new java.util.concurrent.atomic.AtomicBoolean();
 
     DownloadTaskNotifier(Supplier<List<DownloadTaskCenter.TaskSnapshot>> snapshots) {
         this.snapshots = snapshots;
@@ -34,9 +36,15 @@ final class DownloadTaskNotifier {
         }
         long now = System.currentTimeMillis();
         if (!immediate && now - lastNotifiedAt < NOTIFY_THROTTLE_MS) {
+            // 节流窗口内只标记脏，待窗口过后再重建快照，避免高频进度通知全量重建。
+            dirty.set(true);
             return;
         }
         lastNotifiedAt = now;
+        if (!dirty.getAndSet(false) && !immediate) {
+            // 自上次广播以来没有任何变化，跳过快照重建与广播。
+            return;
+        }
         List<DownloadTaskCenter.TaskSnapshot> current = snapshots.get();
         for (DownloadTaskCenter.Listener listener : listeners) {
             try {

@@ -1,8 +1,12 @@
 package com.ecl.util;
 
 import com.google.gson.JsonObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class JsonUtil {
+    private static final Logger LOGGER = LoggerFactory.getLogger(JsonUtil.class);
+
     private JsonUtil() {
     }
 
@@ -16,7 +20,8 @@ public final class JsonUtil {
         }
         try {
             return object.get(key).getAsString();
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException unexpected) {
+            LOGGER.debug("JSON field '{}' is not a string; falling back to default", key, unexpected);
             return defaultValue;
         }
     }
@@ -27,7 +32,8 @@ public final class JsonUtil {
         }
         try {
             return object.get(key).getAsInt();
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException unexpected) {
+            LOGGER.debug("JSON field '{}' is not an integer; falling back to default", key, unexpected);
             return defaultValue;
         }
     }
@@ -38,7 +44,8 @@ public final class JsonUtil {
         }
         try {
             return object.get(key).getAsLong();
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException unexpected) {
+            LOGGER.debug("JSON field '{}' is not a long; falling back to default", key, unexpected);
             return defaultValue;
         }
     }

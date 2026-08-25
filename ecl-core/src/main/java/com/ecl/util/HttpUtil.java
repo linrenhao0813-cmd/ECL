@@ -35,11 +35,11 @@ public class HttpUtil {
 
     /** Configure a process-wide download limit. Zero disables throttling. */
     public static void setDownloadRateLimitBytesPerSecond(long bytesPerSecond) {
-        DownloadRateLimiter.setBytesPerSecond(bytesPerSecond);
+        DownloadRateLimiter.setDefaultBytesPerSecond(bytesPerSecond);
     }
 
     public static long getDownloadRateLimitBytesPerSecond() {
-        return DownloadRateLimiter.getBytesPerSecond();
+        return DownloadRateLimiter.getDefaultBytesPerSecond();
     }
 
     /** Configure the process-wide number of concurrent binary transfers. */

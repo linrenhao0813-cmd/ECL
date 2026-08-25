@@ -34,6 +34,7 @@ final class ServerStatusProbeController implements AutoCloseable {
             ServerStatus existing = statuses.get(server.address());
             if ((existing != null && existing.state() != ServerStatusState.UNKNOWN)
                     || server.address().isBlank()
+                    || !ServerStatusService.shouldProbe(server)
                     || !probingAddresses.add(server.address())) {
                 continue;
             }

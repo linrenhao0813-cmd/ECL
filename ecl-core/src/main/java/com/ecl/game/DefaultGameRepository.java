@@ -1,6 +1,9 @@
 package com.ecl.game;
 
 import com.ecl.util.FileUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,6 +13,7 @@ import java.util.stream.Stream;
 
 /** Filesystem-backed version metadata and instance path policy. */
 public final class DefaultGameRepository implements GameRepository {
+    private static final Logger LOGGER = LoggerFactory.getLogger(DefaultGameRepository.class);
     private final Path versionsDirectory;
     private final Path sharedGameDirectory;
     private final VersionRepository versions;
@@ -111,7 +115,8 @@ public final class DefaultGameRepository implements GameRepository {
                     .map(path -> path.getFileName().toString())
                     .sorted()
                     .toList();
-        } catch (IOException ignored) {
+        } catch (IOException failure) {
+            LOGGER.debug("Failed to list installed versions under {}", versionsDirectory, failure);
             return List.of();
         }
     }

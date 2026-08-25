@@ -73,7 +73,7 @@ public class SettingsManager {
                 settings = JsonParser.parseReader(reader).getAsJsonObject();
                 // 兼容迁移：旧键 "versionCategory" → "versionCategory2"
                 migrateSettingKey("versionCategory", "versionCategory2");
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 Path corrupt = settingsFile.toPath().resolveSibling(settingsFile.getName() + ".corrupt");
                 try {
                     Files.move(settingsFile.toPath(), corrupt, StandardCopyOption.REPLACE_EXISTING);

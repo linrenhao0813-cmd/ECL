@@ -3,7 +3,9 @@ package com.ecl.util;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TextUtilTest {
     @Test
@@ -19,6 +21,42 @@ class TextUtilTest {
 
     @Test
     void replacesInvalidFilenameCharacters() {
+        assertEquals("a_b_c_", TextUtil.replaceInvalidFilenameChars("a/b:c?"));
+    }
+
+    @Test
+    void mapsBlankAndDotNamesToSafeDefault() {
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars("   "));
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars("."));
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars(".."));
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars(""));
+    }
+
+    @Test
+    void mapsWindowsReservedNamesToSafeDefault() {
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars("CON"));
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars("con"));
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars("NUL"));
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars("COM1"));
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars("LPT9"));
+        assertEquals("_", TextUtil.replaceInvalidFilenameChars("AUX.txt"));
+    }
+
+    @Test
+    void recognizesWindowsReservedNames() {
+        assertTrue(TextUtil.isWindowsReservedName("CON"));
+        assertTrue(TextUtil.isWindowsReservedName("lpt1"));
+        assertTrue(TextUtil.isWindowsReservedName("com9"));
+        assertTrue(TextUtil.isWindowsReservedName("nul.txt"));
+        assertFalse(TextUtil.isWindowsReservedName("console"));
+        assertFalse(TextUtil.isWindowsReservedName("COM10"));
+        assertFalse(TextUtil.isWindowsReservedName("my-mod"));
+        assertFalse(TextUtil.isWindowsReservedName(null));
+    }
+
+    @Test
+    void trimsWhitespaceAndKeepsSafeNames() {
+        assertEquals("my-mod", TextUtil.replaceInvalidFilenameChars("  my-mod  "));
         assertEquals("a_b_c_", TextUtil.replaceInvalidFilenameChars("a/b:c?"));
     }
 

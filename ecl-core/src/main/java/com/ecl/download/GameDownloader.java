@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -168,11 +169,45 @@ public class GameDownloader implements DownloadService {
                 if (runListener != null) runListener.onStatus("下载已取消");
                 throw new CancellationException("download cancelled");
             }
-            if (runListener != null) runListener.onError("下载失败: " + e.getMessage());
+            LOGGER.warn("Game download failed for version {}", versionId, e);
+            if (runListener != null) runListener.onError(classifyDownloadError(e));
             // Keep the listener as a UI notification only; the Future must also fail so every
             // caller can observe the download error without relying on callback side effects.
-            throw new RuntimeException(e);
+            // Rethrow the original exception (preserving IOException / CancellationException types).
+            throw e;
         }
+    }
+
+    /**
+     * Maps common download failures to fixed Chinese user-facing copy. The underlying root cause
+     * is kept in the log by the caller; this only decides what the user sees.
+     */
+    private static String classifyDownloadError(Exception failure) {
+        String message = failure.getMessage() == null ? "" : failure.getMessage();
+        String lower = message.toLowerCase(Locale.ROOT);
+        if (isNetworkFailure(failure) || lower.contains("connect") || lower.contains("timeout")
+                || lower.contains("timed out") || lower.contains("unknownhost")
+                || lower.contains("网络") || lower.contains("连接")) {
+            return "网络连接失败，请检查网络连接后重试。";
+        }
+        if (lower.contains("sha-1") || lower.contains("sha1") || lower.contains("hash")
+                || lower.contains("checksum") || lower.contains("size does not match")
+                || lower.contains("校验") || lower.contains("哈希")) {
+            return "下载文件校验失败，请重试下载。";
+        }
+        if (lower.contains("mirror") || lower.contains("镜像") || lower.contains("下载源")
+                || lower.contains("source")) {
+            return "下载源不可用，请稍后重试。";
+        }
+        return "下载失败: " + message;
+    }
+
+    private static boolean isNetworkFailure(Exception failure) {
+        return failure instanceof java.net.ConnectException
+                || failure instanceof java.net.UnknownHostException
+                || failure instanceof java.net.SocketTimeoutException
+                || failure instanceof java.net.http.HttpTimeoutException
+                || failure instanceof javax.net.ssl.SSLException;
     }
 
     private void checkCancelled() throws InterruptedException {

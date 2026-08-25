@@ -198,6 +198,7 @@ public final class ModFileDownloadService {
         try {
             Files.deleteIfExists(file);
         } catch (IOException ignored) {
+            // Best-effort cleanup of a stale partial or temporary file.
         }
     }
 

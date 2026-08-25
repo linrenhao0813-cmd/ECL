@@ -2,6 +2,8 @@ package com.ecl.i18n;
 
 import com.ecl.event.EventBus;
 import com.ecl.event.LocaleChangedEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,6 +18,7 @@ import java.util.function.Consumer;
 
 /** UTF-8 language service with explicit English fallback and live change notifications. */
 public final class ResourceBundleI18n implements I18n {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ResourceBundleI18n.class);
     public static final Locale SIMPLIFIED_CHINESE = Locale.forLanguageTag("zh-CN");
     public static final Locale TRADITIONAL_CHINESE = Locale.forLanguageTag("zh-TW");
     public static final Locale ENGLISH = Locale.ENGLISH;
@@ -102,7 +105,8 @@ public final class ResourceBundleI18n implements I18n {
             if (input != null) {
                 properties.load(new InputStreamReader(input, StandardCharsets.UTF_8));
             }
-        } catch (IOException ignored) {
+        } catch (IOException failure) {
+            LOGGER.warn("Failed to load message resource bundle {}", resource, failure);
         }
         return properties;
     }

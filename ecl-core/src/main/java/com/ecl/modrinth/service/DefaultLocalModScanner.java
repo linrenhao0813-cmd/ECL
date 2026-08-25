@@ -28,6 +28,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -117,6 +118,8 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             List<LocalModScanItem> items = new ArrayList<>();
             Map<String, Integer> projectCounts = new LinkedHashMap<>();
             List<String> warnings = new ArrayList<>();
+            // 预建每个版本的 sha1 → ModFile 索引，避免对每个本地文件做线性 findFirst。
+            Map<String, Map<String, ModFile>> versionFileIndex = new HashMap<>();
             for (ScannedFile file : scanned) {
                 Path relative = instance.gameDirectory().relativize(file.path);
                 InstalledMod old = previousByPath.get(normalizeRelative(relative));
@@ -132,10 +135,8 @@ public final class DefaultLocalModScanner implements LocalModScanner {
                 boolean enabled = file.path.getParent().equals(instance.modsDirectory());
                 InstalledMod record;
                 if (version != null) {
-                    ModFile matchedFile = version.files().stream()
-                            .filter(candidate -> file.hashes.sha1().equalsIgnoreCase(candidate.sha1()))
-                            .findFirst()
-                            .orElseGet(() -> versionSelector.selectInstallFile(version).orElse(null));
+                    ModFile matchedFile = matchFileBySha1(version, file.hashes.sha1(),
+                            versionFileIndex, versionSelector);
                     record = recognizedRecord(instance, version, file, relative, enabled, old, matchedFile);
                     projectCounts.merge(record.projectId(), 1, Integer::sum);
                     items.add(new LocalModScanItem(file.path, record, true, false,
@@ -232,6 +233,34 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             case NEOFORGE -> "NeoForge";
             case NONE -> "未知";
         };
+    }
+
+    /**
+     * Match a scanned file against a version's files by SHA-1 using a per-version index.
+     * Falls back to the version selector when the hash is missing or unmatched.
+     */
+    private static ModFile matchFileBySha1(
+            ModVersion version,
+            String sha1,
+            Map<String, Map<String, ModFile>> versionFileIndex,
+            ModVersionSelector versionSelector
+    ) {
+        Map<String, ModFile> bySha1 = versionFileIndex.computeIfAbsent(version.id(), ignored -> {
+            Map<String, ModFile> index = new HashMap<>();
+            for (ModFile candidate : version.files()) {
+                if (candidate.sha1() != null && !candidate.sha1().isBlank()) {
+                    index.putIfAbsent(candidate.sha1().toLowerCase(Locale.ROOT), candidate);
+                }
+            }
+            return index;
+        });
+        if (sha1 != null && !sha1.isBlank()) {
+            ModFile matched = bySha1.get(sha1.toLowerCase(Locale.ROOT));
+            if (matched != null) {
+                return matched;
+            }
+        }
+        return versionSelector.selectInstallFile(version).orElse(null);
     }
 
     private static InstalledMod recognizedRecord(

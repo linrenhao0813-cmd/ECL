@@ -10,10 +10,17 @@ import java.io.BufferedReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -21,6 +28,17 @@ import java.util.regex.Pattern;
 
 public final class JavaRuntimeUtil {
     private static final Pattern JAVA_VERSION_PATTERN = Pattern.compile("version \"([^\"]+)\"");
+    private static final int PARALLEL_PROBE_THREADS = 4;
+
+    /**
+     * Cache of {@link #detectJavaFeatureVersion(File)} results keyed by
+     * (absolute path, last-modified, size). Spawning a JVM per candidate costs hundreds of
+     * milliseconds, so the same runtime is only probed once per on-disk identity.
+     */
+    private static final Map<JavaProbeKey, Integer> VERSION_CACHE = new ConcurrentHashMap<>();
+
+    /** Number of actual child-process probes performed; exposed for cache-hit tests. */
+    static final AtomicLong DETECTION_PROBE_COUNT = new AtomicLong();
 
     private JavaRuntimeUtil() {
     }
@@ -63,20 +81,22 @@ public final class JavaRuntimeUtil {
         addCandidate(candidates, System.getProperty("java.home"));
         addCandidate(candidates, System.getenv("JAVA_HOME"));
         candidates.addAll(findInstalledJavaCandidates());
+        List<File> orderedCandidates = List.copyOf(candidates);
+        Map<File, Integer> versions = probeInParallel(orderedCandidates);
 
         // Minecraft metadata normally names the feature version it was built for. Prefer an
         // exact match before considering a newer runtime: newer Java releases can be present on
         // the machine but still be rejected by a loader or by native libraries.
-        for (File candidate : candidates) {
-            if (detectJavaFeatureVersion(candidate) == requiredMajorVersion) {
+        for (File candidate : orderedCandidates) {
+            if (versions.getOrDefault(candidate, -1) == requiredMajorVersion) {
                 return candidate.getAbsolutePath();
             }
         }
 
         File bestKnown = null;
         int bestKnownVersion = -1;
-        for (File candidate : candidates) {
-            int featureVersion = detectJavaFeatureVersion(candidate);
+        for (File candidate : orderedCandidates) {
+            int featureVersion = versions.getOrDefault(candidate, -1);
             if (featureVersion >= requiredMajorVersion) {
                 return candidate.getAbsolutePath();
             }
@@ -140,8 +160,10 @@ public final class JavaRuntimeUtil {
         addCandidate(candidates, System.getProperty("java.home"));
         addCandidate(candidates, System.getenv("JAVA_HOME"));
         candidates.addAll(findInstalledJavaCandidates());
-        for (File candidate : candidates) {
-            if (detectJavaFeatureVersion(candidate) == requiredMajorVersion) {
+        List<File> orderedCandidates = List.copyOf(candidates);
+        Map<File, Integer> versions = probeInParallel(orderedCandidates);
+        for (File candidate : orderedCandidates) {
+            if (versions.getOrDefault(candidate, -1) == requiredMajorVersion) {
                 return candidate.getAbsolutePath();
             }
         }
@@ -270,7 +292,53 @@ public final class JavaRuntimeUtil {
         if (javaExecutable == null || !javaExecutable.isFile()) {
             return -1;
         }
+        JavaProbeKey key = new JavaProbeKey(javaExecutable.getAbsolutePath(),
+                javaExecutable.lastModified(), javaExecutable.length());
+        Integer cached = VERSION_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        int detected = probeJavaFeatureVersion(javaExecutable);
+        VERSION_CACHE.put(key, detected);
+        return detected;
+    }
 
+    /** Drop all cached Java probes. Tests and runtime updates call this before re-detecting. */
+    public static void clearVersionCache() {
+        VERSION_CACHE.clear();
+    }
+
+    /**
+     * Probe every candidate runtime in parallel so a cold start is bounded by the slowest single
+     * probe rather than the sum of all probes. Results are cached per (path, mtime, size).
+     */
+    private static Map<File, Integer> probeInParallel(List<File> candidates) {
+        if (candidates.isEmpty()) {
+            return Map.of();
+        }
+        ExecutorService executor = Executors.newFixedThreadPool(
+                Math.min(candidates.size(), PARALLEL_PROBE_THREADS), runnable -> {
+                    Thread thread = new Thread(runnable, "ecl-java-probe");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        Map<File, Integer> versions = new ConcurrentHashMap<>();
+        try {
+            List<CompletableFuture<Void>> futures = candidates.stream()
+                    .map(candidate -> CompletableFuture.runAsync(
+                            () -> versions.put(candidate, detectJavaFeatureVersion(candidate)), executor))
+                    .toList();
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+        } finally {
+            executor.shutdownNow();
+        }
+        Map<File, Integer> ordered = new LinkedHashMap<>();
+        candidates.forEach(candidate -> ordered.put(candidate, versions.getOrDefault(candidate, -1)));
+        return ordered;
+    }
+
+    private static int probeJavaFeatureVersion(File javaExecutable) {
+        DETECTION_PROBE_COUNT.incrementAndGet();
         Process process = null;
         try {
             process = new ProcessBuilder(javaExecutable.getAbsolutePath(), "-version")
@@ -287,6 +355,7 @@ public final class JavaRuntimeUtil {
                         output.append(line).append('\n');
                     }
                 } catch (IOException ignored) {
+                    // The probe process ended before its stream was fully drained.
                 }
             });
             if (!process.waitFor(3, TimeUnit.SECONDS)) {
@@ -344,5 +413,9 @@ public final class JavaRuntimeUtil {
 
     private static String executableName() {
         return "java.exe";
+    }
+
+    /** Identity of a probed java executable; the file attributes detect on-disk replacement. */
+    private record JavaProbeKey(String path, long modifiedAt, long size) {
     }
 }

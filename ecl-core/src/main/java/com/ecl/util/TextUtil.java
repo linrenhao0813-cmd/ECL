@@ -22,8 +22,32 @@ public final class TextUtil {
         return Long.toString(value);
     }
 
+    /**
+     * Sanitizes a string for use as a single filename component. Replaces characters that are
+     * invalid on Windows, trims surrounding whitespace, and maps blank, {@code "."}, {@code ".."}
+     * or Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) to a safe default so callers
+     * never derive a path-traversal or device-name filename.
+     */
     public static String replaceInvalidFilenameChars(String text) {
-        return text == null ? null : text.replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (text == null) {
+            return null;
+        }
+        String replaced = text.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+        if (replaced.isEmpty() || ".".equals(replaced) || "..".equals(replaced)
+                || isWindowsReservedName(replaced)) {
+            return "_";
+        }
+        return replaced;
+    }
+
+    /** Windows device/reserved names, ignoring a trailing extension, e.g. {@code CON}, {@code LPT1}. */
+    public static boolean isWindowsReservedName(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String name = value.replaceFirst("\\..*$", "").toUpperCase(Locale.ROOT);
+        return name.equals("CON") || name.equals("PRN") || name.equals("AUX")
+                || name.equals("NUL") || name.matches("COM[1-9]") || name.matches("LPT[1-9]");
     }
 
     /**

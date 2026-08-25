@@ -29,6 +29,7 @@ final class InstallerProcessRunner {
                     }
                 }
             } catch (IOException ignored) {
+                // The installer process ended or its pipe broke; nothing meaningful left to read.
             }
         });
         try {

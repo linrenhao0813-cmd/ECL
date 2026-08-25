@@ -1,30 +1,24 @@
 package com.ecl;
 
-import java.io.File;
-import java.io.IOException;
-import java.lang.management.ManagementFactory;
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * Main entry point for ECL.
  * Delegates to ECLauncher to keep existing run configs working.
+ *
+ * <p>The launcher needs JavaFX on the classpath. Instead of probing the Gradle dependency cache
+ * with a hard-coded layout (which breaks on Gradle upgrades or a custom {@code GRADLE_USER_HOME}),
+ * a missing JavaFX class simply prints how to run the app with the wrapper.</p>
  */
 public class ECL {
-    private static final String BOOTSTRAPPED_ENV = "ECL_BOOTSTRAPPED";
-    private static final String JAVAFX_VERSION = "21";
-    private static final String GSON_VERSION = "2.10.1";
+    private static final String JAVAFX_CLASS = "javafx.application.Application";
 
     public static void main(String[] args) {
-        if (!hasClass("javafx.application.Application") && !"1".equals(System.getenv(BOOTSTRAPPED_ENV))) {
-            try {
-                relaunchWithCachedDependencies(args);
-                return;
-            } catch (Exception e) {
-                System.err.println("ECL 启动失败：当前运行配置没有包含 JavaFX 依赖。");
-                System.err.println("请用 Gradle 任务运行，或在 IntelliJ 里重新导入 Gradle 项目。");
-                System.err.println("自动补全依赖也失败了：" + e.getMessage());
-            }
+        if (!hasClass(JAVAFX_CLASS)) {
+            System.err.println("ECL 启动失败：当前运行配置没有包含 JavaFX 依赖。");
+            System.err.println("请使用项目自带的 Gradle 包装器运行：");
+            System.err.println("  .\\gradlew.bat run              # 开发运行");
+            System.err.println("  .\\gradlew.bat installDist      # 生成可分发镜像 ecl-boot/build/install/ECL/");
+            System.err.println("或在 IntelliJ 中重新导入 Gradle 项目后运行 ecl-boot 的 ECL 主类。");
+            return;
         }
 
         ECLauncher.main(args);
@@ -37,85 +31,5 @@ public class ECL {
         } catch (ClassNotFoundException e) {
             return false;
         }
-    }
-
-    private static void relaunchWithCachedDependencies(String[] args) throws IOException, InterruptedException {
-        List<String> classpath = new ArrayList<>();
-        String currentClasspath = System.getProperty("java.class.path", "");
-        if (!currentClasspath.isBlank()) {
-            classpath.add(currentClasspath);
-        }
-
-        String javafxClassifier = javafxClassifier();
-        addCachedJar(classpath, "org.openjfx", "javafx-base", JAVAFX_VERSION, javafxClassifier);
-        addCachedJar(classpath, "org.openjfx", "javafx-graphics", JAVAFX_VERSION, javafxClassifier);
-        addCachedJar(classpath, "org.openjfx", "javafx-controls", JAVAFX_VERSION, javafxClassifier);
-        addCachedJar(classpath, "com.google.code.gson", "gson", GSON_VERSION);
-
-        List<String> command = new ArrayList<>();
-        command.add(javaExecutable());
-        command.addAll(ManagementFactory.getRuntimeMXBean().getInputArguments());
-        command.add("-cp");
-        command.add(String.join(File.pathSeparator, classpath));
-        command.add(ECL.class.getName());
-        command.addAll(List.of(args));
-
-        ProcessBuilder builder = new ProcessBuilder(command);
-        builder.inheritIO();
-        builder.environment().put(BOOTSTRAPPED_ENV, "1");
-        Process process = builder.start();
-        System.exit(process.waitFor());
-    }
-
-    private static void addCachedJar(List<String> classpath, String group, String artifact, String version) throws IOException {
-        addCachedJar(classpath, group, artifact, version, null);
-    }
-
-    private static void addCachedJar(List<String> classpath, String group, String artifact, String version, String classifier) throws IOException {
-        File cacheDir = new File(System.getProperty("user.home"),
-                ".gradle/caches/modules-2/files-2.1/" + group + "/" + artifact + "/" + version);
-        String prefix = classifier == null || classifier.isBlank()
-                ? artifact + "-" + version
-                : artifact + "-" + version + "-" + classifier;
-        File jar = findJar(cacheDir, prefix);
-        if (jar == null) {
-            throw new IOException("找不到依赖缓存: " + group + ":" + artifact + ":" + version);
-        }
-        classpath.add(jar.getAbsolutePath());
-    }
-
-    private static File findJar(File dir, String prefix) {
-        if (dir == null || !dir.exists()) {
-            return null;
-        }
-
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return null;
-        }
-
-        for (File file : files) {
-            if (file.isFile() && file.getName().startsWith(prefix) && file.getName().endsWith(".jar")) {
-                return file;
-            }
-        }
-
-        for (File file : files) {
-            if (file.isDirectory()) {
-                File found = findJar(file, prefix);
-                if (found != null) {
-                    return found;
-                }
-            }
-        }
-        return null;
-    }
-
-    private static String javaExecutable() {
-        return new File(System.getProperty("java.home"), "bin/java.exe").getAbsolutePath();
-    }
-
-    private static String javafxClassifier() {
-        return "win";
     }
 }

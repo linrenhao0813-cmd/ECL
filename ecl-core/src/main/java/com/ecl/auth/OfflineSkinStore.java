@@ -266,6 +266,7 @@ public final class OfflineSkinStore {
                 try {
                     Files.deleteIfExists(temp);
                 } catch (IOException ignored) {
+                    // Best-effort cleanup of the temporary index file only.
                 }
             }
         }

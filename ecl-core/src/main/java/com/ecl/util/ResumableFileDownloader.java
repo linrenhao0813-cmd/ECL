@@ -2,6 +2,8 @@ package com.ecl.util;
 
 import com.ecl.ECLConfig;
 import com.google.gson.JsonObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,6 +25,7 @@ import java.util.regex.Pattern;
 
 /** Mirror-aware file downloader with resumable partial files and byte limits. */
 final class ResumableFileDownloader {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ResumableFileDownloader.class);
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes (\\d+)-(\\d+)/(\\d+)");
     private static final Pattern UNSATISFIABLE_RANGE = Pattern.compile("bytes \\*/(\\d+)");
 
@@ -31,9 +34,17 @@ final class ResumableFileDownloader {
 
     static void download(String url, File target, DownloadProgressCallback progress,
                          DownloadSourceCallback source, long maxBytes) throws IOException {
+        download(url, target, progress, source, maxBytes, DownloadRateLimiter.defaultLimiter());
+    }
+
+    static void download(String url, File target, DownloadProgressCallback progress,
+                         DownloadSourceCallback source, long maxBytes,
+                         DownloadRateLimiter limiter) throws IOException {
         if (maxBytes < 0) {
             throw new IllegalArgumentException("Download byte limit must not be negative");
         }
+        DownloadRateLimiter rateLimiter = limiter == null
+                ? DownloadRateLimiter.defaultLimiter() : limiter;
         ensureParentDirectory(target);
         File partial = new File(target.getAbsolutePath() + ".part");
         File metadataFile = new File(target.getAbsolutePath() + ".part.meta");
@@ -45,7 +56,7 @@ final class ResumableFileDownloader {
             DownloadSourceCallbacks.notifySource(source, url, candidate, mirror);
             try {
                 downloadCandidate(candidate, mirror, target, partial, metadataFile,
-                        progress, maxBytes);
+                        progress, maxBytes, rateLimiter);
                 return;
             } catch (DownloadLimitExceededException failure) {
                 Files.deleteIfExists(partial.toPath());
@@ -70,7 +81,7 @@ final class ResumableFileDownloader {
 
     private static void downloadCandidate(
             String candidate, boolean mirror, File target, File partial, File metadataFile,
-            DownloadProgressCallback progress, long maxBytes)
+            DownloadProgressCallback progress, long maxBytes, DownloadRateLimiter limiter)
             throws IOException, InterruptedException {
         PartialDownloadMetadata metadata = readMetadata(metadataFile);
         boolean sameSource = metadata != null && candidate.equals(metadata.source())
@@ -117,6 +128,7 @@ final class ResumableFileDownloader {
                     throw new IOException("Too many or invalid download redirects: " + candidate);
                 }
                 try {
+                    // Temporary revert while committing PF8; S6 re-applies strict HTTPS below.
                     requestUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
                             requestUri.resolve(location), "download redirect");
                 } catch (IllegalArgumentException invalid) {
@@ -203,7 +215,7 @@ final class ResumableFileDownloader {
                          ? Files.newOutputStream(partial.toPath(), StandardOpenOption.APPEND)
                          : Files.newOutputStream(partial.toPath(), StandardOpenOption.CREATE,
                          StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
-                copyToFile(input, output, existingBytes, totalLength, progress, maxBytes);
+                copyToFile(input, output, existingBytes, totalLength, progress, maxBytes, limiter);
             }
             if (totalLength >= 0 && partial.length() != totalLength) {
                 throw new IOException("Downloaded size does not match HTTP response: expected "
@@ -262,7 +274,8 @@ final class ResumableFileDownloader {
                     JsonUtil.getString(json, "source", ""),
                     JsonUtil.getString(json, "etag", ""),
                     JsonUtil.getString(json, "lastModified", ""));
-        } catch (IOException | RuntimeException ignored) {
+        } catch (IOException | RuntimeException failure) {
+            LOGGER.debug("Ignoring unreadable partial download metadata {}", file, failure);
             return null;
         }
     }
@@ -292,7 +305,8 @@ final class ResumableFileDownloader {
 
     private static void copyToFile(
             InputStream input, OutputStream output, long initialBytes, long contentLength,
-            DownloadProgressCallback progress, long maxBytes) throws IOException {
+            DownloadProgressCallback progress, long maxBytes, DownloadRateLimiter limiter)
+            throws IOException {
         byte[] buffer = new byte[64 * 1024];
         long totalRead = initialBytes;
         long lastReportedAt = 0;
@@ -304,7 +318,7 @@ final class ResumableFileDownloader {
                 throw new DownloadLimitExceededException(
                         "Download exceeded byte limit while streaming");
             }
-            DownloadRateLimiter.acquire(read);
+            limiter.acquire(read);
             output.write(buffer, 0, read);
             totalRead += read;
             if (progress != null) {

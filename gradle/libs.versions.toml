@@ -1,16 +1,18 @@
 [versions]
-checkstyle = "10.20.2"
+checkstyle = "10.24.0"
 gson = "2.10.1"
+imageio-webp = "3.13.1"
 jackson = "2.18.9"
 javafx = "21.0.10"
-junit = "5.11.4"
-jna = "5.15.0"
-logback = "1.5.16"
-slf4j = "2.0.16"
-spotbugs-plugin = "6.0.26"
+junit = "5.13.4"
+jna = "5.17.0"
+logback = "1.5.25"
+slf4j = "2.0.17"
+spotbugs-plugin = "6.5.4"
 
 [libraries]
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+imageio-webp = { module = "com.twelvemonkeys.imageio:imageio-webp", version.ref = "imageio-webp" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

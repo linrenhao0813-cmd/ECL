@@ -121,7 +121,38 @@ public final class MicrosoftAccountStore {
 
     private static String decryptLegacy(JsonObject object, String key) {
         String encrypted = string(object, key);
-        return encrypted.isBlank() ? "" : CryptoUtil.decrypt(encrypted);
+        if (encrypted.isBlank()) {
+            return "";
+        }
+        if (!looksLikeCiphertext(encrypted)) {
+            // 旧文件中的明文或损坏值不是本版本密文格式：跳过该字段并继续迁移其余账号，
+            // 让用户重新登录即可，而不是中止整批迁移。
+            LOGGER.warn("Legacy Microsoft account field '{}' is not encrypted ciphertext; "
+                    + "skipping its migration", key);
+            return "";
+        }
+        try {
+            return CryptoUtil.decrypt(encrypted);
+        } catch (IllegalStateException failure) {
+            LOGGER.warn("Failed to decrypt legacy Microsoft account field '{}'; "
+                    + "skipping its migration", key, failure);
+            return "";
+        }
+    }
+
+    /**
+     * Ciphertext produced by {@link CryptoUtil#encrypt(String)} is Base64 of at least
+     * IV(12) + tag(16) bytes; plaintext or truncated values are rejected before decryption.
+     */
+    private static boolean looksLikeCiphertext(String value) {
+        if (value == null || value.length() < 24) {
+            return false;
+        }
+        try {
+            return java.util.Base64.getDecoder().decode(value).length >= 13;
+        } catch (IllegalArgumentException invalid) {
+            return false;
+        }
     }
 
     private JsonArray readRaw() {

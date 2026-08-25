@@ -228,7 +228,8 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
                     // A damaged unrelated profile must not block updates for healthy packs.
                 }
             }
-        } catch (IOException ignored) {
+        } catch (IOException failure) {
+            LOGGER.debug("Failed to list modpack profiles under {}", versionsRoot, failure);
             return List.of();
         }
         return List.copyOf(result);

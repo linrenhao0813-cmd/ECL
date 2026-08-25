@@ -39,12 +39,14 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
 
     public DefaultModDependencyResolver(ModrinthApiClient apiClient, ModVersionSelector versionSelector) {
         this(new ModrinthMetadataProvider(apiClient, false), versionSelector,
-                ignored -> List.of(), 32, 256);
+                ignored -> List.of(), DependencyResolverLimits.MAX_DEPTH,
+                DependencyResolverLimits.MAX_DEPENDENCIES);
     }
 
     public DefaultModDependencyResolver(ModMetadataProvider metadataProvider,
                                         ModVersionSelector versionSelector) {
-        this(metadataProvider, versionSelector, ignored -> List.of(), 32, 256);
+        this(metadataProvider, versionSelector, ignored -> List.of(),
+                DependencyResolverLimits.MAX_DEPTH, DependencyResolverLimits.MAX_DEPENDENCIES);
     }
 
     public DefaultModDependencyResolver(

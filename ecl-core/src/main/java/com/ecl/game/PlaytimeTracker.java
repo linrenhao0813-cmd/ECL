@@ -3,6 +3,9 @@ package com.ecl.game;
 import com.ecl.util.GsonProvider;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -15,6 +18,7 @@ import java.util.Objects;
 
 /** Persists total and latest-session play duration alongside an instance. */
 public final class PlaytimeTracker {
+    private static final Logger LOGGER = LoggerFactory.getLogger(PlaytimeTracker.class);
     /** Records a successful game process start immediately, before the process exits. */
     public synchronized void recordLaunch(Path instanceRoot, long startedAtMillis) throws IOException {
         Path file = statsFile(instanceRoot);
@@ -101,7 +105,8 @@ public final class PlaytimeTracker {
     private static long number(JsonObject value, String key) {
         try {
             return value.has(key) ? Math.max(0, value.get(key).getAsLong()) : 0;
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException unexpected) {
+            LOGGER.debug("Playtime field '{}' is not a number; treating as 0", key, unexpected);
             return 0;
         }
     }
@@ -110,7 +115,8 @@ public final class PlaytimeTracker {
         try {
             return value.has(key) && value.get(key).isJsonPrimitive()
                     ? value.get(key).getAsString() : fallback;
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException unexpected) {
+            LOGGER.debug("Playtime field '{}' is not text; using fallback", key, unexpected);
             return fallback;
         }
     }

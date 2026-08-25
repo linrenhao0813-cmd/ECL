@@ -284,6 +284,7 @@ public final class ServerDirectoryService {
             JsonElement value = json == null ? null : json.get(key);
             return value == null || value.isJsonNull() ? fallback : value.getAsInt();
         } catch (RuntimeException ignored) {
+            // A malformed server-directory field falls back to its default value.
             return fallback;
         }
     }
@@ -293,6 +294,7 @@ public final class ServerDirectoryService {
             JsonElement value = json == null ? null : json.get(key);
             return value == null || value.isJsonNull() ? 0L : value.getAsLong();
         } catch (RuntimeException ignored) {
+            // A malformed server-directory field falls back to 0.
             return 0L;
         }
     }
@@ -302,6 +304,7 @@ public final class ServerDirectoryService {
             JsonElement value = json == null ? null : json.get(key);
             return value != null && !value.isJsonNull() && value.getAsBoolean();
         } catch (RuntimeException ignored) {
+            // A malformed server-directory field falls back to false.
             return false;
         }
     }

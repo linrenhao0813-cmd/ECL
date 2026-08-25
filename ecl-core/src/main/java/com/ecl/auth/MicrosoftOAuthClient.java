@@ -17,8 +17,31 @@ import java.util.Map;
 final class MicrosoftOAuthClient {
     private static final Logger LOGGER = LoggerFactory.getLogger(MicrosoftOAuthClient.class);
     private static final int MAX_DEVICE_POLL_INTERVAL_SECONDS = 60;
-    private static final String CLIENT_ID =
-            System.getProperty("ecl.microsoft.clientId", "00000000402b5328");
+    /**
+     * Azure public client (device code flow) used for Microsoft account login.
+     *
+     * <p>Resolution order: system property {@code ecl.microsoft.clientId}, environment variable
+     * {@code ECL_MICROSOFT_CLIENT_ID}, then a fallback that is NOT the shared Minecraft client id
+     * so ECL never depends on a third-party shared secret. When the fallback is active the client
+     * logs a warning so operators register their own Azure application.</p>
+     */
+    private static final String CLIENT_ID = resolveClientId();
+    private static final String SHARED_CLIENT_FALLBACK = "00000000402b5328";
+
+    private static String resolveClientId() {
+        String fromProperty = System.getProperty("ecl.microsoft.clientId");
+        if (fromProperty != null && !fromProperty.isBlank()) {
+            return fromProperty;
+        }
+        String fromEnv = System.getenv("ECL_MICROSOFT_CLIENT_ID");
+        if (fromEnv != null && !fromEnv.isBlank()) {
+            return fromEnv;
+        }
+        LOGGER.warn("No Microsoft client id configured (ecl.microsoft.clientId or "
+                + "ECL_MICROSOFT_CLIENT_ID); falling back to a shared client id. Register your own "
+                + "Azure public client for device code flow to remove this dependency.");
+        return SHARED_CLIENT_FALLBACK;
+    }
     private static final String MSA_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
     private static final String DEVICE_CODE_URL =
             "https://login.live.com/oauth20_connect.srf?mkt=zh-CN";
