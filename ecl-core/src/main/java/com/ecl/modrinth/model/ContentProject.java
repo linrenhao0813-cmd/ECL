@@ -15,6 +15,11 @@ public record ContentProject(String projectId, String slug, String title, String
         this(projectId, slug, title, author, description, null, downloads, follows, "");
     }
 
+    public ContentProject(String projectId, String slug, String title, String author,
+                          String description, String iconUrl, long downloads, long follows) {
+        this(projectId, slug, title, author, description, iconUrl, downloads, follows, "");
+    }
+
     public String getProjectId() { return projectId; }
     public String getTitle() { return title; }
     public String getDescription() { return description; }
