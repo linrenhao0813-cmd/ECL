@@ -131,6 +131,14 @@ final class JavaRuntimeDownloader {
         } catch (RuntimeException error) {
             throw new IOException("Adoptium 返回了无效的 Java 运行时元数据", error);
         }
+        try {
+            return resolvePackage(assets);
+        } catch (IOException error) {
+            throw new IOException("Adoptium 没有提供兼容的 Java " + featureVersion + " JRE", error);
+        }
+    }
+
+    static PackageInfo resolvePackage(JsonArray assets) throws IOException {
         for (var item : assets) {
             JsonObject binary = item.getAsJsonObject().getAsJsonObject("binary");
             if (binary == null || !binary.has("package")) continue;
@@ -147,10 +155,10 @@ final class JavaRuntimeDownloader {
                 return new PackageInfo(link, checksum, size);
             }
         }
-        throw new IOException("Adoptium 没有提供兼容的 Java " + featureVersion + " JRE");
+        throw new IOException("Adoptium 没有提供兼容的 Java JRE");
     }
 
-    private static void verifySha256(Path file, String expected) throws IOException {
+    static void verifySha256(Path file, String expected) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (var input = Files.newInputStream(file)) {
@@ -230,6 +238,6 @@ final class JavaRuntimeDownloader {
         throw new IOException("暂不支持自动下载 Java 的架构: " + arch);
     }
 
-    private record PackageInfo(String url, String sha256, long size) {
+    record PackageInfo(String url, String sha256, long size) {
     }
 }
