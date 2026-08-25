@@ -10,6 +10,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.File;
 import java.io.IOException;
+import java.net.NetworkInterface;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -17,6 +18,10 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -38,7 +43,8 @@ public final class CryptoUtil {
     private static final String KEY_ALGORITHM = "AES";
     private static final int KEY_SIZE = 256;
     private static final byte[] DPAPI_HEADER = "ECL-DPAPI-1\n".getBytes(StandardCharsets.US_ASCII);
-    private static final byte[] LOCAL_HEADER = "ECL-LOCAL-1\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] LOCAL_HEADER_V1 = "ECL-LOCAL-1\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] LOCAL_HEADER = "ECL-LOCAL-2\n".getBytes(StandardCharsets.US_ASCII);
 
     private static volatile SecretKey cachedKey;
 
@@ -117,9 +123,9 @@ public final class CryptoUtil {
                     throw new IOException("Invalid account encryption key length");
                 }
                 k = new SecretKeySpec(encoded, KEY_ALGORITHM);
-                boolean legacyPlaintext = !startsWith(stored, DPAPI_HEADER)
+                boolean legacyProtection = !startsWith(stored, DPAPI_HEADER)
                         && !startsWith(stored, LOCAL_HEADER);
-                if (legacyPlaintext) {
+                if (legacyProtection) {
                     writeKeyFile(keyFile.toPath(), encodeStoredKey(encoded));
                 }
             } else {
@@ -180,7 +186,10 @@ public final class CryptoUtil {
             }
         }
         if (startsWith(stored, LOCAL_HEADER)) {
-            return decodeLocalKey(stored);
+            return decodeLocalKey(stored, LOCAL_HEADER, localWrappingKey());
+        }
+        if (startsWith(stored, LOCAL_HEADER_V1)) {
+            return decodeLocalKey(stored, LOCAL_HEADER_V1, legacyLocalWrappingKey());
         }
         return stored.clone();
     }
@@ -204,20 +213,20 @@ public final class CryptoUtil {
         }
     }
 
-    private static byte[] decodeLocalKey(byte[] stored)
-            throws IOException, NoSuchAlgorithmException {
-        if (stored.length < LOCAL_HEADER.length + GCM_IV_LENGTH + 1) {
+    private static byte[] decodeLocalKey(byte[] stored, byte[] header, SecretKey wrappingKey)
+            throws IOException {
+        if (stored.length < header.length + GCM_IV_LENGTH + 1) {
             throw new IOException("Invalid locally protected account encryption key");
         }
         try {
-            ByteBuffer buffer = ByteBuffer.wrap(stored, LOCAL_HEADER.length,
-                    stored.length - LOCAL_HEADER.length);
+            ByteBuffer buffer = ByteBuffer.wrap(stored, header.length,
+                    stored.length - header.length);
             byte[] iv = new byte[GCM_IV_LENGTH];
             buffer.get(iv);
             byte[] wrapped = new byte[buffer.remaining()];
             buffer.get(wrapped);
             Cipher cipher = Cipher.getInstance(ALGORITHM);
-            cipher.init(Cipher.DECRYPT_MODE, localWrappingKey(),
+            cipher.init(Cipher.DECRYPT_MODE, wrappingKey,
                     new GCMParameterSpec(GCM_TAG_LENGTH, iv));
             return cipher.doFinal(wrapped);
         } catch (GeneralSecurityException | RuntimeException failure) {
@@ -225,13 +234,63 @@ public final class CryptoUtil {
         }
     }
 
-    private static SecretKey localWrappingKey() throws NoSuchAlgorithmException {
+    static SecretKey localWrappingKey() throws NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update("ECL-local-key-wrapper-v2\n".getBytes(StandardCharsets.UTF_8));
+        digest.update(System.getProperty("user.name", "").getBytes(StandardCharsets.UTF_8));
+        digest.update(System.getProperty("user.home", "").getBytes(StandardCharsets.UTF_8));
+        digest.update(System.getProperty("os.name", "").getBytes(StandardCharsets.UTF_8));
+        digest.update(machineEntropy());
+        return new SecretKeySpec(digest.digest(), KEY_ALGORITHM);
+    }
+
+    static SecretKey legacyLocalWrappingKey() throws NoSuchAlgorithmException {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         digest.update("ECL-local-key-wrapper-v1\n".getBytes(StandardCharsets.UTF_8));
         digest.update(System.getProperty("user.name", "").getBytes(StandardCharsets.UTF_8));
         digest.update(System.getProperty("user.home", "").getBytes(StandardCharsets.UTF_8));
         digest.update(System.getProperty("os.name", "").getBytes(StandardCharsets.UTF_8));
         return new SecretKeySpec(digest.digest(), KEY_ALGORITHM);
+    }
+
+    private static byte[] machineEntropy() {
+        String override = System.getProperty("ecl.crypto.machineId", "").trim();
+        if (!override.isBlank()) {
+            return override.getBytes(StandardCharsets.UTF_8);
+        }
+        for (Path candidate : List.of(Path.of("/etc/machine-id"),
+                Path.of("/var/lib/dbus/machine-id"))) {
+            try {
+                if (Files.isRegularFile(candidate)) {
+                    String machineId = Files.readString(candidate, StandardCharsets.UTF_8).trim();
+                    if (!machineId.isBlank() && machineId.length() <= 4096) {
+                        return machineId.getBytes(StandardCharsets.UTF_8);
+                    }
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // Fall through to network-interface identity.
+            }
+        }
+        try {
+            List<NetworkInterface> interfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
+            interfaces.sort(Comparator.comparing(NetworkInterface::getName));
+            StringBuilder hardwareIds = new StringBuilder();
+            for (NetworkInterface networkInterface : interfaces) {
+                byte[] address = networkInterface.getHardwareAddress();
+                if (address != null && address.length > 0) {
+                    hardwareIds.append(networkInterface.getName()).append('=')
+                            .append(HexFormat.of().formatHex(address)).append('\n');
+                }
+            }
+            if (!hardwareIds.isEmpty()) {
+                return hardwareIds.toString().getBytes(StandardCharsets.UTF_8);
+            }
+        } catch (IOException | RuntimeException ignored) {
+            // Fall through to the host identity available to this process.
+        }
+        String hostname = System.getenv().getOrDefault("HOSTNAME",
+                System.getenv().getOrDefault("COMPUTERNAME", "unknown-host"));
+        return hostname.getBytes(StandardCharsets.UTF_8);
     }
 
     private static boolean isWindows() {

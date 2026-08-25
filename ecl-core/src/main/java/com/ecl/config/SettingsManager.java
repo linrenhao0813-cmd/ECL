@@ -323,6 +323,17 @@ public class SettingsManager {
         return getEncrypted(key.key());
     }
 
+    /** Remove every encrypted setting whose logical key starts with {@code keyPrefix}. */
+    public synchronized boolean removeEncryptedByPrefix(String keyPrefix) {
+        ensureLoaded();
+        Objects.requireNonNull(keyPrefix, "keyPrefix");
+        if (encryptedStore.removeByPrefix(settings, keyPrefix)) {
+            markDirty();
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Migrate a plaintext value to encrypted storage and remove the plaintext key.
      * Used for one-time migration of existing stored tokens.

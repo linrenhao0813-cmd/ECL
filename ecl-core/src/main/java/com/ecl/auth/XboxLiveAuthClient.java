@@ -19,6 +19,15 @@ final class XboxLiveAuthClient {
             "https://user.auth.xboxlive.com/user/authenticate";
     private static final String XSTS_AUTH_URL =
             "https://xsts.auth.xboxlive.com/xsts/authorize";
+    private final AuthHttpTransport http;
+
+    XboxLiveAuthClient() {
+        this(AuthHttpTransport.system());
+    }
+
+    XboxLiveAuthClient(AuthHttpTransport http) {
+        this.http = java.util.Objects.requireNonNull(http, "http");
+    }
 
     Token authenticate(String microsoftAccessToken) throws IOException {
         try {
@@ -46,7 +55,7 @@ final class XboxLiveAuthClient {
         payload.addProperty("RelyingParty", "rp://api.minecraftservices.com/");
         payload.addProperty("TokenType", "JWT");
 
-        HttpUtil.Response response = HttpUtil.postJsonResponse(XSTS_AUTH_URL, payload);
+        HttpUtil.Response response = http.postJson(XSTS_AUTH_URL, payload);
         JsonObject json = parseJson(response.body(), "Xbox XSTS authorization");
         if (!response.isSuccess()) {
             throw new IOException(describeXstsError(json));
@@ -68,7 +77,7 @@ final class XboxLiveAuthClient {
         payload.addProperty("TokenType", "JWT");
 
         JsonObject json = requireSuccess(
-                HttpUtil.postJsonResponse(XBOX_AUTH_URL, payload), "Xbox Live authentication");
+                http.postJson(XBOX_AUTH_URL, payload), "Xbox Live authentication");
         return parseToken(json, "Xbox Live authentication");
     }
 

@@ -46,6 +46,15 @@ final class EncryptedSettingsStore {
         }
     }
 
+    boolean removeByPrefix(JsonObject settings, String keyPrefix) {
+        String encryptedPrefix = "_enc_" + keyPrefix;
+        var matchingKeys = settings.keySet().stream()
+                .filter(key -> key.startsWith(encryptedPrefix))
+                .toList();
+        matchingKeys.forEach(settings::remove);
+        return !matchingKeys.isEmpty();
+    }
+
     String consumeFailureKey() {
         String key = lastFailureKey;
         lastFailureKey = null;

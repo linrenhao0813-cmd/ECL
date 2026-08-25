@@ -49,11 +49,13 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -114,6 +116,7 @@ public final class MainController implements AutoCloseable {
         int configuredConcurrency = settingsManager.get(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT);
         configuredConcurrency = Math.max(1, Math.min(8, configuredConcurrency));
         long configuredRate = Math.max(0L, settingsManager.get(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB)) * 1024L;
+        HttpUtil.setDownloadMaxConcurrent(configuredConcurrency);
         HttpUtil.setDownloadRateLimitBytesPerSecond(configuredRate);
         gameDownloader = new GameDownloader(configuredConcurrency);
         downloadTaskCenter = new DownloadTaskCenter(configuredConcurrency, configuredRate);
@@ -128,8 +131,12 @@ public final class MainController implements AutoCloseable {
                 ECLConfig.getVersionsDir(), ECLConfig.getLibrariesDir(), ECLConfig.getAssetsDir(),
                 ECLConfig.LAUNCHER_NAME, ECLConfig.LAUNCHER_VERSION);
         gameLauncher = new DefaultLauncher(versionRepository, launchEnvironment);
-        backgroundExecutor = Executors.newCachedThreadPool(
-                ThreadFactories.daemon("ecl-background"));
+        int backgroundThreads = Math.min(16,
+                Math.max(2, Runtime.getRuntime().availableProcessors() * 2));
+        backgroundExecutor = new ThreadPoolExecutor(
+                backgroundThreads, backgroundThreads, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(256), ThreadFactories.daemon("ecl-background"),
+                new ThreadPoolExecutor.CallerRunsPolicy());
         modDownloadExecutor = Executors.newFixedThreadPool(
                 configuredConcurrency, ThreadFactories.daemon("ecl-mod-download"));
         installedModRepository = new FileInstalledModRepository();
@@ -250,6 +257,7 @@ public final class MainController implements AutoCloseable {
         boolean migrated = settingsManager.migrateToEncrypted("microsoftRefreshToken");
         migrated |= settingsManager.migrateToEncrypted("microsoftAccessToken");
         migrated |= settingsManager.migrateToEncrypted(ECLConfig.KEY_CURSEFORGE_API_KEY.key());
+        migrated |= settingsManager.removeEncryptedByPrefix("yggdrasilPassword");
         if (migrated) {
             settingsManager.save();
         }

@@ -5,18 +5,24 @@ import com.ecl.auth.AuthProvider;
 import com.ecl.auth.MicrosoftAuth;
 import com.ecl.auth.OfflineAuth;
 import com.ecl.auth.YggdrasilAuth;
+import com.ecl.auth.YggdrasilSessionStore;
+import com.ecl.exception.AuthException;
 import javafx.application.Platform;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Locale;
-import java.util.UUID;
+import java.io.IOException;
 
 /** Creates launch authentication providers and persists provider-specific credentials. */
 final class LaunchAuthFactory {
     private final LauncherUI ui;
+    private final YggdrasilSessionStore yggdrasilSessions;
 
     LaunchAuthFactory(LauncherUI ui) {
+        this(ui, new YggdrasilSessionStore());
+    }
+
+    LaunchAuthFactory(LauncherUI ui, YggdrasilSessionStore yggdrasilSessions) {
         this.ui = ui;
+        this.yggdrasilSessions = yggdrasilSessions;
     }
 
     AuthProvider create(String authType, String server, String username, String password) {
@@ -30,43 +36,48 @@ final class LaunchAuthFactory {
         }
 
         if (LauncherUI.AUTH_YGGDRASIL.equals(authType)) {
-            String effectivePassword = password;
-                if (effectivePassword == null || effectivePassword.isBlank()) {
-                    effectivePassword = ui.settingsManager.getEncrypted(
-                            yggdrasilCredentialKey(server, username));
-                    if (ui.settingsManager.consumeUnreadableEncryptedSetting() != null) {
-                        Platform.runLater(() -> ui.setStatus("保存的登录凭证不可读取",
-                                "外置账户密码解密失败，请重新输入密码并登录。"));
-                    }
-                }
-            if (server.isBlank() || username.isBlank()
-                    || effectivePassword == null || effectivePassword.isBlank()) {
-                throw new IllegalArgumentException("请填写完整的外置登录信息。");
+            if (server.isBlank() || username.isBlank()) {
+                throw new IllegalArgumentException("请填写完整的外置登录服务器和用户名。");
+            }
+            if (password == null || password.isBlank()) {
+                return restoreYggdrasilSession(server, username);
             }
             YggdrasilAuth yggdrasilAuth = new YggdrasilAuth(server);
-            yggdrasilAuth.setCredentials(username, effectivePassword);
+            yggdrasilAuth.setCredentials(username, password);
             yggdrasilAuth.login();
-            ui.settingsManager.setEncrypted(yggdrasilCredentialKey(server, username), effectivePassword);
-            ui.settingsManager.remove("_enc_yggdrasilPassword");
-            ui.settingsManager.set(ECLConfig.KEY_YGGDRASIL_SERVER, server);
-            ui.settingsManager.set(ECLConfig.KEY_USERNAME, yggdrasilAuth.getUsername());
-            if (!ui.settingsManager.save()) {
-                LauncherUI.LOGGER.warn("Failed to persist Yggdrasil session settings");
-            }
+            yggdrasilSessions.save(server, yggdrasilAuth);
+            persistYggdrasilIdentity(server, yggdrasilAuth);
             return yggdrasilAuth;
         }
 
         return new OfflineAuth(username.isBlank() ? "Player" : username);
     }
 
-    private String yggdrasilCredentialKey(String server, String username) {
-        String normalizedServer = server == null ? "" : server.trim().toLowerCase(Locale.ROOT);
-        while (normalizedServer.endsWith("/")) {
-            normalizedServer = normalizedServer.substring(0, normalizedServer.length() - 1);
+    private YggdrasilAuth restoreYggdrasilSession(String server, String username) {
+        YggdrasilAuth cached = yggdrasilSessions.restore(server, username)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "外置登录会话不存在，请重新输入密码。"));
+        try {
+            if (!cached.validate()) {
+                cached.refresh();
+                yggdrasilSessions.save(server, cached);
+            }
+            persistYggdrasilIdentity(server, cached);
+            return cached;
+        } catch (IOException error) {
+            throw new AuthException("外置登录会话已失效，请重新输入密码", error);
         }
-        String normalizedUsername = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
-        String identity = normalizedServer + "\n" + normalizedUsername;
-        return "yggdrasilPassword."
-                + UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void persistYggdrasilIdentity(String server, YggdrasilAuth auth) {
+        ui.settingsManager.set(ECLConfig.KEY_YGGDRASIL_SERVER, server);
+        ui.settingsManager.set(ECLConfig.KEY_USERNAME, auth.getUsername());
+        if (!ui.settingsManager.save()) {
+            LauncherUI.LOGGER.warn("Failed to persist Yggdrasil session settings");
+        }
+        Platform.runLater(() -> {
+            ui.usernameField.setText(auth.getUsername());
+            ui.updateRuntimeSummary();
+        });
     }
 }

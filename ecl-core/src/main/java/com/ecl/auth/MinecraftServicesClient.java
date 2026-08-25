@@ -18,13 +18,22 @@ final class MinecraftServicesClient {
             "https://api.minecraftservices.com/entitlements/mcstore";
     private static final String PROFILE_URL =
             "https://api.minecraftservices.com/minecraft/profile";
+    private final AuthHttpTransport http;
+
+    MinecraftServicesClient() {
+        this(AuthHttpTransport.system());
+    }
+
+    MinecraftServicesClient(AuthHttpTransport http) {
+        this.http = java.util.Objects.requireNonNull(http, "http");
+    }
 
     Token loginWithXbox(String userHash, String xstsToken) throws IOException {
         JsonObject payload = new JsonObject();
         payload.addProperty("identityToken", "XBL3.0 x=" + userHash + ";" + xstsToken);
 
         JsonObject json = requireSuccess(
-                HttpUtil.postJsonResponse(LOGIN_URL, payload), "Minecraft services login");
+                http.postJson(LOGIN_URL, payload), "Minecraft services login");
         String accessToken = requireString(json, "access_token", "Minecraft services login");
         int expiresIn = Math.max(60, JsonUtil.getInt(json, "expires_in", 86_400));
         return new Token(accessToken, System.currentTimeMillis() + expiresIn * 1000L);
@@ -32,7 +41,7 @@ final class MinecraftServicesClient {
 
     void validateEntitlements(String minecraftAccessToken) throws IOException {
         JsonObject json = requireSuccess(
-                HttpUtil.getBearer(ENTITLEMENTS_URL, minecraftAccessToken),
+                http.getBearer(ENTITLEMENTS_URL, minecraftAccessToken),
                 "Minecraft entitlement check");
         JsonArray items = json.has("items") && json.get("items").isJsonArray()
                 ? json.getAsJsonArray("items") : null;
@@ -42,7 +51,7 @@ final class MinecraftServicesClient {
     }
 
     Profile loadProfile(String minecraftAccessToken) throws IOException {
-        HttpUtil.Response response = HttpUtil.getBearer(PROFILE_URL, minecraftAccessToken);
+        HttpUtil.Response response = http.getBearer(PROFILE_URL, minecraftAccessToken);
         JsonObject json = parseJson(response.body(), "Minecraft profile");
         if (!response.isSuccess()) {
             if (response.statusCode() == 404) {

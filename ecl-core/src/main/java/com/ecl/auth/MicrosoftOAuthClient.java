@@ -23,6 +23,15 @@ final class MicrosoftOAuthClient {
     private static final String DEVICE_CODE_URL =
             "https://login.live.com/oauth20_connect.srf?mkt=zh-CN";
     private static final String TOKEN_URL = "https://login.live.com/oauth20_token.srf";
+    private final AuthHttpTransport http;
+
+    MicrosoftOAuthClient() {
+        this(AuthHttpTransport.system());
+    }
+
+    MicrosoftOAuthClient(AuthHttpTransport http) {
+        this.http = java.util.Objects.requireNonNull(http, "http");
+    }
 
     Token refresh(String refreshToken) throws IOException {
         Map<String, String> form = new LinkedHashMap<>();
@@ -30,7 +39,7 @@ final class MicrosoftOAuthClient {
         form.put("refresh_token", refreshToken);
         form.put("grant_type", "refresh_token");
         form.put("scope", MSA_SCOPE);
-        JsonObject json = requireSuccess(HttpUtil.postForm(TOKEN_URL, form), "Microsoft refresh token");
+        JsonObject json = requireSuccess(http.postForm(TOKEN_URL, form), "Microsoft refresh token");
         return parseToken(json, refreshToken);
     }
 
@@ -42,7 +51,7 @@ final class MicrosoftOAuthClient {
         form.put("scope", MSA_SCOPE);
         form.put("response_type", "device_code");
 
-        JsonObject json = requireSuccess(HttpUtil.postForm(DEVICE_CODE_URL, form),
+        JsonObject json = requireSuccess(http.postForm(DEVICE_CODE_URL, form),
                 "Microsoft device code");
         listener.ensureActive();
         String deviceCode = requireString(json, "device_code", "Microsoft device code");
@@ -72,7 +81,7 @@ final class MicrosoftOAuthClient {
             pollForm.put("client_id", CLIENT_ID);
             pollForm.put("device_code", deviceCode);
 
-            HttpUtil.Response response = HttpUtil.postForm(TOKEN_URL, pollForm);
+            HttpUtil.Response response = http.postForm(TOKEN_URL, pollForm);
             listener.ensureActive();
             JsonObject tokenJson = parseJson(response.body(), "Microsoft token");
             if (response.isSuccess() && tokenJson.has("access_token")) {

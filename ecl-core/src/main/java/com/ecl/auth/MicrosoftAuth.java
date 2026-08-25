@@ -11,9 +11,9 @@ import org.slf4j.LoggerFactory;
  */
 public class MicrosoftAuth implements AuthProvider {
     private static final Logger LOGGER = LoggerFactory.getLogger(MicrosoftAuth.class);
-    private final MinecraftServicesClient minecraftServicesClient = new MinecraftServicesClient();
-    private final XboxLiveAuthClient xboxLiveAuthClient = new XboxLiveAuthClient();
-    private final MicrosoftOAuthClient oauthClient = new MicrosoftOAuthClient();
+    private final MinecraftServicesClient minecraftServicesClient;
+    private final XboxLiveAuthClient xboxLiveAuthClient;
+    private final MicrosoftOAuthClient oauthClient;
 
     private final MicrosoftSessionState sessionState;
     private final LoginListener listener;
@@ -36,9 +36,22 @@ public class MicrosoftAuth implements AuthProvider {
     }
 
     public MicrosoftAuth(CachedSession cachedSession, LoginListener listener) {
+        this(cachedSession, listener, new MinecraftServicesClient(),
+                new XboxLiveAuthClient(), new MicrosoftOAuthClient());
+    }
+
+    MicrosoftAuth(CachedSession cachedSession, LoginListener listener,
+                  MinecraftServicesClient minecraftServicesClient,
+                  XboxLiveAuthClient xboxLiveAuthClient,
+                  MicrosoftOAuthClient oauthClient) {
         CachedSession cached = cachedSession == null ? CachedSession.empty() : cachedSession;
         this.sessionState = new MicrosoftSessionState(cached);
         this.listener = listener;
+        this.minecraftServicesClient = java.util.Objects.requireNonNull(
+                minecraftServicesClient, "minecraftServicesClient");
+        this.xboxLiveAuthClient = java.util.Objects.requireNonNull(
+                xboxLiveAuthClient, "xboxLiveAuthClient");
+        this.oauthClient = java.util.Objects.requireNonNull(oauthClient, "oauthClient");
     }
 
     @Override

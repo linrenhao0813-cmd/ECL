@@ -205,6 +205,20 @@ class SettingsManagerTest {
     }
 
     @Test
+    void removeEncryptedByPrefixClearsAllMatchingSecretsOnly() {
+        manager.setEncrypted("yggdrasilPassword", "legacy");
+        manager.setEncrypted("yggdrasilPassword.account-a", "secret-a");
+        manager.setEncrypted("microsoftRefreshToken", "refresh");
+
+        assertTrue(manager.removeEncryptedByPrefix("yggdrasilPassword"));
+
+        assertNull(manager.getEncrypted("yggdrasilPassword"));
+        assertNull(manager.getEncrypted("yggdrasilPassword.account-a"));
+        assertEquals("refresh", manager.getEncrypted("microsoftRefreshToken"));
+        assertFalse(manager.removeEncryptedByPrefix("yggdrasilPassword"));
+    }
+
+    @Test
     void getEncryptedReturnsNullForMissingKey() {
         assertNull(manager.getEncrypted("nonExistent"));
     }
