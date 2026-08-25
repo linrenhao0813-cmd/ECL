@@ -327,8 +327,8 @@ public class SettingsManager {
      * Migrate a plaintext value to encrypted storage and remove the plaintext key.
      * Used for one-time migration of existing stored tokens.
      */
-    public synchronized void migrateToEncrypted(String key) {
-        SettingsMigration.migrateToEncrypted(this, key);
+    public synchronized boolean migrateToEncrypted(String key) {
+        return SettingsMigration.migrateToEncrypted(this, key);
     }
 
     /**

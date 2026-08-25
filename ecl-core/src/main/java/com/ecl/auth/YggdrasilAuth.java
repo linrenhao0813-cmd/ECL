@@ -2,6 +2,7 @@ package com.ecl.auth;
 
 import com.ecl.exception.AuthException;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.NetworkUriPolicy;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -63,9 +64,7 @@ public class YggdrasilAuth implements AuthProvider {
     }
 
     private static boolean isLoopbackHost(String host) {
-        String normalized = host.toLowerCase(Locale.ROOT);
-        return "localhost".equals(normalized) || "::1".equals(normalized)
-                || normalized.startsWith("127.");
+        return NetworkUriPolicy.isLoopbackHostLiteral(host);
     }
 
     public YggdrasilAuth(String authServer, String username, String uuid,

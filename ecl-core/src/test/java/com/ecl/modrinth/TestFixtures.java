@@ -36,7 +36,8 @@ public final class TestFixtures {
 
     public static ModFile file(String name, boolean primary) {
         return new ModFile(URI.create("https://example.invalid/" + name), name,
-                Map.of("sha1", "01", "sha512", "02"), primary, 128, "required-resource");
+                Map.of("sha1", "0".repeat(40), "sha512", "0".repeat(128)),
+                primary, 128, "required-resource");
     }
 
     public static ModVersion version(String id, String projectId, String type, boolean featured,

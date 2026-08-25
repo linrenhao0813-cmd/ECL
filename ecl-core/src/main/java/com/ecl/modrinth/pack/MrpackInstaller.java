@@ -64,7 +64,7 @@ public final class MrpackInstaller {
                         new ModLoaderInstaller(versions, libraries).install(
                                 minecraft, loader, version, listener),
                 PackUpdateTransaction::new,
-                java.util.Set.of("cdn.modrinth.com"));
+                MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS);
     }
 
     public MrpackInstaller(java.util.Set<String> trustedDownloadHosts) {
@@ -82,21 +82,22 @@ public final class MrpackInstaller {
                         new ModLoaderInstaller(versions, libraries).install(
                                 minecraft, loader, version, listener),
                 PackUpdateTransaction::new,
-                java.util.Set.of("cdn.modrinth.com"));
+                MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS);
     }
 
     MrpackInstaller(LoaderInstallation loaderInstallation, TransactionFactory transactionFactory) {
         this(loaderInstallation,
                 (versions, libraries, minecraft, loader, version, listener) ->
                         loaderInstallation.install(minecraft, loader, version, listener),
-                transactionFactory, java.util.Set.of("cdn.modrinth.com"));
+                transactionFactory, MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS);
     }
 
     MrpackInstaller(StagedLoaderInstallation stagedLoaderInstallation,
                     TransactionFactory transactionFactory) {
         this((minecraft, loader, version, listener) ->
                         new ModLoaderInstaller().install(minecraft, loader, version, listener),
-                stagedLoaderInstallation, transactionFactory, java.util.Set.of("cdn.modrinth.com"));
+                stagedLoaderInstallation, transactionFactory,
+                MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS);
     }
 
     private MrpackInstaller(LoaderInstallation loaderInstallation,

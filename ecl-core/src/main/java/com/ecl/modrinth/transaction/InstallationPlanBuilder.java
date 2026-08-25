@@ -1,6 +1,7 @@
 package com.ecl.modrinth.transaction;
 
 import com.ecl.modrinth.instance.ModInstanceContext;
+import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.service.DependencyResolutionResult;
 import com.ecl.modrinth.service.ResolvedMod;
@@ -34,13 +35,17 @@ public final class InstallationPlanBuilder {
             if (!targets.add(target)) {
                 throw new IllegalArgumentException("多个模组将写入同一文件名: " + safeName);
             }
+            if (!hasExpectedHash(resolved.file())) {
+                throw new IllegalArgumentException(
+                        "文件 " + safeName + " 缺少 SHA-512 或 SHA-1，拒绝安装不可验证的模组");
+            }
+            if (resolved.file().size() <= 0) {
+                throw new IllegalArgumentException(
+                        "文件 " + safeName + " 缺少有效大小，拒绝无边界下载");
+            }
             files.add(new PlannedModFile(
                     resolved.version(), resolved.file(), target, null,
                     resolved.dependency(), resolved.requiredByProjectId()));
-            if (!hasExpectedHash(resolved.file())) {
-                warnings.add("文件 " + safeName
-                        + " 未提供 SHA-1 或 SHA-512，安装前无法验证下载完整性");
-            }
             totalSize = Math.addExact(totalSize, Math.max(0, resolved.file().size()));
         }
         return new ModInstallationPlan(
@@ -56,7 +61,7 @@ public final class InstallationPlanBuilder {
     }
 
     private static boolean hasExpectedHash(com.ecl.modrinth.model.ModFile file) {
-        return file != null && ((!file.sha1().isBlank()) || (!file.sha512().isBlank()));
+        return file != null && HashVerifier.hasUsableExpectedHash(file.hashes());
     }
 
     private static String safeFileName(String value) {

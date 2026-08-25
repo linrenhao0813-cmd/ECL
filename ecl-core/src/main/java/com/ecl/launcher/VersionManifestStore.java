@@ -16,7 +16,9 @@ final class VersionManifestStore {
     JsonObject refresh() throws IOException {
         File cache = cacheFile();
         try {
-            JsonObject manifest = HttpUtil.getJsonWithMirrors(ECLConfig.MC_VERSION_MANIFEST_URL, null);
+            // Version metadata is an execution trust root. Never accept mirror-authored JSON;
+            // mirrors remain available later for hash-bound binary artifacts.
+            JsonObject manifest = HttpUtil.getJson(ECLConfig.MC_VERSION_MANIFEST_URL);
             HttpUtil.writeJson(cache, manifest);
             return manifest;
         } catch (IOException networkError) {

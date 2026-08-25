@@ -107,6 +107,7 @@ public final class MainController implements AutoCloseable {
         this.instanceOperations = java.util.Objects.requireNonNull(
                 instanceOperations, "instanceOperations");
         this.settingsManager.load();
+        migrateLegacySecrets();
         settingsManager.enableAutoSave(); // GUI 设置变更自动落盘（防抖 500ms）
         versionManager = new VersionManager();
         versionRepository = new VersionRepository(ECLConfig.getVersionsDir());
@@ -243,6 +244,15 @@ public final class MainController implements AutoCloseable {
         if (!property.isBlank()) return property;
         String environment = System.getenv("CURSEFORGE_API_KEY");
         return environment == null ? "" : environment;
+    }
+
+    private void migrateLegacySecrets() {
+        boolean migrated = settingsManager.migrateToEncrypted("microsoftRefreshToken");
+        migrated |= settingsManager.migrateToEncrypted("microsoftAccessToken");
+        migrated |= settingsManager.migrateToEncrypted(ECLConfig.KEY_CURSEFORGE_API_KEY.key());
+        if (migrated) {
+            settingsManager.save();
+        }
     }
 
     public void registerModInstance(ModInstanceContext instance) {

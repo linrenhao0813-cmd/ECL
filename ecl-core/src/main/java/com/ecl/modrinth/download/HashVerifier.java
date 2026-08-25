@@ -35,11 +35,40 @@ public final class HashVerifier {
     }
 
     public HashResult verify(Path file, Map<String, String> expectedHashes) throws IOException {
-        HashResult actual = calculate(file);
         Map<String, String> expected = expectedHashes == null ? Map.of() : expectedHashes;
-        verifyOne(file, "SHA-512", expected.get("sha512"), actual.sha512());
-        verifyOne(file, "SHA-1", expected.get("sha1"), actual.sha1());
+        String expectedSha512 = normalizedExpected(expected.get("sha512"), 128, "SHA-512", file);
+        String expectedSha1 = normalizedExpected(expected.get("sha1"), 40, "SHA-1", file);
+        if (expectedSha512 == null && expectedSha1 == null) {
+            throw new HashMismatchException(
+                    "Downloaded file is missing a required SHA-512 or SHA-1 digest",
+                    file, "SHA-512/SHA-1", "required", "missing");
+        }
+        HashResult actual = calculate(file);
+        verifyOne(file, "SHA-512", expectedSha512, actual.sha512());
+        verifyOne(file, "SHA-1", expectedSha1, actual.sha1());
         return actual;
+    }
+
+    public static boolean hasUsableExpectedHash(Map<String, String> expectedHashes) {
+        Map<String, String> expected = expectedHashes == null ? Map.of() : expectedHashes;
+        return matchesHex(expected.get("sha512"), 128) || matchesHex(expected.get("sha1"), 40);
+    }
+
+    private static String normalizedExpected(
+            String value, int length, String algorithm, Path file) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if (!matchesHex(normalized, length)) {
+            throw new HashMismatchException("Invalid expected " + algorithm + " digest",
+                    file, algorithm, normalized, "invalid metadata");
+        }
+        return normalized;
+    }
+
+    private static boolean matchesHex(String value, int length) {
+        return value != null && value.trim().matches("(?i)[0-9a-f]{" + length + "}");
     }
 
     private static void verifyOne(Path file, String algorithm, String expected, String actual) {

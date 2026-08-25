@@ -4,9 +4,11 @@ import com.ecl.curseforge.CurseForgeApiClient;
 import com.ecl.curseforge.CurseForgeApiClient.ApiDependency;
 import com.ecl.curseforge.CurseForgeApiClient.ApiFile;
 import com.ecl.curseforge.CurseForgeApiClient.ApiProject;
+import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
+import com.ecl.util.NetworkUriPolicy;
 import com.ecl.util.TextUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -34,6 +36,7 @@ import java.util.zip.ZipOutputStream;
 public final class CurseForgeDownloader implements ContentDownloader {
     private static final int MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
     private static final long MAX_OVERRIDE_BYTES = 4L * 1024 * 1024 * 1024;
+    private static final long MAX_CONTENT_FILE_BYTES = 2L * 1024 * 1024 * 1024;
     private final CurseForgeApiClient api;
 
     public CurseForgeDownloader(Supplier<String> apiKeySupplier) {
@@ -153,22 +156,41 @@ public final class CurseForgeDownloader implements ContentDownloader {
         }
         File target = new File(targetDir, fileName);
         String sha1 = file.hashes().getOrDefault("sha1", "");
+        if (!HashVerifier.hasUsableExpectedHash(file.hashes())) {
+            throw new IOException("CurseForge 文件缺少 SHA-1 校验值: " + fileName);
+        }
+        if (file.size() <= 0 || file.size() > MAX_CONTENT_FILE_BYTES) {
+            throw new IOException("CurseForge 文件大小声明无效: " + fileName);
+        }
         if (target.isFile() && (!sha1.isBlank() && FileUtil.verifySha1(target, sha1))) {
             notifyStatus(listener, "文件已存在，跳过下载: " + fileName);
             return target;
         }
         notifyStatus(listener, (primary ? "正在下载: " : "正在下载依赖: ") + fileName);
-        HttpUtil.downloadFileWithProgress(api.getDownloadUrl(file), target,
+        java.net.URI downloadUri;
+        try {
+            downloadUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                    java.net.URI.create(api.getDownloadUrl(file)), "CurseForge 下载地址");
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("CurseForge 下载地址无效: " + fileName, invalid);
+        }
+        HttpUtil.downloadFileWithProgress(downloadUri.toString(), target,
                 new HttpUtil.ProgressCallback() {
                     @Override public void onStart(long total) { notifyProgress(listener, 0, total); }
                     @Override public void onProgress(long downloaded, long total) {
                         notifyProgress(listener, downloaded, total);
                     }
                     @Override public void onComplete(File value) { notifyProgress(listener, 1, 1); }
-                });
-        if (!sha1.isBlank() && !FileUtil.verifySha1(target, sha1)) {
+                }, null, file.size());
+        if (target.length() != file.size()) {
             Files.deleteIfExists(target.toPath());
-            throw new IOException("CurseForge 文件校验失败: " + fileName);
+            throw new IOException("CurseForge 文件大小校验失败: " + fileName);
+        }
+        try {
+            new HashVerifier().verify(target.toPath(), file.hashes());
+        } catch (RuntimeException invalid) {
+            Files.deleteIfExists(target.toPath());
+            throw new IOException("CurseForge 文件校验失败: " + fileName, invalid);
         }
         return target;
     }

@@ -9,6 +9,7 @@ import com.google.gson.JsonObject;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -21,6 +22,7 @@ public final class DownloadAssetsTask extends Task<Void> {
 
     private static final String RESOURCES_HOST = "https://resources.download.minecraft.net/";
     private static final Pattern SHA1_PATTERN = Pattern.compile("[0-9a-fA-F]{40}");
+    private static final long MAX_ASSET_BYTES = 4L * 1024 * 1024 * 1024;
 
     private final InstallState state;
     private final java.util.concurrent.ExecutorService fileExecutor;
@@ -51,10 +53,18 @@ public final class DownloadAssetsTask extends Task<Void> {
         File assetDir = new File(ECLConfig.getAssetsDir(), "objects");
         File indexFile = FileUtil.safeResolveUnder(
                 ECLConfig.getAssetsDir(), "indexes/" + assetId + ".json");
-        String indexSha1 = assetIndex.has("sha1") ? assetIndex.get("sha1").getAsString() : null;
+        String indexSha1 = InstallHelpers.requireSha1(
+                assetIndex.has("sha1") ? assetIndex.get("sha1").getAsString() : null,
+                "asset index " + assetId);
+        long indexSize = requireSize(assetIndex, "asset index " + assetId);
         if (InstallHelpers.needsDownload(indexFile, indexSha1, verifyExistingFiles)) {
             indexFile.getParentFile().mkdirs();
-            HttpUtil.downloadFile(assetUrl, indexFile, InstallHelpers.sourceCallback("资源索引", state));
+            HttpUtil.downloadFileWithProgress(assetUrl, indexFile, null,
+                    InstallHelpers.sourceCallback("资源索引", state), indexSize);
+            if (indexFile.length() != indexSize) {
+                Files.deleteIfExists(indexFile.toPath());
+                throw new IOException("Asset index size does not match metadata: " + assetId);
+            }
             InstallHelpers.verifyDownloadedFile(indexFile, indexSha1);
         }
 
@@ -63,10 +73,12 @@ public final class DownloadAssetsTask extends Task<Void> {
         for (String name : objects.keySet()) {
             JsonObject object = objects.getAsJsonObject(name);
             String hash = requireSha1(JsonUtil.getString(object, "hash", ""), name);
+            long size = requireSize(object, "asset object " + name);
             String subPath = hash.substring(0, 2) + "/" + hash;
             File target = FileUtil.safeResolveUnder(assetDir, subPath);
             if (InstallHelpers.needsDownload(target, hash, verifyExistingFiles)) {
-                tasks.add(new InstallHelpers.FileDownload(RESOURCES_HOST + subPath, target, hash, "资源文件"));
+                tasks.add(new InstallHelpers.FileDownload(
+                        RESOURCES_HOST + subPath, target, hash, size, "资源文件"));
             }
         }
 
@@ -85,5 +97,13 @@ public final class DownloadAssetsTask extends Task<Void> {
             throw new IOException("资源索引包含无效 SHA-1: " + assetName);
         }
         return hash;
+    }
+
+    private static long requireSize(JsonObject object, String label) throws IOException {
+        long value = JsonUtil.getLong(object, "size", -1L);
+        if (value <= 0 || value > MAX_ASSET_BYTES) {
+            throw new IOException(label + " is missing a valid size");
+        }
+        return value;
     }
 }

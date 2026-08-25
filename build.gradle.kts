@@ -1,5 +1,6 @@
 import com.github.spotbugs.snom.Confidence
 import com.github.spotbugs.snom.SpotBugsTask
+import org.gradle.testing.jacoco.tasks.JacocoCoverageVerification
 
 plugins {
     base
@@ -12,6 +13,10 @@ allprojects {
 }
 
 subprojects {
+    dependencyLocking {
+        lockAllConfigurations()
+    }
+
     pluginManager.withPlugin("java") {
         apply(plugin = "checkstyle")
         apply(plugin = "jacoco")
@@ -40,6 +45,30 @@ subprojects {
             reports {
                 xml.required.set(true)
                 html.required.set(true)
+            }
+        }
+
+        if (project.name == "ecl-core" || project.name == "ecl-gui") {
+            val lineMinimum = if (project.name == "ecl-gui") 0.06 else 0.60
+            val branchMinimum = if (project.name == "ecl-gui") 0.10 else 0.40
+            tasks.withType<JacocoCoverageVerification>().configureEach {
+                violationRules {
+                    rule {
+                        limit {
+                            counter = "LINE"
+                            value = "COVEREDRATIO"
+                            minimum = lineMinimum.toBigDecimal()
+                        }
+                        limit {
+                            counter = "BRANCH"
+                            value = "COVEREDRATIO"
+                            minimum = branchMinimum.toBigDecimal()
+                        }
+                    }
+                }
+            }
+            tasks.named("check") {
+                dependsOn(tasks.named("jacocoTestCoverageVerification"))
             }
         }
 

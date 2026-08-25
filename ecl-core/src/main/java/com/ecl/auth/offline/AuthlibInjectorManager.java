@@ -2,10 +2,12 @@ package com.ecl.auth.offline;
 
 import com.ecl.ECLConfig;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.NetworkUriPolicy;
 import com.google.gson.JsonObject;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -13,9 +15,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.jar.JarFile;
@@ -32,6 +36,8 @@ public final class AuthlibInjectorManager {
     private static final String LATEST_JSON_URL = "https://authlib-injector.yushi.moe/artifact/latest.json";
     private static final String BMCLAPI_MIRROR_URL =
             "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/latest.json";
+    private static final Set<String> MIRROR_DOWNLOAD_HOSTS =
+            Set.of("bmclapi2.bangbang93.com");
 
     private final Path jarFile;
     private final Path checksumFile;
@@ -98,19 +104,29 @@ public final class AuthlibInjectorManager {
 
     private String downloadTo(Path target, Consumer<String> status,
                               BiConsumer<Long, Long> progress) throws IOException {
+        JsonObject officialMetadata = HttpUtil.getJson(LATEST_JSON_URL);
+        String checksum = checksum(officialMetadata);
+        if (checksum == null) {
+            throw new IOException("authlib-injector official metadata has no valid SHA-256 checksum");
+        }
+        List<String> downloadUrls = new ArrayList<>();
+        downloadUrls.add(requireOfficialDownloadUrl(officialMetadata));
+        try {
+            JsonObject mirrorMetadata = HttpUtil.getJson(BMCLAPI_MIRROR_URL);
+            String mirrorUrl = downloadUrl(mirrorMetadata);
+            if (mirrorUrl != null) {
+                downloadUrls.add(NetworkUriPolicy.requireAllowedDownload(
+                        URI.create(mirrorUrl), MIRROR_DOWNLOAD_HOSTS,
+                        "authlib-injector mirror download URL").toString());
+            }
+        } catch (IOException | IllegalArgumentException ignored) {
+            // The mirror is optional. Its URL is useful only when the official checksum above
+            // remains the independent integrity authority.
+        }
+
         IOException lastFailure = null;
-        for (String latestJsonUrl : List.of(LATEST_JSON_URL, BMCLAPI_MIRROR_URL)) {
+        for (String url : downloadUrls.stream().distinct().toList()) {
             try {
-                JsonObject meta = HttpUtil.getJson(latestJsonUrl);
-                String url = meta == null || !meta.has("download_url") ? null
-                        : meta.get("download_url").getAsString();
-                String checksum = checksum(meta);
-                if (url == null || url.isBlank()) {
-                    throw new IOException("authlib-injector metadata has no download URL");
-                }
-                if (checksum == null) {
-                    throw new IOException("authlib-injector metadata has no valid SHA-256 checksum");
-                }
                 status.accept("正在下载离线皮肤支持组件...");
                 HttpUtil.downloadFileWithProgress(url, target.toFile(), new HttpUtil.ProgressCallback() {
                     @Override
@@ -138,6 +154,32 @@ public final class AuthlibInjectorManager {
             }
         }
         throw new IOException("无法下载 authlib-injector（离线皮肤服务需要此组件），请检查网络后重试", lastFailure);
+    }
+
+    private static String requireOfficialDownloadUrl(JsonObject metadata) throws IOException {
+        String value = downloadUrl(metadata);
+        if (value == null) {
+            throw new IOException("authlib-injector official metadata has no download URL");
+        }
+        try {
+            return NetworkUriPolicy.requireHttps(
+                    URI.create(value), "authlib-injector official download URL").toString();
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("authlib-injector official download URL is invalid", invalid);
+        }
+    }
+
+    private static String downloadUrl(JsonObject metadata) {
+        if (metadata == null || !metadata.has("download_url")
+                || metadata.get("download_url").isJsonNull()) {
+            return null;
+        }
+        try {
+            String value = metadata.get("download_url").getAsString().trim();
+            return value.isBlank() ? null : value;
+        } catch (RuntimeException invalid) {
+            return null;
+        }
     }
 
     private void writeChecksum(String checksum) throws IOException {

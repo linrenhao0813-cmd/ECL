@@ -3,6 +3,7 @@ package com.ecl.modrinth.ui;
 import com.ecl.ECLConfig;
 import com.ecl.util.BoundedCache;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.NetworkUriPolicy;
 import com.ecl.util.ThreadFactories;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
@@ -27,6 +28,8 @@ import java.util.Collection;
 import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -39,6 +42,7 @@ public final class RemoteImageLoader {
     private static final long MAX_SOURCE_PIXELS = 16_000_000L;
     private static final int MAX_MEMORY_CACHE_ENTRIES = 256;
     private static final int MAX_DISK_CACHE_ENTRIES = 512;
+    private static final Set<String> MODRINTH_ICON_HOSTS = Set.of("cdn.modrinth.com");
     private static final ExecutorService EXECUTOR =
             Executors.newFixedThreadPool(8, ThreadFactories.daemon("ecl-remote-image"));
     private static final BoundedCache<String, CompletableFuture<Image>> CACHE =
@@ -50,7 +54,7 @@ public final class RemoteImageLoader {
     }
 
     public static CompletableFuture<Image> load(URI uri) {
-        if (uri == null) {
+        if (!isTrustedIconUri(uri)) {
             return CompletableFuture.completedFuture(MISSING);
         }
         String key = uri.toString();
@@ -175,6 +179,18 @@ public final class RemoteImageLoader {
         return width > 0 && height > 0
                 && width <= MAX_SOURCE_DIMENSION && height <= MAX_SOURCE_DIMENSION
                 && (long) width * height <= MAX_SOURCE_PIXELS;
+    }
+
+    /** Only provider-owned HTTPS CDNs may be fetched automatically by list-cell rendering. */
+    public static boolean isTrustedIconUri(URI uri) {
+        try {
+            URI checked = NetworkUriPolicy.requireHttps(uri, "project icon URL");
+            String host = checked.getHost().toLowerCase(Locale.ROOT);
+            return MODRINTH_ICON_HOSTS.contains(host)
+                    || host.equals("forgecdn.net") || host.endsWith(".forgecdn.net");
+        } catch (Exception invalid) {
+            return false;
+        }
     }
 
     private static boolean isDecodedSizeAllowed(int width, int height) {

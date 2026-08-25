@@ -15,11 +15,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class InstallationPlanBuilderTest {
     @Test
-    void warnsWhenModrinthFileHasNoVerificationHash(@TempDir Path tempDir) {
+    void rejectsWhenModrinthFileHasNoVerificationHash(@TempDir Path tempDir) {
         ModFile file = new ModFile(
                 URI.create("https://example.invalid/no-hash.jar"),
                 "no-hash.jar", Map.of(), true, 42, "required-resource");
@@ -32,19 +32,15 @@ class InstallationPlanBuilderTest {
                 List.of(new ResolvedMod(version, file, false, "", List.of("no-hash-project"))),
                 List.of(), List.of(), List.of());
 
-        ModInstallationPlan plan = new InstallationPlanBuilder()
-                .build(TestFixtures.instance(tempDir), version, resolution);
-
-        assertTrue(plan.warnings().stream().anyMatch(warning ->
-                warning.contains("no-hash.jar") && warning.contains("SHA-1")));
-        assertTrue(plan.requiresConfirmation());
+        assertThrows(IllegalArgumentException.class, () -> new InstallationPlanBuilder()
+                .build(TestFixtures.instance(tempDir), version, resolution));
     }
 
     @Test
     void doesNotWarnWhenAtLeastOneSupportedHashExists(@TempDir Path tempDir) {
         ModFile file = new ModFile(
                 URI.create("https://example.invalid/verified.jar"),
-                "verified.jar", Map.of("sha512", "abc"), true, 42, "required-resource");
+                "verified.jar", Map.of("sha512", "0".repeat(128)), true, 42, "required-resource");
         ModVersion version = TestFixtures.version(
                 "verified-version", "verified-project", "release", false,
                 List.of("1.21.1"), List.of("fabric"),

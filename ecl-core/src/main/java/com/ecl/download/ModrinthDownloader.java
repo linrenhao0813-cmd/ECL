@@ -4,6 +4,7 @@ import com.ecl.modrinth.api.DefaultModrinthApiClient;
 import com.ecl.modrinth.api.ModSearchIndex;
 import com.ecl.modrinth.api.ModSearchQuery;
 import com.ecl.modrinth.api.ModrinthApiClient;
+import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.model.DependencyType;
 import com.ecl.modrinth.model.ModDependency;
 import com.ecl.modrinth.model.ModFile;
@@ -11,10 +12,12 @@ import com.ecl.modrinth.model.ModProject;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.NetworkUriPolicy;
 import com.ecl.util.TextUtil;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -34,6 +37,7 @@ import java.util.concurrent.CompletionException;
  */
 public class ModrinthDownloader implements ContentDownloader {
     private static final int MAX_DEPENDENCY_DEPTH = 32;
+    private static final long MAX_CONTENT_FILE_BYTES = 2L * 1024 * 1024 * 1024;
     private final ModrinthApiClient apiClient;
 
     public interface DownloadListener {
@@ -266,15 +270,22 @@ public class ModrinthDownloader implements ContentDownloader {
             if (file.url() == null || filename == null || filename.isBlank()) {
                 throw new IOException("Modrinth 文件信息不完整，无法创建本地文件");
             }
+            if (!HashVerifier.hasUsableExpectedHash(file.hashes())) {
+                throw new IOException("Modrinth 文件缺少 SHA-512 或 SHA-1: " + filename);
+            }
+            if (file.size() <= 0 || file.size() > MAX_CONTENT_FILE_BYTES) {
+                throw new IOException("Modrinth 文件大小声明无效: " + filename);
+            }
+            java.net.URI downloadUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                    file.url(), "Modrinth 下载地址");
 
             File target = new File(targetDir, filename);
-            String sha1 = file.sha1();
-            if (existingFileSatisfies(target, sha1)) {
+            if (existingFileSatisfies(target, file)) {
                 notifyStatus(listener, (primary ? "文件已存在，跳过下载: " : "依赖已存在，跳过下载: ")
                         + filename);
             } else {
                 notifyStatus(listener, (primary ? "正在下载: " : "正在下载依赖: ") + filename);
-                HttpUtil.downloadFileWithProgress(file.url().toString(), target,
+                HttpUtil.downloadFileWithProgress(downloadUri.toString(), target,
                         new HttpUtil.ProgressCallback() {
                             @Override
                             public void onStart(long total) {
@@ -290,13 +301,12 @@ public class ModrinthDownloader implements ContentDownloader {
                             public void onComplete(File downloaded) {
                                 notifyProgress(listener, 1, 1);
                             }
-                        });
-                if (!sha1.isBlank() && !FileUtil.verifySha1(target, sha1)) {
-                    if (!target.delete()) {
-                        target.deleteOnExit();
-                    }
-                    throw new IOException("文件校验失败: " + filename);
+                        }, null, file.size());
+                if (target.length() != file.size()) {
+                    Files.deleteIfExists(target.toPath());
+                    throw new IOException("文件大小校验失败: " + filename);
                 }
+                new HashVerifier().verify(target.toPath(), file.hashes());
             }
             files.add(target);
             if (includeRequiredDependencies) {
@@ -413,7 +423,21 @@ public class ModrinthDownloader implements ContentDownloader {
     }
 
     static boolean existingFileSatisfies(File target, String sha1) {
-        return target.isFile() && (sha1 == null || sha1.isBlank() || FileUtil.verifySha1(target, sha1));
+        return target.isFile() && sha1 != null && sha1.matches("(?i)[0-9a-f]{40}")
+                && FileUtil.verifySha1(target, sha1);
+    }
+
+    private static boolean existingFileSatisfies(File target, ModFile file) {
+        if (!target.isFile() || target.length() != file.size()
+                || !HashVerifier.hasUsableExpectedHash(file.hashes())) {
+            return false;
+        }
+        try {
+            new HashVerifier().verify(target.toPath(), file.hashes());
+            return true;
+        } catch (IOException | RuntimeException invalid) {
+            return false;
+        }
     }
 
     private static Project toProject(ModProject project, String projectType) {

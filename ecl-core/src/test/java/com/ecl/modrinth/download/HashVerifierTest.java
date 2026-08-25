@@ -40,6 +40,15 @@ class HashVerifierTest {
     }
 
     @Test
+    void rejectsMissingOrMalformedExpectedHashes() throws Exception {
+        Path file = Files.writeString(temp.resolve("unverified.bin"), "hello");
+
+        assertThrows(HashMismatchException.class, () -> verifier.verify(file, Map.of()));
+        assertThrows(HashMismatchException.class,
+                () -> verifier.verify(file, Map.of("sha512", "not-a-digest")));
+    }
+
+    @Test
     void handlesEmptyAndLargeFilesUsingStreamingReads() throws Exception {
         Path empty = Files.createFile(temp.resolve("empty.bin"));
         assertEquals(digest("SHA-1", new byte[0]), verifier.calculate(empty).sha1());

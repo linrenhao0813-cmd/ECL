@@ -28,6 +28,7 @@ import com.ecl.modrinth.ui.RemoteImageLoader;
 import com.ecl.server.ServerBrowserView;
 import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.Messages;
+import com.ecl.util.NetworkUriPolicy;
 import javafx.animation.Animation;
 import javafx.animation.Interpolator;
 import javafx.animation.KeyFrame;
@@ -2700,7 +2701,12 @@ public class LauncherUI extends javafx.application.Application {
     }
 
     void openExternalUrl(String url) {
-        getHostServices().showDocument(url);
+        try {
+            URI checked = NetworkUriPolicy.requireHttps(URI.create(url), "external URL");
+            getHostServices().showDocument(checked.toString());
+        } catch (IOException | IllegalArgumentException error) {
+            throw new IllegalArgumentException("拒绝打开不安全的外部地址", error);
+        }
     }
 
     void applyWindowIcon(Stage stage) {

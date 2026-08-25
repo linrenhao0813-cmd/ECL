@@ -28,16 +28,18 @@ public final class DiagnosticBundleService {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final int MAX_LOG_BYTES = 512 * 1024;
     private static final Set<String> SENSITIVE_NAMES = Set.of(
-            "token", "accesstoken", "refreshtoken", "password", "secret", "authorization");
+            "token", "accesstoken", "refreshtoken", "clienttoken", "password", "secret",
+            "authorization", "apikey", "api_key", "session", "cookie");
     private static final Pattern AUTH_HEADER = Pattern.compile(
             "(?im)^((?:proxy-)?authorization\\s*:\\s*)[^\\r\\n]+");
     private static final Pattern COOKIE_HEADER = Pattern.compile(
             "(?im)^((?:set-)?cookie\\s*:\\s*)[^\\r\\n]+");
     private static final Pattern JSON_SECRET = Pattern.compile(
-            "(?i)(\\\"(?:access.?token|refresh.?token|password|secret|authorization|session|cookie)\\\""
+            "(?i)(\\\"[^\\\"\\r\\n]*(?:access[-_]?token|refresh[-_]?token|client[-_]?token|"
+                    + "password|secret|authorization|session|cookie|api[-_]?key)[^\\\"\\r\\n]*\\\""
                     + "\\s*:\\s*)(?:\\\"(?:\\\\.|[^\\\"])*\\\"|\\[[^]\\r\\n]*]|[^,}\\r\\n]+)");
     private static final String SECRET_OPTION =
-            "--(?:access[-_]?token|refresh[-_]?token|session|password|secret)";
+            "--(?:access[-_]?token|refresh[-_]?token|client[-_]?token|api[-_]?key|session|password|secret)";
     private static final Pattern COMMAND_SECRET = Pattern.compile(
             "(?i)(" + SECRET_OPTION + "(?:\\s*=\\s*|\\s+))(?:\\\"[^\\\"]*\\\"|'[^']*'|[^\\s,}\\]]+)");
     private static final Pattern JSON_ARGUMENT_SECRET = Pattern.compile(

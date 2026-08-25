@@ -11,6 +11,7 @@ import com.ecl.modrinth.service.InstanceOperationLock;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
+import com.ecl.util.NetworkUriPolicy;
 import com.google.gson.JsonObject;
 
 import java.io.IOException;
@@ -32,6 +33,7 @@ import org.slf4j.LoggerFactory;
 /** Detects and downloads compatible Modrinth pack updates from persisted profile metadata. */
 public final class DefaultModpackUpdateService implements ModpackUpdateService {
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultModpackUpdateService.class);
+    private static final long MAX_PACK_ARCHIVE_BYTES = 2L * 1024 * 1024 * 1024;
     private final ModMetadataProvider metadataProvider;
     private final Executor executor;
     private final InstanceOperationLock operationLock;
@@ -138,7 +140,16 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
                 temporary = Files.createTempFile(ECLConfig.getBaseDir().toPath(),
                         "ecl-modpack-update-", ".mrpack");
                 ModFile file = update.selectedFile();
-                HttpUtil.downloadFileWithProgress(file.url().toString(), temporary.toFile(),
+                if (!HashVerifier.hasUsableExpectedHash(file.hashes())) {
+                    throw new IOException("Modpack update is missing SHA-512 or SHA-1");
+                }
+                if (file.size() <= 0 || file.size() > MAX_PACK_ARCHIVE_BYTES) {
+                    throw new IOException("Modpack update has an invalid declared size");
+                }
+                java.net.URI downloadUri = NetworkUriPolicy.requireAllowedDownload(
+                        file.url(), MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS,
+                        "Modpack update URL");
+                HttpUtil.downloadFileWithProgress(downloadUri.toString(), temporary.toFile(),
                         new HttpUtil.ProgressCallback() {
                             @Override
                             public void onStart(long total) {
@@ -154,7 +165,10 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
                             public void onComplete(java.io.File ignored) {
                                 if (listener != null) listener.onProgress(1, 1);
                             }
-                        });
+                        }, null, file.size());
+                if (Files.size(temporary) != file.size()) {
+                    throw new IOException("Modpack update size does not match metadata");
+                }
                 hashVerifier.verify(temporary, file.hashes());
                 if (instanceRunning.test(instanceId)) {
                     throw new IOException("Instance started while its modpack update was downloading");

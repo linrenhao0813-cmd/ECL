@@ -112,6 +112,18 @@ class HttpUtilTest {
     }
 
     @Test
+    void asynchronousRequestsRejectOversizedResponseBodies() {
+        server.createContext("/large-async-json", exchange -> respond(exchange, 200, "0123456789"));
+
+        var request = HttpRequestExecutor.requestAsync(
+                "GET", baseUrl + "/large-async-json", null, null, Map.of(),
+                Duration.ofSeconds(5), 5);
+
+        var error = assertThrows(java.util.concurrent.CompletionException.class, request::join);
+        assertTrue(error.getCause().getMessage().contains("exceeds"));
+    }
+
+    @Test
     void binaryRequestsPreserveBytesAndEnforceTheMemoryLimit() throws IOException {
         byte[] body = new byte[]{0, 1, 2, 3, (byte) 255};
         server.createContext("/icon", exchange -> {
@@ -125,6 +137,40 @@ class HttpUtilTest {
         IOException tooLarge = assertThrows(IOException.class,
                 () -> HttpUtil.getBytes(baseUrl + "/icon", body.length - 1));
         assertTrue(tooLarge.getMessage().contains("exceeds"));
+    }
+
+    @Test
+    void binaryRequestsDoNotFollowRedirects() {
+        server.createContext("/icon-redirect", exchange -> {
+            exchange.getResponseHeaders().add("Location", baseUrl + "/icon-target");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/icon-target", exchange -> respond(exchange, 200, "unexpected"));
+
+        IOException error = assertThrows(IOException.class,
+                () -> HttpUtil.getBytes(baseUrl + "/icon-redirect", 100));
+        assertTrue(error.getMessage().contains("HTTP 302"));
+    }
+
+    @Test
+    void downloadsFollowOnlySafeRedirects() throws IOException {
+        byte[] body = "redirected".getBytes(StandardCharsets.UTF_8);
+        server.createContext("/download-redirect", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/download-target");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/download-target", exchange -> respond(exchange, 200,
+                new String(body, StandardCharsets.UTF_8)));
+
+        File target = java.nio.file.Files.createTempFile("ecl-redirect-", ".bin").toFile();
+        try {
+            HttpUtil.downloadFile(baseUrl + "/download-redirect", target);
+            assertArrayEquals(body, Files.readAllBytes(target.toPath()));
+        } finally {
+            Files.deleteIfExists(target.toPath());
+        }
     }
 
     @Test

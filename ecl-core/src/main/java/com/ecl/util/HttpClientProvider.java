@@ -14,7 +14,10 @@ final class HttpClientProvider {
     static final int DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
     static final int DEFAULT_READ_TIMEOUT_MS = 30_000;
 
-    private static final HttpClient DEFAULT_CLIENT = create(DEFAULT_CONNECT_TIMEOUT_MS);
+    private static final HttpClient DEFAULT_CLIENT = create(
+            DEFAULT_CONNECT_TIMEOUT_MS, HttpClient.Redirect.NEVER);
+    private static final HttpClient DOWNLOAD_CLIENT = create(
+            DEFAULT_CONNECT_TIMEOUT_MS, HttpClient.Redirect.NORMAL);
     private static final ConcurrentMap<Integer, HttpClient> CLIENTS = new ConcurrentHashMap<>();
 
     private HttpClientProvider() {
@@ -24,6 +27,11 @@ final class HttpClientProvider {
         return DEFAULT_CLIENT;
     }
 
+    /** Redirect-capable client for credential-free, integrity-checked file downloads only. */
+    static HttpClient downloadClient() {
+        return DOWNLOAD_CLIENT;
+    }
+
     static HttpClient forConnectTimeout(int connectTimeoutMs) {
         if (connectTimeoutMs <= 0) {
             throw new IllegalArgumentException("connectTimeout must be positive");
@@ -31,7 +39,8 @@ final class HttpClientProvider {
         if (connectTimeoutMs == DEFAULT_CONNECT_TIMEOUT_MS) {
             return DEFAULT_CLIENT;
         }
-        return CLIENTS.computeIfAbsent(connectTimeoutMs, HttpClientProvider::create);
+        return CLIENTS.computeIfAbsent(connectTimeoutMs,
+                timeout -> create(timeout, HttpClient.Redirect.NEVER));
     }
 
     static Optional<ProxySelector> proxySelectorFor(String httpsProxy, String httpProxy,
@@ -55,9 +64,9 @@ final class HttpClientProvider {
         return Optional.empty();
     }
 
-    private static HttpClient create(int connectTimeoutMs) {
+    private static HttpClient create(int connectTimeoutMs, HttpClient.Redirect redirectPolicy) {
         HttpClient.Builder builder = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL)
+                .followRedirects(redirectPolicy)
                 .connectTimeout(Duration.ofMillis(connectTimeoutMs));
         proxySelectorFor(System.getenv("HTTPS_PROXY"), System.getenv("HTTP_PROXY"),
                 System.getenv("ALL_PROXY")).ifPresent(builder::proxy);

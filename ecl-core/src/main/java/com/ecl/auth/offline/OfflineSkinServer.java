@@ -8,6 +8,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -45,6 +46,7 @@ public final class OfflineSkinServer implements AutoCloseable {
 
     private static final int MAX_TEXTURES = 16;
     private static final long MAX_TEXTURE_BYTES = 1024 * 1024;
+    private static final int MAX_PROFILE_REQUEST_BYTES = 64 * 1024;
     private static volatile OfflineSkinServer shared;
     private static int sharedUsers;
 
@@ -87,7 +89,10 @@ public final class OfflineSkinServer implements AutoCloseable {
         if (size <= 0 || size > MAX_TEXTURE_BYTES) {
             throw new IOException("Offline skin must be between 1 byte and 1 MB");
         }
-        byte[] png = Files.readAllBytes(skinPng);
+        byte[] png;
+        try (InputStream input = Files.newInputStream(skinPng)) {
+            png = input.readNBytes((int) MAX_TEXTURE_BYTES + 1);
+        }
         if (png.length == 0 || png.length > MAX_TEXTURE_BYTES) {
             throw new IOException("Offline skin changed while it was being read");
         }
@@ -275,7 +280,13 @@ public final class OfflineSkinServer implements AutoCloseable {
     }
 
     private void profiles(HttpExchange exchange) throws IOException {
-        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        byte[] requestBody = exchange.getRequestBody().readNBytes(MAX_PROFILE_REQUEST_BYTES + 1);
+        if (requestBody.length > MAX_PROFILE_REQUEST_BYTES) {
+            respond(exchange, 413, "Request body too large".getBytes(StandardCharsets.UTF_8),
+                    "text/plain");
+            return;
+        }
+        String body = new String(requestBody, StandardCharsets.UTF_8);
         JsonArray response = new JsonArray();
         try {
             JsonArray names = JsonParser.parseString(body).getAsJsonArray();

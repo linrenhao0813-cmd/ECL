@@ -9,6 +9,7 @@ import java.util.Objects;
 
 /** Creates Windows launcher shortcuts without adding a native library dependency. */
 public final class DesktopShortcutService {
+    private static final int MAX_POWERSHELL_OUTPUT_BYTES = 64 * 1024;
     public Path createDesktopShortcut(Path executable, String shortcutName, List<String> arguments)
             throws IOException {
         return createShortcut(desktopDirectory(), executable, shortcutName, arguments);
@@ -38,7 +39,13 @@ public final class DesktopShortcutService {
                     + "';$s.Arguments='" + psLiteral(argumentLine) + "';$s.Save()";
             Process process = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive",
                     "-Command", script).redirectErrorStream(true).start();
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            byte[] outputBytes = process.getInputStream()
+                    .readNBytes(MAX_POWERSHELL_OUTPUT_BYTES + 1);
+            String output = new String(outputBytes, 0,
+                    Math.min(outputBytes.length, MAX_POWERSHELL_OUTPUT_BYTES), StandardCharsets.UTF_8);
+            if (outputBytes.length > MAX_POWERSHELL_OUTPUT_BYTES) {
+                output += "…(output truncated)";
+            }
             if (process.waitFor() != 0 || !Files.isRegularFile(shortcut)) {
                 throw new IOException("PowerShell 创建快捷方式失败: " + output.trim());
             }

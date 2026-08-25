@@ -22,7 +22,10 @@ class DiagnosticBundleServiceTest {
         Files.createDirectories(base.resolve("logs"));
         Files.createDirectories(game.resolve("logs"));
         Files.writeString(base.resolve("settings.json"),
-                "{\"username\":\"Alex\",\"accessToken\":\"top-secret-token\"}");
+                "{\"username\":\"Alex\",\"accessToken\":\"top-secret-token\","
+                        + "\"microsoftRefreshToken\":\"legacy-refresh-secret\","
+                        + "\"microsoftAccessToken\":\"legacy-access-secret\","
+                        + "\"curseForgeApiKey\":\"curseforge-secret\"}");
         Files.writeString(base.resolve("logs/ecl.log"), "Authorization: Bearer abc.def.ghi");
         Files.writeString(base.resolve("logs/headers.log"),
                 "Authorization: Basic dXNlcjpwYXNz\nCookie: SID=cookie-secret");
@@ -51,5 +54,8 @@ class DiagnosticBundleServiceTest {
         assertFalse(contents.toString().contains("cookie-secret"));
         assertFalse(contents.toString().contains("cli-secret"));
         assertFalse(contents.toString().contains("array-secret"));
+        assertFalse(contents.toString().contains("legacy-refresh-secret"));
+        assertFalse(contents.toString().contains("legacy-access-secret"));
+        assertFalse(contents.toString().contains("curseforge-secret"));
     }
 }

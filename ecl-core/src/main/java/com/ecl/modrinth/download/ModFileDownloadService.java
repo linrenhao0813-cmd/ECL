@@ -2,6 +2,7 @@ package com.ecl.modrinth.download;
 
 import com.ecl.modrinth.api.HashMismatchException;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.NetworkUriPolicy;
 
 import java.io.IOException;
 import java.net.URI;
@@ -10,7 +11,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 public final class ModFileDownloadService {
+    private static final long MAX_MOD_FILE_BYTES = 2L * 1024 * 1024 * 1024;
     private final ExecutorService executor;
     private final HashVerifier hashVerifier;
     private final DownloadUriResolver uriResolver;
@@ -103,11 +104,20 @@ public final class ModFileDownloadService {
             throw new java.util.concurrent.CompletionException(
                     new IOException("无法解析模组下载地址: " + request.fileName()));
         }
-        String scheme = downloadUri.getScheme().toLowerCase(Locale.ROOT);
-        if (!("http".equals(scheme) || "https".equals(scheme))
-                || downloadUri.getHost() == null || downloadUri.getUserInfo() != null) {
+        try {
+            downloadUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                    downloadUri, "模组下载地址");
+        } catch (IOException unsafe) {
             throw new java.util.concurrent.CompletionException(
-                    new IOException("拒绝不安全的模组下载地址: " + request.fileName()));
+                    new IOException("拒绝不安全的模组下载地址: " + request.fileName(), unsafe));
+        }
+        if (!HashVerifier.hasUsableExpectedHash(request.expectedHashes())) {
+            throw new java.util.concurrent.CompletionException(
+                    new IOException("模组文件缺少可验证的 SHA-512 或 SHA-1: " + request.fileName()));
+        }
+        if (request.expectedSize() <= 0 || request.expectedSize() > MAX_MOD_FILE_BYTES) {
+            throw new java.util.concurrent.CompletionException(
+                    new IOException("模组文件大小声明无效: " + request.fileName()));
         }
         RuntimeException failure = null;
         for (int attempt = 1; attempt <= 2; attempt++) {
@@ -140,12 +150,15 @@ public final class ModFileDownloadService {
                             @Override
                             public void onComplete(java.io.File file) {
                             }
-                        });
+                        }, null, request.expectedSize());
                 throwIfInterrupted(request);
+                long size = Files.size(request.temporaryFile());
+                if (size != request.expectedSize()) {
+                    throw new IOException("模组文件大小与元数据不一致: " + request.fileName());
+                }
                 HashVerifier.HashResult hashes =
                         hashVerifier.verify(request.temporaryFile(), request.expectedHashes());
                 throwIfInterrupted(request);
-                long size = Files.size(request.temporaryFile());
                 return new DownloadedModFile(request, request.temporaryFile(), hashes, size);
             } catch (HashMismatchException e) {
                 failure = e;

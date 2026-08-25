@@ -35,6 +35,16 @@ class MrpackFileInstallerTest {
     private Field baseDirField;
     private File previousBaseDir;
 
+    @Test
+    void defaultPolicyTrustsModrinthAndCurseForgeCdnHosts() {
+        assertTrue(MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS
+                .contains("cdn.modrinth.com"));
+        assertTrue(MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS
+                .contains("mediafilez.forgecdn.net"));
+        assertTrue(MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS
+                .contains("edge.forgecdn.net"));
+    }
+
     @BeforeEach
     void useTemporaryBaseDirectory() throws Exception {
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");

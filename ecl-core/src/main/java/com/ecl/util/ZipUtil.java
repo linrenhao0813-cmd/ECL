@@ -184,21 +184,26 @@ public final class ZipUtil {
                     }
                     Files.createDirectories(parent);
                     long written = 0L;
-                    try (InputStream input = new BufferedInputStream(zip.getInputStream(entry));
-                         OutputStream output = new BufferedOutputStream(Files.newOutputStream(target))) {
-                        int read;
-                        while ((read = input.read(buffer)) != -1) {
-                            if (read > safeLimits.maxSingleBytes() - written) {
-                                throw new IOException("ZIP entry exceeds the single-file limit: " + entryName);
+                    try {
+                        try (InputStream input = new BufferedInputStream(zip.getInputStream(entry));
+                             OutputStream output = new BufferedOutputStream(Files.newOutputStream(target))) {
+                            int read;
+                            while ((read = input.read(buffer)) != -1) {
+                                if (read > safeLimits.maxSingleBytes() - written) {
+                                    throw new IOException("ZIP entry exceeds the single-file limit: " + entryName);
+                                }
+                                if (read > safeLimits.maxTotalBytes() - completed) {
+                                    throw new IOException("ZIP extraction exceeds the total size limit");
+                                }
+                                output.write(buffer, 0, read);
+                                written += read;
+                                completed += read;
+                                progress.onProgress(completed, totalBytes, entryName);
                             }
-                            if (read > safeLimits.maxTotalBytes() - completed) {
-                                throw new IOException("ZIP extraction exceeds the total size limit");
-                            }
-                            output.write(buffer, 0, read);
-                            written += read;
-                            completed += read;
-                            progress.onProgress(completed, totalBytes, entryName);
                         }
+                    } catch (IOException | RuntimeException failure) {
+                        Files.deleteIfExists(target);
+                        throw failure;
                     }
                     files.add(new ArchivedFile(entryName, written));
                 }

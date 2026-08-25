@@ -12,6 +12,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,7 +45,10 @@ public final class MinecraftSkinService {
         if (size > MAX_SKIN_BYTES) {
             throw new IOException("皮肤文件不得超过 1 MB");
         }
-        byte[] bytes = Files.readAllBytes(file);
+        byte[] bytes;
+        try (InputStream input = Files.newInputStream(file)) {
+            bytes = input.readNBytes((int) MAX_SKIN_BYTES + 1);
+        }
         if (bytes.length == 0 || bytes.length > MAX_SKIN_BYTES) {
             throw new IOException("皮肤文件在读取过程中发生变化，请重新选择");
         }

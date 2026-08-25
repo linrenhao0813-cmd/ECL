@@ -3,9 +3,12 @@ package com.ecl.download;
 import com.ecl.ECLConfig;
 import com.ecl.download.install.InstallHelpers;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.NetworkUriPolicy;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -15,6 +18,7 @@ import java.util.concurrent.Future;
 
 /** Executes verified file downloads and aggregates progress for one download phase. */
 final class GameDownloadBatchExecutor {
+    private static final long MAX_UNSIZED_LIBRARY_BYTES = 1024L * 1024 * 1024;
     private final ExecutorService executor;
 
     GameDownloadBatchExecutor(ExecutorService executor) {
@@ -81,7 +85,16 @@ final class GameDownloadBatchExecutor {
 
     private void downloadAndVerify(DownloadTask task,
                                    GameDownloader.DownloadListener listener) throws IOException {
-        HttpUtil.downloadFile(task.url(), task.target(), sourceCallback(task.sourceLabel(), listener));
+        NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                URI.create(task.url()), task.sourceLabel() + " URL");
+        long maxBytes = task.expectedSize() > 0
+                ? task.expectedSize() : MAX_UNSIZED_LIBRARY_BYTES;
+        HttpUtil.downloadFileWithProgress(task.url(), task.target(), null,
+                sourceCallback(task.sourceLabel(), listener), maxBytes);
+        if (task.expectedSize() > 0 && task.target().length() != task.expectedSize()) {
+            Files.deleteIfExists(task.target().toPath());
+            throw new IOException(task.target().getName() + " size does not match metadata");
+        }
         InstallHelpers.verifyDownloadedFile(task.target(), task.sha1());
     }
 
@@ -105,6 +118,7 @@ final class GameDownloadBatchExecutor {
         };
     }
 
-    record DownloadTask(String url, File target, String sha1, String sourceLabel) {
+    record DownloadTask(String url, File target, String sha1, long expectedSize,
+                        String sourceLabel) {
     }
 }

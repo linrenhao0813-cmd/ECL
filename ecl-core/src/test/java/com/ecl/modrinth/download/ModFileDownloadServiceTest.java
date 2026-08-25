@@ -9,6 +9,8 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -41,10 +43,12 @@ class ModFileDownloadServiceTest {
             String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
             ModDownloadRequest broken = new ModDownloadRequest(
                     URI.create(baseUrl + "/broken"), "broken.jar",
-                    tempDirectory.resolve("broken.jar"), Map.of(), partial.length + 10L);
+                    tempDirectory.resolve("broken.jar"), Map.of("sha512", "0".repeat(128)),
+                    partial.length + 10L);
             ModDownloadRequest successful = new ModDownloadRequest(
                     URI.create(baseUrl + "/complete"), "complete.jar",
-                    tempDirectory.resolve("complete.jar"), Map.of(), complete.length);
+                    tempDirectory.resolve("complete.jar"),
+                    Map.of("sha512", sha512(complete)), complete.length);
             AtomicLong successfulOverall = new AtomicLong(-1);
             var result = new ModFileDownloadService(executor, new HashVerifier()).downloadAll(
                     List.of(broken, successful), progress -> {
@@ -118,10 +122,34 @@ class ModFileDownloadServiceTest {
         }
     }
 
+    @Test
+    void rejectsDownloadsWithoutHashOrDeclaredSize(@TempDir Path tempDirectory) throws Exception {
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            ModDownloadRequest request = new ModDownloadRequest(
+                    URI.create("https://example.invalid/unverified.jar"), "unverified.jar",
+                    tempDirectory.resolve("unverified.jar"), Map.of(), 0);
+
+            ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> new ModFileDownloadService(executor, new HashVerifier())
+                            .downloadAll(List.of(request), null).get(5, TimeUnit.SECONDS));
+
+            assertTrue(failure.getCause() instanceof IOException
+                    || failure.getCause().getCause() instanceof IOException);
+            assertFalse(Files.exists(request.temporaryFile()));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private static void respond(com.sun.net.httpserver.HttpExchange exchange, byte[] body)
             throws IOException {
         exchange.sendResponseHeaders(200, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
+    }
+
+    private static String sha512(byte[] value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-512").digest(value));
     }
 }

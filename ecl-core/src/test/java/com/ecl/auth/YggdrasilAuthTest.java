@@ -30,6 +30,10 @@ class YggdrasilAuthTest {
         assertThrows(IllegalArgumentException.class,
                 () -> YggdrasilAuth.normalizeAuthServer("http://example.invalid/authserver"));
         assertThrows(IllegalArgumentException.class,
+                () -> YggdrasilAuth.normalizeAuthServer("http://127.attacker.example/authserver"));
+        assertThrows(IllegalArgumentException.class,
+                () -> YggdrasilAuth.normalizeAuthServer("http://127.0.0.1.attacker.example/authserver"));
+        assertThrows(IllegalArgumentException.class,
                 () -> YggdrasilAuth.normalizeAuthServer("https://user@example.invalid/authserver"));
     }
 }

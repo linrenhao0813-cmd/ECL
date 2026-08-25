@@ -120,12 +120,10 @@ final class HttpRequestExecutor {
             headers.forEach(builder::header);
         }
         try {
-            HttpResponse<String> response = HttpClientProvider.defaultClient().send(
+            HttpResponse<InputStream> response = HttpClientProvider.defaultClient().send(
                     builder.POST(HttpRequest.BodyPublishers.ofByteArray(body)).build(),
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            return new HttpUtil.Response(response.statusCode(), response.body(),
-                    response.uri() == null ? url : response.uri().toString(),
-                    response.headers().map());
+                    HttpResponse.BodyHandlers.ofInputStream());
+            return boundedResponse(response, url, DEFAULT_MAX_RESPONSE_BYTES);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IOException("HTTP request interrupted", interrupted);
@@ -135,6 +133,17 @@ final class HttpRequestExecutor {
     static CompletableFuture<HttpUtil.Response> requestAsync(
             String method, String url, String contentType, String body,
             Map<String, String> headers, Duration requestTimeout) {
+        return requestAsync(method, url, contentType, body, headers, requestTimeout,
+                DEFAULT_MAX_RESPONSE_BYTES);
+    }
+
+    static CompletableFuture<HttpUtil.Response> requestAsync(
+            String method, String url, String contentType, String body,
+            Map<String, String> headers, Duration requestTimeout, int maxResponseBytes) {
+        if (maxResponseBytes <= 0) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("maxResponseBytes must be positive"));
+        }
         HttpRequest request;
         try {
             DownloadRateLimiter.checkInterrupted();
@@ -161,8 +170,8 @@ final class HttpRequestExecutor {
             return CompletableFuture.failedFuture(failure);
         }
 
-        CompletableFuture<HttpResponse<String>> upstream = HttpClientProvider.defaultClient()
-                .sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        CompletableFuture<HttpResponse<InputStream>> upstream = HttpClientProvider.defaultClient()
+                .sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
         CompletableFuture<HttpUtil.Response> result = new CompletableFuture<>();
         upstream.whenComplete((response, error) -> {
             if (error != null) {
@@ -170,9 +179,11 @@ final class HttpRequestExecutor {
                         "HTTP request failed: " + url, error));
                 return;
             }
-            result.complete(new HttpUtil.Response(response.statusCode(), response.body(),
-                    response.uri() == null ? url : response.uri().toString(),
-                    response.headers().map()));
+            try {
+                result.complete(boundedResponse(response, url, maxResponseBytes));
+            } catch (IOException failure) {
+                result.completeExceptionally(failure);
+            }
         });
         result.whenComplete((ignored, error) -> {
             if (result.isCancelled()) {
@@ -180,6 +191,22 @@ final class HttpRequestExecutor {
             }
         });
         return result;
+    }
+
+    private static HttpUtil.Response boundedResponse(
+            HttpResponse<InputStream> response, String originalUrl, int maxResponseBytes)
+            throws IOException {
+        long declaredLength = response.headers().firstValueAsLong("Content-Length")
+                .orElse(-1L);
+        if (declaredLength > maxResponseBytes) {
+            response.body().close();
+            throw new IOException("HTTP response exceeds " + maxResponseBytes
+                    + " bytes: " + originalUrl);
+        }
+        return new HttpUtil.Response(response.statusCode(),
+                readStream(response.body(), maxResponseBytes),
+                response.uri() == null ? originalUrl : response.uri().toString(),
+                response.headers().map());
     }
 
     /** Reads and closes a response stream. */

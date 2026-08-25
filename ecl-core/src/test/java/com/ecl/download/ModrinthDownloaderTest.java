@@ -71,8 +71,8 @@ class ModrinthDownloaderTest {
         Files.writeString(existing.toPath(), "same content");
         String sha1 = FileUtil.sha1(existing);
 
-        // No expected hash: an existing file is trusted as-is.
-        assertTrue(ModrinthDownloader.existingFileSatisfies(existing, null));
+        // No expected hash: existing executable content must not be trusted.
+        assertFalse(ModrinthDownloader.existingFileSatisfies(existing, null));
         // Matching hash: reuse.
         assertTrue(ModrinthDownloader.existingFileSatisfies(existing, sha1));
         // Mismatching hash: must be overwritten.

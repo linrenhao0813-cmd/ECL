@@ -1,5 +1,7 @@
 package com.ecl.modrinth.ui;
 
+import com.ecl.util.NetworkUriPolicy;
+
 import java.awt.Desktop;
 import java.io.IOException;
 import java.net.URI;
@@ -16,10 +18,11 @@ final class ModExternalActions {
 
     void openUri(URI uri) {
         try {
+            URI checked = NetworkUriPolicy.requireHttps(uri, "project URL");
             if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().browse(uri);
+                Desktop.getDesktop().browse(checked);
             }
-        } catch (IOException error) {
+        } catch (IOException | SecurityException error) {
             statusConsumer.accept("无法打开项目页面: " + error.getMessage());
         }
     }

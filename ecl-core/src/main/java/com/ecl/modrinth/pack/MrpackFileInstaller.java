@@ -2,6 +2,7 @@ package com.ecl.modrinth.pack;
 
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
+import com.ecl.util.NetworkUriPolicy;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -16,7 +17,6 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
-import java.util.Locale;
 import java.util.Set;
 
 /** Downloads and installs the client files declared by an MRPACK index with hash verification. */
@@ -24,14 +24,19 @@ final class MrpackFileInstaller {
     private static final long MAX_INDEXED_FILE_BYTES = 2L * 1024 * 1024 * 1024;
     private static final long MAX_TOTAL_INDEXED_BYTES = 20L * 1024 * 1024 * 1024;
     private static final int MAX_INDEXED_FILES = 100_000;
-    private static final Set<String> TRUSTED_DOWNLOAD_HOSTS = Set.of("cdn.modrinth.com");
+    static final Set<String> DEFAULT_TRUSTED_DOWNLOAD_HOSTS = Set.of(
+            "cdn.modrinth.com",
+            "media.forgecdn.net",
+            "mediafilez.forgecdn.net",
+            "edge.forgecdn.net");
 
     private MrpackFileInstaller() {
     }
 
     static int installIndexedFiles(JsonObject index, Path instanceRoot,
                                    MrpackInstaller.Listener listener) throws IOException {
-        return installIndexedFiles(index, instanceRoot, listener, TRUSTED_DOWNLOAD_HOSTS);
+        return installIndexedFiles(index, instanceRoot, listener,
+                DEFAULT_TRUSTED_DOWNLOAD_HOSTS);
     }
 
     static int installIndexedFiles(JsonObject index, Path instanceRoot,
@@ -52,7 +57,7 @@ final class MrpackFileInstaller {
             String relative = JsonUtil.getString(item, "path", "");
             Path destination = MrpackPathPolicy.safeResolve(instanceRoot, relative);
             long declaredSize = JsonUtil.getLong(item, "fileSize", -1);
-            if (declaredSize < 0) {
+            if (declaredSize <= 0) {
                 throw new IOException("MRPACK file is missing a valid fileSize: " + relative);
             }
             if (declaredSize > MAX_INDEXED_FILE_BYTES
@@ -121,18 +126,12 @@ final class MrpackFileInstaller {
     private static URI requireTrustedDownloadUrl(String value, Set<String> trustedHosts)
             throws IOException {
         try {
-            URI uri = new URI(value);
-            String scheme = uri.getScheme() == null
-                    ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-            String host = uri.getHost() == null
-                    ? "" : uri.getHost().toLowerCase(Locale.ROOT);
-            if (!("http".equals(scheme) || "https".equals(scheme))
-                    || uri.getUserInfo() != null || !trustedHosts.contains(host)) {
-                throw new IOException("MRPACK download URL is not trusted: " + value);
-            }
-            return uri;
+            return NetworkUriPolicy.requireAllowedDownload(
+                    new URI(value), trustedHosts, "MRPACK download URL");
         } catch (URISyntaxException | IllegalArgumentException error) {
             throw new IOException("MRPACK download URL is invalid: " + value, error);
+        } catch (IOException untrusted) {
+            throw new IOException("MRPACK download URL is not trusted: " + value, untrusted);
         }
     }
 

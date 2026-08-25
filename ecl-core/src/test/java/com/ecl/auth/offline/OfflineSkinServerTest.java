@@ -221,4 +221,16 @@ class OfflineSkinServerTest {
         assertEquals(200, response.statusCode());
         assertEquals(0, JsonParser.parseString(response.body()).getAsJsonArray().size());
     }
+
+    @Test
+    void rejectsOversizedProfileBatchBeforeBufferingIt() throws Exception {
+        String oversized = "[\"" + "x".repeat(70 * 1024) + "\"]";
+        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/profiles/minecraft"))
+                .POST(HttpRequest.BodyPublishers.ofString(oversized))
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(413, response.statusCode());
+    }
 }

@@ -14,6 +14,7 @@ import java.io.IOException;
  * shortcut (a loader profile may reuse the base version's client jar).
  */
 public final class DownloadClientJarTask extends Task<Void> {
+    private static final long MAX_CLIENT_BYTES = 4L * 1024 * 1024 * 1024;
 
     private final String versionId;
     private final InstallState state;
@@ -35,7 +36,13 @@ public final class DownloadClientJarTask extends Task<Void> {
             state.setStatus("正在下载游戏主文件...");
             state.setProgressActive(true);
             String clientUrl = client.get("url").getAsString();
-            String clientSha1 = client.has("sha1") ? client.get("sha1").getAsString() : null;
+            String clientSha1 = InstallHelpers.requireSha1(
+                    client.has("sha1") ? client.get("sha1").getAsString() : null,
+                    "Minecraft client");
+            long clientSize = client.has("size") ? client.get("size").getAsLong() : -1L;
+            if (clientSize <= 0 || clientSize > MAX_CLIENT_BYTES) {
+                throw new IOException("Minecraft client is missing a valid size");
+            }
             File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
             if (InstallHelpers.needsDownload(clientJar, clientSha1, true)) {
                 HttpUtil.downloadFileWithProgress(clientUrl, clientJar, new HttpUtil.ProgressCallback() {
@@ -55,7 +62,11 @@ public final class DownloadClientJarTask extends Task<Void> {
                     public void onComplete(File file) {
                         reportProgress(1.0);
                     }
-                }, InstallHelpers.sourceCallback("游戏主文件", state));
+                }, InstallHelpers.sourceCallback("游戏主文件", state), clientSize);
+                if (clientJar.length() != clientSize) {
+                    java.nio.file.Files.deleteIfExists(clientJar.toPath());
+                    throw new IOException("Minecraft client size does not match metadata");
+                }
                 InstallHelpers.verifyDownloadedFile(clientJar, clientSha1);
             }
             state.setProgressActive(false);

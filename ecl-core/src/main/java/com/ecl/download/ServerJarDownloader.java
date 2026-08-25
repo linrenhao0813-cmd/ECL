@@ -5,6 +5,7 @@ import com.ecl.launcher.VersionManager;
 import com.ecl.util.DownloadSourceUtil;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.NetworkUriPolicy;
 import com.google.gson.JsonObject;
 
 import java.io.File;
@@ -31,7 +32,7 @@ public final class ServerJarDownloader {
             if (metadataUrl == null || metadataUrl.isBlank()) {
                 throw new IOException("版本列表中没有 " + versionId + " 的元数据地址");
             }
-            metadata = HttpUtil.getJsonWithMirrors(metadataUrl, sourceCallback(listener));
+            metadata = HttpUtil.getJson(metadataUrl);
         }
 
         JsonObject downloads = metadata.getAsJsonObject("downloads");
@@ -40,6 +41,14 @@ public final class ServerJarDownloader {
         if (server == null || server.url() == null || server.url().isBlank()) {
             throw new IOException("Minecraft " + versionId + " 没有提供官方服务端文件");
         }
+        if (server.sha1() == null || !server.sha1().matches("(?i)[0-9a-f]{40}")) {
+            throw new IOException("Minecraft " + versionId + " 服务端缺少有效 SHA-1");
+        }
+        if (server.size() <= 0) {
+            throw new IOException("Minecraft " + versionId + " 服务端缺少有效大小");
+        }
+        NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                java.net.URI.create(server.url()), "Minecraft server download URL");
         List<DownloadChannel> channels = DownloadSourceUtil.candidates(server.url()).stream()
                 .map(url -> new DownloadChannel(
                         DownloadSourceUtil.sourceName(url),
@@ -76,7 +85,7 @@ public final class ServerJarDownloader {
             public void onComplete(File file) {
                 // Completion is reported only after metadata checks below succeed.
             }
-        }, sourceCallback(listener));
+        }, sourceCallback(listener), artifact.size());
 
         if (!matches(target, artifact)) {
             Files.deleteIfExists(target.toPath());
@@ -103,8 +112,8 @@ public final class ServerJarDownloader {
     private static boolean matches(File file, ServerArtifact artifact) {
         if (!file.isFile()) return false;
         if (artifact.size() >= 0 && file.length() != artifact.size()) return false;
-        return artifact.sha1() == null || artifact.sha1().isBlank()
-                || FileUtil.verifySha1(file, artifact.sha1());
+        return artifact.sha1() != null && artifact.sha1().matches("(?i)[0-9a-f]{40}")
+                && FileUtil.verifySha1(file, artifact.sha1());
     }
 
     private static HttpUtil.SourceCallback sourceCallback(Listener listener) {

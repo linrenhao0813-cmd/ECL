@@ -61,8 +61,11 @@ public final class DownloadLibrariesTask extends Task<Void> {
                 String repository = library.has("url") ? library.get("url").getAsString() : "";
                 if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {
                     JsonObject artifact = new JsonObject();
+                    String resolvedUrl = MavenCoordinates.repositoryUrl(repository, name);
                     artifact.addProperty("path", MavenCoordinates.repositoryPath(name));
-                    artifact.addProperty("url", MavenCoordinates.repositoryUrl(repository, name));
+                    artifact.addProperty("url", resolvedUrl);
+                    artifact.addProperty("sha1", InstallHelpers.resolveRemoteSha1(
+                            resolvedUrl, "Maven library " + name));
                     addIfNeeded(tasks, artifact, "依赖库");
                 }
                 continue;
@@ -93,10 +96,13 @@ public final class DownloadLibrariesTask extends Task<Void> {
             throw new IOException(label + "下载信息缺少 path 或 url: "
                     + (path.isBlank() ? "<unknown>" : path));
         }
-        String sha1 = artifact.has("sha1") ? artifact.get("sha1").getAsString() : null;
+        String sha1 = InstallHelpers.requireSha1(
+                artifact.has("sha1") ? artifact.get("sha1").getAsString() : null,
+                label + " " + path);
+        long size = artifact.has("size") ? JsonUtil.getLong(artifact, "size", -1L) : -1L;
         File target = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
         if (InstallHelpers.needsDownload(target, sha1, verifyExistingFiles)) {
-            tasks.add(new InstallHelpers.FileDownload(url, target, sha1, label));
+            tasks.add(new InstallHelpers.FileDownload(url, target, sha1, size, label));
         }
     }
 

@@ -85,9 +85,17 @@ final class ResumableFileDownloader {
             throw new DownloadLimitExceededException("Partial download exceeds byte limit");
         }
 
+        URI requestUri;
+        try {
+            requestUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                    URI.create(candidate), "download URL");
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Invalid download URL: " + candidate, invalid);
+        }
+        int redirects = 0;
         while (true) {
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                    .uri(URI.create(candidate))
+                    .uri(requestUri)
                     .timeout(Duration.ofMillis(timeoutFor(mirror)))
                     .header("User-Agent", "ECL/1.0")
                     .GET();
@@ -102,6 +110,20 @@ final class ResumableFileDownloader {
             HttpResponse<InputStream> response = HttpClientProvider.defaultClient().send(
                     requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
             int statusCode = response.statusCode();
+            if (statusCode >= 300 && statusCode < 400) {
+                String location = response.headers().firstValue("Location").orElse("");
+                response.body().close();
+                if (location.isBlank() || ++redirects > 5) {
+                    throw new IOException("Too many or invalid download redirects: " + candidate);
+                }
+                try {
+                    requestUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                            requestUri.resolve(location), "download redirect");
+                } catch (IllegalArgumentException invalid) {
+                    throw new IOException("Invalid download redirect: " + location, invalid);
+                }
+                continue;
+            }
             if (statusCode == 416 && existingBytes > 0) {
                 long totalSize = unsatisfiedRangeTotal(response);
                 response.body().close();

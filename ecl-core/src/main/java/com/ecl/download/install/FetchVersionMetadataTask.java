@@ -31,8 +31,9 @@ public final class FetchVersionMetadataTask extends Task<JsonObject> {
         File versionDir = FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), versionId);
         versionDir.mkdirs();
 
-        JsonObject versionJson = HttpUtil.getJsonWithMirrors(
-                versionUrl, InstallHelpers.sourceCallback("版本信息", state));
+        // The version JSON controls launch classes and JVM arguments. Fetch it only from the
+        // authoritative URL; binary artifacts may still use mirrors after digest validation.
+        JsonObject versionJson = HttpUtil.getJson(versionUrl);
         File versionJsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
         HttpUtil.writeJson(versionJsonFile, versionJson);
         InstallHelpers.checkCancelled();

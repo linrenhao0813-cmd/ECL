@@ -1,0 +1,23 @@
+# This is a Gradle generated file for dependency locking.
+# Manual edits can break the build and are not advised.
+# This file is expected to be part of source control.
+ch.qos.logback:logback-classic:1.5.16=runtimeClasspath
+ch.qos.logback:logback-core:1.5.16=runtimeClasspath
+com.fasterxml.jackson.core:jackson-annotations:2.18.2=runtimeClasspath
+com.fasterxml.jackson.core:jackson-core:2.18.2=runtimeClasspath
+com.fasterxml.jackson.core:jackson-databind:2.18.2=runtimeClasspath
+com.fasterxml.jackson:jackson-bom:2.18.2=runtimeClasspath
+com.google.code.gson:gson:2.10.1=runtimeClasspath
+com.twelvemonkeys.common:common-image:3.13.1=runtimeClasspath
+com.twelvemonkeys.common:common-io:3.13.1=runtimeClasspath
+com.twelvemonkeys.common:common-lang:3.13.1=runtimeClasspath
+com.twelvemonkeys.imageio:imageio-core:3.13.1=runtimeClasspath
+com.twelvemonkeys.imageio:imageio-metadata:3.13.1=runtimeClasspath
+com.twelvemonkeys.imageio:imageio-webp:3.13.1=runtimeClasspath
+net.java.dev.jna:jna-platform:5.15.0=runtimeClasspath
+net.java.dev.jna:jna:5.15.0=runtimeClasspath
+org.openjfx:javafx-base:21=runtimeClasspath
+org.openjfx:javafx-controls:21=runtimeClasspath
+org.openjfx:javafx-graphics:21=runtimeClasspath
+org.slf4j:slf4j-api:2.0.16=runtimeClasspath
+empty=

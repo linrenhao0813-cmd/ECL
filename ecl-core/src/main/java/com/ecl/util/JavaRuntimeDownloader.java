@@ -20,12 +20,17 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /** Downloads and extracts launcher-managed Eclipse Temurin JREs. */
 final class JavaRuntimeDownloader {
     private static final String COMPLETE_MARKER = ".ecl-runtime-complete";
+    private static final long MAX_RUNTIME_ARCHIVE_BYTES = 2L * 1024 * 1024 * 1024;
+    private static final ZipUtil.ExtractionLimits RUNTIME_EXTRACTION_LIMITS =
+            new ZipUtil.ExtractionLimits(
+                    4L * 1024 * 1024 * 1024,
+                    1024L * 1024 * 1024,
+                    50_000,
+                    200.0);
     private static final Map<String, Object> DOWNLOAD_LOCKS = new ConcurrentHashMap<>();
 
     private JavaRuntimeDownloader() {
@@ -78,7 +83,10 @@ final class JavaRuntimeDownloader {
                 @Override
                 public void onComplete(File file) {
                 }
-                    });
+                    }, null, packageInfo.size);
+            if (Files.size(archive) != packageInfo.size) {
+                throw new IOException("Java runtime archive size does not match metadata");
+            }
             verifySha256(archive, packageInfo.sha256);
             status.accept("正在解压 Java " + featureVersion + " 运行时...");
             extractZip(archive, staging);
@@ -130,8 +138,13 @@ final class JavaRuntimeDownloader {
             String link = packageObject.has("link") ? packageObject.get("link").getAsString() : "";
             String checksum = packageObject.has("checksum")
                     ? packageObject.get("checksum").getAsString() : "";
-            if (!link.isBlank() && !checksum.isBlank()) {
-                return new PackageInfo(link, checksum);
+            long size = packageObject.has("size")
+                    ? JsonUtil.getLong(packageObject, "size", -1L) : -1L;
+            if (!link.isBlank() && checksum.matches("(?i)[0-9a-f]{64}")
+                    && size > 0 && size <= MAX_RUNTIME_ARCHIVE_BYTES) {
+                NetworkUriPolicy.requireHttps(java.net.URI.create(link),
+                        "Java runtime download URL");
+                return new PackageInfo(link, checksum, size);
             }
         }
         throw new IOException("Adoptium 没有提供兼容的 Java " + featureVersion + " JRE");
@@ -157,22 +170,12 @@ final class JavaRuntimeDownloader {
     }
 
     private static void extractZip(Path archive, Path target) throws IOException {
-        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(archive))) {
-            ZipEntry entry;
-            while ((entry = zip.getNextEntry()) != null) {
-                Path destination = target.resolve(entry.getName()).normalize();
-                if (!destination.startsWith(target)) {
-                    throw new IOException("Java 压缩包包含越界路径: " + entry.getName());
-                }
-                if (entry.isDirectory()) {
-                    Files.createDirectories(destination);
-                } else {
-                    Files.createDirectories(destination.getParent());
-                    Files.copy(zip, destination, StandardCopyOption.REPLACE_EXISTING);
-                }
-                zip.closeEntry();
-            }
-        }
+        extractZip(archive, target, RUNTIME_EXTRACTION_LIMITS);
+    }
+
+    static void extractZip(Path archive, Path target, ZipUtil.ExtractionLimits limits)
+            throws IOException {
+        ZipUtil.extractSafely(archive, target, null, limits);
     }
 
     private static Path findJava(Path root) throws IOException {
@@ -227,6 +230,6 @@ final class JavaRuntimeDownloader {
         throw new IOException("暂不支持自动下载 Java 的架构: " + arch);
     }
 
-    private record PackageInfo(String url, String sha256) {
+    private record PackageInfo(String url, String sha256, long size) {
     }
 }

@@ -23,11 +23,15 @@ final class SettingsMigration {
         settings.remove(oldKey);
     }
 
-    static void migrateToEncrypted(SettingsManager manager, String key) {
+    static boolean migrateToEncrypted(SettingsManager manager, String key) {
         String plaintext = manager.getString(key, null);
-        if (plaintext != null && !plaintext.isBlank()) {
-            manager.setEncrypted(key, plaintext);
-            manager.remove(key);
+        if (plaintext == null) {
+            return false;
         }
+        if (!plaintext.isBlank()) {
+            manager.setEncrypted(key, plaintext);
+        }
+        manager.remove(key);
+        return true;
     }
 }

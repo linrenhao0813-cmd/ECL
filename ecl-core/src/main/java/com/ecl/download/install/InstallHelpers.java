@@ -5,9 +5,12 @@ import com.ecl.task.TaskCancellationException;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.MinecraftRuleUtil;
+import com.ecl.util.NetworkUriPolicy;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -21,6 +24,7 @@ import java.util.concurrent.Future;
  * SHA-1 verification after download, and rule-aware native classifier selection.
  */
 public final class InstallHelpers {
+    private static final long MAX_UNSIZED_LIBRARY_BYTES = 1024L * 1024 * 1024;
 
     private InstallHelpers() {
     }
@@ -33,18 +37,21 @@ public final class InstallHelpers {
     }
 
     /** A single file the workflow wants on disk, verified by SHA-1 when the metadata provides one. */
-    public record FileDownload(String url, File target, String sha1, String sourceLabel) {
+    public record FileDownload(String url, File target, String sha1, long expectedSize,
+                               String sourceLabel) {
     }
 
     public static boolean needsDownload(File target, String expectedSha1, boolean verifyExisting) {
         if (!target.isFile()) {
             return true;
         }
-        return verifyExisting && hasSha1(expectedSha1) && !FileUtil.verifySha1(target, expectedSha1);
+        return !hasSha1(expectedSha1)
+                || verifyExisting && !FileUtil.verifySha1(target, expectedSha1);
     }
 
     public static void verifyDownloadedFile(File target, String expectedSha1) throws IOException {
-        if (!hasSha1(expectedSha1) || FileUtil.verifySha1(target, expectedSha1)) {
+        String required = requireSha1(expectedSha1, target.getName());
+        if (FileUtil.verifySha1(target, required)) {
             return;
         }
         if (!target.delete()) {
@@ -54,7 +61,29 @@ public final class InstallHelpers {
     }
 
     public static boolean hasSha1(String sha1) {
-        return sha1 != null && !sha1.isBlank();
+        return sha1 != null && sha1.matches("(?i)[0-9a-f]{40}");
+    }
+
+    public static String requireSha1(String sha1, String label) throws IOException {
+        if (!hasSha1(sha1)) {
+            throw new IOException((label == null ? "Downloaded file" : label)
+                    + " is missing a valid SHA-1 digest");
+        }
+        return sha1.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** Resolve a bare Maven artifact digest from its HTTPS repository sidecar. */
+    public static String resolveRemoteSha1(String artifactUrl, String label) throws IOException {
+        URI uri;
+        try {
+            uri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                    URI.create(artifactUrl), label + " URL");
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException(label + " URL is invalid", invalid);
+        }
+        String body = HttpUtil.get(uri + ".sha1").trim();
+        String digest = body.isBlank() ? "" : body.split("\\s+", 2)[0];
+        return requireSha1(digest, label);
     }
 
     public static String nativeClassifierKey(com.google.gson.JsonObject library, String osName, String archBits) {
@@ -117,7 +146,16 @@ public final class InstallHelpers {
         List<Future<Void>> phaseTasks = new ArrayList<>(tasks.size());
         for (FileDownload task : tasks) {
             phaseTasks.add(completionService.submit(() -> {
-                HttpUtil.downloadFile(task.url(), task.target(), sourceCallback(task.sourceLabel(), state));
+                NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                        URI.create(task.url()), task.sourceLabel() + " URL");
+                long maxBytes = task.expectedSize() > 0
+                        ? task.expectedSize() : MAX_UNSIZED_LIBRARY_BYTES;
+                HttpUtil.downloadFileWithProgress(task.url(), task.target(), null,
+                        sourceCallback(task.sourceLabel(), state), maxBytes);
+                if (task.expectedSize() > 0 && task.target().length() != task.expectedSize()) {
+                    Files.deleteIfExists(task.target().toPath());
+                    throw new IOException(task.target().getName() + " size does not match metadata");
+                }
                 verifyDownloadedFile(task.target(), task.sha1());
                 return null;
             }));
