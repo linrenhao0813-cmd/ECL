@@ -1,8 +1,8 @@
 [versions]
 checkstyle = "10.20.2"
 gson = "2.10.1"
-jackson = "2.18.2"
-javafx = "21"
+jackson = "2.18.9"
+javafx = "21.0.10"
 junit = "5.11.4"
 jna = "5.15.0"
 logback = "1.5.16"
