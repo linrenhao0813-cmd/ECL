@@ -70,6 +70,7 @@ final class DownloadTasksPage extends VBox {
                 return;
             }
             taskCenter.setMaxConcurrent(value);
+            HttpUtil.setDownloadMaxConcurrent(value);
             settingsManager.set(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT, value);
             settingsManager.save();
         });

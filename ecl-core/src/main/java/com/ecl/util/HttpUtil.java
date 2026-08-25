@@ -42,6 +42,15 @@ public class HttpUtil {
         return DownloadRateLimiter.getBytesPerSecond();
     }
 
+    /** Configure the process-wide number of concurrent binary transfers. */
+    public static void setDownloadMaxConcurrent(int maxConcurrent) {
+        DownloadConcurrencyGate.setLimit(maxConcurrent);
+    }
+
+    public static int getDownloadMaxConcurrent() {
+        return DownloadConcurrencyGate.limit();
+    }
+
     public static String get(String urlStr) throws IOException {
         return HttpJsonClient.get(urlStr);
     }
@@ -102,8 +111,10 @@ public class HttpUtil {
 
     public static void downloadFile(String urlStr, File target, SourceCallback callback)
             throws IOException {
-        ResumableFileDownloader.download(
-                urlStr, target, null, adapt(callback), Long.MAX_VALUE);
+        try (DownloadConcurrencyGate.Permit ignored = DownloadConcurrencyGate.acquire()) {
+            ResumableFileDownloader.download(
+                    urlStr, target, null, adapt(callback), Long.MAX_VALUE);
+        }
     }
 
     public static void downloadFileWithProgress(
@@ -114,16 +125,20 @@ public class HttpUtil {
     public static void downloadFileWithProgress(
             String urlStr, File target, ProgressCallback callback,
             SourceCallback sourceCallback) throws IOException {
-        ResumableFileDownloader.download(urlStr, target, adapt(callback),
-                adapt(sourceCallback), Long.MAX_VALUE);
+        try (DownloadConcurrencyGate.Permit ignored = DownloadConcurrencyGate.acquire()) {
+            ResumableFileDownloader.download(urlStr, target, adapt(callback),
+                    adapt(sourceCallback), Long.MAX_VALUE);
+        }
     }
 
     /** Download while refusing to write more than {@code maxBytes}, including resumed bytes. */
     public static void downloadFileWithProgress(
             String urlStr, File target, ProgressCallback callback,
             SourceCallback sourceCallback, long maxBytes) throws IOException {
-        ResumableFileDownloader.download(urlStr, target, adapt(callback),
-                adapt(sourceCallback), maxBytes);
+        try (DownloadConcurrencyGate.Permit ignored = DownloadConcurrencyGate.acquire()) {
+            ResumableFileDownloader.download(urlStr, target, adapt(callback),
+                    adapt(sourceCallback), maxBytes);
+        }
     }
 
     public static JsonObject getJson(String urlStr) throws IOException {

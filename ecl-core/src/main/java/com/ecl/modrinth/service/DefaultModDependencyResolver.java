@@ -21,6 +21,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -221,13 +222,10 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
             return false;
         }
 
-        Path gameDirectory = state.instance.gameDirectory().toAbsolutePath().normalize();
-        Path modsDirectory = state.instance.modsDirectory().toAbsolutePath().normalize();
-        return state.installedMods.stream()
-                .filter(mod -> requiredVersionId.isBlank()
-                        ? requiredProjectId.equals(mod.projectId())
-                        : requiredVersionId.equals(mod.versionId()))
-                .anyMatch(mod -> isUsableInstalledFile(mod, gameDirectory, modsDirectory));
+        Collection<InstalledMod> candidates = requiredVersionId.isBlank()
+                ? state.installedByProjectId.getOrDefault(requiredProjectId, List.of())
+                : state.installedByVersionId.getOrDefault(requiredVersionId, List.of());
+        return candidates.stream().anyMatch(state::isUsableInstalledFile);
     }
 
     private static boolean isUsableInstalledFile(
@@ -340,6 +338,9 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         private final ModInstanceContext instance;
         private final ModCompatibility compatibility;
         private final Collection<InstalledMod> installedMods;
+        private final Map<String, List<InstalledMod>> installedByProjectId;
+        private final Map<String, List<InstalledMod>> installedByVersionId;
+        private final Map<Path, Boolean> installedFileValidity = new HashMap<>();
         private final Set<String> selectedOptionalProjects;
         private final ReleaseChannel releaseChannel;
         private final Map<String, ModVersion> selectedVersions = new LinkedHashMap<>();
@@ -355,8 +356,32 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
             this.instance = instance;
             this.compatibility = compatibility;
             this.installedMods = installedMods == null ? List.of() : List.copyOf(installedMods);
+            this.installedByProjectId = indexInstalledMods(this.installedMods, InstalledMod::projectId);
+            this.installedByVersionId = indexInstalledMods(this.installedMods, InstalledMod::versionId);
             this.selectedOptionalProjects = selectedOptionalProjects;
             this.releaseChannel = releaseChannel;
+        }
+
+        private boolean isUsableInstalledFile(InstalledMod mod) {
+            Path path = instance.gameDirectory().toAbsolutePath().normalize()
+                    .resolve(mod.relativePath()).normalize();
+            return installedFileValidity.computeIfAbsent(path, ignored ->
+                    DefaultModDependencyResolver.isUsableInstalledFile(
+                            mod, instance.gameDirectory().toAbsolutePath().normalize(),
+                            instance.modsDirectory().toAbsolutePath().normalize()));
+        }
+
+        private Map<String, List<InstalledMod>> indexInstalledMods(
+                Collection<InstalledMod> mods,
+                Function<InstalledMod, String> keyExtractor) {
+            Map<String, List<InstalledMod>> index = new HashMap<>();
+            for (InstalledMod mod : mods) {
+                String key = text(keyExtractor.apply(mod));
+                if (!key.isBlank()) {
+                    index.computeIfAbsent(key, ignored -> new ArrayList<>()).add(mod);
+                }
+            }
+            return index;
         }
     }
 }

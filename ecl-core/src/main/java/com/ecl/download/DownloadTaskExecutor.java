@@ -9,7 +9,9 @@ import java.util.concurrent.RejectedExecutionException;
 
 /** Runs queued download operations and routes their terminal outcome to the task center. */
 final class DownloadTaskExecutor implements AutoCloseable {
-    private final ExecutorService executor = Executors.newCachedThreadPool(
+    private static final int MAX_DOWNLOAD_TASK_THREADS = 8;
+    private final ExecutorService executor = Executors.newFixedThreadPool(
+            MAX_DOWNLOAD_TASK_THREADS,
             ThreadFactories.daemon("ecl-download-task"));
 
     void submit(DownloadTaskEntry<?> entry, DownloadTaskCenter center) {
