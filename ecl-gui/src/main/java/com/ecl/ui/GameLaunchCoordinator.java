@@ -29,34 +29,39 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Owns game launch, download-and-launch, process monitoring, console and crash handling. */
 final class GameLaunchCoordinator {
     private final LauncherUI ui;
+    private final LaunchUiFacade facade;
     private final LaunchAuthFactory authFactory;
     private final GameProcessMonitor processMonitor;
 
     GameLaunchCoordinator(LauncherUI ui) {
+        this(ui, new LauncherUiFacadeAdapter(ui));
+    }
+
+    GameLaunchCoordinator(LauncherUI ui, LaunchUiFacade facade) {
         this.ui = ui;
+        this.facade = facade;
         this.authFactory = new LaunchAuthFactory(ui);
         this.processMonitor = new GameProcessMonitor(ui, this::appendGameConsoleLine,
                 this::showGameErrorDialog);
     }
 
     void launchGame() {
-        String selectedVersion = ui.versionCombo.getValue();
+        String selectedVersion = facade.selectedVersion();
         if (selectedVersion == null || selectedVersion.isBlank()) {
             ui.setStatus("请选择游戏版本", "先刷新并选择一个可启动的 Minecraft 版本。 ");
             return;
         }
-        LoaderChoice requestedLoader = ui.loaderChoiceCombo == null
-                ? LoaderChoice.VANILLA : ui.loaderChoiceCombo.getValue();
+        LoaderChoice requestedLoader = facade.requestedLoader();
         if (requestedLoader != null && !requestedLoader.vanilla()
-                && ui.loaderChoiceForProfile(selectedVersion) != requestedLoader) {
-            ui.installSelectedLoader(this::launchGame);
+                && facade.loaderForProfile(selectedVersion) != requestedLoader) {
+            facade.installSelectedLoader(this::launchGame);
             return;
         }
 
-        if (ui.lastContentVersion != null && !ui.lastContentVersion.equals(selectedVersion)
-                && ui.versionManager.isVersionDownloaded(ui.lastContentVersion)) {
+        if (facade.lastContentVersion() != null && !facade.lastContentVersion().equals(selectedVersion)
+                && facade.isVersionDownloaded(facade.lastContentVersion())) {
             ui.setStatus("注意：启动版本与已下载内容的版本不一致",
-                    "模组 / 光影 / 材质包已下载到 " + ui.lastContentVersion
+                    "模组 / 光影 / 材质包已下载到 " + facade.lastContentVersion()
                             + " 的实例目录，当前将启动 " + selectedVersion
                             + "，这些内容不会被加载。可切换到 " + ui.lastContentVersion + " 再启动。 ");
         }
@@ -85,10 +90,13 @@ final class GameLaunchCoordinator {
         if (LauncherUI.AUTH_YGGDRASIL.equals(ui.authTypeCombo.getValue())) {
             ui.settingsManager.set(ECLConfig.KEY_YGGDRASIL_SERVER, ui.yggdrasilServerField.getText().trim());
         }
-        if (!ui.settingsManager.save()) {
-            ui.setStatus("设置保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
-            return;
-        }
+        // 启动参数先在内存中快照，再在后台线程持久化，避免启动路径阻塞 UI 线程写盘。
+        ui.runAsync("ecl-save-settings", () -> {
+            if (!ui.settingsManager.save()) {
+                Platform.runLater(() -> ui.setStatus("设置保存失败",
+                        "无法写入 settings.json，请检查目录权限或查看日志。"));
+            }
+        });
         ui.updateRuntimeSummary();
 
         if (!ui.versionManager.isVersionDownloaded(selectedVersion)) {
