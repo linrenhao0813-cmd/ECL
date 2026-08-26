@@ -2,7 +2,7 @@
 checkstyle = "10.24.0"
 gson = "2.13.2"
 hamcrest = "3.0"
-imageio-webp = "3.13.1"
+imageio-webp = "3.14.0"
 jackson = "2.19.1"
 javafx = "21.0.10"
 junit = "5.13.4"
