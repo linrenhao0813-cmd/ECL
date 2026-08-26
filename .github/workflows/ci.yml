@@ -32,7 +32,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Verify
         run: .\gradlew.bat check --no-daemon
 
@@ -46,7 +46,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Package
         run: .\gradlew.bat packageWindowsApp --no-daemon
       - uses: actions/upload-artifact@v4
