@@ -9,7 +9,7 @@ junit = "5.13.4"
 jna = "5.17.0"
 logback = "1.5.25"
 slf4j = "2.0.17"
-spotbugs-plugin = "6.5.4"
+spotbugs-plugin = "6.5.11"
 testfx = "4.0.18"
 testfx-monocle = "21.0.2"
 
