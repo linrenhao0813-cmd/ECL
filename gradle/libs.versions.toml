@@ -1,17 +1,21 @@
 [versions]
 checkstyle = "10.24.0"
-gson = "2.10.1"
+gson = "2.13.2"
+hamcrest = "3.0"
 imageio-webp = "3.13.1"
-jackson = "2.18.9"
+jackson = "2.19.1"
 javafx = "21.0.10"
 junit = "5.13.4"
 jna = "5.17.0"
 logback = "1.5.25"
 slf4j = "2.0.17"
 spotbugs-plugin = "6.5.4"
+testfx = "4.0.18"
+testfx-monocle = "21.0.2"
 
 [libraries]
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
 imageio-webp = { module = "com.twelvemonkeys.imageio:imageio-webp", version.ref = "imageio-webp" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -19,6 +23,8 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+testfx-junit5 = { module = "org.testfx:testfx-junit5", version.ref = "testfx" }
+testfx-monocle = { module = "org.testfx:openjfx-monocle", version.ref = "testfx-monocle" }
 
 [plugins]
 spotbugs = { id = "com.github.spotbugs", version.ref = "spotbugs-plugin" }

@@ -128,7 +128,6 @@ final class ResumableFileDownloader {
                     throw new IOException("Too many or invalid download redirects: " + candidate);
                 }
                 try {
-                    // Temporary revert while committing PF8; S6 re-applies strict HTTPS below.
                     requestUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
                             requestUri.resolve(location), "download redirect");
                 } catch (IllegalArgumentException invalid) {

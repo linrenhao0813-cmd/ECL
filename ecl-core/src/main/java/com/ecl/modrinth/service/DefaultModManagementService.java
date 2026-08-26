@@ -110,6 +110,7 @@ public final class DefaultModManagementService implements ModManagementService {
         } catch (ModInstallationException | ModConflictException e) {
             throw e;
         } catch (Exception e) {
+            // Broad catch is required: operationLock AutoCloseable.close() declares Exception.
             throw new ModInstallationException((enabled ? "启用" : "禁用") + "模组失败", e);
         }
     }
@@ -157,6 +158,7 @@ public final class DefaultModManagementService implements ModManagementService {
         } catch (ModInstallationException | ModConflictException e) {
             throw e;
         } catch (Exception e) {
+            // Broad catch is required: operationLock AutoCloseable.close() declares Exception.
             throw new ModInstallationException("卸载模组失败", e);
         }
     }
@@ -204,6 +206,7 @@ public final class DefaultModManagementService implements ModManagementService {
         } catch (ModInstallationException | ModConflictException e) {
             throw e;
         } catch (Exception e) {
+            // Broad catch is required: JarFile + operationLock close() declare Exception.
             throw new ModInstallationException("导入本地模组失败", e);
         }
     }

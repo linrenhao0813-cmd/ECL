@@ -2,6 +2,7 @@ package com.ecl;
 
 import java.io.File;
 import java.lang.management.ManagementFactory;
+import javax.management.JMException;
 import javax.management.ObjectName;
 
 import com.ecl.config.SettingKey;
@@ -127,12 +128,18 @@ public class ECLConfig {
     }
 
     public static void ensureDirs() {
-        getBaseDir().mkdirs();
-        getVersionsDir().mkdirs();
-        getLibrariesDir().mkdirs();
-        getAssetsDir().mkdirs();
-        getBackupsDir().mkdirs();
-        getGameDir().mkdirs();
+        ensureDirectory(getBaseDir());
+        ensureDirectory(getVersionsDir());
+        ensureDirectory(getLibrariesDir());
+        ensureDirectory(getAssetsDir());
+        ensureDirectory(getBackupsDir());
+        ensureDirectory(getGameDir());
+    }
+
+    private static void ensureDirectory(File directory) {
+        if (!directory.isDirectory() && !directory.mkdirs() && !directory.isDirectory()) {
+            throw new IllegalStateException("Unable to create ECL directory: " + directory);
+        }
     }
 
     /**
@@ -163,7 +170,7 @@ public class ECLConfig {
             if (totalBytes instanceof Number num) {
                 return num.longValue() / (1024L * 1024L);
             }
-        } catch (Exception ignored) {
+        } catch (JMException | RuntimeException ignored) {
             // Unsupported management extensions fall back to the conservative default below.
         }
         return -1;

@@ -81,7 +81,7 @@ final class MinecraftServicesClient {
             if (element != null && element.isJsonObject()) {
                 return element.getAsJsonObject();
             }
-        } catch (Exception ignored) {
+        } catch (RuntimeException ignored) {
             // Convert malformed responses to the same IOException contract below.
         }
         throw new IOException(source + " returned invalid JSON: " + TextUtil.abbreviate(body, 240));

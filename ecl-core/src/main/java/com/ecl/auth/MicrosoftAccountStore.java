@@ -161,7 +161,7 @@ public final class MicrosoftAccountStore {
             JsonElement root = JsonParser.parseReader(reader);
             if (root.isJsonArray()) return root.getAsJsonArray();
             LOGGER.warn("Microsoft account store root is not an array: {}", file);
-        } catch (Exception error) {
+        } catch (IOException | RuntimeException error) {
             LOGGER.warn("Failed to load Microsoft account store {}", file, error);
         }
         return null;

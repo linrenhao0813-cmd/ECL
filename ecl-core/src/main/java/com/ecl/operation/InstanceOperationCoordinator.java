@@ -6,16 +6,17 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** Serializes all mutating work for an instance and journals semantic operations. */
 public final class InstanceOperationCoordinator implements InstanceOperationLock {
     public static final String OPERATIONS_RELATIVE_PATH = ".ecl/operations";
 
-    private final ConcurrentHashMap<UUID, LockEntry> locks = new ConcurrentHashMap<>();
+    private final Map<UUID, LockEntry> locks = new HashMap<>();
     private final Clock clock;
 
     public InstanceOperationCoordinator() {
@@ -47,7 +48,7 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
     }
 
     @Override
-    public boolean isLocked(UUID instanceId) {
+    public synchronized boolean isLocked(UUID instanceId) {
         LockEntry entry = locks.get(Objects.requireNonNull(instanceId, "instanceId"));
         return entry != null && entry.lock.isLocked();
     }

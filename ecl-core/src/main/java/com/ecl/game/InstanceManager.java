@@ -110,7 +110,12 @@ public final class InstanceManager {
 
     private static void copyTree(Path source, Path target) throws IOException {
         Files.walkFileTree(source, new SimpleFileVisitor<>() {
-            @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException { Files.createDirectories(target.resolve(source.relativize(dir))); return FileVisitResult.CONTINUE; }
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs)
+                    throws IOException {
+                Files.createDirectories(target.resolve(source.relativize(dir)));
+                return FileVisitResult.CONTINUE;
+            }
             @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 if (!attrs.isSymbolicLink()) {
                     Files.copy(file, target.resolve(source.relativize(file)),

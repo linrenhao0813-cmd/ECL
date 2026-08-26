@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+        "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+        "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+<suppressions>
+    <!-- Existing high-complexity methods remain visible as an explicit migration baseline. -->
+    <suppress files="ResumableFileDownloader.java" checks="CyclomaticComplexity" lines="82"/>
+    <suppress files="LauncherUIView.java" checks="MethodLength" lines="1099,1100"/>
+    <suppress files="LauncherUIView.java" checks="MethodLength" lines="1814,1815"/>
+    <suppress files="SettingsDialog.java" checks="MethodLength|CyclomaticComplexity" lines="42"/>
+    <suppress files="LauncherUiSnapshot.java" checks="CyclomaticComplexity"/>
+</suppressions>

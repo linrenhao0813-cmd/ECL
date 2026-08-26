@@ -154,7 +154,7 @@ final class MicrosoftOAuthClient {
             if (element != null && element.isJsonObject()) {
                 return element.getAsJsonObject();
             }
-        } catch (Exception error) {
+        } catch (RuntimeException error) {
             LOGGER.warn("{} returned invalid JSON", source, error);
         }
         throw new IOException(source + " returned invalid JSON: " + TextUtil.abbreviate(body, 240));

@@ -110,11 +110,16 @@ public final class ServerDirectoryService {
                 server, snapshot.statuses().get(server.address()))));
         root.add("data", data);
 
-        Path temporary = cacheFile.resolveSibling(cacheFile.getFileName() + ".tmp");
+        Path normalizedCache = cacheFile.toAbsolutePath().normalize();
+        Path parent = normalizedCache.getParent();
+        if (parent == null) {
+            return;
+        }
+        Path temporary = normalizedCache.resolveSibling(normalizedCache.getFileName() + ".tmp");
         try {
-            Files.createDirectories(cacheFile.getParent());
+            Files.createDirectories(parent);
             Files.writeString(temporary, GsonProvider.pretty().toJson(root), StandardCharsets.UTF_8);
-            Files.move(temporary, cacheFile, StandardCopyOption.REPLACE_EXISTING,
+            Files.move(temporary, normalizedCache, StandardCopyOption.REPLACE_EXISTING,
                     StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException ignored) {
             try {

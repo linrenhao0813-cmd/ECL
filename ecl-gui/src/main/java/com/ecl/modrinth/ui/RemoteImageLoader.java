@@ -17,6 +17,7 @@ import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -62,7 +63,7 @@ public final class RemoteImageLoader {
             try {
                 byte[] bytes = cachedBytes(key);
                 return decodeWithImageIo(bytes);
-            } catch (Exception ignoredError) {
+            } catch (IOException | RuntimeException ignoredError) {
                 return MISSING;
             }
         }, EXECUTOR));
@@ -86,7 +87,7 @@ public final class RemoteImageLoader {
         return CACHE.size();
     }
 
-    private static byte[] cachedBytes(String key) throws Exception {
+    private static byte[] cachedBytes(String key) throws IOException {
         Path directory = ECLConfig.getBaseDir().toPath().resolve("cache").resolve("project-icons");
         Path file = directory.resolve(cacheName(key));
         if (Files.isRegularFile(file)) {
@@ -96,7 +97,7 @@ public final class RemoteImageLoader {
             }
             try {
                 Files.deleteIfExists(file);
-            } catch (Exception ignored) {
+            } catch (IOException | RuntimeException ignored) {
                 // A stale read-only cache entry must not block a fresh request.
             }
         }
@@ -113,13 +114,13 @@ public final class RemoteImageLoader {
                 Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
             }
             trimDiskCache(directory);
-        } catch (Exception ignored) {
+        } catch (IOException | RuntimeException ignored) {
             // A read-only or busy cache must never prevent the cover from being displayed.
         } finally {
             if (temporary != null) {
                 try {
                     Files.deleteIfExists(temporary);
-                } catch (Exception ignored) {
+                } catch (IOException | RuntimeException ignored) {
                     // Best-effort cleanup only.
                 }
             }
@@ -127,10 +128,14 @@ public final class RemoteImageLoader {
         return bytes;
     }
 
-    private static String cacheName(String key) throws Exception {
-        byte[] digest = MessageDigest.getInstance("SHA-256")
-                .digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        return HexFormat.of().formatHex(digest) + ".img";
+    private static String cacheName(String key) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest) + ".img";
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 not available", impossible);
+        }
     }
 
     private static Image decodeWithImageIo(byte[] bytes) {
@@ -170,7 +175,7 @@ public final class RemoteImageLoader {
             image.getPixelWriter().setPixels(0, 0, width, height,
                     PixelFormat.getIntArgbInstance(), pixels, 0, width);
             return image;
-        } catch (Exception ignored) {
+        } catch (IOException | RuntimeException ignored) {
             return MISSING;
         }
     }
@@ -188,7 +193,7 @@ public final class RemoteImageLoader {
             String host = checked.getHost().toLowerCase(Locale.ROOT);
             return MODRINTH_ICON_HOSTS.contains(host)
                     || host.equals("forgecdn.net") || host.endsWith(".forgecdn.net");
-        } catch (Exception invalid) {
+        } catch (IOException | RuntimeException invalid) {
             return false;
         }
     }
@@ -207,7 +212,7 @@ public final class RemoteImageLoader {
             for (int index = 0; index < excess; index++) {
                 Files.deleteIfExists(cachedFiles.get(index));
             }
-        } catch (Exception ignored) {
+        } catch (IOException | RuntimeException ignored) {
             // Cache trimming is best-effort.
         }
     }
@@ -215,7 +220,7 @@ public final class RemoteImageLoader {
     private static long lastModified(Path path) {
         try {
             return Files.getLastModifiedTime(path).toMillis();
-        } catch (Exception ignored) {
+        } catch (IOException | RuntimeException ignored) {
             return Long.MIN_VALUE;
         }
     }

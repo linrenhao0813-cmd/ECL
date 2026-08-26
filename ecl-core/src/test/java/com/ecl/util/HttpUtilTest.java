@@ -124,6 +124,25 @@ class HttpUtilTest {
     }
 
     @Test
+    void everyRequestEntryPointRejectsPublicPlaintextHttp() {
+        String insecure = "http://example.invalid/resource";
+
+        assertThrows(IOException.class,
+                () -> HttpRequestExecutor.request("GET", insecure, null, null, Map.of()));
+        assertThrows(IOException.class, () -> HttpUtil.getBytes(insecure, 100));
+        assertThrows(IOException.class,
+                () -> HttpUtil.postMultipart(insecure, "boundary", new byte[]{1}, Map.of()));
+        assertThrows(IOException.class,
+                () -> HttpUtil.postJsonBytes(insecure, "{}".getBytes(StandardCharsets.UTF_8)));
+
+        var asynchronous = HttpRequestExecutor.requestAsync(
+                "GET", insecure, null, null, Map.of(), Duration.ofSeconds(1));
+        var failure = assertThrows(java.util.concurrent.CompletionException.class,
+                asynchronous::join);
+        assertTrue(failure.getCause() instanceof IOException);
+    }
+
+    @Test
     void binaryRequestsPreserveBytesAndEnforceTheMemoryLimit() throws IOException {
         byte[] body = new byte[]{0, 1, 2, 3, (byte) 255};
         server.createContext("/icon", exchange -> {
@@ -171,6 +190,23 @@ class HttpUtilTest {
         } finally {
             Files.deleteIfExists(target.toPath());
         }
+    }
+
+    @Test
+    void downloadsRejectRedirectsToPublicPlaintextHttp(@TempDir Path tempDir) {
+        server.createContext("/unsafe-redirect", exchange -> {
+            exchange.getResponseHeaders().add(
+                    "Location", "http://example.invalid/download-target");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        File target = tempDir.resolve("unsafe.bin").toFile();
+
+        IOException failure = assertThrows(IOException.class,
+                () -> HttpUtil.downloadFile(baseUrl + "/unsafe-redirect", target));
+
+        assertTrue(failure.getMessage().contains("must use HTTPS"));
+        assertFalse(target.exists());
     }
 
     @Test

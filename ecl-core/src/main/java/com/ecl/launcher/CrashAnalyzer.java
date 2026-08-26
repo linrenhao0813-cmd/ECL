@@ -97,7 +97,9 @@ public class CrashAnalyzer {
             explanation = "mods 文件夹里存在相同模组的多个版本，加载器无法决定使用哪一个。";
             suggestions.add("打开 mods 目录，删除重复模组，只保留一个版本。");
             suggestions.add("重点检查同名文件、旧版本残留、同一个前置库的多个版本。");
-        } else if (containsAny(lower, "incompatible mod set", "mod loading has failed", "modloadingexception", "requires version", "depends on", "requires any version")) {
+        } else if (containsAny(lower, "incompatible mod set", "mod loading has failed",
+                "modloadingexception", "requires version", "depends on",
+                "requires any version")) {
             title = "模组版本或前置依赖不兼容";
             explanation = "加载器报告模组依赖不满足，常见原因是模组版本、Minecraft 版本或 Fabric/Forge/NeoForge/Quilt 加载器不匹配。";
             suggestions.add("确认每个模组都对应当前 Minecraft 版本和当前加载器。");
@@ -125,7 +127,9 @@ public class CrashAnalyzer {
             suggestions.add("关闭正在运行的 Minecraft 和 Java 进程后重试。");
             suggestions.add("如果目录在 OneDrive/网盘同步目录里，建议把游戏目录移动到普通本地目录。");
             suggestions.add("检查杀毒软件是否拦截了游戏或模组文件。");
-        } else if (containsAny(lower, "could not find or load main class", "unable to access jarfile", "zip end header not found", "invalid or corrupt jarfile")) {
+        } else if (containsAny(lower, "could not find or load main class",
+                "unable to access jarfile", "zip end header not found",
+                "invalid or corrupt jarfile")) {
             title = "游戏文件或依赖库损坏";
             explanation = "客户端 jar、依赖库或模组 jar 文件不完整或损坏。";
             suggestions.add("重新下载当前游戏版本。");

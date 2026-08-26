@@ -25,7 +25,7 @@ final class LaunchAuthFactory {
         this.yggdrasilSessions = yggdrasilSessions;
     }
 
-    AuthProvider create(String authType, String server, String username, String password) {
+    AuthProvider create(String authType, String server, String username, char[] password) {
         if (LauncherUI.AUTH_MICROSOFT.equals(authType)) {
             MicrosoftAuth microsoftAuth = ui.microsoftAccounts.authenticateMicrosoftAccount(false);
             Platform.runLater(() -> {
@@ -39,7 +39,7 @@ final class LaunchAuthFactory {
             if (server.isBlank() || username.isBlank()) {
                 throw new IllegalArgumentException("请填写完整的外置登录服务器和用户名。");
             }
-            if (password == null || password.isBlank()) {
+            if (isBlank(password)) {
                 return restoreYggdrasilSession(server, username);
             }
             YggdrasilAuth yggdrasilAuth = new YggdrasilAuth(server);
@@ -51,6 +51,18 @@ final class LaunchAuthFactory {
         }
 
         return new OfflineAuth(username.isBlank() ? "Player" : username);
+    }
+
+    private static boolean isBlank(char[] value) {
+        if (value == null || value.length == 0) {
+            return true;
+        }
+        for (char character : value) {
+            if (!Character.isWhitespace(character)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private YggdrasilAuth restoreYggdrasilSession(String server, String username) {

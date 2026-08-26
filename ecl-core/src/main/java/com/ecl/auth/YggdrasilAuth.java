@@ -9,7 +9,10 @@ import com.google.gson.JsonParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Arrays;
@@ -20,7 +23,7 @@ import java.util.UUID;
  * Yggdrasil authentication for third-party authlib servers.
  * Compatible with LittleSkin, Blessing Skin, and other authlib-injector based servers.
  */
-public class YggdrasilAuth implements AuthProvider {
+public final class YggdrasilAuth implements AuthProvider {
     private static final Logger LOGGER = LoggerFactory.getLogger(YggdrasilAuth.class);
 
     private final String authServer;
@@ -30,6 +33,7 @@ public class YggdrasilAuth implements AuthProvider {
     private String accessToken;
     private String clientToken;
     private boolean loggedIn;
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
 
     public YggdrasilAuth(String authServer) {
         this.authServer = normalizeAuthServer(authServer);
@@ -82,8 +86,20 @@ public class YggdrasilAuth implements AuthProvider {
     }
 
     public void setCredentials(String username, String password) {
+        char[] mutablePassword = password == null ? null : password.toCharArray();
+        try {
+            setCredentials(username, mutablePassword);
+        } finally {
+            if (mutablePassword != null) {
+                Arrays.fill(mutablePassword, '\0');
+            }
+        }
+    }
+
+    public void setCredentials(String username, char[] password) {
+        clearPassword();
         this.username = username;
-        this.password = password == null ? null : password.toCharArray();
+        this.password = password == null ? null : password.clone();
     }
 
     @Override
@@ -147,18 +163,10 @@ public class YggdrasilAuth implements AuthProvider {
     }
 
     public void authenticate(String username, char[] password) throws IOException {
-        String passwordStr = new String(password);
+        byte[] payload = null;
         try {
-            JsonObject agent = new JsonObject();
-            agent.addProperty("name", "Minecraft");
-            agent.addProperty("version", 1);
-            JsonObject payload = new JsonObject();
-            payload.add("agent", agent);
-            payload.addProperty("username", username);
-            payload.addProperty("password", passwordStr);
-            payload.addProperty("clientToken", clientToken);
-
-            String response = postJson(authServer + "authenticate", payload);
+            payload = authenticationPayload(username, password);
+            String response = HttpUtil.postJsonBytes(authServer + "authenticate", payload);
             JsonObject json = parseResponseObject(response, "authenticate");
 
             if (json.has("error")) {
@@ -198,6 +206,9 @@ public class YggdrasilAuth implements AuthProvider {
             this.loggedIn = true;
 
         } finally {
+            if (payload != null) {
+                Arrays.fill(payload, (byte) 0);
+            }
             clearPassword();
         }
     }
@@ -244,6 +255,72 @@ public class YggdrasilAuth implements AuthProvider {
 
     private String postJson(String urlStr, JsonObject body) throws IOException {
         return HttpUtil.postJson(urlStr, body);
+    }
+
+    private byte[] authenticationPayload(String username, char[] password) throws IOException {
+        try (SensitiveByteArrayOutputStream output = new SensitiveByteArrayOutputStream();
+             Writer writer = new OutputStreamWriter(output, java.nio.charset.StandardCharsets.UTF_8)) {
+            writer.write("{\"agent\":{\"name\":\"Minecraft\",\"version\":1},\"username\":");
+            writeJsonString(writer, username);
+            writer.write(",\"password\":");
+            writeJsonString(writer, password);
+            writer.write(",\"clientToken\":");
+            writeJsonString(writer, clientToken);
+            writer.write('}');
+            writer.flush();
+            return output.snapshot();
+        }
+    }
+
+    private static void writeJsonString(Writer writer, CharSequence value) throws IOException {
+        writer.write('"');
+        for (int i = 0; i < value.length(); i++) {
+            writeJsonCharacter(writer, value.charAt(i));
+        }
+        writer.write('"');
+    }
+
+    private static void writeJsonString(Writer writer, char[] value) throws IOException {
+        writer.write('"');
+        for (char character : value) {
+            writeJsonCharacter(writer, character);
+        }
+        writer.write('"');
+    }
+
+    private static void writeJsonCharacter(Writer writer, char character) throws IOException {
+        switch (character) {
+            case '"' -> writer.write("\\\"");
+            case '\\' -> writer.write("\\\\");
+            case '\b' -> writer.write("\\b");
+            case '\f' -> writer.write("\\f");
+            case '\n' -> writer.write("\\n");
+            case '\r' -> writer.write("\\r");
+            case '\t' -> writer.write("\\t");
+            default -> {
+                if (character < 0x20) {
+                    writer.write("\\u");
+                    writer.write(HEX[(character >>> 12) & 0x0f]);
+                    writer.write(HEX[(character >>> 8) & 0x0f]);
+                    writer.write(HEX[(character >>> 4) & 0x0f]);
+                    writer.write(HEX[character & 0x0f]);
+                } else {
+                    writer.write(character);
+                }
+            }
+        }
+    }
+
+    private static final class SensitiveByteArrayOutputStream extends ByteArrayOutputStream {
+        private byte[] snapshot() {
+            return toByteArray();
+        }
+
+        @Override
+        public void close() {
+            Arrays.fill(buf, (byte) 0);
+            reset();
+        }
     }
 
     private JsonObject tokenPayload() {

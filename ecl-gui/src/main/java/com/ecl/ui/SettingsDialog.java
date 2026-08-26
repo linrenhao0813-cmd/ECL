@@ -311,7 +311,10 @@ final class SettingsDialog {
 
             ui.javaPath = configuredJava.isBlank() ? "" : JavaRuntimeUtil.resolveJavaExecutable(configuredJava);
             ui.gameDir = ui.resolveConfiguredGameRootDir(new File(configuredGameDir));
-            ui.gameDir.mkdirs();
+            if (!ui.gameDir.isDirectory() && !ui.gameDir.mkdirs() && !ui.gameDir.isDirectory()) {
+                ui.setStatus("游戏目录无效", "无法创建游戏目录：" + ui.gameDir);
+                return;
+            }
             ui.extraJvmArgs = jvmField.getText().trim();
             ui.maxMemoryMb = configuredMemoryMb;
             ui.gameWidth = configuredWidth;
@@ -391,7 +394,7 @@ final class SettingsDialog {
                             currentProfile.autoRepair(),
                             currentProfile.backupPolicyId());
                     ui.controller.instanceLaunchProfiles().save(instanceRoot, updatedProfile);
-                } catch (IOException | RuntimeException directoryError) {
+                } catch (Exception directoryError) {
                     ui.setStatus("实例设置保存失败", directoryError.getMessage());
                     return;
                 }

@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
@@ -210,7 +211,8 @@ final class GameLaunchCoordinator {
         String authType = ui.authTypeCombo.getValue();
         String server = ui.yggdrasilServerField.getText().trim();
         String username = ui.usernameField.getText().trim();
-        AtomicReference<String> passwordRef = new AtomicReference<>(ui.passwordField.getText());
+        AtomicReference<char[]> passwordRef = new AtomicReference<>(
+                ui.passwordField.getText().toCharArray());
         ui.passwordField.clear(); // 尽快清除 UI 中的密码，减少敏感数据驻留时间
 
         ui.setControlsBusy(true);
@@ -220,7 +222,7 @@ final class GameLaunchCoordinator {
         ui.runAsync("ecl-launch-game", () -> {
             File launchDir = ui.resolveVersionGameDir(version);
             File instanceRoot = ui.resolveVersionInstanceRoot(version);
-            String password = passwordRef.getAndSet(null);
+            char[] password = passwordRef.getAndSet(null);
             try {
                 ensureVersionGameDirs(version);
                 InstanceLaunchProfile launchProfile = ui.controller.instanceLaunchProfiles()
@@ -234,6 +236,7 @@ final class GameLaunchCoordinator {
                 int instanceMemoryMb = launchProfile.memoryMode() == InstanceLaunchProfile.MemoryMode.AUTO
                         ? ECLConfig.calculateAutoMemoryMb() : launchProfile.maxMemoryMb();
                 AuthProvider auth = authFactory.create(authType, server, username, password);
+                Arrays.fill(password, '\0');
                 password = null;
                 OfflineSkin offlineSkin = auth.getType() == com.ecl.auth.AuthType.OFFLINE
                         ? new OfflineSkinStore()
@@ -294,8 +297,13 @@ final class GameLaunchCoordinator {
                     ui.setControlsBusy(false);
                 });
             } finally {
-                password = null;
-                passwordRef.set(null);
+                if (password != null) {
+                    Arrays.fill(password, '\0');
+                }
+                char[] queuedPassword = passwordRef.getAndSet(null);
+                if (queuedPassword != null) {
+                    Arrays.fill(queuedPassword, '\0');
+                }
             }
         });
     }
@@ -403,7 +411,7 @@ final class GameLaunchCoordinator {
                             .withZone(ZoneId.systemDefault())
                             .format(Instant.parse(stats.lastLaunchedAt())));
             ui.playtimeLaunchCountLabel.setText(String.valueOf(stats.launchCount()));
-        } catch (IOException | RuntimeException error) {
+        } catch (Exception error) {
             ui.playtimeTotalLabel.setText(com.ecl.util.Messages.get("playtime.unavailable"));
             ui.playtimeRecentLabel.setText("-");
             ui.playtimeLaunchCountLabel.setText("-");

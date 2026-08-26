@@ -5,4 +5,23 @@
         <Class name="com.ecl.util.JavaRuntimeUtil"/>
         <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
     </Match>
+    <!-- Java discovery intentionally honors JAVA_HOME alongside java.home and PATH. -->
+    <Match>
+        <Class name="com.ecl.util.JavaRuntimeUtil"/>
+        <Bug pattern="ENV_USE_PROPERTY_INSTEAD_OF_ENV"/>
+    </Match>
+    <!-- Non-Windows key protection reads the standard machine-id locations. -->
+    <Match>
+        <Class name="com.ecl.util.CryptoUtil"/>
+        <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+    </Match>
+    <!-- DTO records and JavaFX property accessors intentionally expose their documented values. -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+    <!-- Shared placeholder images are process-wide immutable UI assets. -->
+    <Match>
+        <Class name="com.ecl.modrinth.ui.RemoteImageLoader"/>
+        <Bug pattern="MS_EXPOSE_REP"/>
+    </Match>
 </FindBugsFilter>

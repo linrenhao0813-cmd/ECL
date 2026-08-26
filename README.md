@@ -51,7 +51,7 @@ cd ECL
 .\gradlew.bat run
 ```
 
-首次构建会通过 Gradle Wrapper 下载 Gradle 8.5 与项目依赖。运行启动器、登录、下载游戏或在线内容时也需要网络连接。
+首次构建会通过 Gradle Wrapper 下载 Gradle 8.14.4 与项目依赖。运行启动器、登录、下载游戏或在线内容时也需要网络连接。
 
 ## 环境要求
 
@@ -104,7 +104,7 @@ CurseForge 官方 API 需要 API Key。可在应用的高级设置中填写，�
 ecl-boot/build/install/ECL/
 ```
 
-GitHub Actions 会在 Windows 上执行 `build check`，并生成 Windows 应用镜像作为工作流产物。
+GitHub Actions 会在 Windows 上执行 `check`，并生成 Windows 应用镜像作为工作流产物。
 
 ### 界面快照
 
@@ -154,7 +154,7 @@ config/    Checkstyle 与 SpotBugs 配置
 
 ## 技术栈
 
-- Java 21、JavaFX 21、Gradle 8.5
+- Java 21、JavaFX 21、Gradle 8.14.4
 - Gson、Jackson、JNA、TwelveMonkeys ImageIO
 - SLF4J 与 Logback
 - JUnit 5、Checkstyle、SpotBugs、JaCoCo

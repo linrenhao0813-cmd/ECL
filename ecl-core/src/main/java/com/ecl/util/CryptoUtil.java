@@ -6,7 +6,9 @@ import com.sun.jna.platform.win32.Crypt32Util;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
+import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.File;
 import java.io.IOException;
@@ -44,7 +46,11 @@ public final class CryptoUtil {
     private static final int KEY_SIZE = 256;
     private static final byte[] DPAPI_HEADER = "ECL-DPAPI-1\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] LOCAL_HEADER_V1 = "ECL-LOCAL-1\n".getBytes(StandardCharsets.US_ASCII);
-    private static final byte[] LOCAL_HEADER = "ECL-LOCAL-2\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] LOCAL_HEADER_V2 = "ECL-LOCAL-2\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] LOCAL_HEADER = "ECL-LOCAL-3\n".getBytes(StandardCharsets.US_ASCII);
+    private static final int LOCAL_KDF_SALT_LENGTH = 16;
+    private static final int LOCAL_KDF_ITERATIONS = 210_000;
+    private static final String LOCAL_KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
 
     private static volatile SecretKey cachedKey;
 
@@ -72,7 +78,7 @@ public final class CryptoUtil {
             buffer.put(iv);
             buffer.put(ciphertext);
             return java.util.Base64.getEncoder().encodeToString(buffer.array());
-        } catch (Exception e) {
+        } catch (GeneralSecurityException | IOException | RuntimeException e) {
             throw new IllegalStateException("Failed to encrypt sensitive data", e);
         }
     }
@@ -100,7 +106,7 @@ public final class CryptoUtil {
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
             byte[] plaintext = cipher.doFinal(ciphertext);
             return new String(plaintext, StandardCharsets.UTF_8);
-        } catch (Exception e) {
+        } catch (GeneralSecurityException | IOException | RuntimeException e) {
             throw new IllegalStateException("Failed to decrypt sensitive data", e);
         }
     }
@@ -186,10 +192,13 @@ public final class CryptoUtil {
             }
         }
         if (startsWith(stored, LOCAL_HEADER)) {
-            return decodeLocalKey(stored, LOCAL_HEADER, localWrappingKey());
+            return decodeLocalKey(stored);
+        }
+        if (startsWith(stored, LOCAL_HEADER_V2)) {
+            return decodeLegacyLocalKey(stored, LOCAL_HEADER_V2, legacyLocalWrappingKeyV2());
         }
         if (startsWith(stored, LOCAL_HEADER_V1)) {
-            return decodeLocalKey(stored, LOCAL_HEADER_V1, legacyLocalWrappingKey());
+            return decodeLegacyLocalKey(stored, LOCAL_HEADER_V1, legacyLocalWrappingKey());
         }
         return stored.clone();
     }
@@ -197,14 +206,18 @@ public final class CryptoUtil {
     private static byte[] encodeLocalKey(byte[] key)
             throws IOException, NoSuchAlgorithmException {
         try {
+            byte[] salt = new byte[LOCAL_KDF_SALT_LENGTH];
             byte[] iv = new byte[GCM_IV_LENGTH];
+            SecureRandom.getInstanceStrong().nextBytes(salt);
             SecureRandom.getInstanceStrong().nextBytes(iv);
             Cipher cipher = Cipher.getInstance(ALGORITHM);
-            cipher.init(Cipher.ENCRYPT_MODE, localWrappingKey(),
+            cipher.init(Cipher.ENCRYPT_MODE, localWrappingKey(salt),
                     new GCMParameterSpec(GCM_TAG_LENGTH, iv));
             byte[] wrapped = cipher.doFinal(key);
-            ByteBuffer buffer = ByteBuffer.allocate(LOCAL_HEADER.length + iv.length + wrapped.length);
+            ByteBuffer buffer = ByteBuffer.allocate(
+                    LOCAL_HEADER.length + salt.length + iv.length + wrapped.length);
             buffer.put(LOCAL_HEADER);
+            buffer.put(salt);
             buffer.put(iv);
             buffer.put(wrapped);
             return buffer.array();
@@ -213,7 +226,32 @@ public final class CryptoUtil {
         }
     }
 
-    private static byte[] decodeLocalKey(byte[] stored, byte[] header, SecretKey wrappingKey)
+    private static byte[] decodeLocalKey(byte[] stored) throws IOException {
+        if (stored.length < LOCAL_HEADER.length + LOCAL_KDF_SALT_LENGTH + GCM_IV_LENGTH + 1) {
+            throw new IOException("Invalid locally protected account encryption key");
+        }
+        byte[] salt = new byte[LOCAL_KDF_SALT_LENGTH];
+        try {
+            ByteBuffer buffer = ByteBuffer.wrap(stored, LOCAL_HEADER.length,
+                    stored.length - LOCAL_HEADER.length);
+            buffer.get(salt);
+            byte[] iv = new byte[GCM_IV_LENGTH];
+            buffer.get(iv);
+            byte[] wrapped = new byte[buffer.remaining()];
+            buffer.get(wrapped);
+            Cipher cipher = Cipher.getInstance(ALGORITHM);
+            cipher.init(Cipher.DECRYPT_MODE, localWrappingKey(salt),
+                    new GCMParameterSpec(GCM_TAG_LENGTH, iv));
+            return cipher.doFinal(wrapped);
+        } catch (GeneralSecurityException | RuntimeException failure) {
+            throw new IOException("Unable to unlock the locally protected account key", failure);
+        } finally {
+            Arrays.fill(salt, (byte) 0);
+        }
+    }
+
+    private static byte[] decodeLegacyLocalKey(
+            byte[] stored, byte[] header, SecretKey wrappingKey)
             throws IOException {
         if (stored.length < header.length + GCM_IV_LENGTH + 1) {
             throw new IOException("Invalid locally protected account encryption key");
@@ -234,7 +272,34 @@ public final class CryptoUtil {
         }
     }
 
-    static SecretKey localWrappingKey() throws NoSuchAlgorithmException {
+    static SecretKey localWrappingKey(byte[] salt) throws GeneralSecurityException {
+        if (salt == null || salt.length < LOCAL_KDF_SALT_LENGTH) {
+            throw new IllegalArgumentException("Local wrapping-key salt is too short");
+        }
+        byte[] machineId = machineEntropy();
+        String material = "ECL-local-key-wrapper-v3\n"
+                + System.getProperty("user.name", "") + '\n'
+                + System.getProperty("user.home", "") + '\n'
+                + System.getProperty("os.name", "") + '\n'
+                + HexFormat.of().formatHex(machineId);
+        char[] password = material.toCharArray();
+        PBEKeySpec spec = new PBEKeySpec(password, salt, LOCAL_KDF_ITERATIONS, KEY_SIZE);
+        byte[] derived = null;
+        try {
+            derived = SecretKeyFactory.getInstance(LOCAL_KDF_ALGORITHM)
+                    .generateSecret(spec).getEncoded();
+            return new SecretKeySpec(derived, KEY_ALGORITHM);
+        } finally {
+            spec.clearPassword();
+            Arrays.fill(password, '\0');
+            Arrays.fill(machineId, (byte) 0);
+            if (derived != null) {
+                Arrays.fill(derived, (byte) 0);
+            }
+        }
+    }
+
+    static SecretKey legacyLocalWrappingKeyV2() throws NoSuchAlgorithmException {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         digest.update("ECL-local-key-wrapper-v2\n".getBytes(StandardCharsets.UTF_8));
         digest.update(System.getProperty("user.name", "").getBytes(StandardCharsets.UTF_8));

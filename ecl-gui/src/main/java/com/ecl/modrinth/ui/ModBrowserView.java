@@ -63,7 +63,6 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     private InstalledModsPane installedPane;
     private ModUpdatesPane updatesPane;
     private boolean updateBatchRunning;
-    private ModProject selectedProject;
 
     public ModBrowserView(
             MainController controller,
@@ -286,7 +285,6 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     }
 
     private void showProject(ModProject project) {
-        selectedProject = project;
         detailsPane.showProject(project);
     }
 

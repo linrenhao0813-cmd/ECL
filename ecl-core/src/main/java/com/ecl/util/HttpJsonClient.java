@@ -51,6 +51,13 @@ final class HttpJsonClient {
         return response.body();
     }
 
+    static String postJsonBytes(String url, byte[] body) throws IOException {
+        HttpUtil.Response response = HttpRequestExecutor.postBytes(
+                url, "application/json", body);
+        response.requireSuccess();
+        return response.body();
+    }
+
     static HttpUtil.Response postForm(String url, Map<String, String> form)
             throws IOException {
         StringJoiner encoded = new StringJoiner("&");

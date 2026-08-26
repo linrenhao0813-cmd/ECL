@@ -81,7 +81,9 @@ final class InstallHelpers {
             candidates.addAll(Arrays.asList(MinecraftRuleUtil.nativeKeys(nativeClassifier)));
         }
         candidates.add(nativeClassifierKey(library, osName, archBits));
-        candidates.addAll(Arrays.asList(MinecraftRuleUtil.nativeKeys(nativeClassifier)));
+        if (nativeClassifier != null) {
+            candidates.addAll(Arrays.asList(MinecraftRuleUtil.nativeKeys(nativeClassifier)));
+        }
         return candidates.stream().filter(classifiers::has).findFirst().orElse(null);
     }
 }

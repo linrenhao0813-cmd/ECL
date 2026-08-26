@@ -110,7 +110,7 @@ public class GameDownloader implements DownloadService {
             if (runListener != null) runListener.onStatus("正在下载版本信息...");
 
             File versionDir = FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), versionId);
-            versionDir.mkdirs();
+            Files.createDirectories(versionDir.toPath());
 
             JsonObject versionJson = HttpUtil.getJson(versionUrl);
             File versionJsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
@@ -164,7 +164,11 @@ public class GameDownloader implements DownloadService {
 
             if (runListener != null) runListener.onStatus("下载完成！");
             if (runListener != null) runListener.onComplete();
-        } catch (Exception e) {
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            if (runListener != null) runListener.onStatus("下载已取消");
+            throw new CancellationException("download cancelled");
+        } catch (IOException | RuntimeException e) {
             if (Thread.currentThread().isInterrupted()) {
                 if (runListener != null) runListener.onStatus("下载已取消");
                 throw new CancellationException("download cancelled");
@@ -336,7 +340,7 @@ public class GameDownloader implements DownloadService {
                 "asset index " + assetId);
         long indexSize = requiredPositiveSize(assetIndex, "size", "asset index " + assetId);
         if (needsDownload(indexFile, indexSha1)) {
-            indexFile.getParentFile().mkdirs();
+            Files.createDirectories(indexFile.toPath().toAbsolutePath().getParent());
             HttpUtil.downloadFileWithProgress(assetUrl, indexFile, null,
                     sourceCallback("资源索引", runListener), indexSize);
             if (indexFile.length() != indexSize) {

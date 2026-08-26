@@ -128,13 +128,27 @@ class CryptoUtilTest {
 
     @Test
     void localWrappingKeyIncludesStableMachineIdentity() throws Exception {
+        byte[] salt = new byte[16];
         System.setProperty("ecl.crypto.machineId", "machine-a");
-        byte[] firstMachineKey = CryptoUtil.localWrappingKey().getEncoded();
+        byte[] firstMachineKey = CryptoUtil.localWrappingKey(salt).getEncoded();
 
         System.setProperty("ecl.crypto.machineId", "machine-b");
-        byte[] secondMachineKey = CryptoUtil.localWrappingKey().getEncoded();
+        byte[] secondMachineKey = CryptoUtil.localWrappingKey(salt).getEncoded();
 
         assertFalse(java.util.Arrays.equals(firstMachineKey, secondMachineKey));
+    }
+
+    @Test
+    void localWrappingKeyUsesTheStoredRandomSalt() throws Exception {
+        System.setProperty("ecl.crypto.machineId", "same-machine");
+        byte[] firstSalt = new byte[16];
+        byte[] secondSalt = new byte[16];
+        secondSalt[0] = 1;
+
+        byte[] firstKey = CryptoUtil.localWrappingKey(firstSalt).getEncoded();
+        byte[] secondKey = CryptoUtil.localWrappingKey(secondSalt).getEncoded();
+
+        assertFalse(java.util.Arrays.equals(firstKey, secondKey));
     }
 
     @Test
@@ -161,8 +175,43 @@ class CryptoUtilTest {
 
             assertEquals("migrated-secret", CryptoUtil.decrypt(encrypted));
             byte[] migrated = Files.readAllBytes(keyFile);
-            assertTrue(new String(migrated, 0, "ECL-LOCAL-2\n".length(),
-                    StandardCharsets.US_ASCII).startsWith("ECL-LOCAL-2"));
+            assertTrue(new String(migrated, 0, "ECL-LOCAL-3\n".length(),
+                    StandardCharsets.US_ASCII).startsWith("ECL-LOCAL-3"));
+        } finally {
+            if (originalOsName == null) {
+                System.clearProperty("os.name");
+            } else {
+                System.setProperty("os.name", originalOsName);
+            }
+        }
+    }
+
+    @Test
+    void versionTwoLocalWrapperIsMigratedToPbkdf2() throws Exception {
+        String originalOsName = System.getProperty("os.name");
+        try {
+            System.setProperty("os.name", "Linux");
+            System.setProperty("ecl.crypto.machineId", "migration-machine");
+            Path keyFile = temp.resolve("secret.key");
+            byte[] accountKey = new byte[32];
+            SecureRandom.getInstanceStrong().nextBytes(accountKey);
+            byte[] iv = new byte[12];
+            SecureRandom.getInstanceStrong().nextBytes(iv);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, CryptoUtil.legacyLocalWrappingKeyV2(),
+                    new GCMParameterSpec(128, iv));
+            byte[] wrapped = cipher.doFinal(accountKey);
+            byte[] header = "ECL-LOCAL-2\n".getBytes(StandardCharsets.US_ASCII);
+            Files.write(keyFile, ByteBuffer.allocate(header.length + iv.length + wrapped.length)
+                    .put(header).put(iv).put(wrapped).array());
+            CryptoUtil.resetKeyCache();
+
+            String encrypted = CryptoUtil.encrypt("migrated-secret");
+
+            assertEquals("migrated-secret", CryptoUtil.decrypt(encrypted));
+            byte[] migrated = Files.readAllBytes(keyFile);
+            assertTrue(new String(migrated, 0, "ECL-LOCAL-3\n".length(),
+                    StandardCharsets.US_ASCII).startsWith("ECL-LOCAL-3"));
         } finally {
             if (originalOsName == null) {
                 System.clearProperty("os.name");

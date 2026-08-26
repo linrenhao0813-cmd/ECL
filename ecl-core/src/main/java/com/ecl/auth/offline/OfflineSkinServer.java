@@ -109,13 +109,15 @@ public final class OfflineSkinServer implements AutoCloseable {
 
     @Override
     public void close() {
-        synchronized (OfflineSkinServer.class) {
-            if (shared == this) {
-                shared = null;
-                sharedUsers = 0;
-            }
-        }
+        clearSharedReference(this);
         stopServer();
+    }
+
+    private static synchronized void clearSharedReference(OfflineSkinServer server) {
+        if (shared == server) {
+            shared = null;
+            sharedUsers = 0;
+        }
     }
 
     private void stopServer() {
@@ -483,7 +485,7 @@ public final class OfflineSkinServer implements AutoCloseable {
             signature.initSign(keyPair.getPrivate(), new SecureRandom());
             signature.update(data.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(signature.sign());
-        } catch (Exception failure) {
+        } catch (java.security.GeneralSecurityException | RuntimeException failure) {
             throw new IllegalStateException("Cannot sign texture property", failure);
         }
     }

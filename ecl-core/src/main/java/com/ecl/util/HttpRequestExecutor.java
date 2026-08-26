@@ -47,7 +47,7 @@ final class HttpRequestExecutor {
             HttpResponse<InputStream> response = HttpClientProvider
                     .forConnectTimeout(connectTimeout)
                     .send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
-            URI resolvedUri = response.uri();
+            URI resolvedUri = checkedResponseUri(response, url);
             long declaredLength = response.headers().firstValueAsLong("Content-Length")
                     .orElse(-1L);
             if (declaredLength > maxResponseBytes) {
@@ -56,7 +56,7 @@ final class HttpRequestExecutor {
             }
             return new HttpUtil.Response(response.statusCode(),
                     readStream(response.body(), maxResponseBytes),
-                    resolvedUri == null ? url : resolvedUri.toString(),
+                    resolvedUri.toString(),
                     response.headers().map());
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -70,7 +70,7 @@ final class HttpRequestExecutor {
         }
         DownloadRateLimiter.checkInterrupted();
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+                .uri(checkedUri(url, "HTTP request URL"))
                 .timeout(Duration.ofMillis(HttpClientProvider.DEFAULT_READ_TIMEOUT_MS))
                 .header("User-Agent", "ECL/1.0")
                 .header("Accept",
@@ -111,13 +111,35 @@ final class HttpRequestExecutor {
         }
         DownloadRateLimiter.checkInterrupted();
         HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+                .uri(checkedUri(url, "HTTP multipart URL"))
                 .timeout(Duration.ofMillis(HttpClientProvider.DEFAULT_READ_TIMEOUT_MS))
                 .header("User-Agent", "ECL/1.0")
                 .header("Accept", "application/json")
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary);
         if (headers != null) {
             headers.forEach(builder::header);
+        }
+        try {
+            HttpResponse<InputStream> response = HttpClientProvider.defaultClient().send(
+                    builder.POST(HttpRequest.BodyPublishers.ofByteArray(body)).build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+            return boundedResponse(response, url, DEFAULT_MAX_RESPONSE_BYTES);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("HTTP request interrupted", interrupted);
+        }
+    }
+
+    static HttpUtil.Response postBytes(String url, String contentType, byte[] body)
+            throws IOException {
+        if (body == null) {
+            throw new IllegalArgumentException("HTTP body is null");
+        }
+        DownloadRateLimiter.checkInterrupted();
+        HttpRequest.Builder builder = baseRequest(
+                url, HttpClientProvider.DEFAULT_READ_TIMEOUT_MS, Map.of());
+        if (contentType != null) {
+            builder.header("Content-Type", contentType);
         }
         try {
             HttpResponse<InputStream> response = HttpClientProvider.defaultClient().send(
@@ -148,7 +170,7 @@ final class HttpRequestExecutor {
         try {
             DownloadRateLimiter.checkInterrupted();
             HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+                    .uri(checkedUri(url, "HTTP request URL"))
                     .timeout(requestTimeout == null
                             ? Duration.ofMillis(HttpClientProvider.DEFAULT_READ_TIMEOUT_MS)
                             : requestTimeout);
@@ -196,6 +218,7 @@ final class HttpRequestExecutor {
     private static HttpUtil.Response boundedResponse(
             HttpResponse<InputStream> response, String originalUrl, int maxResponseBytes)
             throws IOException {
+        URI resolvedUri = checkedResponseUri(response, originalUrl);
         long declaredLength = response.headers().firstValueAsLong("Content-Length")
                 .orElse(-1L);
         if (declaredLength > maxResponseBytes) {
@@ -205,7 +228,7 @@ final class HttpRequestExecutor {
         }
         return new HttpUtil.Response(response.statusCode(),
                 readStream(response.body(), maxResponseBytes),
-                response.uri() == null ? originalUrl : response.uri().toString(),
+                resolvedUri.toString(),
                 response.headers().map());
     }
 
@@ -242,9 +265,10 @@ final class HttpRequestExecutor {
     }
 
     private static HttpRequest.Builder baseRequest(String url, int timeout,
-                                                   Map<String, String> headers) {
+                                                   Map<String, String> headers)
+            throws IOException {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+                .uri(checkedUri(url, "HTTP request URL"))
                 .timeout(Duration.ofMillis(timeout))
                 .header("User-Agent", "ECL/1.0")
                 .header("Accept", "application/json");
@@ -252,6 +276,27 @@ final class HttpRequestExecutor {
             headers.forEach(builder::header);
         }
         return builder;
+    }
+
+    private static URI checkedUri(String url, String description) throws IOException {
+        try {
+            return NetworkUriPolicy.requireHttpsOrLoopbackHttp(URI.create(url), description);
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException(description + " is invalid: " + url, invalid);
+        }
+    }
+
+    private static URI checkedResponseUri(
+            HttpResponse<InputStream> response, String originalUrl) throws IOException {
+        try {
+            return response.uri() == null
+                    ? checkedUri(originalUrl, "HTTP request URL")
+                    : NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                            response.uri(), "HTTP response URL");
+        } catch (IOException unsafeResponse) {
+            response.body().close();
+            throw unsafeResponse;
+        }
     }
 
     private static void applyMethod(HttpRequest.Builder builder, String method, String body) {

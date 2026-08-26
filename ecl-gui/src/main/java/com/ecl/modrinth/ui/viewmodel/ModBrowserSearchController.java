@@ -12,6 +12,7 @@ import javafx.collections.ObservableList;
 
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -28,7 +29,7 @@ final class ModBrowserSearchController {
     private final java.util.function.Function<Throwable, String> errorFormatter;
     private final AtomicLong generation = new AtomicLong();
     private ModMetadataProvider provider;
-    private int offset;
+    private final AtomicInteger offset = new AtomicInteger();
     private String category = "";
 
     ModBrowserSearchController(ModMetadataProvider provider, StringProperty searchText,
@@ -60,7 +61,7 @@ final class ModBrowserSearchController {
 
     void reset() {
         generation.incrementAndGet();
-        offset = 0;
+        offset.set(0);
         results.clear();
     }
 
@@ -72,7 +73,7 @@ final class ModBrowserSearchController {
             return;
         }
         if (!append) {
-            offset = 0;
+            offset.set(0);
             results.clear();
         }
         long requestGeneration = generation.incrementAndGet();
@@ -80,7 +81,7 @@ final class ModBrowserSearchController {
         operations.begin("正在搜索兼容模组…", true);
         Set<String> categories = category.isBlank() ? Set.of() : Set.of(category);
         ModSearchQuery query = new ModSearchQuery(searchText.get(), context.minecraftVersion(),
-                context.loaderName(), categories, sortIndex.get(), offset, 20);
+                context.loaderName(), categories, sortIndex.get(), offset.get(), 20);
         var request = provider.search(query).whenComplete((result, error) -> Platform.runLater(() -> {
             if (requestGeneration != generation.get()) {
                 return;
@@ -95,7 +96,7 @@ final class ModBrowserSearchController {
             } else {
                 results.setAll(result.hits());
             }
-            offset += result.hits().size();
+            offset.addAndGet(result.hits().size());
             setOperation.accept(result.hits().isEmpty()
                     ? "没有找到兼容结果" : "已加载 " + results.size() + " 个结果");
         }));

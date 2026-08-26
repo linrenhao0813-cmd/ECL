@@ -101,9 +101,13 @@ public final class ResourceBundleI18n implements I18n {
 
     private static Properties load(String resource) {
         Properties properties = new Properties();
-        try (InputStream input = ResourceBundleI18n.class.getClassLoader().getResourceAsStream(resource)) {
-            if (input != null) {
-                properties.load(new InputStreamReader(input, StandardCharsets.UTF_8));
+        try (InputStream input = ResourceBundleI18n.class.getClassLoader()
+                .getResourceAsStream(resource)) {
+            if (input == null) {
+                return properties;
+            }
+            try (InputStreamReader reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
+                properties.load(reader);
             }
         } catch (IOException failure) {
             LOGGER.warn("Failed to load message resource bundle {}", resource, failure);

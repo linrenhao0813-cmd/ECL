@@ -178,6 +178,8 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
                         update.availableVersion().id(),
                         () -> instanceRunning.test(instanceId), listener);
             } catch (Exception error) {
+                // Broad catch is required: operationLock.acquire() returns AutoCloseable whose close() declares Exception,
+                // and the install transaction may throw multiple checked types. Preserve full failure for CompletionException.
                 throw new java.util.concurrent.CompletionException(error);
             } finally {
                 if (temporary != null) {

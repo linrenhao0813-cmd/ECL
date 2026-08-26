@@ -29,7 +29,6 @@ import com.ecl.modrinth.ui.ChineseDescriptionService;
 import com.ecl.modrinth.ui.ModBrowserView;
 import com.ecl.modrinth.ui.RemoteImageLoader;
 import com.ecl.server.ServerBrowserView;
-import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.Messages;
 import com.ecl.util.NetworkUriPolicy;
 import javafx.animation.Animation;
@@ -121,7 +120,6 @@ class LauncherUIView extends javafx.application.Application {
     VersionManager versionManager;
     DownloadService downloader;
     DownloadTaskCenter downloadTaskCenter;
-    private ModrinthDownloader modrinthDownloader;
     ServerJarDownloader serverJarDownloader;
     ModLoaderInstaller modLoaderInstaller;
     MrpackInstaller mrpackInstaller;
@@ -172,11 +170,11 @@ class LauncherUIView extends javafx.application.Application {
     Label gameDirSummaryLabel;
     Label versionSummaryLabel;
     Label memorySummaryLabel;
-    private Label jvmArgsSummaryLabel;
-    private Label runtimeBadgeLabel;
-    private Label topAuthBadgeLabel;
-    private Label topVersionBadgeLabel;
-    private Label topMemoryBadgeLabel;
+    Label jvmArgsSummaryLabel;
+    Label runtimeBadgeLabel;
+    Label topAuthBadgeLabel;
+    Label topVersionBadgeLabel;
+    Label topMemoryBadgeLabel;
     Label selectedVersionTitleLabel;
     Label selectedRuntimeMetaLabel;
     Label launchReadinessLabel;
@@ -194,6 +192,8 @@ class LauncherUIView extends javafx.application.Application {
     private final HomePageFactory homePageFactory = new HomePageFactory((LauncherUI) this);
     private final ContentLibraryPageFactory contentLibraryPageFactory =
             new ContentLibraryPageFactory((LauncherUI) this);
+    private final RuntimeSummaryPresenter runtimeSummaryPresenter =
+            new RuntimeSummaryPresenter((LauncherUI) this);
     TitledPane instanceSettingsPane;
     VBox homePage;
     private HBox workspacePane;
@@ -241,7 +241,6 @@ class LauncherUIView extends javafx.application.Application {
         downloadTaskCenter = controller.downloadTasks();
         downloadTaskCenter.addListener(this::onDownloadTasksChanged);
         applyRequestedInstanceArgument();
-        modrinthDownloader = controller.modrinthDownloader();
         serverJarDownloader = new ServerJarDownloader(versionManager);
         modLoaderInstaller = new ModLoaderInstaller();
         mrpackInstaller = new MrpackInstaller();
@@ -1107,7 +1106,9 @@ class LauncherUIView extends javafx.application.Application {
         VersionManager.VersionCategory previousCategory = versionTypeCombo == null || versionTypeCombo.getValue() == null
                 ? versionActions.parseVersionCategory(settingsManager.get(ECLConfig.KEY_VERSION_CATEGORY))
                 : versionTypeCombo.getValue();
-        String previousAuthType = authTypeCombo == null ? normalizeAuthType(settingsManager.get(ECLConfig.KEY_AUTH_TYPE)) : normalizeAuthType(authTypeCombo.getValue());
+        String previousAuthType = authTypeCombo == null
+                ? normalizeAuthType(settingsManager.get(ECLConfig.KEY_AUTH_TYPE))
+                : normalizeAuthType(authTypeCombo.getValue());
         String previousUsername = usernameField == null
                 ? settingsManager.get(ECLConfig.KEY_USERNAME)
                 : usernameField.getText();
@@ -1482,7 +1483,7 @@ class LauncherUIView extends javafx.application.Application {
         setControlsBusy(true);
         startProgressAnimation(downloadProgress);
         setStatus("正在安装加载器", loader.displayName() + " / Minecraft " + minecraftVersion);
-        DownloadTaskCenter.TaskHandle<Void> loaderTask = downloadTaskCenter.submit(
+        downloadTaskCenter.submit(
                 "Loader " + loader.displayName(), () -> context -> {
             try {
                 ModLoaderInstaller.InstallResult result = modLoaderInstaller.install(
@@ -1658,87 +1659,7 @@ class LauncherUIView extends javafx.application.Application {
     }
 
     void updateRuntimeSummary() {
-        String launcherJava = "启动器 Java " + Runtime.version().feature();
-        if (javaSummaryLabel != null) {
-            javaSummaryLabel.setText(launcherJava);
-            javaSummaryLabel.setTooltip(javaPath == null || javaPath.isBlank()
-                    ? null
-                    : new Tooltip(javaPath));
-        }
-        setSummaryText(gameDirSummaryLabel, getActiveGameDir().getAbsolutePath(), 68);
-
-        String selectedVersion = versionCombo == null ? null : versionCombo.getValue();
-        String versionDisplay = selectedVersion == null || selectedVersion.isBlank()
-                ? Messages.get("home.versionPending")
-                : versionManager.getVersionDisplayName(selectedVersion);
-        if (versionSummaryLabel != null) {
-            versionSummaryLabel.setText(abbreviate(versionDisplay, 26));
-            versionSummaryLabel.setTooltip(selectedVersion == null ? null : new Tooltip(selectedVersion));
-        }
-        if (selectedVersionTitleLabel != null) {
-            selectedVersionTitleLabel.setText(selectedVersion == null || selectedVersion.isBlank()
-                    ? Messages.get("home.selectVersion")
-                    : versionDisplay);
-        }
-        String memoryText = gameLaunch.getMemoryDisplayText();
-        if (selectedRuntimeMetaLabel != null) {
-            selectedRuntimeMetaLabel.setText(Messages.format("home.runtimeMeta", launcherJava, memoryText));
-        }
-        if (topVersionBadgeLabel != null) {
-            topVersionBadgeLabel.setText(selectedVersion == null || selectedVersion.isBlank()
-                    ? Messages.get("label.notSelected")
-                    : abbreviate(versionDisplay, 16));
-        }
-        String accountName = getAuthDisplayName();
-        if (topAuthBadgeLabel != null) {
-            topAuthBadgeLabel.setText(accountName);
-        }
-        if (homeAccountNameLabel != null) {
-            homeAccountNameLabel.setText(accountName);
-        }
-        if (homeAccountTypeLabel != null) {
-            homeAccountTypeLabel.setText(getAuthModeLabel());
-        }
-        if (homeAccountAvatarLabel != null) {
-            homeAccountAvatarLabel.setText(accountName.isBlank()
-                    ? "E"
-                    : accountName.substring(0, 1).toUpperCase(Locale.ROOT));
-        }
-        if (memorySummaryLabel != null) {
-            memorySummaryLabel.setText(memoryText);
-        }
-        if (topMemoryBadgeLabel != null) {
-            topMemoryBadgeLabel.setText(memoryText);
-        }
-        if (jvmArgsSummaryLabel != null) {
-            jvmArgsSummaryLabel.setText(extraJvmArgs == null || extraJvmArgs.isBlank()
-                    ? Messages.get("label.notSet") : abbreviate(extraJvmArgs, 68));
-            jvmArgsSummaryLabel.setTooltip(extraJvmArgs == null || extraJvmArgs.isBlank() ? null : new Tooltip(extraJvmArgs));
-        }
-
-        boolean configuredJava = JavaRuntimeUtil.isUsableJavaPath(javaPath);
-        if (runtimeBadgeLabel != null) {
-            runtimeBadgeLabel.setText(configuredJava
-                    ? String.valueOf(Runtime.version().feature())
-                    : Messages.get("label.auto"));
-        }
-        if (homeEnvironmentStatusLabel != null) {
-            homeEnvironmentStatusLabel.setText(configuredJava
-                    ? Messages.get("home.envConfigured") : Messages.get("home.envAutoPrepare"));
-        }
-
-        String readiness = Messages.get("home.readiness.pendingInstance");
-        if (gameLaunch.isGameProcessRunning()) {
-            readiness = Messages.get("home.readiness.running");
-        } else if (selectedVersion != null && !selectedVersion.isBlank()) {
-            readiness = versionManager.isVersionDownloaded(selectedVersion)
-                    ? Messages.get("home.readiness.installed")
-                    : Messages.get("home.readiness.prepareFirst");
-        }
-        if (launchReadinessLabel != null) {
-            launchReadinessLabel.setText("●  " + readiness);
-        }
-        gameLaunch.updatePlaytimeSummary();
+        runtimeSummaryPresenter.update();
     }
 
     String getAuthDisplayName() {
@@ -1755,26 +1676,6 @@ class LauncherUIView extends javafx.application.Application {
             username = AUTH_MICROSOFT.equals(authType) ? "Microsoft" : "Steve";
         }
         return abbreviate(username.trim(), 18);
-    }
-
-    private String getAuthModeLabel() {
-        String authType = authTypeCombo == null ? AUTH_OFFLINE : authTypeCombo.getValue();
-        if (AUTH_MICROSOFT.equals(authType)) {
-            return "Microsoft 账号";
-        }
-        if (AUTH_YGGDRASIL.equals(authType)) {
-            return "外置登录";
-        }
-        return "离线登录";
-    }
-
-    private void setSummaryText(Label label, String value, int maxLength) {
-        if (label == null) {
-            return;
-        }
-        String display = (value == null || value.isBlank()) ? "未设置" : abbreviate(value, maxLength);
-        label.setText(display);
-        label.setTooltip((value == null || value.isBlank()) ? null : new Tooltip(value));
     }
 
     void setStatus(String title, String detail) {
@@ -2460,7 +2361,7 @@ class LauncherUIView extends javafx.application.Application {
                 project.getTitle() + " " + selectedVersion.versionNumber()
                         + " -> " + gameVersion + loaderLabel);
 
-        DownloadTaskCenter.TaskHandle<Void> contentTask = downloadTaskCenter.submit(
+        downloadTaskCenter.submit(
                 "Content " + project.getTitle(), () -> context -> {
             if (generation != downloadGeneration.get()) {
                 // The download dialog was closed; do not start the transfer or touch the UI.

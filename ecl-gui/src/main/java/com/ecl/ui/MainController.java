@@ -238,9 +238,12 @@ public final class MainController implements AutoCloseable {
 
     public ReleaseChannel preferredModReleaseChannel() {
         String configured = settingsManager.get(ECLConfig.KEY_MOD_RELEASE_CHANNEL);
+        if (configured == null || configured.isBlank()) {
+            return ReleaseChannel.RELEASE_AND_BETA;
+        }
         try {
             return ReleaseChannel.valueOf(configured);
-        } catch (IllegalArgumentException | NullPointerException ignored) {
+        } catch (IllegalArgumentException ignored) {
             // An invalid or missing saved channel falls back to the default.
             return ReleaseChannel.RELEASE_AND_BETA;
         }

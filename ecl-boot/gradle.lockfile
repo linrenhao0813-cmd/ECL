@@ -3,18 +3,17 @@
 # This file is expected to be part of source control.
 ch.qos.logback:logback-classic:1.5.25=runtimeClasspath,testRuntimeClasspath
 ch.qos.logback:logback-core:1.5.25=runtimeClasspath,testRuntimeClasspath
-com.fasterxml.jackson.core:jackson-annotations:2.18.9=runtimeClasspath,testRuntimeClasspath
-com.fasterxml.jackson.core:jackson-core:2.18.9=runtimeClasspath,testRuntimeClasspath
-com.fasterxml.jackson.core:jackson-databind:2.18.9=runtimeClasspath,testRuntimeClasspath
-com.fasterxml.jackson:jackson-bom:2.18.9=runtimeClasspath,testRuntimeClasspath
+com.fasterxml.jackson.core:jackson-annotations:2.19.1=runtimeClasspath,testRuntimeClasspath
+com.fasterxml.jackson.core:jackson-core:2.19.1=runtimeClasspath,testRuntimeClasspath
+com.fasterxml.jackson.core:jackson-databind:2.19.1=runtimeClasspath,testRuntimeClasspath
+com.fasterxml.jackson:jackson-bom:2.19.1=runtimeClasspath,testRuntimeClasspath
 com.github.spotbugs:spotbugs-annotations:4.9.8=spotbugs
 com.github.spotbugs:spotbugs:4.9.8=spotbugs
 com.github.stephenc.jcip:jcip-annotations:1.0-1=spotbugs
 com.google.code.findbugs:jsr305:3.0.2=checkstyle,spotbugs
-com.google.code.gson:gson:2.10.1=runtimeClasspath,testRuntimeClasspath
-com.google.code.gson:gson:2.13.2=spotbugs
+com.google.code.gson:gson:2.13.2=runtimeClasspath,spotbugs,testRuntimeClasspath
 com.google.errorprone:error_prone_annotations:2.36.0=checkstyle
-com.google.errorprone:error_prone_annotations:2.41.0=spotbugs
+com.google.errorprone:error_prone_annotations:2.41.0=runtimeClasspath,spotbugs,testRuntimeClasspath
 com.google.guava:failureaccess:1.0.3=checkstyle
 com.google.guava:guava:33.4.8-jre=checkstyle
 com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava=checkstyle

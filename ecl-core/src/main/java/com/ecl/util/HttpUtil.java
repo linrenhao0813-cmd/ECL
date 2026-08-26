@@ -72,6 +72,11 @@ public class HttpUtil {
         return postJson(urlStr, COMPACT_GSON.toJson(body));
     }
 
+    /** Post a UTF-8 JSON payload whose backing array can be wiped by the caller after return. */
+    public static String postJsonBytes(String urlStr, byte[] body) throws IOException {
+        return HttpJsonClient.postJsonBytes(urlStr, body);
+    }
+
     public static Response postForm(String urlStr, Map<String, String> form)
             throws IOException {
         return HttpJsonClient.postForm(urlStr, form);

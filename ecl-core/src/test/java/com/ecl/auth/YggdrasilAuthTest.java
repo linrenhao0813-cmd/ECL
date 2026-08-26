@@ -1,8 +1,14 @@
 package com.ecl.auth;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetSocketAddress;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,5 +41,39 @@ class YggdrasilAuthTest {
                 () -> YggdrasilAuth.normalizeAuthServer("http://127.0.0.1.attacker.example/authserver"));
         assertThrows(IllegalArgumentException.class,
                 () -> YggdrasilAuth.normalizeAuthServer("https://user@example.invalid/authserver"));
+    }
+
+    @Test
+    void authenticationStreamsAndEscapesMutablePasswordPayload() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        server.createContext("/authenticate", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8));
+            byte[] response = """
+                    {"accessToken":"access","clientToken":"returned-client",
+                     "selectedProfile":{"id":"profile-id","name":"Player"}}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            char[] password = {'s', 'e', 'c', 'r', 'e', 't', '"', '\\', '\n', '密'};
+            YggdrasilAuth auth = new YggdrasilAuth(
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/");
+
+            auth.authenticate("player@example.invalid", password);
+
+            JsonObject payload = JsonParser.parseString(requestBody.get()).getAsJsonObject();
+            assertEquals(new String(password), payload.get("password").getAsString());
+            assertEquals("player@example.invalid", payload.get("username").getAsString());
+            Field storedPassword = YggdrasilAuth.class.getDeclaredField("password");
+            storedPassword.setAccessible(true);
+            assertNull(storedPassword.get(auth));
+        } finally {
+            server.stop(0);
+        }
     }
 }

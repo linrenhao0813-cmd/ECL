@@ -117,6 +117,7 @@ public final class ModInstallationService {
         } catch (ModInstallationException | ModConflictException e) {
             throw e;
         } catch (Exception e) {
+            // Broad catch is required: operationLock AutoCloseable.close() declares Exception.
             throw installationFailure(e);
         }
     }

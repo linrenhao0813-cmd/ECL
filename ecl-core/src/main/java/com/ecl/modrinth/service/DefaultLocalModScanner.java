@@ -173,6 +173,7 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             }
             return new LocalModScanResult(records, items, duplicates, warnings);
         } catch (Exception e) {
+            // Broad catch is required: operationLock.acquire() AutoCloseable.close() declares Exception.
             throw new com.ecl.modrinth.api.ModInstallationException("扫描本地模组失败", e);
         }
     }
