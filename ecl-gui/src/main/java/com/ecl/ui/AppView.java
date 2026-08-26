@@ -4,6 +4,7 @@ import com.ecl.util.Messages;
 
 /** Top-level launcher navigation destinations. */
 enum AppView {
+    SAVES("/icons/ui/grass-block.png", "S", "nav.saves"),
     DOWNLOADS("/icons/ui/log.png", "D", "nav.downloads"),
     HOME("/icons/ui/home.png", "⌂", "nav.home"),
     VERSIONS("/icons/ui/stone-block.png", "□", "nav.versions"),

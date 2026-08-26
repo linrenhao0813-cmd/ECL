@@ -41,6 +41,11 @@ public final class DefaultGameRepository implements GameRepository {
         return sharedGameDirectory.resolve("versions").resolve(requireSafeVersionId(versionId)).normalize();
     }
 
+    /** The shared run directory used by unisolated instances. */
+    public Path sharedGameDirectory() {
+        return sharedGameDirectory;
+    }
+
     @Override
     public Path runDirectory(String versionId) throws IOException {
         Path root = instanceRoot(versionId);

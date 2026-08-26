@@ -157,6 +157,21 @@ public final class LauncherUiSnapshot {
                 showAppView("VERSIONS");
                 return primaryStage.getScene();
             }
+            if ("saves".equalsIgnoreCase(mode)) {
+                createVisualProfile("visual-save-vanilla", "", "1.20.1");
+                createVisualProfile("visual-save-fabric", "fabric", "1.20.1");
+                Field gameDirField = LauncherUIView.class.getDeclaredField("gameDir");
+                gameDirField.setAccessible(true);
+                File gameRoot = (File) gameDirField.get(this);
+                createVisualSave(gameRoot.toPath().resolve("saves/Alpine Base"));
+                createVisualSave(gameRoot.toPath().resolve("versions/visual-save-fabric/saves/Modded Valley"));
+                Files.createDirectories(gameRoot.toPath().resolve("versions/visual-save-fabric/saves/Modded Valley/.ecl"));
+                Files.writeString(gameRoot.toPath().resolve(
+                        "versions/visual-save-fabric/saves/Modded Valley/.ecl/world-settings.json"),
+                        "{\"openToLan\":true}");
+                showAppView("SAVES");
+                return primaryStage.getScene();
+            }
             if ("downloads".equalsIgnoreCase(mode)) {
                 showAppView("DOWNLOADS");
                 return primaryStage.getScene();
@@ -289,7 +304,7 @@ public final class LauncherUiSnapshot {
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
 
-                Field gameDirField = LauncherUI.class.getDeclaredField("gameDir");
+                Field gameDirField = LauncherUIView.class.getDeclaredField("gameDir");
                 gameDirField.setAccessible(true);
                 File gameRoot = (File) gameDirField.get(this);
                 Path saves = gameRoot.toPath().resolve("versions").resolve(profileId)
@@ -329,6 +344,11 @@ public final class LauncherUiSnapshot {
             return profileId;
         }
 
+        private void createVisualSave(Path directory) throws IOException {
+            Files.createDirectories(directory);
+            Files.writeString(directory.resolve("level.dat"), "visual snapshot fixture");
+        }
+
         private void createVisualServerVersion(String versionId) throws IOException {
             Path versionDirectory = ECLConfig.getVersionsDir().toPath().resolve(versionId);
             Files.createDirectories(versionDirectory);
@@ -364,7 +384,7 @@ public final class LauncherUiSnapshot {
             Class<? extends Enum> viewType = (Class<? extends Enum>) Class.forName(
                     "com.ecl.ui.AppView");
             Object view = Enum.valueOf(viewType, name);
-            Method setActiveView = LauncherUI.class.getDeclaredMethod("setActiveView", viewType);
+            Method setActiveView = LauncherUIView.class.getDeclaredMethod("setActiveView", viewType);
             setActiveView.setAccessible(true);
             setActiveView.invoke(this, view);
         }

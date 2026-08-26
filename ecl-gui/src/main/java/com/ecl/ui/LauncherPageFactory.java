@@ -27,6 +27,10 @@ final class LauncherPageFactory {
         return new DownloadTasksPage(ui.downloadTaskCenter, ui.settingsManager);
     }
 
+    WorldSavesPage createWorldSavesPage() {
+        return new WorldSavesPage((LauncherUI) ui);
+    }
+
     VBox createVersionsPage() {
         VBox page = ui.createMainPage();
 

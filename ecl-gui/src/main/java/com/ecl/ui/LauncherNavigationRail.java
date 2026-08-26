@@ -59,6 +59,7 @@ final class LauncherNavigationRail {
     private static String titleFor(AppView view) {
         return switch (view) {
             case HOME -> Messages.get("nav.short.home");
+            case SAVES -> Messages.get("nav.short.saves");
             case VERSIONS -> Messages.get("nav.short.versions");
             case DOWNLOADS -> Messages.get("nav.short.downloads");
             case MODRINTH -> Messages.get("nav.short.modrinth");

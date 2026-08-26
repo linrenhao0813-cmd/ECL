@@ -554,6 +554,7 @@ class LauncherUIView extends javafx.application.Application {
 
         switch (activeView) {
             case HOME -> addMainContent(homePageFactory.getOrCreate(), null);
+            case SAVES -> addMainContent(pageFactory.createWorldSavesPage(), null);
             case VERSIONS -> addMainContent(pageFactory.createVersionsPage(), null);
             case DOWNLOADS -> {
                 downloadTasksPage = pageFactory.createDownloadTasksPage();
