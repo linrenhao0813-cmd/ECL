@@ -1,6 +1,7 @@
 package com.ecl.ui;
 
 import com.ecl.ECLConfig;
+import com.ecl.download.DownloadTaskCenter;
 import com.ecl.modrinth.model.ContentProject;
 import com.ecl.modrinth.model.ContentVersion;
 import com.ecl.modrinth.provider.ContentSource;
@@ -24,6 +25,7 @@ import java.io.IOException;
 import java.net.URL;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javafx.geometry.Insets;
 
@@ -261,17 +263,10 @@ final class LauncherContentBrowser {
         AtomicLong downloadGeneration = new AtomicLong();
         AtomicLong activeDownloadGeneration = new AtomicLong();
         AtomicLong descriptionGeneration = new AtomicLong();
-        dialog.setOnHidden(e -> {
-            searchGeneration.incrementAndGet();
-            versionGeneration.incrementAndGet();
-            downloadGeneration.incrementAndGet();
-            descriptionGeneration.incrementAndGet();
-            if (activeDownloadGeneration.getAndSet(0) != 0) {
-                ui.stopProgressAnimation(modProgress, true);
-                ui.stopProgressAnimation(ui.downloadProgress, true);
-                ui.setControlsBusy(false);
-            }
-        });
+        AtomicReference<DownloadTaskCenter.TaskHandle<?>> activeDownloadTask = new AtomicReference<>();
+        configureDialogCancellation(dialog, searchGeneration, versionGeneration,
+                downloadGeneration, descriptionGeneration, activeDownloadTask,
+                activeDownloadGeneration, modProgress);
         Label dialogStatus = new Label("正在加载 Modrinth 列表");
         dialogStatus.getStyleClass().add("status-detail");
         dialogStatus.setWrapText(true);
@@ -339,21 +334,9 @@ final class LauncherContentBrowser {
             searchController.searchModrinthContent(sourceCombo.getValue(), target, inst,
                     searchField, resultList, dialogStatus, searchBtn, importBtn, searchGeneration);
         });
-        importBtn.setOnAction(e -> {
-            ContentInstance inst = downloadWorkflow.resolveContentInstance(targetProfileCombo.getValue());
-            File importDir = target.folderResolver.apply(inst.profileId());
-            try {
-                ui.ensureDirectory(importDir);
-            } catch (IOException error) {
-                dialogStatus.setText("无法创建目录: " + ui.cleanMessage(error));
-                return;
-            }
-            downloadWorkflow.downloadSelectedContent(sourceCombo.getValue(), target,
-                    resultList.getSelectionModel().getSelectedItem(),
-                    projectVersionCombo.getValue(), inst, importDir, dialogStatus,
-                    modProgress, searchBtn, importBtn, targetProfileCombo,
-                    downloadGeneration, activeDownloadGeneration);
-        });
+        configureImportAction(importBtn, targetProfileCombo, sourceCombo, target, resultList,
+                projectVersionCombo, dialogStatus, modProgress, searchBtn, downloadGeneration,
+                activeDownloadGeneration, activeDownloadTask);
         HBox actions = new HBox(10, importBtn, folderBtn, closeBtn);
         actions.setAlignment(Pos.CENTER_RIGHT);
         VBox dialogRoot = new VBox(14,
@@ -376,5 +359,49 @@ final class LauncherContentBrowser {
         dialog.show();
         searchController.searchModrinthContent(sourceCombo.getValue(), target, initialInstance,
                 searchField, resultList, dialogStatus, searchBtn, importBtn, searchGeneration);
+    }
+
+    private void configureDialogCancellation(
+            Stage dialog, AtomicLong searchGeneration, AtomicLong versionGeneration,
+            AtomicLong downloadGeneration, AtomicLong descriptionGeneration,
+            AtomicReference<DownloadTaskCenter.TaskHandle<?>> activeDownloadTask,
+            AtomicLong activeDownloadGeneration, ProgressBar modProgress) {
+        dialog.setOnHidden(e -> {
+            searchGeneration.incrementAndGet();
+            versionGeneration.incrementAndGet();
+            downloadGeneration.incrementAndGet();
+            descriptionGeneration.incrementAndGet();
+            DownloadTaskCenter.TaskHandle<?> task = activeDownloadTask.getAndSet(null);
+            if (task != null) task.cancel();
+            if (activeDownloadGeneration.getAndSet(0) != 0) {
+                ui.stopProgressAnimation(modProgress, true);
+                ui.stopProgressAnimation(ui.downloadProgress, true);
+                ui.setControlsBusy(false);
+            }
+        });
+    }
+
+    private void configureImportAction(
+            Button importBtn, ComboBox<String> targetProfileCombo, ComboBox<ContentSource> sourceCombo,
+            ContentTarget target, ListView<ContentProject> resultList,
+            ComboBox<ContentVersion> projectVersionCombo, Label dialogStatus, ProgressBar modProgress,
+            Button searchBtn, AtomicLong downloadGeneration, AtomicLong activeDownloadGeneration,
+            AtomicReference<DownloadTaskCenter.TaskHandle<?>> activeDownloadTask) {
+        importBtn.setOnAction(e -> {
+            ContentInstance inst = downloadWorkflow.resolveContentInstance(targetProfileCombo.getValue());
+            File importDir = target.folderResolver.apply(inst.profileId());
+            try {
+                ui.ensureDirectory(importDir);
+            } catch (IOException error) {
+                dialogStatus.setText("无法创建目录: " + ui.cleanMessage(error));
+                return;
+            }
+            DownloadTaskCenter.TaskHandle<?> task = downloadWorkflow.downloadSelectedContent(
+                    sourceCombo.getValue(), target, resultList.getSelectionModel().getSelectedItem(),
+                    projectVersionCombo.getValue(), inst, importDir, dialogStatus, modProgress,
+                    searchBtn, importBtn, targetProfileCombo, downloadGeneration,
+                    activeDownloadGeneration);
+            activeDownloadTask.set(task);
+        });
     }
 }

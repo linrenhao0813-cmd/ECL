@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A process-wide download job queue.  Download implementations remain responsible
@@ -103,6 +104,12 @@ public final class DownloadTaskCenter implements AutoCloseable {
 
     private <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory,
                                      int previousAttempts) {
+        return submit(title, operationFactory, previousAttempts, null);
+    }
+
+    private <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory,
+                                     int previousAttempts,
+                                     AtomicReference<DownloadTaskEntry<?>> familyCurrent) {
         Objects.requireNonNull(operationFactory, "operationFactory");
         DownloadTaskEntry<T> entry;
         synchronized (lock) {
@@ -110,10 +117,14 @@ public final class DownloadTaskCenter implements AutoCloseable {
             Operation<T> operation = Objects.requireNonNull(
                     operationFactory.create(), "operationFactory.create()");
             String id = "download-" + sequence.incrementAndGet();
-            entry = new DownloadTaskEntry<>(id, title == null || title.isBlank() ? "下载任务" : title, operation);
+            AtomicReference<DownloadTaskEntry<?>> family = familyCurrent == null
+                    ? new AtomicReference<>() : familyCurrent;
+            entry = new DownloadTaskEntry<>(id,
+                    title == null || title.isBlank() ? "下载任务" : title, operation, family);
             entry.operationFactory = operationFactory;
             entry.attempts = Math.max(0, previousAttempts);
             entries.put(id, entry);
+            family.set(entry);
             queue.addLast(entry);
         }
         // Always notify: when the concurrency limit is reached the new task remains queued and
@@ -204,8 +215,10 @@ public final class DownloadTaskCenter implements AutoCloseable {
         Runnable cancellationHook;
         boolean changed;
         synchronized (lock) {
-            entry = entries.get(taskId);
-            if (entry == null || DownloadTaskSnapshots.isTerminal(entry.status) || entry.status == Status.CANCELLING) {
+            DownloadTaskEntry<?> requested = entries.get(taskId);
+            entry = requested == null ? null : requested.familyCurrent.get();
+            if (entry == null || DownloadTaskSnapshots.isTerminal(entry.status)
+                    || entry.status == Status.CANCELLING) {
                 return false;
             }
             entry.cancelRequested = true;
@@ -239,11 +252,14 @@ public final class DownloadTaskCenter implements AutoCloseable {
         synchronized (lock) {
             original = entries.get(taskId);
             if (original == null || !DownloadTaskSnapshots.isTerminal(original.status)
-                    || original.status == Status.COMPLETED) {
+                    || original.status == Status.COMPLETED
+                    || original.familyCurrent.get() != original
+                    && !DownloadTaskSnapshots.isTerminal(original.familyCurrent.get().status)) {
                 return null;
             }
         }
-        return submit(original.title, original.operationFactory, original.attempts);
+        return submit(original.title, original.operationFactory, original.attempts,
+                original.familyCurrent);
     }
 
     public int clearFinished() {

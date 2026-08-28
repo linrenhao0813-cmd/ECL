@@ -6,6 +6,9 @@ import com.ecl.util.TextUtil;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
@@ -32,6 +35,14 @@ final class ModrinthDownloadSupport {
     static File requireTargetDirectory(File targetDir) throws IOException {
         if (targetDir == null) {
             throw new IOException("导入目录无效");
+        }
+        Path targetPath = targetDir.toPath().toAbsolutePath().normalize();
+        Path current = targetPath;
+        while (current != null && Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isSymbolicLink(current)) {
+                throw new IOException("导入目录不能包含符号链接: " + current);
+            }
+            current = current.getParent();
         }
         if (!targetDir.exists() && !targetDir.mkdirs()) {
             throw new IOException("无法创建导入目录: " + targetDir.getAbsolutePath());

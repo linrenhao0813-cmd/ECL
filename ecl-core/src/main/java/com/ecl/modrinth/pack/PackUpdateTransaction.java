@@ -8,11 +8,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.FileSystemException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -63,6 +66,11 @@ public final class PackUpdateTransaction implements AutoCloseable {
         if (this.instanceRoot.getParent() == null || this.profileFile.getParent() == null) {
             throw new IOException("Pack transaction roots must have parent directories");
         }
+        if (!this.profileFile.startsWith(this.versionsRoot)) {
+            throw new IOException("Pack profile metadata must be inside the versions directory");
+        }
+        MrpackPathPolicy.validateExistingAncestors(this.instanceRoot.getParent(), this.instanceRoot);
+        MrpackPathPolicy.validateExistingAncestors(this.versionsRoot, this.profileFile);
         this.failAfterAppliedEntries = failAfterAppliedEntries;
         Files.createDirectories(this.instanceRoot);
         Files.createDirectories(this.profileFile.getParent());
@@ -211,6 +219,14 @@ public final class PackUpdateTransaction implements AutoCloseable {
                 LOGGER.warn("Failed to read pack transaction journal {}", journalPath, error);
                 return;
             }
+        } else {
+            LOGGER.warn("Preserving pack transaction without a journal: {}", transactionDirectory);
+            try {
+                releaseDirectoryLock();
+            } catch (IOException error) {
+                LOGGER.warn("Failed to release pack transaction lock {}", transactionDirectory, error);
+            }
+            return;
         }
         try {
             cleanupDirectory(transactionDirectory);
@@ -258,6 +274,8 @@ public final class PackUpdateTransaction implements AutoCloseable {
             throws IOException {
         Path normalizedInstance = Objects.requireNonNull(instanceRoot, "instanceRoot")
                 .toAbsolutePath().normalize();
+        Path normalizedProfile = Objects.requireNonNull(profileFile, "profileFile")
+                .toAbsolutePath().normalize();
         Path root = normalizedInstance.getParent() == null ? null
                 : normalizedInstance.getParent().resolve(TRANSACTIONS_DIRECTORY).normalize();
         if (root == null || !Files.isDirectory(root)) {
@@ -268,15 +286,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
             if (operationLock == null) {
                 return;
             }
-            recoverTransactionDirectories(normalizedInstance, profileFile, root);
-        }
-        try (var remaining = Files.list(root)) {
-            for (Path directory : directories
-                    .filter(Files::isDirectory)
-                    .filter(path -> path.getFileName().toString().startsWith(prefix))
-                    .toList()) {
-                recoverDirectory(normalizedInstance, profileFile.toAbsolutePath().normalize(), directory);
-            }
+            recoverTransactionDirectories(normalizedInstance, normalizedProfile, root);
         }
         try (var remaining = Files.list(root)) {
             if (remaining.filter(path -> !path.getFileName().toString().endsWith(".lock"))
@@ -301,7 +311,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
 
     private static void recoverDirectory(Path instanceRoot, Path profileFile, Path directory)
             throws IOException {
-        try (FileLockLease lock = FileLockLease.tryAcquire(lockFile(directory))) {
+        try (FileLockLease lock = FileLockLease.tryAcquire(directoryLockFile(directory))) {
             if (lock == null) {
                 LOGGER.debug("Skipping active pack transaction {}", directory);
                 return;
@@ -314,7 +324,9 @@ public final class PackUpdateTransaction implements AutoCloseable {
             throws IOException {
         Path journalPath = directory.resolve(JOURNAL_FILE);
         if (!Files.isRegularFile(journalPath)) {
-            cleanupDirectory(directory);
+            // A crash can happen after a backup move and before the first journal rename. Keep
+            // the directory for inspection/recovery instead of deleting possible rollback data.
+            LOGGER.warn("Preserving pack transaction without a journal: {}", directory);
             return;
         }
         Journal journal = MAPPER.readValue(journalPath.toFile(), Journal.class);
@@ -348,8 +360,14 @@ public final class PackUpdateTransaction implements AutoCloseable {
         Path target = transactionDirectory.resolve(JOURNAL_FILE);
         Path temporary = Files.createTempFile(transactionDirectory, "journal-", ".tmp");
         try {
-            Files.writeString(temporary, MAPPER.writeValueAsString(journal), StandardCharsets.UTF_8);
+            byte[] bytes = MAPPER.writeValueAsString(journal).getBytes(StandardCharsets.UTF_8);
+            try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING)) {
+                channel.write(ByteBuffer.wrap(bytes));
+                channel.force(true);
+            }
             move(temporary, target);
+            forceDirectory(transactionDirectory);
         } finally {
             Files.deleteIfExists(temporary);
         }
@@ -388,6 +406,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
             if (entry.targetPath() != null && !entry.targetPath().isBlank()) {
                 throw new IOException("Invalid profile target in pack transaction journal");
             }
+            MrpackPathPolicy.validateExistingAncestors(versionsRoot, profileFile);
             return profileFile;
         }
         if (scope == Scope.VERSIONS) {
@@ -432,6 +451,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
     }
 
     private static void move(Path source, Path target) throws IOException {
+        forceFile(source);
         try {
             Files.move(source, target, StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING);
@@ -443,9 +463,11 @@ public final class PackUpdateTransaction implements AutoCloseable {
                     throw moveError;
                 }
                 Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                forceFile(target);
                 Files.delete(source);
             }
         }
+        forceDirectory(target.toAbsolutePath().normalize().getParent());
     }
 
     private static boolean sameFileStore(Path source, Path target) throws IOException {
@@ -469,6 +491,33 @@ public final class PackUpdateTransaction implements AutoCloseable {
 
     private static Path operationLockFile(Path instanceRoot) {
         return instanceRoot.resolveSibling(instanceRoot.getFileName() + ".pack.lock");
+    }
+
+    private static Path directoryLockFile(Path directory) {
+        return directory.resolveSibling(directory.getFileName() + ".lock");
+    }
+
+    private static void forceFile(Path file) throws IOException {
+        if (file != null && Files.isRegularFile(file)) {
+            try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
+                channel.force(true);
+            }
+        }
+    }
+
+    private static void forceDirectory(Path directory) throws IOException {
+        if (directory == null || !Files.isDirectory(directory)) {
+            return;
+        }
+        try {
+            try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+                channel.force(true);
+            }
+        } catch (java.nio.file.AccessDeniedException | UnsupportedOperationException unsupported) {
+            // The Windows provider does not allow opening a directory as a FileChannel. File
+            // contents and the journal are still forced; directory metadata is best effort there.
+            LOGGER.debug("Directory fsync is unavailable for {}", directory, unsupported);
+        }
     }
 
     private void releaseDirectoryLock() throws IOException {

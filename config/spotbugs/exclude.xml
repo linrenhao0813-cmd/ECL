@@ -15,10 +15,6 @@
         <Class name="com.ecl.util.CryptoUtil"/>
         <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
     </Match>
-    <!-- DTO records and JavaFX property accessors intentionally expose their documented values. -->
-    <Match>
-        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
-    </Match>
     <!-- Shared placeholder images are process-wide immutable UI assets. -->
     <Match>
         <Class name="com.ecl.modrinth.ui.RemoteImageLoader"/>

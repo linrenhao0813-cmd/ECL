@@ -1,6 +1,9 @@
 package com.ecl.modrinth.download;
 
+import com.ecl.util.TestNetworkPolicy;
 import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -25,6 +28,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModFileDownloadServiceTest {
+    private AutoCloseable loopbackDownloads;
+
+    @BeforeEach
+    void allowLoopbackDownloads() {
+        loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
+    }
+
+    @AfterEach
+    void restoreDownloadPolicy() throws Exception {
+        loopbackDownloads.close();
+    }
+
     @Test
     void rollsBackPartialProgressAfterAnIoFailure(@TempDir Path tempDirectory) throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

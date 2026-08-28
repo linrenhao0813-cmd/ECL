@@ -41,4 +41,15 @@ class NetworkUriPolicyTest {
                 URI.create("https://cdn.modrinth.com.attacker.example/file.jar"),
                 Set.of("cdn.modrinth.com"), "download"));
     }
+
+    @Test
+    void artifactPoliciesRejectLoopbackHttpInProductionMode() {
+        URI loopback = URI.create("http://127.0.0.1:8080/file.jar");
+
+        assertThrows(IOException.class, () ->
+                NetworkUriPolicy.requireArtifactDownload(loopback, "download"));
+        assertThrows(IOException.class, () ->
+                NetworkUriPolicy.requireAllowedDownload(
+                        loopback, Set.of("127.0.0.1"), "download"));
+    }
 }

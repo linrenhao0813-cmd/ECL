@@ -1,6 +1,7 @@
 package com.ecl.download;
 
 import com.ecl.ECLConfig;
+import com.ecl.util.TestNetworkPolicy;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,9 +29,11 @@ class GameDownloaderTest {
     Path temp;
     private Field baseDirField;
     private File previousBaseDir;
+    private AutoCloseable loopbackDownloads;
 
     @BeforeEach
     void useIsolatedBaseDirectory() throws Exception {
+        loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);
@@ -39,7 +42,11 @@ class GameDownloaderTest {
 
     @AfterEach
     void restoreBaseDirectory() throws Exception {
-        baseDirField.set(null, previousBaseDir);
+        try {
+            baseDirField.set(null, previousBaseDir);
+        } finally {
+            loopbackDownloads.close();
+        }
     }
 
     @Test

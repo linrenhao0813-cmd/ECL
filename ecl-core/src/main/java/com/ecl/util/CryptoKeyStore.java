@@ -29,9 +29,12 @@ import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Loads and stores the AES key used to protect sensitive launcher data. */
 final class CryptoKeyStore {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CryptoKeyStore.class);
     private static final String ALGORITHM = "AES/GCM/NoPadding";
     private static final int GCM_IV_LENGTH = 12;
     private static final int GCM_TAG_LENGTH = 128;
@@ -63,6 +66,9 @@ final class CryptoKeyStore {
                 return key;
             }
             File keyFile = keyFile();
+            if (Files.isSymbolicLink(keyFile.toPath())) {
+                throw new IOException("Account encryption key must not be a symbolic link");
+            }
             if (keyFile.exists()) {
                 byte[] stored = Files.readAllBytes(keyFile.toPath());
                 byte[] encoded = decodeStoredKey(stored);
@@ -74,7 +80,7 @@ final class CryptoKeyStore {
                         && !startsWith(stored, LOCAL_HEADER)
                         && !startsWith(stored, PROVIDER_HEADER);
                 if (legacyProtection) {
-                    writeKeyFile(keyFile.toPath(), encodeStoredKey(encoded));
+                    writeKeyFile(keyFile.toPath(), encodeMigrationKey(encoded));
                 }
             } else {
                 if (!create) {
@@ -191,6 +197,21 @@ final class CryptoKeyStore {
         } catch (GeneralSecurityException failure) {
             throw new IOException("Unable to protect account encryption key", failure);
         }
+    }
+
+    /**
+     * Keep old non-Windows installations readable when no keyring provider has been wired yet.
+     * New keys never use this path; the fallback is explicitly weak, logged, and protected with
+     * owner-only file permissions so it can be replaced by a user/OS-secret provider later.
+     */
+    private static byte[] encodeMigrationKey(byte[] key)
+            throws IOException, NoSuchAlgorithmException {
+        if (!isWindows() && protectionProvider == null) {
+            LOGGER.warn("Migrating a legacy account key with the weak local wrapper; configure "
+                    + "a KeyProtectionProvider to use an OS/user secret");
+            return encodeLocalKey(key);
+        }
+        return encodeStoredKey(key);
     }
 
     private static byte[] decodeStoredKey(byte[] stored)
@@ -350,6 +371,12 @@ final class CryptoKeyStore {
 
     private static void writeKeyFile(Path target, byte[] value) throws IOException {
         Path parent = target.toAbsolutePath().getParent();
+        if (parent == null) {
+            throw new IOException("Account encryption key has no parent directory");
+        }
+        if (Files.isSymbolicLink(target)) {
+            throw new IOException("Account encryption key must not be a symbolic link");
+        }
         Path temp = Files.createTempFile(parent, ".secret-key-", ".tmp");
         try {
             Files.write(temp, value);
@@ -359,8 +386,19 @@ final class CryptoKeyStore {
             } catch (AtomicMoveNotSupportedException ignored) {
                 Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
             }
+            enforceOwnerOnlyPermissions(target);
         } finally {
             Files.deleteIfExists(temp);
+        }
+    }
+
+    private static void enforceOwnerOnlyPermissions(Path target) throws IOException {
+        try {
+            Files.setPosixFilePermissions(target, java.util.Set.of(
+                    java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                    java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
+        } catch (UnsupportedOperationException ignored) {
+            // Windows uses DPAPI; providers without POSIX permissions use their own ACL model.
         }
     }
 }

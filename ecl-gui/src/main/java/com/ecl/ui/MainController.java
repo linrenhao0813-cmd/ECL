@@ -47,7 +47,6 @@ import com.ecl.util.HttpUtil;
 
 import java.io.IOException;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -57,6 +56,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /** Owns application services and background task creation independently of JavaFX view construction. */
@@ -87,7 +87,7 @@ public final class MainController implements AutoCloseable {
     private final InstanceOperationCoordinator instanceOperations;
     private final Map<ContentSource, ModSourceServices> sourceServices = new ConcurrentHashMap<>();
     private final Map<UUID, ModInstanceContext> modInstances = new ConcurrentHashMap<>();
-    private final Set<UUID> runningInstances = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, AtomicInteger> runningInstances = new ConcurrentHashMap<>();
 
     public MainController() {
         this(defaultDependencies());
@@ -165,19 +165,19 @@ public final class MainController implements AutoCloseable {
                 });
         modInstallationService = new ModInstallationService(
                 installedModRepository, fileDownloadService, instanceOperations,
-                backgroundExecutor, runningInstances::contains);
+                backgroundExecutor, this::isInstanceRunning);
         modManagementService = new DefaultModManagementService(
                 installedModRepository, instanceOperations, backgroundExecutor,
-                runningInstances::contains, hashVerifier);
+                this::isInstanceRunning, hashVerifier);
         localModScanner = new DefaultLocalModScanner(
                 metadataProvider, installedModRepository, hashVerifier, modVersionSelector,
-                instanceOperations, backgroundExecutor, runningInstances::contains);
+                instanceOperations, backgroundExecutor, this::isInstanceRunning);
         modUpdateService = new DefaultModUpdateService(
                 metadataProvider, modVersionSelector, modDependencyResolver,
                 installationPlanBuilder, modInstallationService, modInstances::get);
         modpackUpdateService = new DefaultModpackUpdateService(
                 metadataProvider, backgroundExecutor, instanceOperations,
-                runningInstances::contains);
+                this::isInstanceRunning);
         sourceServices.put(ContentSource.MODRINTH,
                 new ModSourceServices(modDependencyResolver, localModScanner, modUpdateService));
     }
@@ -210,7 +210,7 @@ public final class MainController implements AutoCloseable {
                     }, 32, 256);
             LocalModScanner scanner = new DefaultLocalModScanner(
                     provider, installedModRepository, new HashVerifier(), modVersionSelector,
-                    instanceOperations, backgroundExecutor, runningInstances::contains);
+                    instanceOperations, backgroundExecutor, this::isInstanceRunning);
             ModUpdateService updater = new DefaultModUpdateService(
                     provider, modVersionSelector, resolver, installationPlanBuilder,
                     modInstallationService, modInstances::get);
@@ -273,11 +273,21 @@ public final class MainController implements AutoCloseable {
     }
 
     public void setInstanceRunning(UUID instanceId, boolean running) {
-        if (running) {
-            runningInstances.add(instanceId);
-        } else {
-            runningInstances.remove(instanceId);
+        if (instanceId == null) {
+            return;
         }
+        if (running) {
+            runningInstances.computeIfAbsent(instanceId, ignored -> new AtomicInteger())
+                    .incrementAndGet();
+        } else {
+            runningInstances.computeIfPresent(instanceId, (ignored, count) ->
+                    count.decrementAndGet() <= 0 ? null : count);
+        }
+    }
+
+    public boolean isInstanceRunning(UUID instanceId) {
+        AtomicInteger count = instanceId == null ? null : runningInstances.get(instanceId);
+        return count != null && count.get() > 0;
     }
 
     public Future<?> runAsync(String threadName, Runnable action) {

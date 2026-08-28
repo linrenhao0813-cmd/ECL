@@ -22,6 +22,7 @@ import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.Set;
 
 /** Mirror-aware file downloader with resumable partial files and byte limits. */
 final class ResumableFileDownloader {
@@ -34,12 +35,18 @@ final class ResumableFileDownloader {
 
     static void download(String url, File target, DownloadProgressCallback progress,
                          DownloadSourceCallback source, long maxBytes) throws IOException {
-        download(url, target, progress, source, maxBytes, DownloadRateLimiter.defaultLimiter());
+        download(url, target, progress, source, maxBytes, DownloadRateLimiter.defaultLimiter(), null);
     }
 
     static void download(String url, File target, DownloadProgressCallback progress,
                          DownloadSourceCallback source, long maxBytes,
                          DownloadRateLimiter limiter) throws IOException {
+        download(url, target, progress, source, maxBytes, limiter, null);
+    }
+
+    static void download(String url, File target, DownloadProgressCallback progress,
+                         DownloadSourceCallback source, long maxBytes,
+                         DownloadRateLimiter limiter, Set<String> allowedHosts) throws IOException {
         if (maxBytes < 0) {
             throw new IllegalArgumentException("Download byte limit must not be negative");
         }
@@ -53,10 +60,10 @@ final class ResumableFileDownloader {
         for (String candidate : DownloadSourceUtil.candidates(url)) {
             DownloadRateLimiter.checkInterrupted();
             boolean mirror = DownloadSourceUtil.isMirror(url, candidate);
-            DownloadSourceCallbacks.notifySource(source, url, candidate, mirror);
+                DownloadSourceCallbacks.notifySource(source, url, candidate, mirror);
             try {
                 downloadCandidate(candidate, mirror, target, partial, metadataFile,
-                        progress, maxBytes, rateLimiter);
+                        progress, maxBytes, rateLimiter, allowedHosts);
                 return;
             } catch (DownloadLimitExceededException failure) {
                 Files.deleteIfExists(partial.toPath());
@@ -81,11 +88,40 @@ final class ResumableFileDownloader {
 
     private static void downloadCandidate(
             String candidate, boolean mirror, File target, File partial, File metadataFile,
-            DownloadProgressCallback progress, long maxBytes, DownloadRateLimiter limiter)
+            DownloadProgressCallback progress, long maxBytes, DownloadRateLimiter limiter,
+            Set<String> allowedHosts)
             throws IOException, InterruptedException {
         PartialDownloadMetadata metadata = readMetadata(metadataFile);
         boolean sameSource = metadata != null && candidate.equals(metadata.source())
                 && !metadata.validator().isBlank();
+        ResumeState state = initializeResumeState(sameSource, metadata, partial, metadataFile, maxBytes);
+        URI requestUri = parseDownloadUri(candidate, allowedHosts, "download URL");
+        int redirects = 0;
+        while (true) {
+            HttpResponse<InputStream> response = sendRequest(requestUri, mirror, state);
+            int statusCode = response.statusCode();
+            if (statusCode >= 300 && statusCode < 400) {
+                requestUri = followRedirect(response, requestUri, candidate, allowedHosts, ++redirects);
+                continue;
+            }
+            if (statusCode == 416 && state.existingBytes > 0) {
+                if (handleUnsatisfiedRange(response, state, target, partial, metadataFile,
+                        progress, maxBytes, candidate)) {
+                    return;
+                }
+                continue;
+            }
+            requireSuccessfulResponse(response, statusCode, candidate);
+            if (writeResponse(response, candidate, mirror, target, partial, metadataFile,
+                    progress, maxBytes, limiter, state)) {
+                return;
+            }
+        }
+    }
+
+    private static ResumeState initializeResumeState(boolean sameSource, PartialDownloadMetadata metadata,
+                                                     File partial, File metadataFile, long maxBytes)
+            throws IOException {
         if (!sameSource) {
             Files.deleteIfExists(partial.toPath());
             Files.deleteIfExists(metadataFile.toPath());
@@ -95,138 +131,165 @@ final class ResumableFileDownloader {
         if (existingBytes > maxBytes) {
             throw new DownloadLimitExceededException("Partial download exceeds byte limit");
         }
+        return new ResumeState(existingBytes, metadata);
+    }
 
-        URI requestUri;
-        try {
-            requestUri = NetworkUriPolicy.requireSecureDownload(
-                    URI.create(candidate), "download URL");
-        } catch (IllegalArgumentException invalid) {
-            throw new IOException("Invalid download URL: " + candidate, invalid);
+    private static HttpResponse<InputStream> sendRequest(URI requestUri, boolean mirror,
+                                                          ResumeState state)
+            throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(requestUri)
+                .timeout(Duration.ofMillis(timeoutFor(mirror)))
+                .header("User-Agent", "ECL/1.0")
+                .GET();
+        if (state.existingBytes > 0) {
+            builder.header("Range", "bytes=" + state.existingBytes + "-");
+            if (state.metadata != null && !state.metadata.validator().isBlank()) {
+                builder.header("If-Range", state.metadata.validator());
+            }
         }
-        int redirects = 0;
-        while (true) {
-            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                    .uri(requestUri)
-                    .timeout(Duration.ofMillis(timeoutFor(mirror)))
-                    .header("User-Agent", "ECL/1.0")
-                    .GET();
-            if (existingBytes > 0) {
-                requestBuilder.header("Range", "bytes=" + existingBytes + "-");
-                String validator = metadata == null ? "" : metadata.validator();
-                if (!validator.isBlank()) {
-                    requestBuilder.header("If-Range", validator);
-                }
-            }
+        return HttpClientProvider.defaultClient().send(
+                builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+    }
 
-            HttpResponse<InputStream> response = HttpClientProvider.defaultClient().send(
-                    requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
-            int statusCode = response.statusCode();
-            if (statusCode >= 300 && statusCode < 400) {
-                String location = response.headers().firstValue("Location").orElse("");
-                response.body().close();
-                if (location.isBlank() || ++redirects > 5) {
-                    throw new IOException("Too many or invalid download redirects: " + candidate);
-                }
-                try {
-                    requestUri = NetworkUriPolicy.requireSecureDownload(
-                            requestUri.resolve(location), "download redirect");
-                } catch (IllegalArgumentException invalid) {
-                    throw new IOException("Invalid download redirect: " + location, invalid);
-                }
-                continue;
-            }
-            if (statusCode == 416 && existingBytes > 0) {
-                long totalSize = unsatisfiedRangeTotal(response);
-                response.body().close();
-                if (totalSize < 0) {
-                    throw new IOException("HTTP 416 without a valid Content-Range for " + candidate);
-                }
-                if (existingBytes == totalSize) {
-                    if (totalSize > maxBytes) {
-                        throw new DownloadLimitExceededException(
-                                "Download exceeds byte limit: " + totalSize + " > " + maxBytes);
-                    }
-                    promote(partial.toPath(), target.toPath());
-                    Files.deleteIfExists(metadataFile.toPath());
-                    if (progress != null) {
-                        progress.onStart(totalSize);
-                        progress.onProgress(totalSize, totalSize);
-                        progress.onComplete(target);
-                    }
-                    return;
-                }
-                if (totalSize >= 0 && existingBytes > totalSize) {
-                    Files.deleteIfExists(partial.toPath());
-                    Files.deleteIfExists(metadataFile.toPath());
-                    existingBytes = 0;
-                    metadata = null;
-                    continue;
-                }
-            }
-            if (statusCode < 200 || statusCode >= 300) {
-                String errorBody = HttpRequestExecutor.readStream(response.body());
-                if (errorBody.isBlank()) {
-                    throw new IOException("HTTP " + statusCode + " for " + candidate);
-                }
-                throw new IOException("HTTP " + statusCode + " for " + candidate + ": "
-                        + TextUtil.abbreviate(errorBody, 240));
-            }
+    private static URI parseDownloadUri(String value, Set<String> allowedHosts, String description)
+            throws IOException {
+        try {
+            return checkedDownloadUri(URI.create(value), allowedHosts, description);
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Invalid " + description + ": " + value, invalid);
+        }
+    }
 
-            long responseLength = response.headers().firstValueAsLong("Content-Length")
-                    .orElse(-1);
-            boolean resumed = statusCode == 206 && existingBytes > 0;
-            long totalLength;
-            if (resumed) {
-                totalLength = validatedRangeTotal(
-                        response, existingBytes, responseLength, metadata);
-                if (totalLength < 0) {
-                    response.body().close();
-                    Files.deleteIfExists(partial.toPath());
-                    Files.deleteIfExists(metadataFile.toPath());
-                    existingBytes = 0;
-                    metadata = null;
-                    continue;
-                }
-            } else {
-                if (statusCode == 206) {
-                    response.body().close();
-                    throw new IOException(
-                            "Unexpected partial response without a resume request: " + candidate);
-                }
-                existingBytes = 0;
-                totalLength = responseLength;
-            }
-            if (totalLength > maxBytes) {
-                response.body().close();
+    private static URI followRedirect(HttpResponse<InputStream> response, URI current,
+                                      String candidate, Set<String> allowedHosts, int redirects)
+            throws IOException {
+        String location = response.headers().firstValue("Location").orElse("");
+        response.body().close();
+        if (location.isBlank() || redirects > 5) {
+            throw new IOException("Too many or invalid download redirects: " + candidate);
+        }
+        return parseDownloadUri(current.resolve(location).toString(), allowedHosts,
+                "download redirect");
+    }
+
+    private static boolean handleUnsatisfiedRange(HttpResponse<InputStream> response, ResumeState state,
+                                                  File target, File partial, File metadataFile,
+                                                  DownloadProgressCallback progress, long maxBytes,
+                                                  String candidate) throws IOException {
+        long totalSize = unsatisfiedRangeTotal(response);
+        response.body().close();
+        if (totalSize < 0) {
+            throw new IOException("HTTP 416 without a valid Content-Range for " + candidate);
+        }
+        if (state.existingBytes == totalSize) {
+            if (totalSize > maxBytes) {
                 throw new DownloadLimitExceededException(
-                        "Download exceeds byte limit: " + totalLength + " > " + maxBytes);
-            }
-
-            PartialDownloadMetadata current = new PartialDownloadMetadata(candidate,
-                    response.headers().firstValue("ETag").orElse(""),
-                    response.headers().firstValue("Last-Modified").orElse(""));
-            writeMetadata(metadataFile, current);
-            if (progress != null) {
-                progress.onStart(totalLength);
-            }
-            try (InputStream input = response.body();
-                 OutputStream output = resumed
-                         ? Files.newOutputStream(partial.toPath(), StandardOpenOption.APPEND)
-                         : Files.newOutputStream(partial.toPath(), StandardOpenOption.CREATE,
-                         StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
-                copyToFile(input, output, existingBytes, totalLength, progress, maxBytes, limiter);
-            }
-            if (totalLength >= 0 && partial.length() != totalLength) {
-                throw new IOException("Downloaded size does not match HTTP response: expected "
-                        + totalLength + ", got " + partial.length());
+                        "Download exceeds byte limit: " + totalSize + " > " + maxBytes);
             }
             promote(partial.toPath(), target.toPath());
             Files.deleteIfExists(metadataFile.toPath());
             if (progress != null) {
+                progress.onStart(totalSize);
+                progress.onProgress(totalSize, totalSize);
                 progress.onComplete(target);
             }
+            return true;
+        }
+        if (state.existingBytes > totalSize) {
+            resetResumeState(state, partial, metadataFile);
+            return false;
+        }
+        throw new IOException("HTTP 416 range is inconsistent for " + candidate);
+    }
+
+    private static void resetResumeState(ResumeState state, File partial, File metadataFile)
+            throws IOException {
+        Files.deleteIfExists(partial.toPath());
+        Files.deleteIfExists(metadataFile.toPath());
+        state.existingBytes = 0;
+        state.metadata = null;
+    }
+
+    private static void requireSuccessfulResponse(HttpResponse<InputStream> response, int statusCode,
+                                                  String candidate) throws IOException {
+        if (statusCode >= 200 && statusCode < 300) {
             return;
         }
+        String errorBody = HttpRequestExecutor.readStream(response.body());
+        if (errorBody.isBlank()) {
+            throw new IOException("HTTP " + statusCode + " for " + candidate);
+        }
+        throw new IOException("HTTP " + statusCode + " for " + candidate + ": "
+                + TextUtil.abbreviate(errorBody, 240));
+    }
+
+    private static boolean writeResponse(HttpResponse<InputStream> response, String candidate,
+                                         boolean mirror, File target, File partial, File metadataFile,
+                                         DownloadProgressCallback progress, long maxBytes,
+                                         DownloadRateLimiter limiter, ResumeState state)
+            throws IOException {
+        long responseLength = response.headers().firstValueAsLong("Content-Length").orElse(-1);
+        boolean resumed = response.statusCode() == 206 && state.existingBytes > 0;
+        long totalLength = responseLength;
+        if (resumed) {
+            totalLength = validatedRangeTotal(response, state.existingBytes, responseLength,
+                    state.metadata);
+            if (totalLength < 0) {
+                response.body().close();
+                resetResumeState(state, partial, metadataFile);
+                return false;
+            }
+        } else {
+            if (response.statusCode() == 206) {
+                response.body().close();
+                throw new IOException(
+                        "Unexpected partial response without a resume request: " + candidate);
+            }
+            state.existingBytes = 0;
+        }
+        if (totalLength > maxBytes) {
+            response.body().close();
+            throw new DownloadLimitExceededException(
+                    "Download exceeds byte limit: " + totalLength + " > " + maxBytes);
+        }
+        PartialDownloadMetadata current = new PartialDownloadMetadata(candidate,
+                response.headers().firstValue("ETag").orElse(""),
+                response.headers().firstValue("Last-Modified").orElse(""));
+        writeMetadata(metadataFile, current);
+        if (progress != null) progress.onStart(totalLength);
+        try (InputStream input = response.body();
+             OutputStream output = resumed
+                     ? Files.newOutputStream(partial.toPath(), StandardOpenOption.APPEND)
+                     : Files.newOutputStream(partial.toPath(), StandardOpenOption.CREATE,
+                     StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+            copyToFile(input, output, state.existingBytes, totalLength, progress, maxBytes, limiter);
+        }
+        if (totalLength >= 0 && partial.length() != totalLength) {
+            throw new IOException("Downloaded size does not match HTTP response: expected "
+                    + totalLength + ", got " + partial.length());
+        }
+        promote(partial.toPath(), target.toPath());
+        Files.deleteIfExists(metadataFile.toPath());
+        if (progress != null) progress.onComplete(target);
+        return true;
+    }
+
+    private static final class ResumeState {
+        private long existingBytes;
+        private PartialDownloadMetadata metadata;
+
+        private ResumeState(long existingBytes, PartialDownloadMetadata metadata) {
+            this.existingBytes = existingBytes;
+            this.metadata = metadata;
+        }
+    }
+
+    private static URI checkedDownloadUri(URI uri, Set<String> allowedHosts, String description)
+            throws IOException {
+        return allowedHosts == null
+                ? NetworkUriPolicy.requireArtifactDownload(uri, description)
+                : NetworkUriPolicy.requireAllowedDownload(uri, allowedHosts, description);
     }
 
     private static long validatedRangeTotal(HttpResponse<?> response, long existingBytes,

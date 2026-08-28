@@ -13,12 +13,14 @@ import com.ecl.modrinth.model.ContentVersion;
 import com.ecl.modrinth.model.ModDependency;
 import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModVersion;
+import com.ecl.modrinth.transaction.FileModInstallationTransaction;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.NetworkUriPolicy;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -40,6 +42,8 @@ import java.util.UUID;
 public class ModrinthDownloader implements ContentDownloader {
     private static final int MAX_DEPENDENCY_DEPTH = 32;
     private static final long MAX_CONTENT_FILE_BYTES = 2L * 1024 * 1024 * 1024;
+    private static final Set<String> TRUSTED_DOWNLOAD_HOSTS = Set.of(
+            "cdn.modrinth.com", "cdn-raw.modrinth.com");
     private final ModrinthApiClient apiClient;
 
     public interface DownloadListener {
@@ -134,16 +138,26 @@ public class ModrinthDownloader implements ContentDownloader {
         }
 
         List<File> files = new ArrayList<>();
-        downloadVersion(version, gameVersion, loader, destination, listener,
-                new HashSet<>(), new ArrayDeque<>(), files, new HashMap<>(), true,
-                includeRequiredDependencies, allowedExtensions);
-        if (files.isEmpty()) {
-            throw new IOException("这个版本没有可下载文件");
+        try (FileModInstallationTransaction transaction =
+                     new FileModInstallationTransaction(destination.toPath())) {
+            Path downloads = transaction.temporaryDirectory().resolve("content-downloads");
+            Files.createDirectories(downloads);
+            downloadVersion(version, gameVersion, loader, destination, downloads, transaction,
+                    listener, new HashSet<>(), new ArrayDeque<>(), files, new HashMap<>(), true,
+                    includeRequiredDependencies, allowedExtensions);
+            if (files.isEmpty()) {
+                throw new IOException("这个版本没有可下载文件");
+            }
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.io.InterruptedIOException("内容安装已取消");
+            }
+            transaction.commit();
         }
         return new ContentDownloadResult(files.get(0), files);
     }
 
     private File downloadVersion(ModVersion version, String gameVersion, String loader, File targetDir,
+                                 Path downloadsDirectory, FileModInstallationTransaction transaction,
                                  DownloadListener listener, Set<String> visitedVersions,
                                  Deque<String> dependencyPath, List<File> files,
                                  Map<Path, String> plannedTargets, boolean primary,
@@ -176,16 +190,23 @@ public class ModrinthDownloader implements ContentDownloader {
             if (file.size() <= 0 || file.size() > MAX_CONTENT_FILE_BYTES) {
                 throw new IOException("Modrinth 文件大小声明无效: " + filename);
             }
-            java.net.URI downloadUri = NetworkUriPolicy.requireSecureDownload(
-                    file.url(), "Modrinth 下载地址");
+            java.net.URI downloadUri = NetworkUriPolicy.requireAllowedDownload(
+                    file.url(), TRUSTED_DOWNLOAD_HOSTS, "Modrinth 下载地址");
 
             File target = new File(targetDir, filename);
             Path normalizedTarget = target.toPath().toAbsolutePath().normalize();
+            if (Files.isSymbolicLink(normalizedTarget)) {
+                throw new IOException("目标文件不能是符号链接，为避免越界写入: " + filename);
+            }
             String targetHash = file.sha512() == null || file.sha512().isBlank()
                     ? file.sha1() : file.sha512();
             String priorHash = plannedTargets.putIfAbsent(normalizedTarget, targetHash.toLowerCase());
-            if (priorHash != null && !priorHash.equalsIgnoreCase(targetHash)) {
-                throw new IOException("Modrinth dependency files collide at target: " + filename);
+            if (priorHash != null) {
+                if (!priorHash.equalsIgnoreCase(targetHash)) {
+                    throw new IOException("Modrinth dependency files collide at target: " + filename);
+                }
+                files.add(target);
+                return target;
             }
             if (ModrinthFileSelector.existingFileSatisfies(target, file)) {
                 ModrinthDownloadSupport.notifyStatus(
@@ -194,8 +215,14 @@ public class ModrinthDownloader implements ContentDownloader {
             } else {
                 ModrinthDownloadSupport.notifyStatus(
                         listener, (primary ? "正在下载: " : "正在下载依赖: ") + filename);
-                Path temporary = target.toPath().toAbsolutePath().normalize()
-                        .resolveSibling(target.getName() + ".ecl-download-" + UUID.randomUUID() + ".tmp");
+                if (Files.exists(normalizedTarget)) {
+                    throw new IOException("目标文件已存在但校验不匹配，为避免覆盖用户文件: " + filename);
+                }
+                Path temporary = downloadsDirectory.resolve(UUID.randomUUID() + ".part").normalize();
+                if (!temporary.startsWith(transaction.temporaryDirectory())) {
+                    throw new IOException("内容下载 staging 路径越界: " + temporary);
+                }
+                boolean staged = false;
                 try {
                 HttpUtil.downloadFileWithProgress(downloadUri.toString(), temporary.toFile(),
                         new HttpUtil.ProgressCallback() {
@@ -213,24 +240,23 @@ public class ModrinthDownloader implements ContentDownloader {
                             public void onComplete(File downloaded) {
                                 ModrinthDownloadSupport.notifyProgress(listener, 1, 1);
                             }
-                        }, null, file.size());
+                        }, null, file.size(), TRUSTED_DOWNLOAD_HOSTS);
                 if (Files.size(temporary) != file.size()) {
                     throw new IOException("文件大小校验失败: " + filename);
                 }
                 new HashVerifier().verify(temporary, file.hashes());
-                try {
-                    Files.move(temporary, target.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-                    Files.move(temporary, target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                }
+                transaction.stageDownloadedFile(temporary, normalizedTarget);
+                staged = true;
                 } finally {
-                    Files.deleteIfExists(temporary);
+                    if (!staged) {
+                        Files.deleteIfExists(temporary);
+                    }
                 }
             }
             files.add(target);
             if (includeRequiredDependencies) {
-                downloadRequiredDependencies(version, gameVersion, loader, targetDir, listener,
+                downloadRequiredDependencies(version, gameVersion, loader, targetDir,
+                        downloadsDirectory, transaction, listener,
                         visitedVersions, dependencyPath, files, plannedTargets);
             }
             return target;
@@ -242,7 +268,9 @@ public class ModrinthDownloader implements ContentDownloader {
     }
 
     private void downloadRequiredDependencies(ModVersion version, String gameVersion, String loader,
-                                              File targetDir, DownloadListener listener,
+                                               File targetDir, Path downloadsDirectory,
+                                               FileModInstallationTransaction transaction,
+                                               DownloadListener listener,
                                               Set<String> visitedVersions, Deque<String> dependencyPath,
                                               List<File> files, Map<Path, String> plannedTargets) throws IOException {
         for (ModDependency dependency : version.dependencies()) {
@@ -251,7 +279,8 @@ public class ModrinthDownloader implements ContentDownloader {
             }
             ModVersion dependencyVersion = resolveDependency(dependency, gameVersion, loader);
             if (dependencyVersion != null) {
-                downloadVersion(dependencyVersion, gameVersion, loader, targetDir, listener,
+                downloadVersion(dependencyVersion, gameVersion, loader, targetDir,
+                        downloadsDirectory, transaction, listener,
                         visitedVersions, dependencyPath, files, plannedTargets, false, true, ".jar");
             }
         }

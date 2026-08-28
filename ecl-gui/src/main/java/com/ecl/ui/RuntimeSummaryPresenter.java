@@ -18,26 +18,24 @@ final class RuntimeSummaryPresenter {
     }
 
     void update() {
-        String launcherJava = "启动器 Java " + Runtime.version().feature();
-        updateJava(launcherJava);
-
         String selectedVersion = ui.versionCombo == null ? null : ui.versionCombo.getValue();
         String versionDisplay = selectedVersion == null || selectedVersion.isBlank()
                 ? Messages.get("home.versionPending")
                 : ui.versionManager.getVersionDisplayName(selectedVersion);
         updateVersion(selectedVersion, versionDisplay);
 
-        String memoryText = ui.gameLaunch.getMemoryDisplayText();
-        updateAccountAndMemory(launcherJava, memoryText);
-        updateEnvironmentAndReadiness(selectedVersion);
+        GameLaunchCoordinator.RuntimeSummary runtime = ui.gameLaunch.runtimeSummary(selectedVersion);
+        updateJava(runtime.javaText(), runtime.javaPath());
+        updateAccountAndMemory(runtime);
+        updateEnvironmentAndReadiness(selectedVersion, runtime);
         ui.gameLaunch.updatePlaytimeSummary();
     }
 
-    private void updateJava(String launcherJava) {
+    private void updateJava(String javaText, String javaPath) {
         if (ui.javaSummaryLabel != null) {
-            ui.javaSummaryLabel.setText(launcherJava);
-            ui.javaSummaryLabel.setTooltip(ui.javaPath == null || ui.javaPath.isBlank()
-                    ? null : new Tooltip(ui.javaPath));
+            ui.javaSummaryLabel.setText(javaText);
+            ui.javaSummaryLabel.setTooltip(javaPath == null || javaPath.isBlank()
+                    ? null : new Tooltip(javaPath));
         }
         setSummaryText(ui.gameDirSummaryLabel, ui.getActiveGameDir().getAbsolutePath(), 68);
     }
@@ -58,10 +56,10 @@ final class RuntimeSummaryPresenter {
         }
     }
 
-    private void updateAccountAndMemory(String launcherJava, String memoryText) {
+    private void updateAccountAndMemory(GameLaunchCoordinator.RuntimeSummary runtime) {
         if (ui.selectedRuntimeMetaLabel != null) {
             ui.selectedRuntimeMetaLabel.setText(
-                    Messages.format("home.runtimeMeta", launcherJava, memoryText));
+                    Messages.format("home.runtimeMeta", runtime.javaText(), runtime.memoryText()));
         }
         String accountName = ui.getAuthDisplayName();
         setText(ui.topAuthBadgeLabel, accountName);
@@ -71,22 +69,23 @@ final class RuntimeSummaryPresenter {
             ui.homeAccountAvatarLabel.setText(accountName.isBlank()
                     ? "E" : accountName.substring(0, 1).toUpperCase(Locale.ROOT));
         }
-        setText(ui.memorySummaryLabel, memoryText);
-        setText(ui.topMemoryBadgeLabel, memoryText);
+        setText(ui.memorySummaryLabel, runtime.memoryText());
+        setText(ui.topMemoryBadgeLabel, runtime.memoryText());
         if (ui.jvmArgsSummaryLabel != null) {
-            boolean blankArguments = ui.extraJvmArgs == null || ui.extraJvmArgs.isBlank();
+            boolean blankArguments = runtime.jvmArguments().isBlank();
             ui.jvmArgsSummaryLabel.setText(blankArguments
-                    ? Messages.get("label.notSet") : abbreviate(ui.extraJvmArgs, 68));
+                    ? Messages.get("label.notSet") : abbreviate(runtime.jvmArguments(), 68));
             ui.jvmArgsSummaryLabel.setTooltip(
-                    blankArguments ? null : new Tooltip(ui.extraJvmArgs));
+                    blankArguments ? null : new Tooltip(runtime.jvmArguments()));
         }
     }
 
-    private void updateEnvironmentAndReadiness(String selectedVersion) {
-        boolean configuredJava = JavaRuntimeUtil.isUsableJavaPath(ui.javaPath);
+    private void updateEnvironmentAndReadiness(String selectedVersion,
+                                               GameLaunchCoordinator.RuntimeSummary runtime) {
+        boolean configuredJava = !runtime.javaPath().isBlank()
+                && JavaRuntimeUtil.isUsableJavaPath(runtime.javaPath());
         if (ui.runtimeBadgeLabel != null) {
-            ui.runtimeBadgeLabel.setText(configuredJava
-                    ? String.valueOf(Runtime.version().feature()) : Messages.get("label.auto"));
+            ui.runtimeBadgeLabel.setText(configuredJava ? "自定义" : Messages.get("label.auto"));
         }
         if (ui.homeEnvironmentStatusLabel != null) {
             ui.homeEnvironmentStatusLabel.setText(configuredJava

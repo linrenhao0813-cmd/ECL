@@ -53,7 +53,10 @@ public final class ModFileDownloadService {
                         futures.toArray(CompletableFuture[]::new))
                 .thenApply(ignored -> futures.stream().map(CompletableFuture::join).toList());
         result.whenComplete((ignored, error) -> {
-            if (result.isCancelled() || error != null) {
+            // A failed sibling does not mean queued downloads were cancelled by the caller. Let
+            // them finish so their progress/cleanup remains deterministic; an explicit batch
+            // cancellation still propagates to every child.
+            if (result.isCancelled()) {
                 futures.forEach(future -> future.cancel(true));
             }
         });
@@ -105,7 +108,7 @@ public final class ModFileDownloadService {
                     new IOException("无法解析模组下载地址: " + request.fileName()));
         }
         try {
-            downloadUri = NetworkUriPolicy.requireSecureDownload(
+            downloadUri = NetworkUriPolicy.requireArtifactDownload(
                     downloadUri, "模组下载地址");
         } catch (IOException unsafe) {
             throw new java.util.concurrent.CompletionException(
@@ -137,8 +140,8 @@ public final class ModFileDownloadService {
                                         overallTotal, 0);
                             }
 
-                            @Override
-                            public void onProgress(long downloaded, long total) {
+            @Override
+            public void onProgress(long downloaded, long total) {
                                 long delta = Math.max(0, downloaded - previousFileBytes.getAndSet(downloaded));
                                 long aggregate = overallDownloaded.addAndGet(delta);
                                 double seconds = Math.max(0.001,

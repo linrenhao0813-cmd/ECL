@@ -282,9 +282,6 @@ public class GameDownloader implements DownloadService {
                 Files.deleteIfExists(temporaryIndex.toPath());
             }
         }
-        // A marker is only an optimization hint for UI/history. It must never authorize
-        // existing bytes without comparing each object's digest to the index hash.
-        boolean skipHashVerification = false;
         JsonObject objects = HttpUtil.readJson(indexFile).getAsJsonObject("objects");
         List<GameDownloadBatchExecutor.DownloadTask> tasks = new ArrayList<>();
         for (String name : objects.keySet()) {
@@ -296,16 +293,13 @@ public class GameDownloader implements DownloadService {
             String subPath = hash.substring(0, 2) + "/" + hash;
             long size = GameManifestParser.requiredPositiveSize(obj, "size", "asset object " + name);
             File target = FileUtil.safeResolveUnder(assetDir, subPath);
-            if (assetVerifier.needsDownload(target, hash, skipHashVerification)) {
+            if (assetVerifier.needsDownload(target, hash)) {
                 tasks.add(new GameDownloadBatchExecutor.DownloadTask(
                         "https://resources.download.minecraft.net/" + subPath,
                         target, hash, size, "资源文件"));
             }
         }
         batchExecutor.download(tasks, "资源文件", runListener);
-        if (verifyExistingFiles) {
-            assetVerifier.writeVerifiedMarker(assetId, indexSha1);
-        }
     }
 
     private HttpUtil.SourceCallback sourceCallback(String label, DownloadListener runListener) {

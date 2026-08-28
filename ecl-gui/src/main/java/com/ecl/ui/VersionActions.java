@@ -16,10 +16,12 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Owns version delete / reinstall / refresh / loader-version restore and Wiki navigation. */
 final class VersionActions {
     private final LauncherUI ui;
+    private final AtomicLong versionListGeneration = new AtomicLong();
 
     VersionActions(LauncherUI ui) {
         this.ui = ui;
@@ -243,6 +245,7 @@ final class VersionActions {
             return;
         }
         VersionManager.VersionCategory category = getSelectedVersionCategory();
+        long generation = versionListGeneration.incrementAndGet();
         // 本地版本档案扫描与合并放到后台线程，完成后在 FX 线程回填下拉框，
         // 避免首页构建时同步扫描解析全部本地版本 JSON 造成卡顿。
         ui.runAsync("ecl-restore-versions", () -> {
@@ -250,7 +253,7 @@ final class VersionActions {
                 List<String> versions = ui.versionManager.mergeLocalLoaderProfiles(
                         ui.versionManager.getVersions(category));
                 Platform.runLater(() -> {
-                    if (ui.versionCombo == null) {
+                    if (generation != versionListGeneration.get() || ui.versionCombo == null) {
                         return;
                     }
                     ui.versionCombo.getItems().setAll(versions);
@@ -271,6 +274,7 @@ final class VersionActions {
 
     void refreshVersions() {
         VersionManager.VersionCategory category = getSelectedVersionCategory();
+        long generation = versionListGeneration.incrementAndGet();
         String categoryLabel = category.getLabel();
         ui.refreshBtn.setDisable(true);
         ui.versionCombo.setDisable(true);
@@ -284,6 +288,9 @@ final class VersionActions {
                 List<String> versions = ui.versionManager.mergeLocalLoaderProfiles(
                         ui.versionManager.getVersions(category));
                 Platform.runLater(() -> {
+                    if (generation != versionListGeneration.get()) {
+                        return;
+                    }
                     String current = ui.versionCombo.getValue();
                     ui.versionCombo.getItems().setAll(versions);
                     if (current != null && versions.contains(current)) {
@@ -300,6 +307,9 @@ final class VersionActions {
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
+                    if (generation != versionListGeneration.get()) {
+                        return;
+                    }
                     ui.setStatus("获取版本列表失败", ui.cleanMessage(e));
                     ui.refreshBtn.setDisable(false);
                     ui.versionCombo.setDisable(false);

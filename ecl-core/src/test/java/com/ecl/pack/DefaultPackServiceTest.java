@@ -1,6 +1,9 @@
 package com.ecl.pack;
 
+import com.ecl.util.TestNetworkPolicy;
 import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -24,6 +27,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DefaultPackServiceTest {
     @TempDir
     Path temp;
+    private AutoCloseable loopbackDownloads;
+
+    @BeforeEach
+    void allowLoopbackDownloads() {
+        loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
+    }
+
+    @AfterEach
+    void restoreDownloadPolicy() throws Exception {
+        loopbackDownloads.close();
+    }
 
     @Test
     void eclPackRoundTripIsPreviewableAndTransactional() throws Exception {

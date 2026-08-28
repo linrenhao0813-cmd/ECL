@@ -9,6 +9,7 @@ import com.ecl.game.InstanceLaunchProfile;
 import com.ecl.launcher.CrashAnalyzer;
 import com.ecl.launch.GameProcess;
 import com.ecl.launch.LaunchOptions;
+import com.ecl.util.FileLockLease;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
 import javafx.application.Platform;
@@ -48,6 +49,11 @@ final class GameLaunchCoordinator {
     }
 
     void launchGame() {
+        String selectedVersion = facade.selectedVersion();
+        if (selectedVersion != null && ui.isVersionRunning(selectedVersion)) {
+            ui.setStatus("游戏已在运行", selectedVersion + " 已经启动，请先退出当前游戏。");
+            return;
+        }
         preparation.prepareAndLaunch(this::startGame, this::launchGame);
     }
 
@@ -67,8 +73,15 @@ final class GameLaunchCoordinator {
             File launchDir = ui.resolveVersionGameDir(version);
             File instanceRoot = ui.resolveVersionInstanceRoot(version);
             char[] password = passwordRef.getAndSet(null);
+            FileLockLease gameLock = null;
+            boolean monitorOwnsGameLock = false;
             try {
                 ensureVersionGameDirs(version);
+                gameLock = FileLockLease.tryAcquire(launchDir.toPath().resolve(".ecl")
+                        .resolve("operation.lock"));
+                if (gameLock == null) {
+                    throw new IOException("实例正在运行或被另一个启动器进程占用: " + version);
+                }
                 InstanceLaunchProfile launchProfile = ui.controller.instanceLaunchProfiles()
                         .load(instanceRoot.toPath());
                 String instanceJavaPath = launchProfile.javaMode() == InstanceLaunchProfile.JavaMode.AUTO
@@ -128,12 +141,13 @@ final class GameLaunchCoordinator {
                 });
                 processMonitor.monitor(gameProcess, version, launchDir, launchStartedAt,
                         launchStartedNanos,
-                        runningInstanceId, minimizeThisLaunch);
+                        runningInstanceId, minimizeThisLaunch, gameLock);
+                monitorOwnsGameLock = true;
             } catch (Exception e) {
                 CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
                 runOnUiIfActive(() -> {
                     ui.setStatus("启动失败", report.getTitle());
-                    showGameErrorDialog(report);
+                    showGameErrorDialog(report, launchDir);
                     ui.setControlsBusy(false);
                 });
             } finally {
@@ -143,6 +157,14 @@ final class GameLaunchCoordinator {
                 char[] queuedPassword = passwordRef.getAndSet(null);
                 if (queuedPassword != null) {
                     Arrays.fill(queuedPassword, '\0');
+                }
+                if (!monitorOwnsGameLock && gameLock != null) {
+                    try {
+                        gameLock.close();
+                    } catch (IOException lockError) {
+                        LauncherUI.LOGGER.warn("Failed to release game launch lock for {}", version,
+                                lockError);
+                    }
                 }
             }
         });
@@ -187,8 +209,8 @@ final class GameLaunchCoordinator {
         });
     }
 
-    private void showGameErrorDialog(CrashAnalyzer.Report report) {
-        CrashDiagnosticDialog.show(ui.primaryStage, report, ui.resolveModsDir(ui.getSelectedVersion()),
+    private void showGameErrorDialog(CrashAnalyzer.Report report, File launchDir) {
+        CrashDiagnosticDialog.show(ui.primaryStage, report, new File(launchDir, "mods"),
                 folder -> ui.openLocalFolder(folder, "诊断目录"));
     }
 
@@ -196,14 +218,45 @@ final class GameLaunchCoordinator {
         return ui.hasRunningGameProcess();
     }
 
+    RuntimeSummary runtimeSummary(String version) {
+        int memoryMb = ui.maxMemoryMb == ECLConfig.AUTO_MEMORY_MB
+                ? ECLConfig.calculateAutoMemoryMb() : ui.maxMemoryMb;
+        boolean autoMemory = ui.maxMemoryMb == ECLConfig.AUTO_MEMORY_MB;
+        String javaPath = ui.javaPath == null ? "" : ui.javaPath;
+        String jvmArguments = ui.extraJvmArgs == null ? "" : ui.extraJvmArgs;
+        boolean customJava = !javaPath.isBlank();
+        if (version != null && !version.isBlank()) {
+            try {
+                java.nio.file.Path profileRoot = ui.resolveVersionInstanceRoot(version).toPath();
+                java.nio.file.Path profileFile = ui.controller.instanceLaunchProfiles()
+                        .profileFile(profileRoot);
+                if (java.nio.file.Files.isRegularFile(profileFile)) {
+                    InstanceLaunchProfile profile = ui.controller.instanceLaunchProfiles().load(profileRoot);
+                    memoryMb = profile.memoryMode() == InstanceLaunchProfile.MemoryMode.AUTO
+                            ? ECLConfig.calculateAutoMemoryMb() : profile.maxMemoryMb();
+                    autoMemory = profile.memoryMode() == InstanceLaunchProfile.MemoryMode.AUTO;
+                    customJava = profile.javaMode() == InstanceLaunchProfile.JavaMode.CUSTOM;
+                    javaPath = profile.javaPath();
+                    jvmArguments = String.join(" ", profile.customJvmArguments());
+                }
+            } catch (IOException | RuntimeException error) {
+                LauncherUI.LOGGER.warn("Cannot read instance runtime summary for {}", version, error);
+            }
+        }
+        return new RuntimeSummary(
+                customJava ? "实例 Java 自定义" : "实例 Java 自动",
+                customJava ? javaPath : "",
+                memoryMb,
+                autoMemory,
+                jvmArguments);
+    }
+
     void updatePlaytimeSummary() {
         playtime.updateSummary();
     }
 
     int getEffectiveMaxMemoryMb() {
-        return ui.maxMemoryMb == ECLConfig.AUTO_MEMORY_MB
-                ? ECLConfig.calculateAutoMemoryMb()
-                : ui.maxMemoryMb;
+        return runtimeSummary(ui.getSelectedVersion()).memoryMb();
     }
 
     private void ensureVersionGameDirs(String gameVersion) throws IOException {
@@ -217,9 +270,16 @@ final class GameLaunchCoordinator {
     }
 
     String getMemoryDisplayText() {
-        int effectiveMemoryMb = getEffectiveMaxMemoryMb();
-        return ui.maxMemoryMb == ECLConfig.AUTO_MEMORY_MB
-                ? "自动 " + effectiveMemoryMb + " MB"
-                : effectiveMemoryMb + " MB";
+        RuntimeSummary summary = runtimeSummary(ui.getSelectedVersion());
+        return summary.autoMemory()
+                ? "自动 " + summary.memoryMb() + " MB"
+                : summary.memoryMb() + " MB";
+    }
+
+    record RuntimeSummary(String javaText, String javaPath, int memoryMb, boolean autoMemory,
+                          String jvmArguments) {
+        String memoryText() {
+            return autoMemory ? "自动 " + memoryMb + " MB" : memoryMb + " MB";
+        }
     }
 }

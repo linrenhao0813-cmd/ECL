@@ -13,10 +13,11 @@ import java.util.Base64;
 /**
  * AES-256-GCM encryption for sensitive launcher data (tokens, refresh tokens).
  *
- * <p>The AES key is protected by Windows DPAPI. On non-Windows systems a local AES-GCM wrapper is
- * used so account persistence remains available without loading the Windows-only DPAPI library.
- * The optional {@code ecl.crypto.keyFile} property only redirects the key-file location; it never
- * disables key protection.
+ * <p>The AES key is protected by Windows DPAPI. On non-Windows systems a caller must configure a
+ * {@link KeyProtectionProvider} backed by the operating system keyring or a user-held secret. The
+ * optional {@code ecl.crypto.keyFile} property only redirects the key-file location; it never
+ * disables key protection. Legacy machine-derived wrappers are accepted only for migration and
+ * are not used for newly created keys.
  */
 public final class CryptoUtil {
     private static final String ALGORITHM = "AES/GCM/NoPadding";

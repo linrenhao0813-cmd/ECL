@@ -1,6 +1,7 @@
 package com.ecl.game;
 
 import com.ecl.util.GsonProvider;
+import com.ecl.util.FileLockLease;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -25,10 +26,21 @@ import java.util.Objects;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import java.util.stream.Stream;
+import java.util.function.Predicate;
 
 /** Scans Minecraft saves and persists the editable single-player world settings. */
 public final class WorldSaveService {
     public static final String SETTINGS_FILE = ".ecl/world-settings.json";
+    private final Predicate<String> instanceRunning;
+
+    public WorldSaveService() {
+        this(ignored -> false);
+    }
+
+    /** Creates a service that refuses writes while the owning instance is running. */
+    public WorldSaveService(Predicate<String> instanceRunning) {
+        this.instanceRunning = Objects.requireNonNull(instanceRunning, "instanceRunning");
+    }
 
     public List<WorldSave> scan(DefaultGameRepository repository) {
         Objects.requireNonNull(repository, "repository");
@@ -54,25 +66,49 @@ public final class WorldSaveService {
     public WorldSave update(WorldSave save, WorldSaveSettings settings) throws IOException {
         Objects.requireNonNull(save, "save");
         Objects.requireNonNull(settings, "settings");
-        Path levelDat = save.directory().resolve("level.dat");
-        if (!Files.isRegularFile(levelDat)) {
-            throw new IOException("World is missing level.dat: " + save.name());
+        ensureNotRunning(save);
+        try (FileLockLease ignored = FileLockLease.tryAcquire(gameLockFile(save))) {
+            if (ignored == null) {
+                throw new IOException("游戏正在运行，不能修改世界存档: " + save.name());
+            }
+            ensureNotRunning(save);
+            Path levelDat = save.directory().resolve("level.dat");
+            if (!Files.isRegularFile(levelDat)) {
+                throw new IOException("World is missing level.dat: " + save.name());
+            }
+            try {
+                NbtIo.Compound root = NbtIo.read(levelDat);
+                NbtIo.Compound data = root.compound("Data");
+                if (data == null) data = root;
+                data.put("GameType", new NbtIo.IntValue(settings.gameMode().id()));
+                data.put("Difficulty", new NbtIo.ByteValue((byte) settings.difficulty().id()));
+                data.put("allowCommands", new NbtIo.ByteValue((byte) (settings.allowCommands() ? 1 : 0)));
+                ensureNotRunning(save);
+                writeAtomically(levelDat, root);
+            } catch (IOException | RuntimeException failure) {
+                throw new IOException("Unable to edit level.dat for world " + save.name(), failure);
+            }
+            ensureNotRunning(save);
+            writeSidecar(save.directory(), settings);
+            return new WorldSave(save.name(), save.directory(), save.instanceId(), save.minecraftVersion(),
+                    save.modLoader(), save.modLoaderVersion(), Files.getLastModifiedTime(save.directory())
+                            .toMillis(), settings, save.sharedDirectory());
         }
-        try {
-            NbtIo.Compound root = NbtIo.read(levelDat);
-            NbtIo.Compound data = root.compound("Data");
-            if (data == null) data = root;
-            data.put("GameType", new NbtIo.IntValue(settings.gameMode().id()));
-            data.put("Difficulty", new NbtIo.ByteValue((byte) settings.difficulty().id()));
-            data.put("allowCommands", new NbtIo.ByteValue((byte) (settings.allowCommands() ? 1 : 0)));
-            writeAtomically(levelDat, root);
-        } catch (IOException | RuntimeException failure) {
-            throw new IOException("Unable to edit level.dat for world " + save.name(), failure);
+    }
+
+    private static Path gameLockFile(WorldSave save) throws IOException {
+        Path saves = save.directory().toAbsolutePath().normalize().getParent();
+        Path runDirectory = saves == null ? null : saves.getParent();
+        if (runDirectory == null) {
+            throw new IOException("World directory has no game root: " + save.directory());
         }
-        writeSidecar(save.directory(), settings);
-        return new WorldSave(save.name(), save.directory(), save.instanceId(), save.minecraftVersion(),
-                save.modLoader(), save.modLoaderVersion(), Files.getLastModifiedTime(save.directory())
-                        .toMillis(), settings, save.sharedDirectory());
+        return runDirectory.resolve(".ecl").resolve("operation.lock");
+    }
+
+    private void ensureNotRunning(WorldSave save) throws IOException {
+        if (instanceRunning.test(save.instanceId())) {
+            throw new IOException("实例正在运行，不能修改世界存档: " + save.instanceId());
+        }
     }
 
     private void scanDirectory(Map<Path, WorldSave> unique, Path runDirectory, String instanceId,

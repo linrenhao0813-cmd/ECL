@@ -87,9 +87,10 @@ public final class WorldBackupService {
                 + FILE_TIME_FORMAT.withZone(clock.getZone()).format(createdAt);
         Path archive = metadataHelper.uniqueArchivePath(directory, prefix);
         Path metadata = metadataHelper.metadataPath(archive);
-        String temporarySuffix = "." + java.util.UUID.randomUUID() + ".part";
-        Path temporaryArchive = archive.resolveSibling(archive.getFileName() + temporarySuffix);
-        Path temporaryMetadata = metadata.resolveSibling(metadata.getFileName() + temporarySuffix);
+        Path temporaryArchive = Files.createTempFile(directory,
+                "." + archive.getFileName() + ".", ".part");
+        Path temporaryMetadata = Files.createTempFile(directory,
+                "." + metadata.getFileName() + ".", ".part");
 
         Map<String, Path> sources = new LinkedHashMap<>();
         for (BackupEntry.Content content : BackupEntry.Content.values()) {

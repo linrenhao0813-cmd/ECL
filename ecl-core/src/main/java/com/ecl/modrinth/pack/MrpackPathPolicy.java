@@ -2,6 +2,9 @@ package com.ecl.modrinth.pack;
 
 import com.ecl.ECLConfig;
 import com.ecl.util.TextUtil;
+import com.sun.jna.platform.win32.Kernel32;
+import com.sun.jna.platform.win32.WinBase;
+import com.sun.jna.platform.win32.WinNT;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,7 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.InvalidPathException;
-import java.nio.file.attribute.DosFileAttributes;
+import java.util.Locale;
 import java.util.UUID;
 
 /** Centralizes MRPACK profile, instance and archive path safety rules. */
@@ -129,7 +132,9 @@ final class MrpackPathPolicy {
         if (!normalizedCandidate.startsWith(normalizedRoot)) {
             throw new IOException("整合包路径越界");
         }
-        checkPathComponent(normalizedRoot, "整合包根目录");
+        if (Files.exists(normalizedRoot, LinkOption.NOFOLLOW_LINKS)) {
+            checkPathComponent(normalizedRoot, "整合包根目录");
+        }
         Path current = normalizedRoot;
         Path relative = normalizedRoot.relativize(normalizedCandidate);
         for (Path component : relative) {
@@ -154,15 +159,19 @@ final class MrpackPathPolicy {
         if (Files.isSymbolicLink(path)) {
             throw new IOException(label + "不能是符号链接: " + path.getFileName());
         }
-        try {
-            DosFileAttributes attrs = Files.readAttributes(path, DosFileAttributes.class,
-                    LinkOption.NOFOLLOW_LINKS);
-            if (attrs.isReparsePoint()) {
+        if (isWindows()) {
+            int attributes = Kernel32.INSTANCE.GetFileAttributes(path.toString());
+            if (attributes == WinBase.INVALID_FILE_ATTRIBUTES) {
+                throw new IOException("无法读取 Windows 文件属性: " + path);
+            }
+            if ((attributes & WinNT.FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
                 throw new IOException(label + "不能是 Windows reparse point: " + path.getFileName());
             }
-        } catch (UnsupportedOperationException ignored) {
-            // Non-DOS providers have no reparse-point attribute; symbolic links are still checked.
         }
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
     private static boolean isWindowsReservedName(String value) {

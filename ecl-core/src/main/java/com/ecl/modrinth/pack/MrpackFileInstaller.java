@@ -98,7 +98,7 @@ final class MrpackFileInstaller {
                                 @Override
                                 public void onComplete(File file) {
                                 }
-                            }, null, remainingBudget);
+                            }, null, remainingBudget, trustedDownloadHosts);
                     long downloadedSize = Files.size(destination);
                     if (downloadedSize != declaredSize) {
                         Files.deleteIfExists(destination);

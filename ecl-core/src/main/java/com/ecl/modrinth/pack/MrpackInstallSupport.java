@@ -41,8 +41,14 @@ final class MrpackInstallSupport {
     }
 
     static PackManifest readInstalledManifest(Path instanceRoot, MrpackInstaller.Listener listener) {
-        Path manifestFile = instanceRoot.resolve(PackManifest.FILE_NAME);
-        if (!Files.isRegularFile(manifestFile)) {
+        Path manifestFile;
+        try {
+            manifestFile = PackManifest.resolve(instanceRoot, PackManifest.FILE_NAME);
+        } catch (IOException unsafePath) {
+            listener.onStatus("旧整合包文件清单路径不安全；本次更新不会删除旧版遗留文件");
+            return new PackManifest("", Map.of());
+        }
+        if (!Files.isRegularFile(manifestFile, LinkOption.NOFOLLOW_LINKS)) {
             listener.onStatus("未找到旧整合包文件清单；本次更新不会删除旧版遗留文件");
             return new PackManifest("", Map.of());
         }

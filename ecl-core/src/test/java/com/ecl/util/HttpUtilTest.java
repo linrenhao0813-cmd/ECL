@@ -68,17 +68,23 @@ class HttpUtilTest {
     }
     private HttpServer server;
     private String baseUrl;
+    private AutoCloseable loopbackDownloads;
 
     @BeforeEach
     void startServer() throws IOException {
+        loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
     }
 
     @AfterEach
-    void stopServer() {
-        server.stop(0);
+    void stopServer() throws Exception {
+        try {
+            server.stop(0);
+        } finally {
+            loopbackDownloads.close();
+        }
     }
 
     @Test

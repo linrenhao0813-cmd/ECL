@@ -752,6 +752,14 @@ class LauncherUIView extends javafx.application.Application {
         return activeGameProcesses.keySet().stream().anyMatch(Process::isAlive);
     }
 
+    boolean isVersionRunning(String version) {
+        if (version == null || version.isBlank()) {
+            return false;
+        }
+        return activeGameProcesses.entrySet().stream()
+                .anyMatch(entry -> version.equals(entry.getValue()) && entry.getKey().isAlive());
+    }
+
 
 
 

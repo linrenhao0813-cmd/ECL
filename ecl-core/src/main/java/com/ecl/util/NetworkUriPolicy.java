@@ -1,7 +1,6 @@
 package com.ecl.util;
 
 import java.io.IOException;
-import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.util.Locale;
@@ -9,6 +8,9 @@ import java.util.Set;
 
 /** Shared validation for remote download and browser-facing HTTP(S) addresses. */
 public final class NetworkUriPolicy {
+    private static final InheritableThreadLocal<Boolean> LOOPBACK_ARTIFACT_TEST_MODE =
+            new InheritableThreadLocal<>();
+
     private NetworkUriPolicy() {
     }
 
@@ -42,10 +44,29 @@ public final class NetworkUriPolicy {
         return requireSecureDownload(uri, description);
     }
 
+    /** HTTP client policy used by API test/local endpoints and remote HTTPS services. */
+    public static URI requireHttpRequest(URI uri, String description) throws IOException {
+        URI checked = requireHttpsOrLoopbackHttp(uri, description);
+        if ("https".equalsIgnoreCase(checked.getScheme())) {
+            rejectUnsafeResolvedAddresses(checked, description);
+        }
+        return checked;
+    }
+
+    /** Strict production artifact policy; loopback HTTP is available only to scoped tests. */
+    public static URI requireArtifactDownload(URI uri, String description) throws IOException {
+        if (loopbackArtifactTestMode() && isLoopbackHttp(uri)) {
+            return requireHttpRequest(uri, description);
+        }
+        return requireSecureDownload(uri, description);
+    }
+
     /** Require HTTPS/loopback HTTP and an exact host from the supplied allowlist. */
     public static URI requireAllowedDownload(
             URI uri, Set<String> allowedHosts, String description) throws IOException {
-        URI checked = requireSecureDownload(uri, description);
+        URI checked = loopbackArtifactTestMode() && isLoopbackHttp(uri)
+                ? requireHttpRequest(uri, description)
+                : requireSecureDownload(uri, description);
         String host = checked.getHost().toLowerCase(Locale.ROOT);
         boolean allowed = allowedHosts != null && allowedHosts.stream()
                 .filter(value -> value != null && !value.isBlank())
@@ -55,6 +76,27 @@ public final class NetworkUriPolicy {
             throw new IOException(description + " host is not trusted: " + host);
         }
         return checked;
+    }
+
+    static AutoCloseable allowLoopbackArtifactDownloadsForTesting() {
+        Boolean previous = LOOPBACK_ARTIFACT_TEST_MODE.get();
+        LOOPBACK_ARTIFACT_TEST_MODE.set(Boolean.TRUE);
+        return () -> {
+            if (previous == null) {
+                LOOPBACK_ARTIFACT_TEST_MODE.remove();
+            } else {
+                LOOPBACK_ARTIFACT_TEST_MODE.set(previous);
+            }
+        };
+    }
+
+    private static boolean loopbackArtifactTestMode() {
+        return Boolean.TRUE.equals(LOOPBACK_ARTIFACT_TEST_MODE.get());
+    }
+
+    private static boolean isLoopbackHttp(URI uri) {
+        return uri != null && "http".equalsIgnoreCase(uri.getScheme())
+                && isLoopbackHostLiteral(uri.getHost());
     }
 
     /** Strict literal loopback recognition; hostnames such as 127.example.com are rejected. */
@@ -122,29 +164,41 @@ public final class NetworkUriPolicy {
     }
 
     private static boolean isUnsafeAddress(InetAddress address) {
-        byte[] bytes = address.getAddress();
         if (address.isAnyLocalAddress() || address.isLoopbackAddress()
                 || address.isLinkLocalAddress() || address.isSiteLocalAddress()
                 || address.isMulticastAddress()) {
             return true;
         }
-        if (bytes.length == 4) {
-            int first = bytes[0] & 0xff;
-            int second = bytes[1] & 0xff;
-            // RFC 6598 shared CGNAT space (100.64.0.0/10).
-            if (first == 100 && second >= 64 && second <= 127) return true;
-            // 0.0.0.0/8 and 169.254/16 are not consistently covered by all providers.
-            if (first == 0 || first == 169 && second == 254) return true;
-        } else if (address instanceof Inet6Address) {
-            // IPv6 unique-local addresses fc00::/7 and IPv4-mapped private addresses.
-            int first = bytes[0] & 0xff;
-            if ((first & 0xfe) == 0xfc) return true;
-            if (first == 0 && bytes[1] == 0 && bytes[2] == 0 && bytes[3] == 0
-                    && bytes[4] == 0 && bytes[5] == 0 && bytes[6] == 0 && bytes[7] == 0
-                    && bytes[8] == 0 && bytes[9] == 0 && bytes[10] == (byte) 0xff) {
-                return isUnsafeAddress(InetAddress.getByAddress(java.util.Arrays.copyOfRange(bytes, 12, 16)));
-            }
+        byte[] bytes = address.getAddress();
+        return bytes.length == 4 ? isUnsafeIpv4(bytes) : isUnsafeIpv6(bytes);
+    }
+
+    private static boolean isUnsafeIpv4(byte[] bytes) {
+        int first = bytes[0] & 0xff;
+        int second = bytes[1] & 0xff;
+        // RFC 6598 shared CGNAT space (100.64.0.0/10).
+        if (first == 100 && second >= 64 && second <= 127) return true;
+        // 0.0.0.0/8 and 169.254/16 are not consistently covered by all providers.
+        return first == 0 || first == 169 && second == 254;
+    }
+
+    private static boolean isUnsafeIpv6(byte[] bytes) {
+        // IPv6 unique-local addresses fc00::/7 and IPv4-mapped private addresses.
+        int first = bytes[0] & 0xff;
+        if ((first & 0xfe) == 0xfc) return true;
+        if (!isIpv4Mapped(bytes)) return false;
+        try {
+            return isUnsafeAddress(InetAddress.getByAddress(
+                    java.util.Arrays.copyOfRange(bytes, 12, 16)));
+        } catch (java.net.UnknownHostException impossible) {
+            return true;
         }
-        return false;
+    }
+
+    private static boolean isIpv4Mapped(byte[] bytes) {
+        for (int index = 0; index < 10; index++) {
+            if (bytes[index] != 0) return false;
+        }
+        return bytes[10] == (byte) 0xff && bytes[11] == (byte) 0xff;
     }
 }

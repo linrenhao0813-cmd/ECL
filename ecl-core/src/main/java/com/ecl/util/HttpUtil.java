@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -140,9 +141,17 @@ public class HttpUtil {
     public static void downloadFileWithProgress(
             String urlStr, File target, ProgressCallback callback,
             SourceCallback sourceCallback, long maxBytes) throws IOException {
+        downloadFileWithProgress(urlStr, target, callback, sourceCallback, maxBytes, null);
+    }
+
+    /** Download with an exact host allowlist applied to the initial URL and every redirect. */
+    public static void downloadFileWithProgress(
+            String urlStr, File target, ProgressCallback callback,
+            SourceCallback sourceCallback, long maxBytes, Set<String> allowedHosts)
+            throws IOException {
         try (DownloadConcurrencyGate.Permit ignored = DownloadConcurrencyGate.acquire()) {
             ResumableFileDownloader.download(urlStr, target, adapt(callback),
-                    adapt(sourceCallback), maxBytes);
+                    adapt(sourceCallback), maxBytes, DownloadRateLimiter.defaultLimiter(), allowedHosts);
         }
     }
 

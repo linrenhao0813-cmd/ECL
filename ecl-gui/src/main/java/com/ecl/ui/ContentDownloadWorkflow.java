@@ -1,10 +1,13 @@
 package com.ecl.ui;
 
 import com.ecl.launcher.VersionManager;
+import com.ecl.download.DownloadTaskCenter;
 import com.ecl.modrinth.download.ModrinthDownloader;
 import com.ecl.modrinth.model.ContentDownloadResult;
 import com.ecl.modrinth.model.ContentProject;
 import com.ecl.modrinth.model.ContentVersion;
+import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
+import com.ecl.util.FileLockLease;
 import com.ecl.modrinth.pack.MrpackInstaller;
 import com.ecl.modrinth.provider.ContentSource;
 import javafx.application.Platform;
@@ -65,6 +68,10 @@ final class ContentDownloadWorkflow {
                     profileId,
                     ui.versionManager.resolveMinecraftVersionId(profileId),
                     loader,
+                    VersionProfileModInstanceContext.load(profileId,
+                            com.ecl.ECLConfig.getVersionsDir().toPath(),
+                            ui.getConfiguredGameRootDir().toPath(),
+                            ui.resolveVersionGameDir(profileId).toPath()).instanceId(),
                     ui.resolveVersionGameDir(profileId));
         } catch (IOException error) {
             throw new IllegalArgumentException("无法解析目标实例 " + profileId, error);
@@ -85,7 +92,7 @@ final class ContentDownloadWorkflow {
                 + "    导入目录: " + importDir.getAbsolutePath());
     }
 
-    void downloadSelectedContent(
+    DownloadTaskCenter.TaskHandle<?> downloadSelectedContent(
             ContentSource source,
             ContentTarget target,
             ContentProject project,
@@ -102,57 +109,63 @@ final class ContentDownloadWorkflow {
     ) {
         if (project == null || selectedVersion == null) {
             dialogStatus.setText("请先选择一个" + target.title + "及其具体版本。");
-            return;
+            return null;
         }
-        long generation = downloadGeneration.incrementAndGet();
-        activeDownloadGeneration.set(generation);
-        String loader = target.usesLoader() ? instance.loader() : null;
-        String gameVersion = instance.minecraftVersion();
-        ui.setControlsBusy(true);
-        searchBtn.setDisable(true);
-        importBtn.setDisable(true);
-        targetProfileCombo.setDisable(true);
-        modProgress.setProgress(0);
-        ui.downloadProgress.setProgress(0);
-        ui.startProgressAnimation(modProgress);
-        ui.startProgressAnimation(ui.downloadProgress);
-        String loaderLabel = loader == null ? "" : " / " + loader;
-        ui.setStatus("正在下载" + target.title,
-                project.getTitle() + " " + selectedVersion.versionNumber()
-                        + " -> " + gameVersion + loaderLabel);
+        return ui.downloadTaskCenter.submit(
+                "Content " + project.getTitle(), () -> {
+            // This factory is invoked for the initial attempt and every retry. Keep all UI
+            // preparation here so a retry cannot reuse stale listeners/progress from the failed
+            // attempt or accidentally run alongside another content import.
+            long generation = downloadGeneration.incrementAndGet();
+            activeDownloadGeneration.set(generation);
+            String loader = target.usesLoader() ? instance.loader() : null;
+            String gameVersion = instance.minecraftVersion();
+            ui.setControlsBusy(true);
+            searchBtn.setDisable(true);
+            importBtn.setDisable(true);
+            targetProfileCombo.setDisable(true);
+            modProgress.setProgress(0);
+            ui.downloadProgress.setProgress(0);
+            ui.startProgressAnimation(modProgress);
+            ui.startProgressAnimation(ui.downloadProgress);
+            String loaderLabel = loader == null ? "" : " / " + loader;
+            ui.setStatus("正在下载" + target.title,
+                    project.getTitle() + " " + selectedVersion.versionNumber()
+                            + " -> " + gameVersion + loaderLabel);
 
-        ui.downloadTaskCenter.submit(
-                "Content " + project.getTitle(), () -> context -> {
+            return context -> {
             if (generation != downloadGeneration.get()) {
                 return null;
             }
             try {
-                ContentDownloadResult result = ui.controller.contentDownloader(source).downloadVersion(
+                if (ui.isVersionRunning(instance.profileId())) {
+                    throw new IOException("实例正在运行，不能安装内容: " + instance.profileId());
+                }
+                ContentDownloadResult result;
+                MrpackInstaller.InstallResult packResult = null;
+                try (AutoCloseable ignored = ui.controller.instanceOperations()
+                        .acquireInterruptibly(instance.instanceId());
+                     FileLockLease fileLock = FileLockLease.tryAcquire(
+                             instance.gameDirectory().toPath().resolve(".ecl").resolve("operation.lock"))) {
+                    if (fileLock == null) {
+                        throw new IOException("实例内容操作正在另一个启动器进程中执行: " + instance.profileId());
+                    }
+                    if (context.isCancelled()) {
+                        throw new java.util.concurrent.CancellationException("内容安装已取消");
+                    }
+                    if (ui.isVersionRunning(instance.profileId())) {
+                        throw new IOException("实例正在运行，不能安装内容: " + instance.profileId());
+                    }
+                result = ui.controller.contentDownloader(source).downloadVersion(
                         project, selectedVersion, gameVersion, loader, importDir,
                         target.downloadDependencies,
-                        new ModrinthDownloader.DownloadListener() {
-                            @Override
-                            public void onStatus(String message) {
-                                context.updateStatus(message);
-                                Platform.runLater(() -> {
-                                    if (generation != downloadGeneration.get()) return;
-                                    dialogStatus.setText(message);
-                                    ui.setStatus("正在导入" + target.title, message);
-                                });
-                            }
-                            @Override
-                            public void onProgress(long downloaded, long total) {
-                                context.updateProgress(downloaded, total);
-                                Platform.runLater(() -> {
-                                    if (generation != downloadGeneration.get()) return;
-                                    ui.updateProgress(modProgress, downloaded, total);
-                                    ui.updateProgress(ui.downloadProgress, downloaded, total);
-                                });
-                            }
-                        },
+                        contentDownloadListener(context, generation, downloadGeneration,
+                                dialogStatus, target, modProgress),
                         target.allowedExtensions
                 );
-                MrpackInstaller.InstallResult packResult = null;
+                if (context.isCancelled()) {
+                    throw new java.util.concurrent.CancellationException("内容安装已取消");
+                }
                 if ("modpack".equals(target.projectType)) {
                     if (result.getMainFile() == null) {
                         throw new IOException("整合包下载完成，但没有找到安装文件");
@@ -178,6 +191,9 @@ final class ContentDownloadWorkflow {
                                 new MrpackInstaller.Listener() {
                                     @Override
                                     public void onStatus(String message) {
+                                        if (context.isCancelled()) {
+                                            throw new java.util.concurrent.CancellationException("整合包安装已取消");
+                                        }
                                         context.updateStatus(message);
                                         Platform.runLater(() -> {
                                             if (generation != downloadGeneration.get()) return;
@@ -187,6 +203,9 @@ final class ContentDownloadWorkflow {
                                     }
                                     @Override
                                     public void onProgress(long downloaded, long total) {
+                                        if (context.isCancelled()) {
+                                            throw new java.util.concurrent.CancellationException("整合包安装已取消");
+                                        }
                                         context.updateProgress(downloaded, total);
                                         Platform.runLater(() -> {
                                             if (generation != downloadGeneration.get()) return;
@@ -199,6 +218,7 @@ final class ContentDownloadWorkflow {
                         if (converted) Files.deleteIfExists(installArchive.toPath());
                     }
                     ui.gameRepository().applyDefaultIsolationSettingForNewInstance(packResult.profileId());
+                }
                 }
 
                 MrpackInstaller.InstallResult completedPack = packResult;
@@ -249,6 +269,41 @@ final class ContentDownloadWorkflow {
                 throw e;
             }
             return null;
+            };
         });
+    }
+
+    private ModrinthDownloader.DownloadListener contentDownloadListener(
+            DownloadTaskCenter.TaskContext context, long generation, AtomicLong downloadGeneration,
+            Label dialogStatus, ContentTarget target, ProgressBar modProgress) {
+        return new ModrinthDownloader.DownloadListener() {
+            @Override
+            public void onStatus(String message) {
+                requireActive(context, "内容安装已取消");
+                context.updateStatus(message);
+                Platform.runLater(() -> {
+                    if (generation != downloadGeneration.get()) return;
+                    dialogStatus.setText(message);
+                    ui.setStatus("正在导入" + target.title, message);
+                });
+            }
+
+            @Override
+            public void onProgress(long downloaded, long total) {
+                requireActive(context, "内容安装已取消");
+                context.updateProgress(downloaded, total);
+                Platform.runLater(() -> {
+                    if (generation != downloadGeneration.get()) return;
+                    ui.updateProgress(modProgress, downloaded, total);
+                    ui.updateProgress(ui.downloadProgress, downloaded, total);
+                });
+            }
+        };
+    }
+
+    private static void requireActive(DownloadTaskCenter.TaskContext context, String message) {
+        if (context.isCancelled()) {
+            throw new java.util.concurrent.CancellationException(message);
+        }
     }
 }

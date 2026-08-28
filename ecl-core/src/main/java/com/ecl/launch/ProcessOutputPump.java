@@ -13,6 +13,8 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -35,6 +37,7 @@ public final class ProcessOutputPump implements AutoCloseable {
     private final AtomicBoolean started = new AtomicBoolean();
     private final AtomicBoolean stopped = new AtomicBoolean();
     private final AtomicBoolean mirrorFailed = new AtomicBoolean();
+    private final CountDownLatch finished = new CountDownLatch(1);
     private volatile Thread runningThread;
 
     /**
@@ -94,6 +97,11 @@ public final class ProcessOutputPump implements AutoCloseable {
         return capture.toString();
     }
 
+    /** Wait until the reader has consumed the process pipe and closed its mirror. */
+    public boolean awaitStopped(long timeout, TimeUnit unit) throws InterruptedException {
+        return finished.await(timeout, unit);
+    }
+
     /** Stop pumping. Idempotent; interrupts the reader so {@link #start()}-ed threads wind down. */
     @Override
     public void close() {
@@ -151,6 +159,7 @@ public final class ProcessOutputPump implements AutoCloseable {
             // The process ended or its pipe broke; nothing meaningful left to read.
         } finally {
             closeMirror();
+            finished.countDown();
         }
     }
 

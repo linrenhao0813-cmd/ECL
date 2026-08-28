@@ -4,6 +4,7 @@ import com.ecl.game.WorldSave;
 import com.ecl.game.WorldSaveService;
 import com.ecl.game.WorldSaveSettings;
 import com.ecl.util.Messages;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -12,7 +13,6 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
-import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -24,11 +24,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Save browser grouped by Minecraft version and mod loader. */
 final class WorldSavesPage extends VBox {
     private final LauncherUI ui;
-    private final WorldSaveService service = new WorldSaveService();
+    private final WorldSaveService service;
     private final ListView<SaveGroup> groups = new ListView<>();
     private final ListView<WorldSave> worlds = new ListView<>();
     private final VBox detail = new VBox(12);
@@ -39,15 +40,15 @@ final class WorldSavesPage extends VBox {
     private final ComboBox<WorldSaveSettings.Difficulty> difficulty = new ComboBox<>();
     private final ComboBox<WorldSaveSettings.GameMode> gameMode = new ComboBox<>();
     private final CheckBox commands = new CheckBox();
-    private final CheckBox lan = new CheckBox();
-    private final Label lanPortLabel = new Label();
-    private final TextField lanPortField = new TextField();
     private Button openInstanceButton;
+    private Button saveButton;
     private WorldSave selected;
     private List<WorldSave> allWorlds = List.of();
+    private final AtomicLong scanGeneration = new AtomicLong();
 
     WorldSavesPage(LauncherUI ui) {
         this.ui = Objects.requireNonNull(ui, "ui");
+        this.service = new WorldSaveService(ui::isVersionRunning);
         setSpacing(18);
         setPadding(new Insets(2, 0, 24, 0));
         getStyleClass().addAll("launch-pane", "world-saves-page");
@@ -114,17 +115,12 @@ final class WorldSavesPage extends VBox {
         detail.getChildren().add(ui.createControlRow(Messages.get("saves.difficulty"), difficulty));
         detail.getChildren().add(ui.createControlRow(Messages.get("saves.gameMode"), gameMode));
         detail.getChildren().add(commands);
-        lanPortLabel.setText(Messages.get("saves.lanPort"));
-        HBox lanOptions = new HBox(10, lan, lanPortLabel, lanPortField);
-        lanOptions.setAlignment(Pos.CENTER_LEFT);
-        detail.getChildren().add(lanOptions);
-
-        Button save = ui.createActionButton(Messages.get("saves.save"), "primary-button", this::saveSettings);
+        saveButton = ui.createActionButton(Messages.get("saves.save"), "primary-button", this::saveSettings);
         Button folder = ui.createActionButton(Messages.get("button.openDir"), "ghost-button",
                 () -> { if (selected != null) ui.openLocalFolder(selected.directory().toFile(), Messages.get("saves.title")); });
         openInstanceButton = ui.createActionButton(Messages.get("saves.openInstance"), "secondary-button",
                 this::openInstance);
-        HBox actions = new HBox(10, save, folder, openInstanceButton);
+        HBox actions = new HBox(10, saveButton, folder, openInstanceButton);
         actions.setAlignment(Pos.CENTER_LEFT);
         detail.getChildren().add(actions);
         setDetailVisible(false);
@@ -156,19 +152,7 @@ final class WorldSavesPage extends VBox {
         gameMode.setButtonCell(comboCell(WorldSavesPage::gameModeText));
         ui.applyFieldStyle(difficulty);
         ui.applyFieldStyle(gameMode);
-        lanPortField.setPromptText(Integer.toString(WorldSaveSettings.DEFAULT_LAN_PORT));
-        lanPortField.setPrefWidth(110);
-        ui.applyFieldStyle(lanPortField);
         commands.setText(Messages.get("saves.allowCommands"));
-        lan.setText(Messages.get("saves.openToLan"));
-        lan.selectedProperty().addListener((obs, oldValue, selected) -> {
-            updateLanPortVisibility(selected);
-            if (selected) {
-                lanPortField.requestFocus();
-                lanPortField.selectAll();
-            }
-        });
-        updateLanPortVisibility(false);
     }
 
     private <T> ListCell<T> comboCell(java.util.function.Function<T, String> display) {
@@ -185,7 +169,22 @@ final class WorldSavesPage extends VBox {
     }
 
     private void refreshSelection(String groupId, String worldName) {
-        allWorlds = service.scan(ui.gameRepository());
+        long generation = scanGeneration.incrementAndGet();
+        ui.controller.supplyAsync("ecl-scan-worlds", () -> service.scan(ui.gameRepository()))
+                .whenComplete((scanned, error) -> Platform.runLater(() -> {
+                    if (generation != scanGeneration.get()) {
+                        return;
+                    }
+                    if (error != null) {
+                        ui.setStatus("读取世界失败", ui.cleanMessage(error));
+                        return;
+                    }
+                    applyScannedWorlds(scanned == null ? List.of() : scanned, groupId, worldName);
+                }));
+    }
+
+    private void applyScannedWorlds(List<WorldSave> scanned, String groupId, String worldName) {
+        allWorlds = scanned;
         List<SaveGroup> values = new ArrayList<>();
         values.add(new SaveGroup(Messages.get("saves.all"), allWorlds));
         allWorlds.stream().collect(java.util.stream.Collectors.groupingBy(WorldSave::groupId))
@@ -238,37 +237,20 @@ final class WorldSavesPage extends VBox {
         difficulty.setValue(value.settings().difficulty());
         gameMode.setValue(value.settings().gameMode());
         commands.setSelected(value.settings().allowCommands());
-        lan.setSelected(value.settings().openToLan());
-        lanPortField.setText(Integer.toString(value.settings().lanPort()));
-        updateLanPortVisibility(value.settings().openToLan());
         openInstanceButton.setDisable(value.sharedDirectory());
+        saveButton.setDisable(ui.isVersionRunning(value.instanceId()));
     }
 
     private void saveSettings() {
         if (selected == null) return;
-        int lanPort = WorldSaveSettings.DEFAULT_LAN_PORT;
-        if (lan.isSelected()) {
-            try {
-                lanPort = Integer.parseInt(lanPortField.getText().trim());
-            } catch (NumberFormatException ignored) {
-                lanPort = -1;
-            }
-            if (lanPort < 1 || lanPort > 65535) {
-                ui.setStatus(Messages.get("saves.save"), Messages.get("saves.lanPort.invalid"));
-                lanPortField.requestFocus();
-                return;
-            }
-        } else if (!lanPortField.getText().isBlank()) {
-            try {
-                int entered = Integer.parseInt(lanPortField.getText().trim());
-                if (entered >= 1 && entered <= 65535) lanPort = entered;
-            } catch (NumberFormatException ignored) {
-                // Use the default port while LAN publishing is disabled.
-            }
+        if (ui.isVersionRunning(selected.instanceId())) {
+            ui.setStatus(Messages.get("saves.save"), "实例正在运行，请退出游戏后再修改世界。");
+            return;
         }
         try {
             WorldSave updated = service.update(selected, new WorldSaveSettings(difficulty.getValue(),
-                    gameMode.getValue(), commands.isSelected(), lan.isSelected(), lanPort));
+                    gameMode.getValue(), commands.isSelected(), selected.settings().openToLan(),
+                    selected.settings().lanPort()));
             refreshSelection(updated.groupId(), updated.name());
             ui.setStatus(Messages.get("saves.save"), Messages.format("saves.saved", updated.name()));
         } catch (IOException error) {
@@ -280,13 +262,6 @@ final class WorldSavesPage extends VBox {
         if (selected == null || selected.sharedDirectory() || selected.instanceId().isBlank()) return;
         ui.versionActions.restoreVersionComboItems(selected.instanceId());
         ui.setActiveView(AppView.HOME);
-    }
-
-    private void updateLanPortVisibility(boolean visible) {
-        lanPortField.setVisible(visible);
-        lanPortField.setManaged(visible);
-        lanPortLabel.setVisible(visible);
-        lanPortLabel.setManaged(visible);
     }
 
     private void setDetailVisible(boolean visible) {
