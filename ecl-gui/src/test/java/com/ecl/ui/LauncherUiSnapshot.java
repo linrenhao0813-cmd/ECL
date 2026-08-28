@@ -180,16 +180,16 @@ public final class LauncherUiSnapshot {
                     || "servers-dark".equalsIgnoreCase(mode)
                     || "servers-en".equalsIgnoreCase(mode)) {
                 if ("servers-dark".equalsIgnoreCase(mode)) {
-                    Field settingsField = LauncherUI.class.getDeclaredField("settingsManager");
+                    Field settingsField = LauncherUIView.class.getDeclaredField("settingsManager");
                     settingsField.setAccessible(true);
                     SettingsManager settings = (SettingsManager) settingsField.get(this);
                     settings.set(ECLConfig.KEY_THEME, "DARK");
-                    Method applyTheme = LauncherUI.class.getDeclaredMethod("applyTheme", String.class);
+                    Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme", String.class);
                     applyTheme.setAccessible(true);
                     applyTheme.invoke(this, "DARK");
                 }
                 if ("servers-en".equalsIgnoreCase(mode)) {
-                    Method switchLanguage = LauncherUI.class.getDeclaredMethod(
+                    Method switchLanguage = LauncherUIView.class.getDeclaredMethod(
                             "switchLanguage", String.class);
                     switchLanguage.setAccessible(true);
                     switchLanguage.invoke(this, "en");
@@ -203,25 +203,25 @@ public final class LauncherUiSnapshot {
                 ComboBox<String> versionCombo = versionCombo();
                 if (!versionCombo.getItems().contains(profileId)) versionCombo.getItems().add(profileId);
                 versionCombo.setValue(profileId);
-                Field loaderField = LauncherUI.class.getDeclaredField("loaderChoiceCombo");
+                Field loaderField = LauncherUIView.class.getDeclaredField("loaderChoiceCombo");
                 loaderField.setAccessible(true);
                 @SuppressWarnings("unchecked")
                 ComboBox<Object> loaderCombo = (ComboBox<Object>) loaderField.get(this);
                 loaderCombo.getItems().stream()
                         .filter(item -> "Fabric".equals(item.toString()))
                         .findFirst().ifPresent(loaderCombo::setValue);
-                Field settingsPaneField = LauncherUI.class.getDeclaredField("instanceSettingsPane");
+                Field settingsPaneField = LauncherUIView.class.getDeclaredField("instanceSettingsPane");
                 settingsPaneField.setAccessible(true);
                 ((javafx.scene.control.TitledPane) settingsPaneField.get(this)).setExpanded(true);
                 return primaryStage.getScene();
             }
             if ("skin-upload".equalsIgnoreCase(mode)) {
-                Field authTypeField = LauncherUI.class.getDeclaredField("authTypeCombo");
+                Field authTypeField = LauncherUIView.class.getDeclaredField("authTypeCombo");
                 authTypeField.setAccessible(true);
                 @SuppressWarnings("unchecked")
                 ComboBox<String> authType = (ComboBox<String>) authTypeField.get(this);
                 authType.setValue("MICROSOFT");
-                Field settingsPaneField = LauncherUI.class.getDeclaredField("instanceSettingsPane");
+                Field settingsPaneField = LauncherUIView.class.getDeclaredField("instanceSettingsPane");
                 settingsPaneField.setAccessible(true);
                 ((javafx.scene.control.TitledPane) settingsPaneField.get(this)).setExpanded(true);
                 return primaryStage.getScene();
@@ -275,18 +275,18 @@ public final class LauncherUiSnapshot {
                 return primaryStage.getScene();
             }
             if ("settings-page-dark".equalsIgnoreCase(mode)) {
-                Field settingsField = LauncherUI.class.getDeclaredField("settingsManager");
+                Field settingsField = LauncherUIView.class.getDeclaredField("settingsManager");
                 settingsField.setAccessible(true);
                 SettingsManager settings = (SettingsManager) settingsField.get(this);
                 settings.set(ECLConfig.KEY_THEME, "DARK");
                 showAppView("SETTINGS");
-                Method applyTheme = LauncherUI.class.getDeclaredMethod("applyTheme", String.class);
+                Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme", String.class);
                 applyTheme.setAccessible(true);
                 applyTheme.invoke(this, "DARK");
                 return primaryStage.getScene();
             }
             if ("settings".equalsIgnoreCase(mode)) {
-                Method settingsDialog = LauncherUI.class.getDeclaredMethod("showSettingsDialog");
+                Method settingsDialog = LauncherUIView.class.getDeclaredMethod("showSettingsDialog");
                 settingsDialog.setAccessible(true);
                 settingsDialog.invoke(this);
                 Scene scene = findSecondaryScene(primaryStage, "Settings dialog did not open");
@@ -297,7 +297,7 @@ public final class LauncherUiSnapshot {
             }
             if ("backups".equalsIgnoreCase(mode)) {
                 String profileId = "visual-backup-instance";
-                Field comboField = LauncherUI.class.getDeclaredField("versionCombo");
+                Field comboField = LauncherUIView.class.getDeclaredField("versionCombo");
                 comboField.setAccessible(true);
                 @SuppressWarnings("unchecked")
                 ComboBox<String> combo = (ComboBox<String>) comboField.get(this);
@@ -317,7 +317,7 @@ public final class LauncherUiSnapshot {
                             EnumSet.of(BackupEntry.Content.SAVES), null);
                 }
 
-                Method backupDialog = LauncherUI.class.getDeclaredMethod("showBackupManagerDialog");
+                Method backupDialog = LauncherUIView.class.getDeclaredMethod("showBackupManagerDialog");
                 backupDialog.setAccessible(true);
                 backupDialog.invoke(this);
                 return findSecondaryScene(primaryStage, "Backup dialog did not open");
@@ -366,7 +366,7 @@ public final class LauncherUiSnapshot {
 
         @SuppressWarnings("unchecked")
         private ComboBox<String> versionCombo() throws ReflectiveOperationException {
-            Field comboField = LauncherUI.class.getDeclaredField("versionCombo");
+            Field comboField = LauncherUIView.class.getDeclaredField("versionCombo");
             comboField.setAccessible(true);
             return (ComboBox<String>) comboField.get(this);
         }

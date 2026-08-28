@@ -6,7 +6,6 @@ import com.ecl.launcher.CrashAnalyzer;
 import javafx.application.Platform;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -15,12 +14,19 @@ final class GameProcessMonitor {
     private final LauncherUI ui;
     private final Consumer<String> outputConsumer;
     private final Consumer<CrashAnalyzer.Report> errorConsumer;
+    private final SessionRecorder sessionRecorder;
+
+    @FunctionalInterface
+    interface SessionRecorder {
+        void record(String version, long launchStartedAt, long elapsedNanos);
+    }
 
     GameProcessMonitor(LauncherUI ui, Consumer<String> outputConsumer,
-                       Consumer<CrashAnalyzer.Report> errorConsumer) {
+                       Consumer<CrashAnalyzer.Report> errorConsumer, SessionRecorder sessionRecorder) {
         this.ui = ui;
         this.outputConsumer = outputConsumer;
         this.errorConsumer = errorConsumer;
+        this.sessionRecorder = sessionRecorder;
     }
 
     void monitor(GameProcess gameProcess, String version, File launchDir,
@@ -58,13 +64,7 @@ final class GameProcessMonitor {
                 });
             } finally {
                 gameProcess.detachOutputListener(outputListener);
-                try {
-                    ui.playtimeTracker.recordSession(ui.resolveVersionInstanceRoot(version).toPath(),
-                            launchStartedAt, System.currentTimeMillis(),
-                            System.nanoTime() - launchStartedNanos);
-                } catch (IOException statsError) {
-                    LauncherUI.LOGGER.warn("Cannot record playtime statistics for {}", version, statsError);
-                }
+                sessionRecorder.record(version, launchStartedAt, System.nanoTime() - launchStartedNanos);
                 if (runningInstanceId != null) {
                     ui.controller.setInstanceRunning(runningInstanceId, false);
                 }

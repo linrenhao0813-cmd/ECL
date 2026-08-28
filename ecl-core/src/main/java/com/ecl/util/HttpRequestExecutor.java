@@ -280,7 +280,7 @@ final class HttpRequestExecutor {
 
     private static URI checkedUri(String url, String description) throws IOException {
         try {
-            return NetworkUriPolicy.requireHttpsOrLoopbackHttp(URI.create(url), description);
+            return NetworkUriPolicy.requireSecureDownload(URI.create(url), description);
         } catch (IllegalArgumentException invalid) {
             throw new IOException(description + " is invalid: " + url, invalid);
         }
@@ -291,7 +291,7 @@ final class HttpRequestExecutor {
         try {
             return response.uri() == null
                     ? checkedUri(originalUrl, "HTTP request URL")
-                    : NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                    : NetworkUriPolicy.requireSecureDownload(
                             response.uri(), "HTTP response URL");
         } catch (IOException unsafeResponse) {
             response.body().close();

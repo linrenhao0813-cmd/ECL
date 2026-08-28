@@ -105,7 +105,7 @@ public final class ModFileDownloadService {
                     new IOException("无法解析模组下载地址: " + request.fileName()));
         }
         try {
-            downloadUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+            downloadUri = NetworkUriPolicy.requireSecureDownload(
                     downloadUri, "模组下载地址");
         } catch (IOException unsafe) {
             throw new java.util.concurrent.CompletionException(

@@ -29,12 +29,19 @@ final class MrpackOverrideExtractor {
             }
             String relative = name.substring(prefix.length());
             Path destination = MrpackPathPolicy.safeResolve(instanceRoot, relative);
+            // Count directories as well as files before handling either kind. Directory entries
+            // are attacker-controlled ZIP records and must not bypass the shared budget.
+            if (++budget.entries > MAX_ENTRIES) {
+                throw new IOException("MRPACK override entry count exceeds the safety limit");
+            }
+            String normalizedTarget = instanceRoot.toAbsolutePath().normalize()
+                    .relativize(destination.toAbsolutePath().normalize()).toString();
+            if (!budget.targets.add(normalizedTarget)) {
+                throw new IOException("Duplicate MRPACK override target: " + relative);
+            }
             if (entry.isDirectory()) {
                 Files.createDirectories(destination);
                 continue;
-            }
-            if (++budget.entries > MAX_ENTRIES) {
-                throw new IOException("MRPACK override entry count exceeds the safety limit");
             }
             long declaredSize = entry.getSize();
             if (declaredSize > MAX_ENTRY_BYTES) {
@@ -77,5 +84,6 @@ final class MrpackOverrideExtractor {
     static final class ExtractionBudget {
         private long total;
         private int entries;
+        private final java.util.Set<String> targets = new java.util.HashSet<>();
     }
 }

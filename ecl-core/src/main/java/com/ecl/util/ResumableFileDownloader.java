@@ -98,7 +98,7 @@ final class ResumableFileDownloader {
 
         URI requestUri;
         try {
-            requestUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+            requestUri = NetworkUriPolicy.requireSecureDownload(
                     URI.create(candidate), "download URL");
         } catch (IllegalArgumentException invalid) {
             throw new IOException("Invalid download URL: " + candidate, invalid);
@@ -128,7 +128,7 @@ final class ResumableFileDownloader {
                     throw new IOException("Too many or invalid download redirects: " + candidate);
                 }
                 try {
-                    requestUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+                    requestUri = NetworkUriPolicy.requireSecureDownload(
                             requestUri.resolve(location), "download redirect");
                 } catch (IllegalArgumentException invalid) {
                     throw new IOException("Invalid download redirect: " + location, invalid);

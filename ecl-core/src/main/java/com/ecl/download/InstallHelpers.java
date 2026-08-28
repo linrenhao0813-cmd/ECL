@@ -52,7 +52,7 @@ final class InstallHelpers {
     static String resolveRemoteSha1(String artifactUrl, String label) throws IOException {
         URI uri;
         try {
-            uri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+            uri = NetworkUriPolicy.requireSecureDownload(
                     URI.create(artifactUrl), label + " URL");
         } catch (IllegalArgumentException invalid) {
             throw new IOException(label + " URL is invalid", invalid);

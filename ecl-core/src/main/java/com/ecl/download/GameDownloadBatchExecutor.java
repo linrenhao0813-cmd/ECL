@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.UUID;
 
 /** Executes verified file downloads and aggregates progress for one download phase. */
 final class GameDownloadBatchExecutor {
@@ -84,17 +85,29 @@ final class GameDownloadBatchExecutor {
 
     private void downloadAndVerify(DownloadTask task,
                                    GameDownloader.DownloadListener listener) throws IOException {
-        NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+        NetworkUriPolicy.requireSecureDownload(
                 URI.create(task.url()), task.sourceLabel() + " URL");
         long maxBytes = task.expectedSize() > 0
                 ? task.expectedSize() : MAX_UNSIZED_LIBRARY_BYTES;
-        HttpUtil.downloadFileWithProgress(task.url(), task.target(), null,
-                sourceCallback(task.sourceLabel(), listener), maxBytes);
-        if (task.expectedSize() > 0 && task.target().length() != task.expectedSize()) {
-            Files.deleteIfExists(task.target().toPath());
-            throw new IOException(task.target().getName() + " size does not match metadata");
+        Path target = task.target().toPath().toAbsolutePath().normalize();
+        Path temporary = target.resolveSibling(target.getFileName() + ".ecl-download-"
+                + UUID.randomUUID() + ".tmp");
+        try {
+            HttpUtil.downloadFileWithProgress(task.url(), temporary.toFile(), null,
+                    sourceCallback(task.sourceLabel(), listener), maxBytes);
+            if (task.expectedSize() > 0 && Files.size(temporary) != task.expectedSize()) {
+                throw new IOException(task.target().getName() + " size does not match metadata");
+            }
+            InstallHelpers.verifyDownloadedFile(temporary.toFile(), task.sha1());
+            try {
+                Files.move(temporary, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
         }
-        InstallHelpers.verifyDownloadedFile(task.target(), task.sha1());
     }
 
     private HttpUtil.SourceCallback sourceCallback(String label,

@@ -47,7 +47,7 @@ public final class ServerJarDownloader {
         if (server.size() <= 0) {
             throw new IOException("Minecraft " + versionId + " 服务端缺少有效大小");
         }
-        NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+        NetworkUriPolicy.requireSecureDownload(
                 java.net.URI.create(server.url()), "Minecraft server download URL");
         List<DownloadChannel> channels = DownloadSourceUtil.candidates(server.url()).stream()
                 .map(url -> new DownloadChannel(

@@ -8,7 +8,10 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.InvalidPathException;
+import java.nio.file.attribute.DosFileAttributes;
 import java.util.UUID;
 
 /** Centralizes MRPACK profile, instance and archive path safety rules. */
@@ -44,10 +47,8 @@ final class MrpackPathPolicy {
 
     static Path profileDirectory(String profileId) throws IOException {
         Path root = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
-        Path profileDir = root.resolve(profileId).normalize();
-        if (!profileDir.startsWith(root)) {
-            throw new IOException("整合包版本目录越界");
-        }
+        Path profileDir = safeResolve(root, profileId);
+        validateExistingAncestors(root, profileDir);
         return profileDir;
     }
 
@@ -90,10 +91,8 @@ final class MrpackPathPolicy {
 
     static Path safeInstanceDirectory(Path gameRoot, String profileId) throws IOException {
         Path root = gameRoot.toAbsolutePath().normalize().resolve("versions").normalize();
-        Path result = root.resolve(profileId).normalize();
-        if (!result.startsWith(root)) {
-            throw new IOException("整合包实例目录越界");
-        }
+        Path result = safeResolve(root, profileId);
+        validateExistingAncestors(root, result);
         return result;
     }
 
@@ -106,11 +105,64 @@ final class MrpackPathPolicy {
             throw new IOException("整合包包含绝对路径: " + relative);
         }
         Path normalizedRoot = root.toAbsolutePath().normalize();
-        Path result = normalizedRoot.resolve(normalizedRelative).normalize();
+        Path result;
+        try {
+            result = normalizedRoot.resolve(normalizedRelative).normalize();
+        } catch (InvalidPathException invalid) {
+            throw new IOException("整合包包含无效路径: " + relative, invalid);
+        }
         if (!result.startsWith(normalizedRoot)) {
             throw new IOException("整合包包含越界路径: " + relative);
         }
+        validateExistingAncestors(normalizedRoot, result);
         return result;
+    }
+
+    /**
+     * Checks every existing component without following links. This is deliberately performed
+     * before callers create parent directories, so an archive cannot turn a pre-existing link
+     * into an escape to an arbitrary tree. DOS reparse points include junctions on Windows.
+     */
+    static void validateExistingAncestors(Path root, Path candidate) throws IOException {
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path normalizedCandidate = candidate.toAbsolutePath().normalize();
+        if (!normalizedCandidate.startsWith(normalizedRoot)) {
+            throw new IOException("整合包路径越界");
+        }
+        checkPathComponent(normalizedRoot, "整合包根目录");
+        Path current = normalizedRoot;
+        Path relative = normalizedRoot.relativize(normalizedCandidate);
+        for (Path component : relative) {
+            current = current.resolve(component);
+            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+                checkPathComponent(current, "整合包路径");
+            }
+        }
+        if (Files.exists(normalizedRoot, LinkOption.NOFOLLOW_LINKS)
+                && Files.exists(normalizedCandidate, LinkOption.NOFOLLOW_LINKS)) {
+            try {
+                if (!normalizedCandidate.toRealPath().startsWith(normalizedRoot.toRealPath())) {
+                    throw new IOException("整合包路径解析后越界");
+                }
+            } catch (IOException error) {
+                throw new IOException("无法验证整合包路径", error);
+            }
+        }
+    }
+
+    private static void checkPathComponent(Path path, String label) throws IOException {
+        if (Files.isSymbolicLink(path)) {
+            throw new IOException(label + "不能是符号链接: " + path.getFileName());
+        }
+        try {
+            DosFileAttributes attrs = Files.readAttributes(path, DosFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (attrs.isReparsePoint()) {
+                throw new IOException(label + "不能是 Windows reparse point: " + path.getFileName());
+            }
+        } catch (UnsupportedOperationException ignored) {
+            // Non-DOS providers have no reparse-point attribute; symbolic links are still checked.
+        }
     }
 
     private static boolean isWindowsReservedName(String value) {

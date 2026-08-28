@@ -49,6 +49,7 @@ final class MrpackFileInstaller {
         }
         int completed = 0;
         long totalBytes = 0;
+        Set<Path> destinations = new java.util.HashSet<>();
         for (JsonElement element : files) {
             JsonObject item = element.getAsJsonObject();
             if (!isClientFile(item)) {
@@ -56,6 +57,9 @@ final class MrpackFileInstaller {
             }
             String relative = JsonUtil.getString(item, "path", "");
             Path destination = MrpackPathPolicy.safeResolve(instanceRoot, relative);
+            if (!destinations.add(destination.toAbsolutePath().normalize())) {
+                throw new IOException("Duplicate MRPACK indexed target: " + relative);
+            }
             long declaredSize = JsonUtil.getLong(item, "fileSize", -1);
             if (declaredSize <= 0) {
                 throw new IOException("MRPACK file is missing a valid fileSize: " + relative);

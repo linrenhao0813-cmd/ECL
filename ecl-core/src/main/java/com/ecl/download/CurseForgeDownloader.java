@@ -173,7 +173,7 @@ public final class CurseForgeDownloader implements ContentDownloader {
         notifyStatus(listener, (primary ? "正在下载: " : "正在下载依赖: ") + fileName);
         java.net.URI downloadUri;
         try {
-            downloadUri = NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+            downloadUri = NetworkUriPolicy.requireSecureDownload(
                     java.net.URI.create(api.getDownloadUrl(file)), "CurseForge 下载地址");
         } catch (IllegalArgumentException invalid) {
             throw new IOException("CurseForge 下载地址无效: " + fileName, invalid);

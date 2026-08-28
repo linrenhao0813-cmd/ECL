@@ -44,7 +44,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
     private final Path backupDirectory;
     private final List<Stage> stages = new ArrayList<>();
     private final int failAfterAppliedEntries;
-    private FileLockLease directoryLock;
+    private FileLockLease operationLock;
     private boolean committed;
     private boolean closed;
 
@@ -69,12 +69,12 @@ public final class PackUpdateTransaction implements AutoCloseable {
         this.transactionRoot = this.instanceRoot.getParent().resolve(TRANSACTIONS_DIRECTORY)
                 .toAbsolutePath().normalize();
         Files.createDirectories(transactionRoot);
+        this.operationLock = FileLockLease.tryAcquire(operationLockFile(this.instanceRoot));
+        if (operationLock == null) {
+            throw new IOException("Unable to lock pack instance operation: " + instanceRoot);
+        }
         this.transactionDirectory = Files.createDirectory(
                 transactionRoot.resolve(this.instanceRoot.getFileName() + "-" + UUID.randomUUID()));
-        this.directoryLock = FileLockLease.tryAcquire(lockFile(transactionDirectory));
-        if (directoryLock == null) {
-            throw new IOException("Unable to lock new pack transaction: " + transactionDirectory);
-        }
         this.stagingDirectory = Files.createDirectory(transactionDirectory.resolve("staged"));
         this.backupDirectory = Files.createDirectory(transactionDirectory.resolve("backups"));
     }
@@ -263,8 +263,14 @@ public final class PackUpdateTransaction implements AutoCloseable {
         if (root == null || !Files.isDirectory(root)) {
             return;
         }
-        String prefix = normalizedInstance.getFileName() + "-";
-        try (var directories = Files.list(root)) {
+        try (FileLockLease operationLock = FileLockLease.tryAcquire(
+                operationLockFile(normalizedInstance))) {
+            if (operationLock == null) {
+                return;
+            }
+            recoverTransactionDirectories(normalizedInstance, profileFile, root);
+        }
+        try (var remaining = Files.list(root)) {
             for (Path directory : directories
                     .filter(Files::isDirectory)
                     .filter(path -> path.getFileName().toString().startsWith(prefix))
@@ -273,8 +279,22 @@ public final class PackUpdateTransaction implements AutoCloseable {
             }
         }
         try (var remaining = Files.list(root)) {
-            if (remaining.findAny().isEmpty()) {
+            if (remaining.filter(path -> !path.getFileName().toString().endsWith(".lock"))
+                    .findAny().isEmpty()) {
                 Files.deleteIfExists(root);
+            }
+        }
+    }
+
+    private static void recoverTransactionDirectories(Path normalizedInstance, Path profileFile,
+                                                      Path root) throws IOException {
+        String prefix = normalizedInstance.getFileName() + "-";
+        try (var directories = Files.list(root)) {
+            for (Path directory : directories
+                    .filter(Files::isDirectory)
+                    .filter(path -> path.getFileName().toString().startsWith(prefix))
+                    .toList()) {
+                recoverDirectory(normalizedInstance, profileFile, directory);
             }
         }
     }
@@ -447,14 +467,14 @@ public final class PackUpdateTransaction implements AutoCloseable {
         }
     }
 
-    private static Path lockFile(Path directory) {
-        return directory.resolveSibling(directory.getFileName() + ".lock");
+    private static Path operationLockFile(Path instanceRoot) {
+        return instanceRoot.resolveSibling(instanceRoot.getFileName() + ".pack.lock");
     }
 
     private void releaseDirectoryLock() throws IOException {
-        if (directoryLock != null) {
-            directoryLock.close();
-            directoryLock = null;
+        if (operationLock != null) {
+            operationLock.close();
+            operationLock = null;
         }
     }
 
