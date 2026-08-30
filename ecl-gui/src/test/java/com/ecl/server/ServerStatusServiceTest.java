@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ServerStatusServiceTest {
     @Test
@@ -41,5 +43,16 @@ class ServerStatusServiceTest {
 
         assertEquals("https://api.mcsrvstat.us/2/play.example.org:25570",
                 ServerStatusService.url(server));
+    }
+
+    @Test
+    void rejectsHostsThatWouldRewriteTheStatusPath() {
+        PublicServer injected = new PublicServer(
+                "Test", "pvp", "play.example.org/../admin", 25565, "1.21", "", "", "",
+                List.of(), "T");
+        assertFalse(PublicServer.isSafeHost(injected.ip()));
+        assertThrows(IllegalArgumentException.class, () -> ServerStatusService.url(injected));
+        assertFalse(PublicServer.isSafeHost("127.0.0.1?x=1"));
+        assertFalse(PublicServer.isSafeHost("example.org#frag"));
     }
 }

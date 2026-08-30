@@ -56,21 +56,88 @@ public class FileUtil {
         }
     }
 
-    public static void deleteDirectory(Path dir) throws IOException {
-        if (!Files.exists(dir)) return;
-        Files.walkFileTree(dir, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                Files.delete(file);
-                return FileVisitResult.CONTINUE;
-            }
+    public static String sha1(byte[] data) {
+        if (data == null) {
+            throw new IllegalArgumentException("SHA-1 input is null");
+        }
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-1");
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-1 algorithm not available", e);
+        }
+        byte[] hash = digest.digest(data);
+        char[] chars = new char[hash.length * 2];
+        for (int i = 0; i < hash.length; i++) {
+            int b = hash[i] & 0xFF;
+            chars[i * 2] = HEX_DIGITS[b >>> 4];
+            chars[i * 2 + 1] = HEX_DIGITS[b & 0x0F];
+        }
+        return new String(chars);
+    }
 
-            @Override
-            public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
-                Files.delete(d);
-                return FileVisitResult.CONTINUE;
-            }
-        });
+    public static boolean verifySha1(byte[] data, String expected) {
+        return expected != null && !expected.isBlank() && sha1(data).equalsIgnoreCase(expected);
+    }
+
+    /**
+     * Deletes {@code dir} without following symbolic links or Windows junctions. A reparse point
+     * at the root or inside the tree is removed as a single node so a planted junction cannot
+     * cause the launcher to walk and delete an unrelated directory.
+     */
+    public static void deleteDirectory(Path dir) throws IOException {
+        if (dir == null || !Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        if (isSymlinkOrReparsePoint(dir)) {
+            Files.delete(dir);
+            return;
+        }
+        Files.walkFileTree(dir, java.util.EnumSet.noneOf(FileVisitOption.class), Integer.MAX_VALUE,
+                new SimpleFileVisitor<>() {
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs)
+                            throws IOException {
+                        if (!directory.equals(dir) && isSymlinkOrReparsePoint(directory)) {
+                            Files.delete(directory);
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+                            throws IOException {
+                        Files.delete(file);
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
+                    public FileVisitResult postVisitDirectory(Path directory, IOException exc)
+                            throws IOException {
+                        if (exc != null) {
+                            throw exc;
+                        }
+                        Files.delete(directory);
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+    }
+
+    /** True when {@code path} is a symbolic link or a Windows reparse point (including junctions). */
+    public static boolean isSymlinkOrReparsePoint(Path path) {
+        if (path == null) {
+            return false;
+        }
+        if (Files.isSymbolicLink(path)) {
+            return true;
+        }
+        if (!isWindows()) {
+            return false;
+        }
+        int attributes = Kernel32.INSTANCE.GetFileAttributes(path.toString());
+        return attributes != WinBase.INVALID_FILE_ATTRIBUTES
+                && (attributes & WinNT.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
     }
 
     public static String getNativeClassifier() {
@@ -149,18 +216,53 @@ public class FileUtil {
     }
 
     private static void validatePathComponent(Path path) throws IOException {
-        if (Files.isSymbolicLink(path)) {
-            throw new IOException("Managed path cannot contain a symbolic link: " + path);
+        if (isSymlinkOrReparsePoint(path)) {
+            throw new IOException("Managed path cannot contain a symbolic link or reparse point: "
+                    + path);
         }
-        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+        if (isWindows()) {
             int attributes = Kernel32.INSTANCE.GetFileAttributes(path.toString());
             if (attributes == WinBase.INVALID_FILE_ATTRIBUTES) {
                 throw new IOException("Unable to read Windows file attributes: " + path);
             }
-            if ((attributes & WinNT.FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-                throw new IOException("Managed path cannot contain a Windows reparse point: " + path);
-            }
         }
+    }
+
+    /**
+     * Resolves a ZIP/JAR entry under {@code root}, rejecting absolute paths, drive letters,
+     * NUL/colon smuggling, and any existing symlink or Windows reparse point on the path.
+     */
+    public static Path safeArchiveEntry(Path root, String entryName) throws IOException {
+        if (entryName == null || entryName.isBlank() || entryName.indexOf('\0') >= 0
+                || entryName.indexOf(':') >= 0) {
+            throw new IOException("Archive contains an invalid entry name");
+        }
+        String relative = entryName.replace('\\', '/');
+        while (relative.startsWith("./")) {
+            relative = relative.substring(2);
+        }
+        if (relative.endsWith("/")) {
+            relative = relative.substring(0, relative.length() - 1);
+        }
+        if (relative.isBlank() || ".".equals(relative) || "..".equals(relative)) {
+            throw new IOException("Archive entry escapes the target directory: " + entryName);
+        }
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path target;
+        try {
+            target = safeResolveUnder(normalizedRoot.toFile(), relative).toPath();
+        } catch (IOException invalid) {
+            throw new IOException("Archive entry escapes the target directory: " + entryName, invalid);
+        }
+        if (target.equals(normalizedRoot)) {
+            throw new IOException("Archive entry escapes the target directory: " + entryName);
+        }
+        validateExistingAncestors(normalizedRoot, target);
+        return target;
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
     /**

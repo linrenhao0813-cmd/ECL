@@ -157,6 +157,18 @@ class NativeLibraryExtractorTest {
     }
 
     @Test
+    void extractJarRejectsEntriesThatEscapeTheDestination() throws Exception {
+        Path jar = writeJar("slip.jar", Map.of("../evil.dll", new byte[]{1}));
+        Path output = Files.createDirectories(tempDir.resolve("out"));
+        NativeLibraryExtractor.ExtractionBudget budget = budget(100, 50, 3);
+
+        assertThrows(IOException.class,
+                () -> NativeLibraryExtractor.extractJar(jar.toFile(), output.toFile(), budget));
+        assertFalse(Files.exists(tempDir.resolve("evil.dll")));
+        assertFalse(Files.exists(output.resolve("evil.dll")));
+    }
+
+    @Test
     void sourceFingerprintChangeShowsInMarker() throws Exception {
         Path nativesDirectory = Files.createDirectories(tempDir.resolve("natives"));
         String first = NativeLibraryExtractor.buildMarker("source-v1", nativesDirectory);

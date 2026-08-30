@@ -7,6 +7,6 @@
     <suppress files="ResumableFileDownloader.java" checks="CyclomaticComplexity" lines="82"/>
     <suppress files="LauncherContentBrowser.java" checks="MethodLength" lines="192"/>
     <suppress files="LauncherLaunchForm.java" checks="MethodLength" lines="33"/>
-    <suppress files="SettingsDialog.java" checks="MethodLength|CyclomaticComplexity" lines="42"/>
+    <suppress files="SettingsDialog.java" checks="MethodLength|CyclomaticComplexity" lines="43"/>
     <suppress files="LauncherUiSnapshot.java" checks="CyclomaticComplexity"/>
 </suppressions>

@@ -11,7 +11,7 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖游戏版本�
 - 安装、重装、删除 Minecraft 正式版、快照和愚人节版本；下载时校验客户端、资源和依赖文件。
 - 使用统一下载任务中心管理游戏、服务端、加载器、Java 运行时和内容下载；支持并行数与限速设置、取消、失败重试和自动清理历史任务。
 - 安装 Fabric、Quilt、Forge、NeoForge 加载器，并为带加载器的实例提供隔离运行目录。
-- 使用离线账户、Microsoft 设备码登录或 Yggdrasil 外置登录；保存的账户凭据采用加密存储。
+- 使用离线账户、Microsoft 设备码登录或 Yggdrasil 外置登录；保存的账户凭据采用加密存储。Microsoft 登录需要配置自己的 Azure 公共客户端 ID（`ecl.microsoft.clientId` 或环境变量 `ECL_MICROSOFT_CLIENT_ID`），不再回退到共享客户端。
 - Microsoft 正版账户可上传官方皮肤；离线账户可导入本地皮肤，并在启动游戏时自动注入。
 - 按 Minecraft 版本和加载器筛选 Modrinth、CurseForge 的模组、光影包、资源包和整合包内容；支持依赖解析及事务式安装。
 - Mod 管理支持多选顺序更新、批量启用、禁用和卸载，也可以将本地 `.jar` 文件拖入启动器导入当前模组实例。

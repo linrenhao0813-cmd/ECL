@@ -8,6 +8,7 @@ import com.ecl.game.InstanceGameSettingsStore;
 import com.ecl.game.InstanceLaunchProfile;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.util.JavaRuntimeUtil;
+import com.ecl.util.JvmArgumentPolicy;
 import com.ecl.util.TextUtil;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -287,7 +288,8 @@ final class SettingsDialog {
             }
             List<String> configuredJvmArguments;
             try {
-                configuredJvmArguments = TextUtil.parseCommandLine(jvmField.getText());
+                configuredJvmArguments = JvmArgumentPolicy.requireSafe(
+                        TextUtil.parseCommandLine(jvmField.getText()));
             } catch (IllegalArgumentException jvmError) {
                 ui.setStatus("JVM 参数无效", jvmError.getMessage());
                 return;

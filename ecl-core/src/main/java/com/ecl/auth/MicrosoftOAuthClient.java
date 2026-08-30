@@ -20,27 +20,20 @@ final class MicrosoftOAuthClient {
     /**
      * Azure public client (device code flow) used for Microsoft account login.
      *
-     * <p>Resolution order: system property {@code ecl.microsoft.clientId}, environment variable
-     * {@code ECL_MICROSOFT_CLIENT_ID}, then a fallback that is NOT the shared Minecraft client id
-     * so ECL never depends on a third-party shared secret. When the fallback is active the client
-     * logs a warning so operators register their own Azure application.</p>
+     * <p>Resolution order: system property {@code ecl.microsoft.clientId}, then environment
+     * variable {@code ECL_MICROSOFT_CLIENT_ID}. There is no shared fallback client id.</p>
      */
-    private static final String CLIENT_ID = resolveClientId();
-    private static final String SHARED_CLIENT_FALLBACK = "00000000402b5328";
-
-    private static String resolveClientId() {
+    private static String requireClientId() throws IOException {
         String fromProperty = System.getProperty("ecl.microsoft.clientId");
         if (fromProperty != null && !fromProperty.isBlank()) {
-            return fromProperty;
+            return fromProperty.trim();
         }
         String fromEnv = System.getenv("ECL_MICROSOFT_CLIENT_ID");
         if (fromEnv != null && !fromEnv.isBlank()) {
-            return fromEnv;
+            return fromEnv.trim();
         }
-        LOGGER.warn("No Microsoft client id configured (ecl.microsoft.clientId or "
-                + "ECL_MICROSOFT_CLIENT_ID); falling back to a shared client id. Register your own "
-                + "Azure public client for device code flow to remove this dependency.");
-        return SHARED_CLIENT_FALLBACK;
+        throw new IOException("未配置 Microsoft 客户端 ID。请设置 ecl.microsoft.clientId 或环境变量 "
+                + "ECL_MICROSOFT_CLIENT_ID。");
     }
     private static final String MSA_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
     private static final String DEVICE_CODE_URL =
@@ -58,7 +51,7 @@ final class MicrosoftOAuthClient {
 
     Token refresh(String refreshToken) throws IOException {
         Map<String, String> form = new LinkedHashMap<>();
-        form.put("client_id", CLIENT_ID);
+        form.put("client_id", requireClientId());
         form.put("refresh_token", refreshToken);
         form.put("grant_type", "refresh_token");
         form.put("scope", MSA_SCOPE);
@@ -70,7 +63,7 @@ final class MicrosoftOAuthClient {
             MicrosoftAuth.LoginCancelledException {
         listener.ensureActive();
         Map<String, String> form = new LinkedHashMap<>();
-        form.put("client_id", CLIENT_ID);
+        form.put("client_id", requireClientId());
         form.put("scope", MSA_SCOPE);
         form.put("response_type", "device_code");
 
@@ -101,7 +94,7 @@ final class MicrosoftOAuthClient {
 
             Map<String, String> pollForm = new LinkedHashMap<>();
             pollForm.put("grant_type", "urn:ietf:params:oauth:grant-type:device_code");
-            pollForm.put("client_id", CLIENT_ID);
+            pollForm.put("client_id", requireClientId());
             pollForm.put("device_code", deviceCode);
 
             HttpUtil.Response response = http.postForm(TOKEN_URL, pollForm);

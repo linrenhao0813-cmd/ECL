@@ -6,14 +6,18 @@ import com.ecl.util.FileLockLease;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.ManagedLockPaths;
+import com.ecl.util.NetworkUriPolicy;
 import com.ecl.util.RuleEvaluator;
 import com.ecl.util.ThreadFactories;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 public class GameDownloader implements DownloadService {
     private static final Logger LOGGER = LoggerFactory.getLogger(GameDownloader.class);
+    private static final int MAX_VERSION_METADATA_BYTES = 4 * 1024 * 1024;
     public interface DownloadListener {
         void onStatus(String message);
         void onProgress(long downloaded, long total);
@@ -67,14 +72,23 @@ public class GameDownloader implements DownloadService {
     }
 
     public void downloadVersion(String versionId, String versionUrl) {
-        downloadVersionAsync(versionId, versionUrl);
+        downloadVersionAsync(versionId, versionUrl, null);
+    }
+
+    public void downloadVersion(String versionId, String versionUrl, String versionSha1) {
+        downloadVersionAsync(versionId, versionUrl, versionSha1);
     }
 
     public synchronized Future<?> downloadVersionAsync(String versionId, String versionUrl) {
+        return downloadVersionAsync(versionId, versionUrl, null);
+    }
+
+    public synchronized Future<?> downloadVersionAsync(String versionId, String versionUrl,
+                                                       String versionSha1) {
         cancelDownload();
         DownloadListener runListener = configuredListener;
         Future<?> task = versionDownloadExecutor.submit(() -> {
-            downloadVersionInternal(versionId, versionUrl, runListener);
+            downloadVersionInternal(versionId, versionUrl, versionSha1, runListener);
             return null;
         });
         activeDownload.set(task);
@@ -100,7 +114,7 @@ public class GameDownloader implements DownloadService {
         awaitTermination(fileDownloadExecutor, "file download");
     }
 
-    private void downloadVersionInternal(String versionId, String versionUrl,
+    private void downloadVersionInternal(String versionId, String versionUrl, String versionSha1,
                                          DownloadListener runListener) throws Exception {
         try {
             if (runListener != null) runListener.onStatus("正在下载版本信息...");
@@ -117,7 +131,7 @@ public class GameDownloader implements DownloadService {
                 Files.deleteIfExists(versionDir.toPath().resolve(
                         ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER));
 
-                JsonObject versionJson = HttpUtil.getJson(versionUrl);
+                JsonObject versionJson = readVersionMetadata(versionUrl, versionSha1);
                 File versionJsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
                 HttpUtil.writeJson(versionJsonFile, versionJson);
                 checkCancelled();
@@ -206,6 +220,32 @@ public class GameDownloader implements DownloadService {
 
     private void checkCancelled() throws InterruptedException {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedException("download cancelled");
+    }
+
+    private static JsonObject readVersionMetadata(String versionUrl, String versionSha1)
+            throws IOException {
+        URI metadataUri;
+        try {
+            metadataUri = URI.create(versionUrl);
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Invalid version metadata URL: " + versionUrl, invalid);
+        }
+        byte[] metadataBytes = HttpUtil.getBytes(versionUrl, MAX_VERSION_METADATA_BYTES);
+        String expectedSha1 = versionSha1 == null ? "" : versionSha1.trim();
+        if (!expectedSha1.isBlank()) {
+            if (!InstallHelpers.hasSha1(expectedSha1)
+                    || !FileUtil.verifySha1(metadataBytes, expectedSha1)) {
+                throw new IOException("Minecraft version metadata SHA-1 mismatch");
+            }
+        } else if (!NetworkUriPolicy.isLoopbackHostLiteral(metadataUri.getHost())) {
+            throw new IOException("Minecraft version metadata is missing a valid SHA-1 digest");
+        }
+        try {
+            return JsonParser.parseString(new String(metadataBytes, StandardCharsets.UTF_8))
+                    .getAsJsonObject();
+        } catch (RuntimeException invalid) {
+            throw new IOException("Minecraft version metadata is not valid JSON", invalid);
+        }
     }
 
     private void awaitTermination(ExecutorService executor, String executorName) {

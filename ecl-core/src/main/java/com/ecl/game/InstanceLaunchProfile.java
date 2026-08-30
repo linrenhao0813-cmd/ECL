@@ -2,6 +2,7 @@ package com.ecl.game;
 
 import com.ecl.ECLConfig;
 import com.ecl.performance.PerformancePreset;
+import com.ecl.util.JvmArgumentPolicy;
 
 import java.util.List;
 import java.util.Objects;
@@ -29,11 +30,7 @@ public record InstanceLaunchProfile(
         javaPath = javaPath == null ? "" : javaPath.trim();
         performancePreset = Objects.requireNonNull(performancePreset, "performancePreset");
         memoryMode = Objects.requireNonNull(memoryMode, "memoryMode");
-        customJvmArguments = customJvmArguments == null ? List.of()
-                : customJvmArguments.stream()
-                        .filter(Objects::nonNull)
-                        .filter(argument -> !argument.isBlank())
-                        .toList();
+        customJvmArguments = JvmArgumentPolicy.requireSafe(customJvmArguments);
         backupPolicyId = backupPolicyId == null ? "" : backupPolicyId.trim();
 
         if (javaMode == JavaMode.CUSTOM && javaPath.isEmpty()) {

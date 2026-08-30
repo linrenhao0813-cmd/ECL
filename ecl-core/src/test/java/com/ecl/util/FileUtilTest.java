@@ -61,6 +61,34 @@ class FileUtilTest {
     }
 
     @Test
+    void hashesAndVerifiesByteArrays() {
+        byte[] data = "abc".getBytes(StandardCharsets.UTF_8);
+        assertEquals("a9993e364706816aba3e25717850c26c9cd0d89d", FileUtil.sha1(data));
+        assertTrue(FileUtil.verifySha1(data, "A9993E364706816ABA3E25717850C26C9CD0D89D"));
+        assertThrows(IllegalArgumentException.class, () -> FileUtil.sha1((byte[]) null));
+    }
+
+    @Test
+    void deleteDirectoryRemovesNestedFilesWithoutFollowingMissingRoots() throws Exception {
+        Path nested = Files.createDirectories(tempDir.resolve("tree/child"));
+        Path file = nested.resolve("file.txt");
+        Files.writeString(file, "x", StandardCharsets.UTF_8);
+        FileUtil.deleteDirectory(tempDir.resolve("tree"));
+        assertTrue(Files.notExists(tempDir.resolve("tree")));
+        FileUtil.deleteDirectory(tempDir.resolve("missing"));
+    }
+
+    @Test
+    void safeArchiveEntryRejectsTraversalAndInvalidNames() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("extract"));
+        assertEquals(root.resolve("bin/a.dll"), FileUtil.safeArchiveEntry(root, "bin/a.dll"));
+        assertThrows(IOException.class, () -> FileUtil.safeArchiveEntry(root, "../evil.dll"));
+        assertThrows(IOException.class, () -> FileUtil.safeArchiveEntry(root, "C:foo"));
+        assertThrows(IOException.class, () -> FileUtil.safeArchiveEntry(root, "a\0b"));
+        assertThrows(IOException.class, () -> FileUtil.safeArchiveEntry(root, "."));
+    }
+
+    @Test
     void validatesVersionIdsAsSafePlatformIndependentPathSegments() throws Exception {
         FileUtil.requireSafeVersionId("1.21.4");
         FileUtil.requireSafeVersionId("3D Shareware v1.34");

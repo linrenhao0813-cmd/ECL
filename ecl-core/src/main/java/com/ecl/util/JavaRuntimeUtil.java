@@ -171,7 +171,8 @@ public final class JavaRuntimeUtil {
     }
 
     public static boolean isUsableJavaPath(String path) {
-        return resolveJavaCandidate(path) != null;
+        File candidate = resolveJavaCandidate(path);
+        return candidate != null && detectJavaFeatureVersion(candidate) > 0;
     }
 
     /** Returns whether launch preparation would need to download a managed Java runtime. */

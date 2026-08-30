@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -100,6 +101,28 @@ class GameDownloaderTest {
             assertTrue(Files.isRegularFile(installed.resolveSibling(
                     ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER)));
             assertTrue(completed.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void rejectsVersionMetadataWhenSha1DoesNotMatch() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/version.json", exchange -> {
+            byte[] metadata = "{\"downloads\":{},\"libraries\":[]}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, metadata.length);
+            exchange.getResponseBody().write(metadata);
+            exchange.close();
+        });
+        server.start();
+        try (GameDownloader downloader = new GameDownloader(1)) {
+            String versionUrl = "http://127.0.0.1:" + server.getAddress().getPort()
+                    + "/version.json";
+            ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> downloader.downloadVersionAsync(
+                            "bad-meta", versionUrl, "0".repeat(40)).get());
+            assertTrue(failure.getCause() instanceof IOException);
         } finally {
             server.stop(0);
         }

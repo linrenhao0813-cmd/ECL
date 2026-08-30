@@ -10,6 +10,8 @@ import java.util.Set;
 public final class NetworkUriPolicy {
     private static final InheritableThreadLocal<Boolean> LOOPBACK_ARTIFACT_TEST_MODE =
             new InheritableThreadLocal<>();
+    private static final InheritableThreadLocal<Boolean> PRIVATE_NETWORK_HTTP =
+            new InheritableThreadLocal<>();
 
     private NetworkUriPolicy() {
     }
@@ -47,10 +49,28 @@ public final class NetworkUriPolicy {
     /** HTTP client policy used by API test/local endpoints and remote HTTPS services. */
     public static URI requireHttpRequest(URI uri, String description) throws IOException {
         URI checked = requireHttpsOrLoopbackHttp(uri, description);
-        if ("https".equalsIgnoreCase(checked.getScheme())) {
+        if ("https".equalsIgnoreCase(checked.getScheme())
+                && !isLoopbackHostLiteral(checked.getHost())
+                && !privateNetworkHttpAllowed()) {
             rejectUnsafeResolvedAddresses(checked, description);
         }
         return checked;
+    }
+
+    /**
+     * Allow HTTPS to private/LAN addresses for the current thread. Used for user-configured
+     * Yggdrasil servers; artifact downloads keep the public-address policy.
+     */
+    public static AutoCloseable allowPrivateNetworkHttp() {
+        Boolean previous = PRIVATE_NETWORK_HTTP.get();
+        PRIVATE_NETWORK_HTTP.set(Boolean.TRUE);
+        return () -> {
+            if (previous == null) {
+                PRIVATE_NETWORK_HTTP.remove();
+            } else {
+                PRIVATE_NETWORK_HTTP.set(previous);
+            }
+        };
     }
 
     /** Strict production artifact policy; loopback HTTP is available only to scoped tests. */
@@ -92,6 +112,10 @@ public final class NetworkUriPolicy {
 
     private static boolean loopbackArtifactTestMode() {
         return Boolean.TRUE.equals(LOOPBACK_ARTIFACT_TEST_MODE.get());
+    }
+
+    private static boolean privateNetworkHttpAllowed() {
+        return Boolean.TRUE.equals(PRIVATE_NETWORK_HTTP.get());
     }
 
     private static boolean isLoopbackHttp(URI uri) {

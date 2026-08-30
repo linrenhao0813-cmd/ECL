@@ -247,7 +247,9 @@ public class VersionManager {
         JsonObject manifestVersion = findVersion(downloadVersionId);
         String url = manifestVersion == null
                 ? "" : JsonUtil.getString(manifestVersion, "url", "");
-        return new VersionDownloadTarget(profileId, downloadVersionId, url);
+        String sha1 = manifestVersion == null
+                ? "" : JsonUtil.getString(manifestVersion, "sha1", "");
+        return new VersionDownloadTarget(profileId, downloadVersionId, url, sha1);
     }
 
     public String resolveMinecraftVersionId(String profileId) throws IOException {
@@ -370,8 +372,13 @@ public class VersionManager {
     public record VersionDownloadTarget(
             String requestedProfileId,
             String downloadVersionId,
-            String versionUrl
+            String versionUrl,
+            String versionSha1
     ) {
+        public VersionDownloadTarget {
+            versionUrl = versionUrl == null ? "" : versionUrl;
+            versionSha1 = versionSha1 == null ? "" : versionSha1.trim();
+        }
     }
 
     private record DownloadState(String jarVersion, File jar, File marker) {

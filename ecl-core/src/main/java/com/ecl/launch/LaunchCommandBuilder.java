@@ -5,6 +5,7 @@ import com.ecl.game.DownloadObject;
 import com.ecl.game.Library;
 import com.ecl.game.VersionMetadata;
 import com.ecl.util.FileUtil;
+import com.ecl.util.JvmArgumentPolicy;
 import com.ecl.util.RuleEvaluator;
 
 import java.io.File;
@@ -42,19 +43,26 @@ public final class LaunchCommandBuilder {
      */
     public LaunchCommand build(LaunchOptions options, VersionMetadata version, String javaExecutable,
                                List<String> extraJvmArgs) throws IOException {
-        String mainClass = requireMainClass(options, version);
-        Map<String, String> variables = LaunchVariables.of(options, version);
-        List<String> arguments = buildArguments(options, version, mainClass, variables, extraJvmArgs);
-        arguments.addAll(gameArguments(version, variables));
-        appendResolutionAndServer(options, arguments);
+        try {
+            String mainClass = requireMainClass(options, version);
+            Map<String, String> variables = LaunchVariables.of(options, version);
+            List<String> arguments = buildArguments(options, version, mainClass, variables, extraJvmArgs);
+            arguments.addAll(gameArguments(version, variables));
+            appendResolutionAndServer(options, arguments);
 
-        int estimate = joinLength(javaExecutable, arguments);
-        if (estimate > MAX_COMMAND_LENGTH) {
-            throw new LaunchException(LaunchException.Kind.COMMAND_TOO_LONG,
-                    "生成的启动命令超过系统长度限制，请减少 JVM 参数或改用手动启动。");
+            int estimate = joinLength(javaExecutable, arguments);
+            if (estimate > MAX_COMMAND_LENGTH) {
+                throw new LaunchException(LaunchException.Kind.COMMAND_TOO_LONG,
+                        "生成的启动命令超过系统长度限制，请减少 JVM 参数或改用手动启动。");
+            }
+            return new LaunchCommand(javaExecutable, arguments,
+                    options.gameDirectory(), environmentAdditions(options));
+        } catch (LaunchException alreadyClassified) {
+            throw alreadyClassified;
+        } catch (IllegalArgumentException invalidArgument) {
+            throw new LaunchException(LaunchException.Kind.UNKNOWN,
+                    invalidArgument.getMessage(), invalidArgument);
         }
-        return new LaunchCommand(javaExecutable, arguments,
-                options.gameDirectory(), environmentAdditions(options));
     }
 
     private Map<String, String> environmentAdditions(LaunchOptions options) {
@@ -85,7 +93,11 @@ public final class LaunchCommandBuilder {
         }
         for (String userArgument : options.jvmArguments()) {
             if (!userArgument.isBlank()) {
-                args.add(LaunchVariables.substitute(userArgument, variables));
+                String argument = LaunchVariables.substitute(userArgument, variables);
+                if (!argument.isEmpty()) {
+                    JvmArgumentPolicy.requireSafe(argument);
+                    args.add(argument);
+                }
             }
         }
         if (extraJvmArgs != null) {
@@ -110,6 +122,7 @@ public final class LaunchCommandBuilder {
             if (token instanceof ArgumentToken.Literal literal) {
                 String argument = LaunchVariables.substitute(literal.value(), variables);
                 if (!argument.isEmpty()) {
+                    JvmArgumentPolicy.requireSafe(argument);
                     args.add(argument);
                 }
             } else if (token instanceof ArgumentToken.Conditional conditional) {
@@ -117,6 +130,7 @@ public final class LaunchCommandBuilder {
                     for (String value : conditional.values()) {
                         String argument = LaunchVariables.substitute(value, variables);
                         if (!argument.isEmpty()) {
+                            JvmArgumentPolicy.requireSafe(argument);
                             args.add(argument);
                         }
                     }
@@ -127,6 +141,7 @@ public final class LaunchCommandBuilder {
             for (String legacy : version.arguments().legacyJvmArguments()) {
                 String argument = LaunchVariables.substitute(legacy, variables);
                 if (!argument.isEmpty()) {
+                    JvmArgumentPolicy.requireSafe(argument);
                     args.add(argument);
                 }
             }

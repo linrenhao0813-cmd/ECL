@@ -1,5 +1,7 @@
 package com.ecl.desktop;
 
+import com.ecl.util.TextUtil;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -81,8 +83,10 @@ public final class DesktopShortcutService {
     }
 
     private static String safeFileName(String value) throws IOException {
-        String name = value == null ? "" : value.trim().replaceAll("[\\\\/:*?\"<>|]", "_");
-        if (name.isBlank() || ".".equals(name) || "..".equals(name)) throw new IOException("快捷方式名称无效");
+        String name = TextUtil.replaceInvalidFilenameChars(value == null ? "" : value.trim());
+        if (name == null || name.isBlank() || "_".equals(name)) {
+            throw new IOException("快捷方式名称无效");
+        }
         return name;
     }
 
@@ -94,11 +98,44 @@ public final class DesktopShortcutService {
         return value.replace("'", "''");
     }
 
-    private static String quoteWindowsArgument(String value) {
-        if (value.isEmpty() || !value.matches("[A-Za-z0-9._-]+")) {
-            return "\"" + value.replace("\"", "\\\"") + "\"";
+    static String quoteWindowsArgument(String value) {
+        if (value.isEmpty()) {
+            return "\"\"";
         }
-        return value;
+        boolean needsQuotes = false;
+        for (int i = 0; i < value.length(); i++) {
+            char character = value.charAt(i);
+            if (Character.isWhitespace(character) || character == '"') {
+                needsQuotes = true;
+                break;
+            }
+        }
+        if (!needsQuotes) {
+            return value;
+        }
+        StringBuilder quoted = new StringBuilder(value.length() + 8);
+        quoted.append('"');
+        int backslashes = 0;
+        for (int i = 0; i < value.length(); i++) {
+            char character = value.charAt(i);
+            if (character == '\\') {
+                backslashes++;
+                continue;
+            }
+            if (character == '"') {
+                quoted.repeat('\\', backslashes * 2 + 1).append('"');
+                backslashes = 0;
+                continue;
+            }
+            if (backslashes > 0) {
+                quoted.repeat('\\', backslashes);
+                backslashes = 0;
+            }
+            quoted.append(character);
+        }
+        quoted.repeat('\\', backslashes * 2);
+        quoted.append('"');
+        return quoted.toString();
     }
 
     /** Escape text that is written directly into a cmd batch command. */

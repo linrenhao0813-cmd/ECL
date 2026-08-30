@@ -16,8 +16,6 @@ final class HttpClientProvider {
 
     private static final HttpClient DEFAULT_CLIENT = create(
             DEFAULT_CONNECT_TIMEOUT_MS, HttpClient.Redirect.NEVER);
-    private static final HttpClient DOWNLOAD_CLIENT = create(
-            DEFAULT_CONNECT_TIMEOUT_MS, HttpClient.Redirect.NORMAL);
     private static final ConcurrentMap<Integer, HttpClient> CLIENTS = new ConcurrentHashMap<>();
 
     private HttpClientProvider() {
@@ -25,11 +23,6 @@ final class HttpClientProvider {
 
     static HttpClient defaultClient() {
         return DEFAULT_CLIENT;
-    }
-
-    /** Redirect-capable client for credential-free, integrity-checked file downloads only. */
-    static HttpClient downloadClient() {
-        return DOWNLOAD_CLIENT;
     }
 
     static HttpClient forConnectTimeout(int connectTimeoutMs) {

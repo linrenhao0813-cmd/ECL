@@ -43,6 +43,22 @@ class NetworkUriPolicyTest {
     }
 
     @Test
+    void httpsLoopbackIsAllowedWithoutPrivateNetworkMode() throws Exception {
+        URI loopbackHttps = URI.create("https://127.0.0.1:8443/auth");
+        assertEquals(loopbackHttps, NetworkUriPolicy.requireHttpRequest(loopbackHttps, "auth"));
+    }
+
+    @Test
+    void privateNetworkModeSkipsPublicAddressEnforcement() throws Exception {
+        URI lan = URI.create("https://192.168.1.10/auth");
+        assertThrows(IOException.class, () -> NetworkUriPolicy.requireHttpRequest(lan, "auth"));
+        try (AutoCloseable ignored = NetworkUriPolicy.allowPrivateNetworkHttp()) {
+            assertEquals(lan, NetworkUriPolicy.requireHttpRequest(lan, "auth"));
+        }
+        assertThrows(IOException.class, () -> NetworkUriPolicy.requireHttpRequest(lan, "auth"));
+    }
+
+    @Test
     void artifactPoliciesRejectLoopbackHttpInProductionMode() {
         URI loopback = URI.create("http://127.0.0.1:8080/file.jar");
 

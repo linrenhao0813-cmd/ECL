@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.io.File;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -52,6 +53,20 @@ class JavaRuntimeUtilTest {
         long afterSecond = JavaRuntimeUtil.DETECTION_PROBE_COUNT.get();
         assertEquals(1, afterSecond - afterFirst,
                 "Clearing the cache should force a fresh child-process probe");
+    }
+
+    @Test
+    void usableJavaPathRequiresARealJvm() {
+        File executable = currentJavaExecutable();
+        assumeTrue(executable.isFile(), "Test JVM must be a real java.exe");
+        assertTrue(JavaRuntimeUtil.isUsableJavaPath(executable.getAbsolutePath()));
+        assertFalse(JavaRuntimeUtil.isUsableJavaPath(
+                new File(System.getProperty("java.io.tmpdir"), "ecl-not-java.exe").getAbsolutePath()));
+        File cmd = new File(System.getenv().getOrDefault("SystemRoot", "C:\\Windows"),
+                "System32\\cmd.exe");
+        if (cmd.isFile()) {
+            assertFalse(JavaRuntimeUtil.isUsableJavaPath(cmd.getAbsolutePath()));
+        }
     }
 
     @Test

@@ -133,7 +133,8 @@ final class GameLaunchPreparation {
                 }); }
             });
             context.registerCancellation(ui.downloader::cancelDownload);
-            Future<?> future = ui.downloader.downloadVersionAsync(downloadVersion, url); future.get();
+            Future<?> future = ui.downloader.downloadVersionAsync(
+                    downloadVersion, url, target.versionSha1()); future.get();
             if (failure.get() != null && !failure.get().isBlank()) throw new IOException(failure.get());
             return null;
         });

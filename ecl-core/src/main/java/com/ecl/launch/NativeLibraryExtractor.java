@@ -63,7 +63,12 @@ public final class NativeLibraryExtractor {
         Path nativesDir = instanceDirectory == null
                 ? environment.nativesDirectory(versionId).toPath()
                 : instanceDirectory.toPath().resolve("natives-windows");
+        Path nativesParent = nativesDir.getParent();
+        if (nativesParent != null) {
+            FileUtil.validateExistingAncestors(nativesParent, nativesDir);
+        }
         Files.createDirectories(nativesDir);
+        FileUtil.validateExistingAncestors(nativesDir, nativesDir);
         if (metadata.libraries().isEmpty()) {
             return;
         }
@@ -105,7 +110,7 @@ public final class NativeLibraryExtractor {
 
     private static Set<File> collectNativeFiles(VersionMetadata metadata, LaunchEnvironment environment,
                                                String nativeClassifier, String osArch,
-                                               File instanceDirectory) {
+                                               File instanceDirectory) throws IOException {
         Set<DownloadObject> chosen = new LinkedHashSet<>();
         for (Library library : metadata.libraries()) {
             if (!libraryHasAllowedRules(library) || library.classifiers().isEmpty()) {
@@ -134,8 +139,7 @@ public final class NativeLibraryExtractor {
             Library owner = ownerByObject.get(object);
             File base = owner != null && owner.isLocal() && instanceDirectory != null
                     ? new File(instanceDirectory, "libraries") : environment.librariesDirectory();
-            File nativeFile = new File(base, object.path());
-            files.add(nativeFile);
+            files.add(FileUtil.safeResolveUnder(base, object.path()));
         }
         return files;
     }
@@ -236,11 +240,13 @@ public final class NativeLibraryExtractor {
     /** Extract the entries of {@code jarFile} into {@code targetDir}, respecting the shared budget. */
     static void extractJar(File jarFile, File targetDir, ExtractionBudget budget) throws IOException {
         Path targetRoot = targetDir.toPath().toAbsolutePath().normalize();
+        FileUtil.validateExistingAncestors(targetRoot, targetRoot);
         try (JarFile jar = new JarFile(jarFile)) {
             Enumeration<JarEntry> entries = jar.entries();
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
-                if (entry.getName().startsWith("META-INF/") || entry.isDirectory()) {
+                String entryName = entry.getName() == null ? "" : entry.getName().replace('\\', '/');
+                if (entryName.startsWith("META-INF/") || entry.isDirectory() || entryName.endsWith("/")) {
                     continue;
                 }
                 if (++budget.entryCount > budget.limits.maxEntries()) {
@@ -257,13 +263,11 @@ public final class NativeLibraryExtractor {
                     throw new IOException("ZIP 炸弹防护: 解压总大小超过上限 "
                             + budget.limits.maxTotalBytes() / 1024 / 1024 + " MB: " + jarFile);
                 }
-                Path outPath = targetRoot.resolve(entry.getName()).normalize();
-                if (!outPath.startsWith(targetRoot)) {
-                    throw new IOException("Native entry escapes extraction directory: " + entry.getName());
-                }
+                Path outPath = FileUtil.safeArchiveEntry(targetRoot, entryName);
                 Path parent = outPath.getParent();
                 if (parent != null) {
                     Files.createDirectories(parent);
+                    FileUtil.validateExistingAncestors(targetRoot, outPath);
                 }
                 long entryBytes = 0;
                 try (InputStream is = jar.getInputStream(entry);

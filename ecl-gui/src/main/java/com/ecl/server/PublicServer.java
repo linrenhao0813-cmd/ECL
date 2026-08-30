@@ -2,7 +2,6 @@ package com.ecl.server;
 
 import java.net.URI;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * 一条公开 Minecraft 服务器的静态描述，配合 {@link ServerCatalog} 从内置 JSON 目录加载。
@@ -39,6 +38,25 @@ public record PublicServer(
         iconText = iconText == null || iconText.isBlank() ? "◈" : iconText;
     }
 
+    /**
+     * Hostnames used in status URLs and connect addresses must not contain path, query,
+     * fragment or encoding characters that could rewrite a request.
+     */
+    public static boolean isSafeHost(String host) {
+        if (host == null || host.isBlank() || host.length() > 253) {
+            return false;
+        }
+        String value = host.trim();
+        for (int i = 0; i < value.length(); i++) {
+            char character = value.charAt(i);
+            if (character == '/' || character == '?' || character == '#' || character == '\\'
+                    || character == '%' || character <= ' ' || character == 127) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** 完整连接地址：默认端口省略端口号。 */
     public String address() {
         if (ip.isEmpty()) {
@@ -51,7 +69,7 @@ public record PublicServer(
         return ServerCategory.fromId(category);
     }
 
-    /** Returns a browser-safe website URI, or {@code null} for invalid/non-web schemes. */
+    /** Returns a browser-safe HTTPS website URI, or {@code null} for invalid or non-HTTPS schemes. */
     public URI websiteUri() {
         if (website.isBlank()) {
             return null;
@@ -62,9 +80,7 @@ public record PublicServer(
             if (scheme == null || uri.getHost() == null || uri.getUserInfo() != null) {
                 return null;
             }
-            String normalizedScheme = scheme.toLowerCase(Locale.ROOT);
-            return normalizedScheme.equals("https") || normalizedScheme.equals("http")
-                    ? uri : null;
+            return "https".equalsIgnoreCase(scheme) ? uri : null;
         } catch (IllegalArgumentException ignored) {
             return null;
         }

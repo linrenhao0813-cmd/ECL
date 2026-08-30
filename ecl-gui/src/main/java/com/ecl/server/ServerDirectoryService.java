@@ -157,7 +157,8 @@ public final class ServerDirectoryService {
             host = text(json, "ip");
         }
         int port = intValue(json, "port", 25565);
-        if (name.isBlank() || host.isBlank() || port < 1 || port > 65535) {
+        if (name.isBlank() || host.isBlank() || !PublicServer.isSafeHost(host)
+                || port < 1 || port > 65535) {
             return null;
         }
 

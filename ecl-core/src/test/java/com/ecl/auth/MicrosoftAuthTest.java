@@ -1,5 +1,7 @@
 package com.ecl.auth;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.CountDownLatch;
@@ -19,6 +21,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MicrosoftAuthTest {
+    @BeforeEach
+    void configureMicrosoftClientId() {
+        System.setProperty("ecl.microsoft.clientId", "test-client-id");
+    }
+
+    @AfterEach
+    void clearMicrosoftClientId() {
+        System.clearProperty("ecl.microsoft.clientId");
+    }
+
     @Test
     void slowDownPollingIntervalIsCapped() {
         assertEquals(10, MicrosoftAuth.nextDevicePollInterval(5));
