@@ -165,10 +165,6 @@ public final class LauncherUiSnapshot {
                 File gameRoot = (File) gameDirField.get(this);
                 createVisualSave(gameRoot.toPath().resolve("saves/Alpine Base"));
                 createVisualSave(gameRoot.toPath().resolve("versions/visual-save-fabric/saves/Modded Valley"));
-                Files.createDirectories(gameRoot.toPath().resolve("versions/visual-save-fabric/saves/Modded Valley/.ecl"));
-                Files.writeString(gameRoot.toPath().resolve(
-                        "versions/visual-save-fabric/saves/Modded Valley/.ecl/world-settings.json"),
-                        "{\"openToLan\":true}");
                 showAppView("SAVES");
                 return primaryStage.getScene();
             }

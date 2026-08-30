@@ -2,6 +2,7 @@ package com.ecl.modrinth.pack;
 
 import com.ecl.ECLConfig;
 import com.ecl.util.FileLockLease;
+import com.ecl.util.InstanceOperationLease;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -48,6 +49,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
     private final List<Stage> stages = new ArrayList<>();
     private final int failAfterAppliedEntries;
     private FileLockLease operationLock;
+    private InstanceOperationLease gameOperationLock;
     private boolean committed;
     private boolean closed;
 
@@ -76,15 +78,38 @@ public final class PackUpdateTransaction implements AutoCloseable {
         Files.createDirectories(this.profileFile.getParent());
         this.transactionRoot = this.instanceRoot.getParent().resolve(TRANSACTIONS_DIRECTORY)
                 .toAbsolutePath().normalize();
+        MrpackPathPolicy.validateExistingAncestors(this.instanceRoot.getParent(), this.transactionRoot);
         Files.createDirectories(transactionRoot);
         this.operationLock = FileLockLease.tryAcquire(operationLockFile(this.instanceRoot));
         if (operationLock == null) {
             throw new IOException("Unable to lock pack instance operation: " + instanceRoot);
         }
-        this.transactionDirectory = Files.createDirectory(
-                transactionRoot.resolve(this.instanceRoot.getFileName() + "-" + UUID.randomUUID()));
-        this.stagingDirectory = Files.createDirectory(transactionDirectory.resolve("staged"));
-        this.backupDirectory = Files.createDirectory(transactionDirectory.resolve("backups"));
+        try {
+            this.gameOperationLock = InstanceOperationLease.tryAcquire(this.instanceRoot);
+            if (gameOperationLock == null) {
+                throw new IOException("Unable to lock running game directory: " + instanceRoot);
+            }
+            this.transactionDirectory = Files.createDirectory(
+                    transactionRoot.resolve(this.instanceRoot.getFileName() + "-" + UUID.randomUUID()));
+            this.stagingDirectory = Files.createDirectory(transactionDirectory.resolve("staged"));
+            this.backupDirectory = Files.createDirectory(transactionDirectory.resolve("backups"));
+        } catch (IOException | RuntimeException failure) {
+            if (gameOperationLock != null) {
+                try {
+                    gameOperationLock.close();
+                } catch (IOException closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+                gameOperationLock = null;
+            }
+            try {
+                operationLock.close();
+            } catch (IOException closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+            operationLock = null;
+            throw failure;
+        }
     }
 
     public Path stagingDirectory() {
@@ -286,7 +311,13 @@ public final class PackUpdateTransaction implements AutoCloseable {
             if (operationLock == null) {
                 return;
             }
-            recoverTransactionDirectories(normalizedInstance, normalizedProfile, root);
+            try (InstanceOperationLease gameLock =
+                         InstanceOperationLease.tryAcquire(normalizedInstance)) {
+                if (gameLock == null) {
+                    return;
+                }
+                recoverTransactionDirectories(normalizedInstance, normalizedProfile, root);
+            }
         }
         try (var remaining = Files.list(root)) {
             if (remaining.filter(path -> !path.getFileName().toString().endsWith(".lock"))
@@ -521,9 +552,28 @@ public final class PackUpdateTransaction implements AutoCloseable {
     }
 
     private void releaseDirectoryLock() throws IOException {
+        IOException failure = null;
+        if (gameOperationLock != null) {
+            try {
+                gameOperationLock.close();
+            } catch (IOException error) {
+                failure = error;
+            } finally {
+                gameOperationLock = null;
+            }
+        }
         if (operationLock != null) {
-            operationLock.close();
-            operationLock = null;
+            try {
+                operationLock.close();
+            } catch (IOException error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            } finally {
+                operationLock = null;
+            }
+        }
+        if (failure != null) {
+            throw failure;
         }
     }
 

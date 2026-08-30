@@ -9,7 +9,7 @@ import com.ecl.modrinth.download.ModrinthDownloader;
 import com.ecl.modrinth.model.ContentDownloadResult;
 import com.ecl.modrinth.model.ContentProject;
 import com.ecl.modrinth.model.ContentVersion;
-import com.ecl.util.FileUtil;
+import com.ecl.modrinth.transaction.FileModInstallationTransaction;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
 import com.ecl.util.NetworkUriPolicy;
@@ -28,9 +28,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -41,6 +44,8 @@ public final class CurseForgeDownloader implements ContentDownloader {
     private static final int MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
     private static final long MAX_OVERRIDE_BYTES = 4L * 1024 * 1024 * 1024;
     private static final long MAX_CONTENT_FILE_BYTES = 2L * 1024 * 1024 * 1024;
+    private static final int MAX_DEPENDENCY_DEPTH = 32;
+    private static final int MAX_DEPENDENCY_FILES = 256;
     private final CurseForgeApiClient api;
 
     public CurseForgeDownloader(Supplier<String> apiKeySupplier) {
@@ -97,25 +102,38 @@ public final class CurseForgeDownloader implements ContentDownloader {
         requireProject(project);
         if (selectedVersion == null) throw new IOException("请选择具体版本");
         if (targetDir == null) throw new IOException("下载目录无效");
-        Files.createDirectories(targetDir.toPath());
         String[] ids = splitVersionId(selectedVersion.versionId());
         if (!project.getProjectId().equals(ids[0])) {
             throw new IOException("所选文件不属于当前 CurseForge 项目");
         }
         ApiFile file = api.getFile(ids[0], ids[1]);
         List<File> downloaded = new ArrayList<>();
-        File main = downloadFile(file, targetDir, true, listener, allowedExtensions);
-        downloaded.add(main);
-        if (includeRequiredDependencies && "mod".equals(project.getProjectType())) {
-            downloadDependencies(file, gameVersion, loader, targetDir, listener,
-                    new HashSet<>(Set.of(versionId(file))), downloaded);
+        try (FileModInstallationTransaction transaction =
+                     new FileModInstallationTransaction(targetDir.toPath())) {
+            Path downloads = transaction.temporaryDirectory().resolve("downloads");
+            Files.createDirectories(downloads);
+            Map<Path, String> plannedTargets = new HashMap<>();
+            File main = downloadFile(file, targetDir, true, listener, transaction, downloads,
+                    plannedTargets, allowedExtensions);
+            downloaded.add(main);
+            if (includeRequiredDependencies && "mod".equals(project.getProjectType())) {
+                downloadDependencies(file, gameVersion, loader, targetDir, listener,
+                        new HashSet<>(Set.of(versionId(file))), downloaded, transaction, downloads,
+                        plannedTargets, 0);
+            }
+            transaction.commit();
+            return new ContentDownloadResult(main, List.copyOf(downloaded));
         }
-        return new ContentDownloadResult(main, List.copyOf(downloaded));
     }
 
     private void downloadDependencies(ApiFile parent, String gameVersion, String loader, File targetDir,
-                                      ModrinthDownloader.DownloadListener listener,
-                                      Set<String> visited, List<File> downloaded) throws IOException {
+                                       ModrinthDownloader.DownloadListener listener,
+                                       Set<String> visited, List<File> downloaded,
+                                       FileModInstallationTransaction transaction, Path downloads,
+                                       Map<Path, String> plannedTargets, int depth) throws IOException {
+        if (depth >= MAX_DEPENDENCY_DEPTH) {
+            throw new IOException("CurseForge dependency chain exceeds " + MAX_DEPENDENCY_DEPTH);
+        }
         for (ApiDependency dependency : parent.dependencies()) {
             if (dependency.relationType() != 3 || "0".equals(dependency.projectId())) continue;
             List<ApiFile> candidates = api.getFiles(dependency.projectId(), gameVersion, loader);
@@ -124,8 +142,13 @@ public final class CurseForgeDownloader implements ContentDownloader {
             }
             ApiFile file = selectDependencyFile(candidates);
             if (!visited.add(versionId(file))) continue;
-            downloaded.add(downloadFile(file, targetDir, false, listener, ".jar"));
-            downloadDependencies(file, gameVersion, loader, targetDir, listener, visited, downloaded);
+            if (visited.size() > MAX_DEPENDENCY_FILES) {
+                throw new IOException("CurseForge dependency count exceeds " + MAX_DEPENDENCY_FILES);
+            }
+            downloaded.add(downloadFile(file, targetDir, false, listener, transaction, downloads,
+                    plannedTargets, ".jar"));
+            downloadDependencies(file, gameVersion, loader, targetDir, listener, visited, downloaded,
+                    transaction, downloads, plannedTargets, depth + 1);
         }
     }
 
@@ -151,7 +174,8 @@ public final class CurseForgeDownloader implements ContentDownloader {
 
     private File downloadFile(ApiFile file, File targetDir, boolean primary,
                               ModrinthDownloader.DownloadListener listener,
-                              String... allowedExtensions) throws IOException {
+                              FileModInstallationTransaction transaction, Path downloads,
+                              Map<Path, String> plannedTargets, String... allowedExtensions) throws IOException {
         String fileName = sanitizeFilename(file.fileName());
         boolean modpackZip = fileName.toLowerCase(Locale.ROOT).endsWith(".zip")
                 && extensionConfigured(".mrpack", allowedExtensions);
@@ -159,16 +183,52 @@ public final class CurseForgeDownloader implements ContentDownloader {
             throw new IOException("CurseForge 文件类型不受支持: " + fileName);
         }
         File target = new File(targetDir, fileName);
-        String sha1 = file.hashes().getOrDefault("sha1", "");
+        Path targetPath = target.toPath().toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(targetPath)) {
+            throw new IOException("CurseForge target cannot be a symbolic link: " + target);
+        }
+        String expectedHash = expectedHash(file.hashes());
         if (!HashVerifier.hasUsableExpectedHash(file.hashes())) {
             throw new IOException("CurseForge 文件缺少 SHA-1 校验值: " + fileName);
         }
         if (file.size() <= 0 || file.size() > MAX_CONTENT_FILE_BYTES) {
             throw new IOException("CurseForge 文件大小声明无效: " + fileName);
         }
-        if (target.isFile() && (!sha1.isBlank() && FileUtil.verifySha1(target, sha1))) {
-            notifyStatus(listener, "文件已存在，跳过下载: " + fileName);
-            return target;
+        String previousHash = plannedTargets.putIfAbsent(targetPath, expectedHash);
+        if (previousHash != null && !previousHash.equalsIgnoreCase(expectedHash)) {
+            throw new IOException("CurseForge files collide at target: " + fileName);
+        }
+        if (previousHash != null) {
+            if (Files.exists(targetPath) && !target.isFile()) {
+                throw new IOException("CurseForge target is not a regular file: " + target);
+            }
+            if (!target.isFile()) {
+                return target;
+            }
+            try {
+                if (target.length() == file.size()) {
+                    new HashVerifier().verify(targetPath, file.hashes());
+                    return target;
+                }
+            } catch (RuntimeException ignored) {
+                // A concurrent replacement will be detected as a duplicate target below.
+            }
+            throw new IOException("CurseForge target changed during installation: " + target);
+        }
+        if (target.isFile()) {
+            try {
+                if (target.length() == file.size()) {
+                    new HashVerifier().verify(targetPath, file.hashes());
+                    notifyStatus(listener, "文件已存在，跳过下载: " + fileName);
+                    return target;
+                }
+            } catch (RuntimeException ignored) {
+                // Download the replacement into staging; the transaction keeps the old file
+                // available for rollback if the new content or a dependency fails.
+            }
+        }
+        if (Files.exists(targetPath)) {
+            throw new IOException("CurseForge target is not a regular file: " + target);
         }
         notifyStatus(listener, (primary ? "正在下载: " : "正在下载依赖: ") + fileName);
         java.net.URI downloadUri;
@@ -178,25 +238,38 @@ public final class CurseForgeDownloader implements ContentDownloader {
         } catch (IllegalArgumentException invalid) {
             throw new IOException("CurseForge 下载地址无效: " + fileName, invalid);
         }
-        HttpUtil.downloadFileWithProgress(downloadUri.toString(), target,
-                new HttpUtil.ProgressCallback() {
-                    @Override public void onStart(long total) { notifyProgress(listener, 0, total); }
-                    @Override public void onProgress(long downloaded, long total) {
-                        notifyProgress(listener, downloaded, total);
-                    }
-                    @Override public void onComplete(File value) { notifyProgress(listener, 1, 1); }
-                }, null, file.size());
-        if (target.length() != file.size()) {
-            Files.deleteIfExists(target.toPath());
-            throw new IOException("CurseForge 文件大小校验失败: " + fileName);
-        }
+        Path staged = downloads.resolve(UUID.randomUUID() + ".part").toAbsolutePath().normalize();
+        boolean stagedForCommit = false;
         try {
-            new HashVerifier().verify(target.toPath(), file.hashes());
-        } catch (RuntimeException invalid) {
-            Files.deleteIfExists(target.toPath());
-            throw new IOException("CurseForge 文件校验失败: " + fileName, invalid);
+            HttpUtil.downloadFileWithProgress(downloadUri.toString(), staged.toFile(),
+                    new HttpUtil.ProgressCallback() {
+                        @Override public void onStart(long total) { notifyProgress(listener, 0, total); }
+                        @Override public void onProgress(long downloaded, long total) {
+                            notifyProgress(listener, downloaded, total);
+                        }
+                        @Override public void onComplete(File value) { notifyProgress(listener, 1, 1); }
+                    }, null, file.size());
+            if (Files.size(staged) != file.size()) {
+                throw new IOException("CurseForge 文件大小校验失败: " + fileName);
+            }
+            try {
+                new HashVerifier().verify(staged, file.hashes());
+            } catch (RuntimeException invalid) {
+                throw new IOException("CurseForge 文件校验失败: " + fileName, invalid);
+            }
+            transaction.stageDownloadedFile(staged, targetPath);
+            stagedForCommit = true;
+            return target;
+        } finally {
+            if (!stagedForCommit) Files.deleteIfExists(staged);
         }
-        return target;
+    }
+
+    private static String expectedHash(Map<String, String> hashes) {
+        String sha512 = hashes == null ? null : hashes.get("sha512");
+        if (sha512 != null && sha512.matches("(?i)[0-9a-f]{128}")) return sha512;
+        String sha1 = hashes == null ? null : hashes.get("sha1");
+        return sha1 == null ? "" : sha1;
     }
 
     /** Converts a CurseForge manifest pack to MRPACK so the existing transactional installer can install it. */

@@ -2,8 +2,10 @@ package com.ecl.download;
 
 import com.ecl.ECLConfig;
 import com.ecl.game.MavenCoordinates;
+import com.ecl.util.FileLockLease;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.ManagedLockPaths;
 import com.ecl.util.RuleEvaluator;
 import com.ecl.util.ThreadFactories;
 import com.google.gson.JsonArray;
@@ -105,60 +107,85 @@ public class GameDownloader implements DownloadService {
 
             File versionDir = FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), versionId);
             Files.createDirectories(versionDir.toPath());
-
-            JsonObject versionJson = HttpUtil.getJson(versionUrl);
-            File versionJsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
-            HttpUtil.writeJson(versionJsonFile, versionJson);
-            checkCancelled();
-
-            JsonObject downloads = versionJson.has("downloads") ? versionJson.getAsJsonObject("downloads") : null;
-            JsonObject client = downloads != null && downloads.has("client")
-                    ? downloads.getAsJsonObject("client") : null;
-            if (client != null) {
-                if (runListener != null) runListener.onStatus("正在下载游戏主文件...");
-                String clientUrl = client.get("url").getAsString();
-                String clientSha1 = InstallHelpers.requireSha1(
-                        client.has("sha1") ? client.get("sha1").getAsString() : null,
-                        "Minecraft client");
-                long clientSize = GameManifestParser.requiredPositiveSize(client, "size", "Minecraft client");
-                File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
-                if (assetVerifier.needsDownload(clientJar, clientSha1)) {
-                    File temporaryClient = new File(clientJar.getAbsolutePath() + ".ecl-download-"
-                            + UUID.randomUUID() + ".tmp");
-                    try {
-                    HttpUtil.downloadFileWithProgress(clientUrl, temporaryClient, new HttpUtil.ProgressCallback() {
-                        @Override
-                        public void onStart(long total) {
-                            if (runListener != null) runListener.onProgress(0, total);
-                        }
-                        @Override
-                        public void onProgress(long downloaded, long total) {
-                            if (runListener != null) runListener.onProgress(downloaded, total);
-                        }
-                        @Override
-                        public void onComplete(File file) {}
-                    }, sourceCallback("游戏主文件", runListener), clientSize);
-                    if (temporaryClient.length() != clientSize) {
-                        throw new IOException("Minecraft client size does not match metadata");
-                    }
-                    assetVerifier.verifyDownloadedFile(temporaryClient, clientSha1);
-                    atomicReplace(temporaryClient.toPath(), clientJar.toPath());
-                    } finally {
-                        Files.deleteIfExists(temporaryClient.toPath());
-                    }
+            try (FileLockLease versionLock = FileLockLease.tryAcquire(
+                    ManagedLockPaths.versionDownload(
+                            ECLConfig.getVersionsDir().toPath(), versionId))) {
+                if (versionLock == null) {
+                    throw new IOException("Version download or migration is already in progress: "
+                            + versionId);
                 }
-            } else if (!GameManifestParser.hasUsableInheritedClient(versionJson)) {
-                throw new IOException("版本缺少 client 下载信息，且继承版本客户端不可用: " + versionId);
+                Files.deleteIfExists(versionDir.toPath().resolve(
+                        ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER));
+
+                JsonObject versionJson = HttpUtil.getJson(versionUrl);
+                File versionJsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
+                HttpUtil.writeJson(versionJsonFile, versionJson);
+                checkCancelled();
+
+                JsonObject downloads = versionJson.has("downloads")
+                        ? versionJson.getAsJsonObject("downloads") : null;
+                JsonObject client = downloads != null && downloads.has("client")
+                        ? downloads.getAsJsonObject("client") : null;
+                if (client != null) {
+                    if (runListener != null) runListener.onStatus("正在下载游戏主文件...");
+                    String clientUrl = client.get("url").getAsString();
+                    String clientSha1 = InstallHelpers.requireSha1(
+                            client.has("sha1") ? client.get("sha1").getAsString() : null,
+                            "Minecraft client");
+                    long clientSize = GameManifestParser.requiredPositiveSize(
+                            client, "size", "Minecraft client");
+                    File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
+                    if (assetVerifier.needsDownload(clientJar, clientSha1)) {
+                        File temporaryClient = new File(clientJar.getAbsolutePath()
+                                + ".ecl-download-" + UUID.randomUUID() + ".tmp");
+                        try {
+                            HttpUtil.downloadFileWithProgress(clientUrl, temporaryClient,
+                                    new HttpUtil.ProgressCallback() {
+                                        @Override
+                                        public void onStart(long total) {
+                                            if (runListener != null) {
+                                                runListener.onProgress(0, total);
+                                            }
+                                        }
+
+                                        @Override
+                                        public void onProgress(long downloaded, long total) {
+                                            if (runListener != null) {
+                                                runListener.onProgress(downloaded, total);
+                                            }
+                                        }
+
+                                        @Override
+                                        public void onComplete(File file) {
+                                        }
+                                    }, sourceCallback("游戏主文件", runListener), clientSize);
+                            if (temporaryClient.length() != clientSize) {
+                                throw new IOException(
+                                        "Minecraft client size does not match metadata");
+                            }
+                            assetVerifier.verifyDownloadedFile(temporaryClient, clientSha1);
+                            atomicReplace(temporaryClient.toPath(), clientJar.toPath());
+                        } finally {
+                            Files.deleteIfExists(temporaryClient.toPath());
+                        }
+                    }
+                } else if (!GameManifestParser.hasUsableInheritedClient(versionJson)) {
+                    throw new IOException("版本缺少 client 下载信息，且继承版本客户端不可用: "
+                            + versionId);
+                }
+                checkCancelled();
+
+                if (runListener != null) runListener.onStatus("正在下载依赖库...");
+                downloadLibraries(versionJson, runListener);
+                checkCancelled();
+
+                if (runListener != null) runListener.onStatus("正在下载资源文件...");
+                downloadAssets(versionJson, runListener);
+                checkCancelled();
+                Files.writeString(versionDir.toPath().resolve(
+                        ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER), "complete",
+                        java.nio.charset.StandardCharsets.UTF_8);
             }
-            checkCancelled();
-
-            if (runListener != null) runListener.onStatus("正在下载依赖库...");
-            downloadLibraries(versionJson, runListener);
-            checkCancelled();
-
-            if (runListener != null) runListener.onStatus("正在下载资源文件...");
-            downloadAssets(versionJson, runListener);
-            checkCancelled();
 
             if (runListener != null) runListener.onStatus("下载完成！");
             if (runListener != null) runListener.onComplete();

@@ -10,6 +10,8 @@ import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.provider.ModrinthMetadataProvider;
 import com.ecl.modrinth.repository.InstalledModRepository;
+import com.ecl.util.FileUtil;
+import com.ecl.util.InstanceOperationLease;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -90,7 +92,15 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             throw new com.ecl.modrinth.api.ModInstallationException(
                     "实例正在运行，不能修复模组索引");
         }
-        try (AutoCloseable ignored = operationLock.acquire(instance.instanceId())) {
+        try (AutoCloseable ignored = operationLock.acquire(instance.instanceId());
+             InstanceOperationLease processLock =
+                     InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
+            if (processLock == null) {
+                throw new IOException("Instance is running or busy in another launcher process");
+            }
+            FileUtil.validateExistingAncestors(instance.gameDirectory(), instance.modsDirectory());
+            FileUtil.validateExistingAncestors(instance.gameDirectory(),
+                    instance.gameDirectory().resolve("disabled-mods"));
             Files.createDirectories(instance.modsDirectory());
             Files.createDirectories(instance.gameDirectory().resolve("disabled-mods"));
             List<InstalledMod> previous = repository.findAll(instance);

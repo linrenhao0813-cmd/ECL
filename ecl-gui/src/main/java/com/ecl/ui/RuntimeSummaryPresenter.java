@@ -2,10 +2,12 @@ package com.ecl.ui;
 
 import com.ecl.util.JavaRuntimeUtil;
 import com.ecl.util.Messages;
+import javafx.application.Platform;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
 
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
 
 import static com.ecl.util.TextUtil.abbreviate;
 
@@ -96,7 +98,25 @@ final class RuntimeSummaryPresenter {
         if (ui.gameLaunch.isGameProcessRunning()) {
             readiness = Messages.get("home.readiness.running");
         } else if (selectedVersion != null && !selectedVersion.isBlank()) {
-            readiness = ui.versionManager.isVersionDownloaded(selectedVersion)
+            boolean downloaded = ui.versionManager.isVersionDownloaded(selectedVersion);
+            if (!downloaded) {
+                CompletableFuture<Boolean> migration =
+                        ui.versionManager.ensureVersionDownloadedAsync(selectedVersion);
+                if (migration.isDone() && !migration.isCompletedExceptionally()) {
+                    downloaded = Boolean.TRUE.equals(migration.getNow(false));
+                } else {
+                    String checkedVersion = selectedVersion;
+                    migration.thenAccept(ready -> {
+                        if (!Boolean.TRUE.equals(ready)) return;
+                        Platform.runLater(() -> {
+                            String current = ui.versionCombo == null
+                                    ? null : ui.versionCombo.getValue();
+                            if (checkedVersion.equals(current)) update();
+                        });
+                    });
+                }
+            }
+            readiness = downloaded
                     ? Messages.get("home.readiness.installed")
                     : Messages.get("home.readiness.prepareFirst");
         }

@@ -7,7 +7,7 @@ import com.ecl.modrinth.model.ContentDownloadResult;
 import com.ecl.modrinth.model.ContentProject;
 import com.ecl.modrinth.model.ContentVersion;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
-import com.ecl.util.FileLockLease;
+import com.ecl.util.InstanceOperationLease;
 import com.ecl.modrinth.pack.MrpackInstaller;
 import com.ecl.modrinth.provider.ContentSource;
 import javafx.application.Platform;
@@ -145,10 +145,12 @@ final class ContentDownloadWorkflow {
                 MrpackInstaller.InstallResult packResult = null;
                 try (AutoCloseable ignored = ui.controller.instanceOperations()
                         .acquireInterruptibly(instance.instanceId());
-                     FileLockLease fileLock = FileLockLease.tryAcquire(
-                             instance.gameDirectory().toPath().resolve(".ecl").resolve("operation.lock"))) {
-                    if (fileLock == null) {
-                        throw new IOException("实例内容操作正在另一个启动器进程中执行: " + instance.profileId());
+                     InstanceOperationLease instanceLock =
+                             InstanceOperationLease.tryAcquire(
+                                     instance.gameDirectory().toPath())) {
+                    if (instanceLock == null) {
+                        throw new IOException("实例内容操作正在另一个启动器进程中执行: "
+                                + instance.profileId());
                     }
                     if (context.isCancelled()) {
                         throw new java.util.concurrent.CancellationException("内容安装已取消");

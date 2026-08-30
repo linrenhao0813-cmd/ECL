@@ -1,9 +1,7 @@
 package com.ecl.game;
 
-import com.ecl.util.GsonProvider;
-import com.ecl.util.FileLockLease;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.ecl.util.FileUtil;
+import com.ecl.util.InstanceOperationLease;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -30,7 +28,6 @@ import java.util.function.Predicate;
 
 /** Scans Minecraft saves and persists the editable single-player world settings. */
 public final class WorldSaveService {
-    public static final String SETTINGS_FILE = ".ecl/world-settings.json";
     private final Predicate<String> instanceRunning;
 
     public WorldSaveService() {
@@ -67,7 +64,8 @@ public final class WorldSaveService {
         Objects.requireNonNull(save, "save");
         Objects.requireNonNull(settings, "settings");
         ensureNotRunning(save);
-        try (FileLockLease ignored = FileLockLease.tryAcquire(gameLockFile(save))) {
+        try (InstanceOperationLease ignored =
+                     InstanceOperationLease.tryAcquire(gameDirectory(save))) {
             if (ignored == null) {
                 throw new IOException("游戏正在运行，不能修改世界存档: " + save.name());
             }
@@ -88,21 +86,19 @@ public final class WorldSaveService {
             } catch (IOException | RuntimeException failure) {
                 throw new IOException("Unable to edit level.dat for world " + save.name(), failure);
             }
-            ensureNotRunning(save);
-            writeSidecar(save.directory(), settings);
             return new WorldSave(save.name(), save.directory(), save.instanceId(), save.minecraftVersion(),
                     save.modLoader(), save.modLoaderVersion(), Files.getLastModifiedTime(save.directory())
                             .toMillis(), settings, save.sharedDirectory());
         }
     }
 
-    private static Path gameLockFile(WorldSave save) throws IOException {
+    private static Path gameDirectory(WorldSave save) throws IOException {
         Path saves = save.directory().toAbsolutePath().normalize().getParent();
         Path runDirectory = saves == null ? null : saves.getParent();
         if (runDirectory == null) {
             throw new IOException("World directory has no game root: " + save.directory());
         }
-        return runDirectory.resolve(".ecl").resolve("operation.lock");
+        return runDirectory;
     }
 
     private void ensureNotRunning(WorldSave save) throws IOException {
@@ -114,11 +110,19 @@ public final class WorldSaveService {
     private void scanDirectory(Map<Path, WorldSave> unique, Path runDirectory, String instanceId,
                                VersionMetadata metadata, boolean sharedDirectory) {
         Path saves = runDirectory.toAbsolutePath().normalize().resolve("saves");
-        if (!Files.isDirectory(saves)) return;
+        try {
+            FileUtil.validateExistingAncestors(runDirectory, saves);
+        } catch (IOException unsafePath) {
+            return;
+        }
+        if (!Files.isDirectory(saves, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return;
         try (Stream<Path> entries = Files.list(saves)) {
-            entries.filter(Files::isDirectory).forEach(directory -> {
-                if (!Files.isRegularFile(directory.resolve("level.dat"))) return;
+            entries.filter(path -> Files.isDirectory(path, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                    .filter(path -> !Files.isSymbolicLink(path)).forEach(directory -> {
+                Path levelDat = directory.resolve("level.dat");
+                if (!Files.isRegularFile(levelDat, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return;
                 try {
+                    FileUtil.validateExistingAncestors(runDirectory, levelDat);
                     WorldSaveSettings settings = readSettings(directory);
                     BasicFileAttributes attributes = Files.readAttributes(directory,
                             BasicFileAttributes.class);
@@ -147,51 +151,11 @@ public final class WorldSaveService {
             int difficulty = data.intValue("Difficulty", defaults.difficulty().id());
             boolean commands = data.intValue("allowCommands", defaults.allowCommands() ? 1 : 0) != 0;
             defaults = new WorldSaveSettings(WorldSaveSettings.Difficulty.fromId(difficulty),
-                    WorldSaveSettings.GameMode.fromId(gameType), commands, false);
+                    WorldSaveSettings.GameMode.fromId(gameType), commands);
         } catch (IOException | RuntimeException ignored) {
             // Fall back to sidecar/defaults for old or incomplete worlds.
         }
-        Path sidecar = world.resolve(SETTINGS_FILE);
-        if (!Files.isRegularFile(sidecar)) return defaults;
-        try (var reader = Files.newBufferedReader(sidecar, StandardCharsets.UTF_8)) {
-            JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-            int lanPort = defaults.lanPort();
-            if (json.has("lanPort") && !json.get("lanPort").isJsonNull()) {
-                try {
-                    int storedPort = json.get("lanPort").getAsInt();
-                    if (storedPort >= 1 && storedPort <= 65535) lanPort = storedPort;
-                } catch (RuntimeException ignored) {
-                    // Keep the default port when the sidecar contains an invalid value.
-                }
-            }
-            return new WorldSaveSettings(defaults.difficulty(), defaults.gameMode(),
-                    defaults.allowCommands(), json.has("openToLan")
-                    && json.get("openToLan").getAsBoolean(), lanPort);
-        } catch (RuntimeException invalidJson) {
-            return defaults;
-        }
-    }
-
-    private void writeSidecar(Path world, WorldSaveSettings settings) throws IOException {
-        Path file = world.resolve(SETTINGS_FILE);
-        Files.createDirectories(file.getParent());
-        JsonObject json = new JsonObject();
-        json.addProperty("openToLan", settings.openToLan());
-        json.addProperty("lanPort", settings.lanPort());
-        Path temporary = Files.createTempFile(file.getParent(), "world-settings-", ".tmp");
-        try {
-            try (var writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
-                GsonProvider.pretty().toJson(json, writer);
-            }
-            try {
-                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
+        return defaults;
     }
 
     private static void writeAtomically(Path target, NbtIo.Compound root) throws IOException {
@@ -214,6 +178,11 @@ public final class WorldSaveService {
         private static final int END = 0, BYTE = 1, SHORT = 2, INT = 3, LONG = 4,
                 FLOAT = 5, DOUBLE = 6, BYTE_ARRAY = 7, STRING = 8, LIST = 9,
                 COMPOUND = 10, INT_ARRAY = 11, LONG_ARRAY = 12;
+        private static final int MAX_DEPTH = 128;
+        private static final int MAX_ARRAY_ELEMENTS = 4_000_000;
+        private static final int MAX_LIST_ELEMENTS = 1_000_000;
+        private static final int MAX_COMPOUND_ENTRIES = 1_000_000;
+        private static final long MAX_DECODED_BYTES = 64L * 1024 * 1024;
 
         private NbtIo() { }
 
@@ -222,8 +191,9 @@ public final class WorldSaveService {
                  DataInputStream data = new DataInputStream(input)) {
                 int type = data.readUnsignedByte();
                 if (type != COMPOUND) throw new IOException("level.dat root is not a compound");
-                readString(data);
-                return (Compound) readPayload(data, type);
+                ReadBudget budget = new ReadBudget();
+                readString(data, budget);
+                return (Compound) readPayload(data, type, 0, budget);
             }
         }
 
@@ -236,7 +206,11 @@ public final class WorldSaveService {
             }
         }
 
-        private static Value readPayload(DataInputStream data, int type) throws IOException {
+        private static Value readPayload(DataInputStream data, int type, int depth,
+                                         ReadBudget budget) throws IOException {
+            if (depth > MAX_DEPTH) {
+                throw new IOException("NBT nesting depth exceeds " + MAX_DEPTH);
+            }
             return switch (type) {
                 case BYTE -> new ByteValue(data.readByte());
                 case SHORT -> new ShortValue(data.readShort());
@@ -244,31 +218,49 @@ public final class WorldSaveService {
                 case LONG -> new LongValue(data.readLong());
                 case FLOAT -> new FloatValue(data.readFloat());
                 case DOUBLE -> new DoubleValue(data.readDouble());
-                case BYTE_ARRAY -> new ByteArrayValue(data.readNBytes(data.readInt()));
-                case STRING -> new StringValue(readString(data));
+                case BYTE_ARRAY -> {
+                    int length = readLength(data, MAX_ARRAY_ELEMENTS, "NBT byte array");
+                    byte[] values = data.readNBytes(length);
+                    if (values.length != length) throw new IOException("Truncated NBT byte array");
+                    budget.consume(length);
+                    yield new ByteArrayValue(values);
+                }
+                case STRING -> new StringValue(readString(data, budget));
                 case LIST -> {
                     int childType = data.readUnsignedByte();
-                    int size = data.readInt();
-                    List<Value> values = new ArrayList<>(Math.max(0, size));
-                    for (int i = 0; i < size; i++) values.add(readPayload(data, childType));
+                    int size = readLength(data, MAX_LIST_ELEMENTS, "NBT list");
+                    budget.consume(size);
+                    List<Value> values = new ArrayList<>(size);
+                    for (int i = 0; i < size; i++) {
+                        values.add(readPayload(data, childType, depth + 1, budget));
+                    }
                     yield new ListValue(childType, values);
                 }
                 case COMPOUND -> {
                     Compound compound = new Compound();
+                    int entries = 0;
                     while (true) {
                         int childType = data.readUnsignedByte();
                         if (childType == END) break;
-                        compound.put(readString(data), readPayload(data, childType));
+                        if (++entries > MAX_COMPOUND_ENTRIES) {
+                            throw new IOException("NBT compound has too many entries");
+                        }
+                        compound.put(readString(data, budget),
+                                readPayload(data, childType, depth + 1, budget));
                     }
                     yield compound;
                 }
                 case INT_ARRAY -> {
-                    int[] values = new int[data.readInt()];
+                    int length = readLength(data, MAX_ARRAY_ELEMENTS, "NBT int array");
+                    budget.consume(Math.multiplyExact((long) length, Integer.BYTES));
+                    int[] values = new int[length];
                     for (int i = 0; i < values.length; i++) values[i] = data.readInt();
                     yield new IntArrayValue(values);
                 }
                 case LONG_ARRAY -> {
-                    long[] values = new long[data.readInt()];
+                    int length = readLength(data, MAX_ARRAY_ELEMENTS, "NBT long array");
+                    budget.consume(Math.multiplyExact((long) length, Long.BYTES));
+                    long[] values = new long[length];
                     for (int i = 0; i < values.length; i++) values[i] = data.readLong();
                     yield new LongArrayValue(values);
                 }
@@ -312,7 +304,16 @@ public final class WorldSaveService {
             throw new IllegalArgumentException("Unsupported NBT value: " + value);
         }
 
-        private static String readString(DataInputStream data) throws IOException {
+        private static int readLength(DataInputStream data, int maximum, String description)
+                throws IOException {
+            int length = data.readInt();
+            if (length < 0 || length > maximum) {
+                throw new IOException(description + " length exceeds the safety limit");
+            }
+            return length;
+        }
+
+        private static String readString(DataInputStream data, ReadBudget budget) throws IOException {
             int length = data.readUnsignedShort();
             byte[] bytes = new byte[length];
             try {
@@ -320,7 +321,19 @@ public final class WorldSaveService {
             } catch (EOFException truncated) {
                 throw new IOException("Truncated NBT string", truncated);
             }
+            budget.consume(length);
             return new String(bytes, StandardCharsets.UTF_8);
+        }
+
+        private static final class ReadBudget {
+            private long decodedBytes;
+
+            private void consume(long amount) throws IOException {
+                if (amount < 0 || decodedBytes > MAX_DECODED_BYTES - amount) {
+                    throw new IOException("NBT decoded data exceeds the safety limit");
+                }
+                decodedBytes += amount;
+            }
         }
 
         private static void writeString(DataOutputStream data, String value) throws IOException {

@@ -9,7 +9,7 @@ import com.ecl.game.InstanceLaunchProfile;
 import com.ecl.launcher.CrashAnalyzer;
 import com.ecl.launch.GameProcess;
 import com.ecl.launch.LaunchOptions;
-import com.ecl.util.FileLockLease;
+import com.ecl.util.InstanceOperationLease;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
 import javafx.application.Platform;
@@ -73,12 +73,12 @@ final class GameLaunchCoordinator {
             File launchDir = ui.resolveVersionGameDir(version);
             File instanceRoot = ui.resolveVersionInstanceRoot(version);
             char[] password = passwordRef.getAndSet(null);
-            FileLockLease gameLock = null;
+            InstanceOperationLease gameLock = null;
             boolean monitorOwnsGameLock = false;
             try {
                 ensureVersionGameDirs(version);
-                gameLock = FileLockLease.tryAcquire(launchDir.toPath().resolve(".ecl")
-                        .resolve("operation.lock"));
+                createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
+                gameLock = InstanceOperationLease.tryAcquire(launchDir.toPath());
                 if (gameLock == null) {
                     throw new IOException("实例正在运行或被另一个启动器进程占用: " + version);
                 }
@@ -115,7 +115,6 @@ final class GameLaunchCoordinator {
                         .serverAddress(ui.quickServer)
                         .processorCount(ui.processorCount)
                         .build();
-                createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
                 ui.controller.invalidateLaunchVersion(version);
                 GameProcess gameProcess = ui.gameLauncher.launch(options);
                 Process process = gameProcess.process();

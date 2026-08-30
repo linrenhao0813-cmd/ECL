@@ -1,9 +1,12 @@
 package com.ecl.modrinth.transaction;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -118,5 +121,24 @@ class ModInstallationTransactionTest {
 
         assertEquals("original", Files.readString(target));
         assertFalse(Files.exists(transaction));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void rejectsJunctionsInManagedTargetPaths() throws Exception {
+        Path external = Files.createTempDirectory(game.getParent(), "external-mods-");
+        Path mods = game.resolve("mods");
+        Process process = new ProcessBuilder("cmd.exe", "/d", "/c", "mklink", "/J",
+                mods.toString(), external.toString()).redirectErrorStream(true).start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+
+        try (FileModInstallationTransaction transaction =
+                     new FileModInstallationTransaction(game)) {
+            Path staged = Files.writeString(transaction.temporaryDirectory().resolve("one.part"), "one");
+            assertThrows(IllegalArgumentException.class,
+                    () -> transaction.stageDownloadedFile(staged, mods.resolve("one.jar")));
+        }
+        assertFalse(Files.exists(external.resolve("one.jar")));
     }
 }

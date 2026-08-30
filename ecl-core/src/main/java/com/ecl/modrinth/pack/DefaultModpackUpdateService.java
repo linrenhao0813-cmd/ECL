@@ -165,7 +165,7 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
                             public void onComplete(java.io.File ignored) {
                                 if (listener != null) listener.onProgress(1, 1);
                             }
-                        }, null, file.size());
+                        }, null, file.size(), MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS);
                 if (Files.size(temporary) != file.size()) {
                     throw new IOException("Modpack update size does not match metadata");
                 }

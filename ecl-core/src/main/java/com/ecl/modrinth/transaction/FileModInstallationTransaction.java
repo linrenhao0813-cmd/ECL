@@ -1,6 +1,8 @@
 package com.ecl.modrinth.transaction;
 
 import com.ecl.util.FileLockLease;
+import com.ecl.util.FileUtil;
+import com.ecl.util.InstanceOperationLease;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -34,24 +36,54 @@ public final class FileModInstallationTransaction implements ModInstallationTran
     private final Path backupDirectory;
     private final List<Stage> stages = new ArrayList<>();
     private FileLockLease directoryLock;
+    private InstanceOperationLease gameOperationLock;
     private boolean committed;
     private boolean closed;
 
     public FileModInstallationTransaction(Path gameDirectory) throws IOException {
         this.gameDirectory = Objects.requireNonNull(gameDirectory, "gameDirectory")
                 .toAbsolutePath().normalize();
+        Path gameParent = this.gameDirectory.getParent();
+        if (gameParent != null) {
+            FileUtil.validateExistingAncestors(gameParent, this.gameDirectory);
+        }
         Files.createDirectories(this.gameDirectory);
         this.transactionRoot = this.gameDirectory.resolve(TRANSACTIONS_DIRECTORY).normalize();
         ensureInside(this.gameDirectory, transactionRoot, "transaction root");
+        FileUtil.validateExistingAncestors(this.gameDirectory, transactionRoot);
         Files.createDirectories(transactionRoot);
         this.temporaryDirectory = Files.createDirectory(
                 transactionRoot.resolve(UUID.randomUUID().toString()));
+        FileUtil.validateExistingAncestors(transactionRoot, temporaryDirectory);
         this.directoryLock = FileLockLease.tryAcquire(lockFile(temporaryDirectory));
         if (directoryLock == null) {
             throw new IOException("Unable to lock new mod transaction: " + temporaryDirectory);
         }
-        this.backupDirectory = temporaryDirectory.resolve("backups");
-        Files.createDirectories(backupDirectory);
+        try {
+            this.gameOperationLock = InstanceOperationLease.tryAcquire(this.gameDirectory);
+            if (gameOperationLock == null) {
+                throw new IOException("Instance is running or busy in another launcher process: "
+                        + this.gameDirectory);
+            }
+            this.backupDirectory = temporaryDirectory.resolve("backups");
+            Files.createDirectories(backupDirectory);
+        } catch (IOException | RuntimeException failure) {
+            if (gameOperationLock != null) {
+                try {
+                    gameOperationLock.close();
+                } catch (IOException closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+                gameOperationLock = null;
+            }
+            try {
+                directoryLock.close();
+            } catch (IOException closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+            directoryLock = null;
+            throw failure;
+        }
     }
 
     @Override
@@ -80,9 +112,20 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         Path target = normalizeRequired(finalFile, "finalFile");
         ensureInside(temporaryDirectory, staged, "staged file");
         ensureInside(gameDirectory, target, "final file");
+        try {
+            FileUtil.validateExistingAncestors(temporaryDirectory, staged);
+            FileUtil.validateExistingAncestors(gameDirectory, target);
+        } catch (IOException error) {
+            throw new IllegalArgumentException(error.getMessage(), error);
+        }
         Path old = oldFile == null ? null : oldFile.toAbsolutePath().normalize();
         if (old != null) {
             ensureInside(gameDirectory, old, "old file");
+            try {
+                FileUtil.validateExistingAncestors(gameDirectory, old);
+            } catch (IOException error) {
+                throw new IllegalArgumentException(error.getMessage(), error);
+            }
         }
         if (stages.stream().anyMatch(stage -> stage.finalFile.equals(target))) {
             throw new IllegalArgumentException("Duplicate transaction target: " + target);
@@ -228,10 +271,26 @@ public final class FileModInstallationTransaction implements ModInstallationTran
 
     public static void recoverIncompleteTransactions(Path gameDirectory) throws IOException {
         Path gameRoot = gameDirectory.toAbsolutePath().normalize();
+        Path gameParent = gameRoot.getParent();
+        if (gameParent != null) {
+            FileUtil.validateExistingAncestors(gameParent, gameRoot);
+        }
         Path transactionRoot = gameRoot.resolve(TRANSACTIONS_DIRECTORY);
+        FileUtil.validateExistingAncestors(gameRoot, transactionRoot);
         if (!Files.isDirectory(transactionRoot)) {
             return;
         }
+        try (InstanceOperationLease gameLock =
+                     InstanceOperationLease.tryAcquire(gameRoot)) {
+            if (gameLock == null) {
+                return;
+            }
+            recoverTransactionsLocked(gameRoot, transactionRoot);
+        }
+    }
+
+    private static void recoverTransactionsLocked(Path gameRoot, Path transactionRoot)
+            throws IOException {
         try (var directories = Files.list(transactionRoot)) {
             for (Path directory : directories.filter(Files::isDirectory).toList()) {
                 try (FileLockLease lock = FileLockLease.tryAcquire(lockFile(directory))) {
@@ -314,17 +373,18 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         return gameDirectory.relativize(value.toAbsolutePath().normalize()).toString();
     }
 
-    private Path resolve(String relative) {
+    private Path resolve(String relative) throws IOException {
         return safeResolve(gameDirectory, relative);
     }
 
-    private Path resolveNullable(String relative) {
+    private Path resolveNullable(String relative) throws IOException {
         return relative == null ? null : resolve(relative);
     }
 
-    private static Path safeResolve(Path gameRoot, String relative) {
+    private static Path safeResolve(Path gameRoot, String relative) throws IOException {
         Path result = gameRoot.resolve(relative).normalize();
         ensureInside(gameRoot, result, "journal path");
+        FileUtil.validateExistingAncestors(gameRoot, result);
         return result;
     }
 
@@ -352,9 +412,28 @@ public final class FileModInstallationTransaction implements ModInstallationTran
     }
 
     private void releaseDirectoryLock() throws IOException {
+        IOException failure = null;
+        if (gameOperationLock != null) {
+            try {
+                gameOperationLock.close();
+            } catch (IOException error) {
+                failure = error;
+            } finally {
+                gameOperationLock = null;
+            }
+        }
         if (directoryLock != null) {
-            directoryLock.close();
-            directoryLock = null;
+            try {
+                directoryLock.close();
+            } catch (IOException error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            } finally {
+                directoryLock = null;
+            }
+        }
+        if (failure != null) {
+            throw failure;
         }
     }
 

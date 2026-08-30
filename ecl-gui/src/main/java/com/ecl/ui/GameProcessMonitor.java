@@ -2,7 +2,7 @@ package com.ecl.ui;
 
 import com.ecl.ECLConfig;
 import com.ecl.launch.GameProcess;
-import com.ecl.util.FileLockLease;
+import com.ecl.util.InstanceOperationLease;
 import com.ecl.launcher.CrashAnalyzer;
 import javafx.application.Platform;
 
@@ -33,7 +33,8 @@ final class GameProcessMonitor {
 
     void monitor(GameProcess gameProcess, String version, File launchDir,
                  long launchStartedAt, long launchStartedNanos,
-                 UUID runningInstanceId, boolean restoreLauncher, FileLockLease launchLock) {
+                 UUID runningInstanceId, boolean restoreLauncher,
+                 InstanceOperationLease launchLock) {
         // 守护线程：关闭启动器窗口后进程能立即退出，不会被该监控线程拖住；
         // 游戏本体是独立进程，启动器退出不影响其继续运行。
         Thread.ofPlatform().name("ecl-monitor-game-" + version).daemon(true).start(() -> {

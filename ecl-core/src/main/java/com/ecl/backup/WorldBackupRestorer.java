@@ -31,6 +31,7 @@ final class WorldBackupRestorer {
         if (parent == null) {
             throw new IOException("Instance directory has no parent: " + instanceRoot);
         }
+        FileUtil.validateExistingAncestors(parent, instanceRoot);
         Files.createDirectories(parent);
         Files.createDirectories(instanceRoot);
 
@@ -113,6 +114,7 @@ final class WorldBackupRestorer {
         if (!result.startsWith(normalizedRoot) || result.equals(normalizedRoot)) {
             throw new IOException("Path escapes restore root: " + child);
         }
+        FileUtil.validateExistingAncestors(normalizedRoot, result);
         return result;
     }
 

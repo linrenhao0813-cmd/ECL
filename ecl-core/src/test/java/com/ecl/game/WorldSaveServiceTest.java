@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.DataOutputStream;
+import java.util.zip.GZIPOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -36,13 +38,11 @@ class WorldSaveServiceTest {
         assertEquals(WorldSaveSettings.Difficulty.NORMAL, save.settings().difficulty());
 
         service.update(save, new WorldSaveSettings(WorldSaveSettings.Difficulty.HARD,
-                WorldSaveSettings.GameMode.CREATIVE, true, true, 34567));
+                WorldSaveSettings.GameMode.CREATIVE, true));
         WorldSave updated = service.scan(repository).get(0);
         assertEquals(WorldSaveSettings.Difficulty.HARD, updated.settings().difficulty());
         assertEquals(WorldSaveSettings.GameMode.CREATIVE, updated.settings().gameMode());
         assertTrue(updated.settings().allowCommands());
-        assertTrue(updated.settings().openToLan());
-        assertEquals(34567, updated.settings().lanPort());
         assertEquals("世界 😀", WorldSaveService.NbtIo.read(instance.resolve("level.dat"))
                 .compound("Data").stringValue("WorldName", ""));
     }
@@ -71,5 +71,22 @@ class WorldSaveServiceTest {
         WorldSave save = new WorldSaveService().scan(repository).get(0);
         assertTrue(save.sharedDirectory());
         assertEquals("shared", save.groupId());
+    }
+
+    @Test
+    void rejectsUnboundedNbtArrayLengths() throws Exception {
+        Path levelDat = Files.createTempFile("ecl-malformed-level-", ".dat");
+        try (DataOutputStream data = new DataOutputStream(
+                new GZIPOutputStream(Files.newOutputStream(levelDat)))) {
+            data.writeByte(10); // root compound
+            data.writeShort(0); // root name
+            data.writeByte(7); // byte array
+            data.writeShort(4);
+            data.writeBytes("evil");
+            data.writeInt(Integer.MAX_VALUE);
+        }
+
+        assertThrows(java.io.IOException.class,
+                () -> WorldSaveService.NbtIo.read(levelDat));
     }
 }

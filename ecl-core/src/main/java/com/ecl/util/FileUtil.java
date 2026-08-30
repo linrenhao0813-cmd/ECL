@@ -8,8 +8,12 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.sun.jna.platform.win32.Kernel32;
+import com.sun.jna.platform.win32.WinBase;
+import com.sun.jna.platform.win32.WinNT;
 
 public class FileUtil {
     private static final Logger LOGGER = LoggerFactory.getLogger(FileUtil.class);
@@ -119,6 +123,44 @@ public class FileUtil {
             throw new IOException("依赖路径越界: " + relativePath);
         }
         return candidate.toFile();
+    }
+
+    /**
+     * Validate all existing path components without following symbolic links or Windows reparse
+     * points. The check is intentionally separate from lexical containment because a pre-existing
+     * junction can redirect a later create/move operation outside the managed root.
+     */
+    public static void validateExistingAncestors(Path root, Path candidate) throws IOException {
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path normalizedCandidate = candidate.toAbsolutePath().normalize();
+        if (!normalizedCandidate.startsWith(normalizedRoot)) {
+            throw new IOException("Path escapes root: " + candidate);
+        }
+        Path current = normalizedRoot;
+        if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+            validatePathComponent(current);
+        }
+        for (Path component : normalizedRoot.relativize(normalizedCandidate)) {
+            current = current.resolve(component);
+            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+                validatePathComponent(current);
+            }
+        }
+    }
+
+    private static void validatePathComponent(Path path) throws IOException {
+        if (Files.isSymbolicLink(path)) {
+            throw new IOException("Managed path cannot contain a symbolic link: " + path);
+        }
+        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+            int attributes = Kernel32.INSTANCE.GetFileAttributes(path.toString());
+            if (attributes == WinBase.INVALID_FILE_ATTRIBUTES) {
+                throw new IOException("Unable to read Windows file attributes: " + path);
+            }
+            if ((attributes & WinNT.FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+                throw new IOException("Managed path cannot contain a Windows reparse point: " + path);
+            }
+        }
     }
 
     /**

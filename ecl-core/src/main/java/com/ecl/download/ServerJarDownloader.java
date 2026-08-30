@@ -11,6 +11,8 @@ import com.google.gson.JsonObject;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 /** Resolves and downloads the official dedicated-server JAR declared by Minecraft metadata. */
@@ -61,6 +63,16 @@ public final class ServerJarDownloader {
     public File download(ServerArtifact artifact, File target, Listener listener) throws IOException {
         if (artifact == null) throw new IOException("尚未选择服务端文件");
         if (target == null) throw new IOException("服务端文件保存位置不能为空");
+        Path targetPath = target.toPath().toAbsolutePath().normalize();
+        Path targetParent = targetPath.getParent();
+        if (targetParent == null) {
+            throw new IOException("服务端文件保存位置没有父目录: " + target);
+        }
+        FileUtil.validateExistingAncestors(targetParent, targetPath);
+        if (Files.isSymbolicLink(targetPath)) {
+            throw new IOException("服务器 JAR 目标不能是符号链接: " + target);
+        }
+        Files.createDirectories(targetParent);
 
         if (target.isFile() && matches(target, artifact)) {
             if (listener != null) {
@@ -70,29 +82,39 @@ public final class ServerJarDownloader {
             return target;
         }
 
-        HttpUtil.downloadFileWithProgress(artifact.url(), target, new HttpUtil.ProgressCallback() {
-            @Override
-            public void onStart(long total) {
-                if (listener != null) listener.onStart(total);
-            }
+        Path temporary = Files.createTempFile(targetParent, ".ecl-server-", ".tmp");
+        try {
+            HttpUtil.downloadFileWithProgress(artifact.url(), temporary.toFile(), new HttpUtil.ProgressCallback() {
+                @Override
+                public void onStart(long total) {
+                    if (listener != null) listener.onStart(total);
+                }
 
-            @Override
-            public void onProgress(long downloaded, long total) {
-                if (listener != null) listener.onProgress(downloaded, total);
-            }
+                @Override
+                public void onProgress(long downloaded, long total) {
+                    if (listener != null) listener.onProgress(downloaded, total);
+                }
 
-            @Override
-            public void onComplete(File file) {
-                // Completion is reported only after metadata checks below succeed.
-            }
-        }, sourceCallback(listener), artifact.size());
+                @Override
+                public void onComplete(File file) {
+                    // Completion is reported only after metadata checks below succeed.
+                }
+            }, sourceCallback(listener), artifact.size());
 
-        if (!matches(target, artifact)) {
-            Files.deleteIfExists(target.toPath());
-            throw new IOException(target.getName() + " 的大小或 SHA-1 校验失败");
+            if (!matches(temporary.toFile(), artifact)) {
+                throw new IOException(target.getName() + " 的大小或 SHA-1 校验失败");
+            }
+            try {
+                Files.move(temporary, targetPath, StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            }
+            if (listener != null) listener.onComplete(target);
+            return target;
+        } finally {
+            Files.deleteIfExists(temporary);
         }
-        if (listener != null) listener.onComplete(target);
-        return target;
     }
 
     public static String suggestedFileName(String versionId) {

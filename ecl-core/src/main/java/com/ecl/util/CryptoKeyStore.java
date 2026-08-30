@@ -66,34 +66,46 @@ final class CryptoKeyStore {
                 return key;
             }
             File keyFile = keyFile();
-            if (Files.isSymbolicLink(keyFile.toPath())) {
-                throw new IOException("Account encryption key must not be a symbolic link");
+            Path keyPath = keyFile.toPath().toAbsolutePath().normalize();
+            Path parent = keyPath.getParent();
+            if (parent == null || keyPath.getFileName() == null) {
+                throw new IOException("Account encryption key has no parent directory");
             }
-            if (keyFile.exists()) {
-                byte[] stored = Files.readAllBytes(keyFile.toPath());
-                byte[] encoded = decodeStoredKey(stored);
-                if (encoded.length != KEY_SIZE / Byte.SIZE) {
-                    throw new IOException("Invalid account encryption key length");
+            Path lockPath = keyPath.resolveSibling(keyPath.getFileName() + ".lock");
+            try (FileLockLease ignored = FileLockLease.tryAcquire(lockPath)) {
+                if (ignored == null) {
+                    throw new IOException("Account encryption key is busy in another process");
                 }
-                key = new SecretKeySpec(encoded, KEY_ALGORITHM);
-                boolean legacyProtection = !startsWith(stored, DPAPI_HEADER)
-                        && !startsWith(stored, LOCAL_HEADER)
-                        && !startsWith(stored, PROVIDER_HEADER);
-                if (legacyProtection) {
-                    writeKeyFile(keyFile.toPath(), encodeMigrationKey(encoded));
+                // The file must be re-read after taking the cross-process lock. Two launcher
+                // processes may otherwise generate different keys on first startup.
+                if (Files.isSymbolicLink(keyPath)) {
+                    throw new IOException("Account encryption key must not be a symbolic link");
                 }
-            } else {
-                if (!create) {
-                    throw new IOException("Account encryption key does not exist");
+                if (Files.isRegularFile(keyPath, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    byte[] stored = Files.readAllBytes(keyPath);
+                    byte[] encoded = decodeStoredKey(stored);
+                    if (encoded.length != KEY_SIZE / Byte.SIZE) {
+                        throw new IOException("Invalid account encryption key length");
+                    }
+                    key = new SecretKeySpec(encoded, KEY_ALGORITHM);
+                    boolean legacyProtection = !startsWith(stored, DPAPI_HEADER)
+                            && !startsWith(stored, LOCAL_HEADER)
+                            && !startsWith(stored, PROVIDER_HEADER);
+                    if (legacyProtection) {
+                        writeKeyFile(keyPath, encodeMigrationKey(encoded));
+                    }
+                } else {
+                    if (Files.exists(keyPath, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                        throw new IOException("Account encryption key is not a regular file");
+                    }
+                    if (!create) {
+                        throw new IOException("Account encryption key does not exist");
+                    }
+                    key = generateKey();
+                    byte[] encoded = key.getEncoded();
+                    Files.createDirectories(parent);
+                    writeKeyFile(keyPath, encodeStoredKey(encoded));
                 }
-                key = generateKey();
-                byte[] encoded = key.getEncoded();
-                File parent = keyFile.getAbsoluteFile().getParentFile();
-                if (parent == null) {
-                    throw new IOException("Account encryption key has no parent directory");
-                }
-                Files.createDirectories(parent.toPath());
-                writeKeyFile(keyFile.toPath(), encodeStoredKey(encoded));
             }
             cachedKey = key;
             return key;
@@ -380,6 +392,7 @@ final class CryptoKeyStore {
         Path temp = Files.createTempFile(parent, ".secret-key-", ".tmp");
         try {
             Files.write(temp, value);
+            enforceOwnerOnlyPermissions(temp);
             try {
                 Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE,
                         StandardCopyOption.REPLACE_EXISTING);

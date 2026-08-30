@@ -39,8 +39,17 @@ public final class ChineseDescriptionService {
                 ? normalized.substring(0, MAX_SOURCE_LENGTH) : normalized;
         CompletableFuture<String> cached = CACHE.get(shortSource);
         if (cached == null) {
-            cached = requestTranslation(shortSource);
-            CACHE.put(shortSource, cached);
+            CompletableFuture<String> requested = requestTranslation(shortSource);
+            CompletableFuture<String> existing = CACHE.putIfAbsent(shortSource, requested);
+            cached = existing == null ? requested : existing;
+            if (existing == null) {
+                CompletableFuture<String> cachedFuture = cached;
+                cachedFuture.whenComplete((translated, error) -> {
+                    if (error != null || translated == null || translated.isBlank()) {
+                        CACHE.remove(shortSource, cachedFuture);
+                    }
+                });
+            }
         }
         return cached
                 .thenApply(translated -> translated == null || translated.isBlank()
@@ -50,18 +59,14 @@ public final class ChineseDescriptionService {
 
     private static CompletableFuture<String> requestTranslation(String source) {
         CompletableFuture<String> chain = requestTencent(source)
-                .thenCompose(translated -> translated.isBlank()
+                .exceptionally(error -> "")
+                .thenCompose(translated -> translated == null || translated.isBlank()
                         ? requestGoogle(source)
                         : CompletableFuture.completedFuture(translated))
-                .thenCompose(translated -> translated.isBlank()
+                .exceptionally(error -> "")
+                .thenCompose(translated -> translated == null || translated.isBlank()
                         ? requestMyMemory(source)
                         : CompletableFuture.completedFuture(translated));
-        chain.whenComplete((translated, error) -> {
-            if (error != null || translated == null || translated.isBlank()) {
-                // Evict so a later request can retry instead of replaying the failure.
-                CACHE.remove(source, chain);
-            }
-        });
         return chain;
     }
 

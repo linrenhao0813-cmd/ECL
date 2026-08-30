@@ -249,8 +249,7 @@ final class WorldSavesPage extends VBox {
         }
         try {
             WorldSave updated = service.update(selected, new WorldSaveSettings(difficulty.getValue(),
-                    gameMode.getValue(), commands.isSelected(), selected.settings().openToLan(),
-                    selected.settings().lanPort()));
+                    gameMode.getValue(), commands.isSelected()));
             refreshSelection(updated.groupId(), updated.name());
             ui.setStatus(Messages.get("saves.save"), Messages.format("saves.saved", updated.name()));
         } catch (IOException error) {

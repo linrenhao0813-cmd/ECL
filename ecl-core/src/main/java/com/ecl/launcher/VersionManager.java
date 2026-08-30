@@ -1,14 +1,18 @@
 package com.ecl.launcher;
 
 import com.ecl.ECLConfig;
+import com.ecl.download.LegacyGameInstallationVerifier;
+import com.ecl.util.FileLockLease;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
 import com.ecl.util.Messages;
+import com.ecl.util.ManagedLockPaths;
 import com.google.gson.JsonObject;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -17,6 +21,7 @@ import java.util.Set;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 
 public class VersionManager {
     private volatile JsonObject manifest;
@@ -26,6 +31,8 @@ public class VersionManager {
     private final VersionDownloadTargetResolver downloadTargetResolver =
             new VersionDownloadTargetResolver(this);
     private final Map<String, String> displayNameCache = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<Boolean>> legacyMigrationChecks =
+            new ConcurrentHashMap<>();
     /** Cached scan of local version profiles; null means not computed yet. */
     private volatile List<LocalVersionProfile> localProfilesCache;
 
@@ -263,22 +270,76 @@ public class VersionManager {
     }
 
     public boolean isVersionDownloaded(String versionId) {
-        File json;
         try {
-            json = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
+            DownloadState state = downloadState(versionId);
+            if (state == null || !state.jar().isFile()) return false;
+            if (state.marker().isFile()) return true;
+            CompletableFuture<Boolean> migration = legacyMigrationChecks.get(state.jarVersion());
+            return migration != null && migration.isDone() && !migration.isCompletedExceptionally()
+                    && Boolean.TRUE.equals(migration.getNow(false));
         } catch (IOException e) {
             return false;
         }
-        if (!json.isFile()) {
-            return false;
-        }
+    }
+
+    public CompletableFuture<Boolean> ensureVersionDownloadedAsync(String versionId) {
+        DownloadState state;
         try {
-            String jarVersion = profileResolver.resolveClientJarVersion(versionId, new java.util.HashSet<>());
-            File jar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), jarVersion);
-            return jar.isFile();
-        } catch (IOException e) {
+            state = downloadState(versionId);
+        } catch (IOException invalidVersion) {
+            return CompletableFuture.completedFuture(false);
+        }
+        if (state == null || !state.jar().isFile()) {
+            return CompletableFuture.completedFuture(false);
+        }
+        if (state.marker().isFile()) {
+            return CompletableFuture.completedFuture(true);
+        }
+        CompletableFuture<Boolean> migration = legacyMigrationChecks.computeIfAbsent(
+                state.jarVersion(), ignored -> CompletableFuture.supplyAsync(
+                        () -> migrateLegacyInstallation(state)));
+        migration.whenComplete((ready, error) -> {
+            if (error != null) {
+                legacyMigrationChecks.remove(state.jarVersion(), migration);
+            }
+        });
+        return migration;
+    }
+
+    private boolean migrateLegacyInstallation(DownloadState state) {
+        try (FileLockLease versionLock = FileLockLease.tryAcquire(
+                ManagedLockPaths.versionDownload(
+                        ECLConfig.getVersionsDir().toPath(), state.jarVersion()))) {
+            if (versionLock == null) {
+                throw new IllegalStateException(
+                        "Version download or migration is already in progress: "
+                                + state.jarVersion());
+            }
+            if (state.marker().isFile()) return true;
+            if (!LegacyGameInstallationVerifier.isComplete(state.jarVersion())) return false;
+            try {
+                Files.writeString(state.marker().toPath(), "legacy-verified",
+                        java.nio.charset.StandardCharsets.UTF_8);
+            } catch (IOException readOnlyInstallation) {
+                // Keep the positive result cached for this process. Another process will perform
+                // the same bounded migration check if the installation remains read-only.
+            }
+            return true;
+        } catch (IOException invalidOrBusy) {
             return false;
         }
+    }
+
+    private DownloadState downloadState(String versionId) throws IOException {
+        File json = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
+        if (!json.isFile()) return null;
+        String jarVersion = profileResolver.resolveClientJarVersion(
+                versionId, new java.util.HashSet<>());
+        File jar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), jarVersion);
+        File marker = new File(FileUtil.safeVersionDirectory(
+                ECLConfig.getVersionsDir(), jarVersion),
+                ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER);
+        return new DownloadState(jarVersion, jar, marker);
     }
 
     public JsonObject loadVersionJson(String versionId) throws IOException {
@@ -311,6 +372,9 @@ public class VersionManager {
             String downloadVersionId,
             String versionUrl
     ) {
+    }
+
+    private record DownloadState(String jarVersion, File jar, File marker) {
     }
 
 }

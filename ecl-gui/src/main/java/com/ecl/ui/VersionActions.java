@@ -3,6 +3,7 @@ package com.ecl.ui;
 import com.ecl.ECLConfig;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.launcher.VersionManager;
+import com.ecl.util.InstanceOperationLease;
 import javafx.application.Platform;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
@@ -52,8 +53,7 @@ final class VersionActions {
             ui.setStatus("版本 ID 无效", ui.cleanMessage(error));
             return;
         }
-        boolean localInstance = Files.isDirectory(
-                ui.getConfiguredGameRootDir().toPath().resolve("versions").resolve(profileId));
+        boolean localInstance = Files.isDirectory(ui.resolveVersionInstanceRoot(profileId).toPath());
         if (!localMetadata && !localInstance) {
             ui.setStatus("版本尚未安装", profileId + " 没有可删除的本地文件。");
             return;
@@ -217,24 +217,44 @@ final class VersionActions {
         if (profileId.contains("/") || profileId.contains("\\") || profileId.contains("..")) {
             throw new IOException("版本 ID 无效");
         }
-        Path metadataRoot = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
-        deleteTreeWithin(metadataRoot, metadataRoot.resolve(profileId));
-        if (includeInstance) {
-            Path instanceRoot = ui.getConfiguredGameRootDir().toPath().toAbsolutePath()
-                    .normalize().resolve("versions").normalize();
-            deleteTreeWithin(instanceRoot, instanceRoot.resolve(profileId));
+        Path runDirectory = ui.resolveVersionGameDir(profileId).toPath()
+                .toAbsolutePath().normalize();
+        Path operationLock = runDirectory.resolve(".ecl").resolve("operation.lock");
+        try (InstanceOperationLease lease = InstanceOperationLease.tryAcquire(runDirectory)) {
+            if (lease == null) {
+                throw new IOException("Instance is running or busy in another launcher process");
+            }
+            Path metadataRoot = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
+            deleteTreeWithin(metadataRoot, metadataRoot.resolve(profileId), operationLock);
+            if (includeInstance) {
+                Path instanceRoot = ui.getConfiguredGameRootDir().toPath().toAbsolutePath()
+                        .normalize().resolve("versions").normalize();
+                Path instanceTarget = ui.resolveVersionInstanceRoot(profileId).toPath()
+                        .toAbsolutePath().normalize();
+                deleteTreeWithin(instanceRoot, instanceTarget, operationLock);
+                if (operationLock.startsWith(instanceTarget)) {
+                    lease.releaseLegacyLock();
+                    deleteTreeWithin(instanceRoot, instanceTarget, null);
+                }
+            }
         }
     }
 
-    private void deleteTreeWithin(Path root, Path target) throws IOException {
+    static void deleteTreeWithin(Path root, Path target, Path preservedPath) throws IOException {
         Path normalizedRoot = root.toAbsolutePath().normalize();
         Path normalizedTarget = target.toAbsolutePath().normalize();
+        Path normalizedPreserved = preservedPath == null
+                ? null : preservedPath.toAbsolutePath().normalize();
         if (normalizedTarget.equals(normalizedRoot) || !normalizedTarget.startsWith(normalizedRoot)) {
             throw new IOException("拒绝删除越界目录: " + target);
         }
         if (!Files.exists(normalizedTarget)) return;
         try (var stream = Files.walk(normalizedTarget)) {
             for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
+                if (normalizedPreserved != null
+                        && (path.equals(normalizedPreserved) || normalizedPreserved.startsWith(path))) {
+                    continue;
+                }
                 Files.deleteIfExists(path);
             }
         }

@@ -5,6 +5,8 @@ import com.ecl.download.GameDownloader;
 import javafx.application.Platform;
 
 import java.io.IOException;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -60,8 +62,30 @@ final class GameLaunchPreparation {
                     "无法写入 settings.json，请检查目录权限或查看日志。"));
         });
         ui.updateRuntimeSummary();
-        if (!ui.versionManager.isVersionDownloaded(selectedVersion)) downloadAndLaunch(selectedVersion, launcher);
-        else launcher.accept(selectedVersion);
+        CompletableFuture<Boolean> readiness =
+                ui.versionManager.ensureVersionDownloadedAsync(selectedVersion);
+        if (readiness.isDone() && !readiness.isCompletedExceptionally()) {
+            if (Boolean.TRUE.equals(readiness.getNow(false))) launcher.accept(selectedVersion);
+            else downloadAndLaunch(selectedVersion, launcher);
+            return;
+        }
+        ui.setControlsBusy(true);
+        ui.setStatus("正在验证本地版本", selectedVersion + " 的旧安装正在后台执行完整性检查。");
+        readiness.whenComplete((ready, error) -> Platform.runLater(() -> {
+            if (!Objects.equals(selectedVersion, facade.selectedVersion())) {
+                ui.setControlsBusy(false);
+                return;
+            }
+            ui.setControlsBusy(false);
+            ui.updateRuntimeSummary();
+            if (error != null) {
+                ui.setStatus("本地版本检查失败", ui.cleanMessage(error));
+            } else if (Boolean.TRUE.equals(ready)) {
+                launcher.accept(selectedVersion);
+            } else {
+                downloadAndLaunch(selectedVersion, launcher);
+            }
+        }));
     }
 
     private void downloadAndLaunch(String version, Consumer<String> launcher) {

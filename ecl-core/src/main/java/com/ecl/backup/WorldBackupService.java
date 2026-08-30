@@ -2,6 +2,8 @@ package com.ecl.backup;
 
 import com.ecl.ECLConfig;
 import com.ecl.util.FileLockLease;
+import com.ecl.util.FileUtil;
+import com.ecl.util.InstanceOperationLease;
 import com.ecl.util.ZipUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,8 +68,9 @@ public final class WorldBackupService {
                                                  ProgressListener listener) throws IOException {
         String normalizedProfileId = metadataHelper.requireProfileId(profileId);
         return withProfileLock(normalizedProfileId,
-                () -> createBackupLocked(normalizedProfileId, sourceVersion, instanceDirectory,
-                        requestedContent, listener));
+                () -> withInstanceLock(instanceDirectory,
+                        () -> createBackupLocked(normalizedProfileId, sourceVersion, instanceDirectory,
+                                requestedContent, listener)));
     }
 
     private BackupEntry createBackupLocked(String normalizedProfileId, String sourceVersion,
@@ -164,7 +167,10 @@ public final class WorldBackupService {
         Objects.requireNonNull(selectedBackup, "backup");
         String profileId = metadataHelper.requireProfileId(selectedBackup.profileId());
         withProfileLock(profileId, () -> {
-            restorer.restore(selectedBackup, instanceDirectory, listener);
+            withInstanceLock(instanceDirectory, () -> {
+                restorer.restore(selectedBackup, instanceDirectory, listener);
+                return null;
+            });
             return null;
         });
     }
@@ -212,12 +218,34 @@ public final class WorldBackupService {
 
     private <T> T withProfileLock(String profileId, ProfileOperation<T> operation)
             throws IOException {
+        Path backupParent = backupRoot.getParent();
+        if (backupParent != null) {
+            FileUtil.validateExistingAncestors(backupParent, backupRoot);
+        }
         Path lockDirectory = backupRoot.resolve(".locks").toAbsolutePath().normalize();
+        FileUtil.validateExistingAncestors(backupRoot, lockDirectory);
         Files.createDirectories(lockDirectory);
         Path lockFile = lockDirectory.resolve(metadataHelper.safeProfileFileName(profileId) + ".lock");
+        FileUtil.validateExistingAncestors(lockDirectory, lockFile);
         try (FileLockLease ignored = FileLockLease.tryAcquire(lockFile)) {
             if (ignored == null) {
                 throw new IOException("Backup profile is busy: " + profileId);
+            }
+            return operation.run();
+        }
+    }
+
+    private <T> T withInstanceLock(Path instanceDirectory, ProfileOperation<T> operation)
+            throws IOException {
+        Path instanceRoot = Objects.requireNonNull(instanceDirectory, "instanceDirectory")
+                .toAbsolutePath().normalize();
+        Path parent = instanceRoot.getParent();
+        if (parent != null) {
+            FileUtil.validateExistingAncestors(parent, instanceRoot);
+        }
+        try (InstanceOperationLease ignored = InstanceOperationLease.tryAcquire(instanceRoot)) {
+            if (ignored == null) {
+                throw new IOException("Instance is running or busy in another launcher process");
             }
             return operation.run();
         }
