@@ -1,6 +1,6 @@
 [versions]
 checkstyle = "10.24.0"
-gson = "2.13.2"
+gson = "2.14.0"
 hamcrest = "3.0"
 imageio-webp = "3.13.1"
 jackson = "2.19.1"
