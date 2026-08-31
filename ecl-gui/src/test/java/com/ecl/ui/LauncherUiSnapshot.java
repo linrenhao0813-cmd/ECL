@@ -157,7 +157,7 @@ public final class LauncherUiSnapshot {
                 showAppView("VERSIONS");
                 return primaryStage.getScene();
             }
-            if ("saves".equalsIgnoreCase(mode)) {
+            if ("saves".equalsIgnoreCase(mode) || "saves-ai".equalsIgnoreCase(mode)) {
                 createVisualProfile("visual-save-vanilla", "", "1.20.1");
                 createVisualProfile("visual-save-fabric", "fabric", "1.20.1");
                 Field gameDirField = LauncherUIView.class.getDeclaredField("gameDir");
@@ -166,6 +166,9 @@ public final class LauncherUiSnapshot {
                 createVisualSave(gameRoot.toPath().resolve("saves/Alpine Base"));
                 createVisualSave(gameRoot.toPath().resolve("versions/visual-save-fabric/saves/Modded Valley"));
                 showAppView("SAVES");
+                if ("saves-ai".equalsIgnoreCase(mode)) {
+                    selectAssistantTab(primaryStage);
+                }
                 return primaryStage.getScene();
             }
             if ("downloads".equalsIgnoreCase(mode)) {
@@ -319,6 +322,15 @@ public final class LauncherUiSnapshot {
                 return findSecondaryScene(primaryStage, "Backup dialog did not open");
             }
             return primaryStage.getScene();
+        }
+
+        private static void selectAssistantTab(Stage stage) {
+            javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
+                    stage.getScene().lookup(".world-save-tabs");
+            if (tabs == null || tabs.getTabs().size() < 2) {
+                throw new IllegalStateException("AI Assistant tab was not rendered");
+            }
+            tabs.getSelectionModel().select(1);
         }
 
         private String createVisualProfile(String profileId, String loader) throws IOException {

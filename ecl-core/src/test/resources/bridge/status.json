@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "taskId": "00000000-0000-0000-0000-000000000001",
+  "status": "RUNNING",
+  "requestedActions": 3,
+  "completedActions": 2,
+  "message": "正在寻找附近矿物",
+  "startedAt": "2026-08-31T12:00:01Z",
+  "updatedAt": "2026-08-31T12:00:20Z",
+  "finishedAt": ""
+}

@@ -1324,6 +1324,49 @@
     -fx-background-color: #17314a;
 }
 
+/* ---------- World save companion bridge ---------- */
+.world-save-tabs {
+    -fx-tab-min-height: 32;
+    -fx-tab-max-height: 32;
+    -fx-background-color: transparent;
+}
+.world-save-tabs > .tab-header-area > .headers-region > .tab {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: -ecl-border;
+    -fx-padding: 4 14;
+}
+.world-save-tabs > .tab-header-area > .headers-region > .tab:selected {
+    -fx-background-color: #eaf3ff;
+    -fx-border-color: -ecl-blue;
+}
+.world-save-tabs > .tab-header-area > .headers-region > .tab .tab-label {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-weight: 700;
+}
+.world-save-tabs > .tab-header-area > .headers-region > .tab:selected .tab-label {
+    -fx-text-fill: -ecl-blue;
+}
+.world-save-tabs > .tab-content-area {
+    -fx-background-color: transparent;
+    -fx-padding: 12 0 0 0;
+}
+.assistant-pane {
+    -fx-background-color: transparent;
+}
+.assistant-status {
+    -fx-font-weight: 700;
+    -fx-text-fill: -ecl-text;
+}
+.assistant-binding {
+    -fx-text-fill: -ecl-secondary;
+}
+.scene-root.theme-dark .world-save-tabs > .tab-header-area > .headers-region > .tab:selected {
+    -fx-background-color: #17314a;
+}
+.scene-root.theme-dark .world-save-tabs > .tab-header-area > .headers-region > .tab:selected .tab-label {
+    -fx-text-fill: -ecl-blue-hover;
+}
+
 .scene-root.theme-dark .content-library-nav-icon {
     -fx-background-color: #263247;
     -fx-text-fill: -ecl-secondary;
