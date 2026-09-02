@@ -2,6 +2,7 @@ package com.ecl.ui;
 
 import com.ecl.ECLConfig;
 import com.ecl.launch.GameProcess;
+import com.ecl.launch.GameProcessMarker;
 import com.ecl.util.InstanceOperationLease;
 import com.ecl.launcher.CrashAnalyzer;
 import javafx.application.Platform;
@@ -73,6 +74,12 @@ final class GameProcessMonitor {
                     ui.controller.setInstanceRunning(runningInstanceId, false);
                 }
                 ui.unregisterActiveGameProcess(process);
+                try {
+                    GameProcessMarker.clear(launchDir.toPath(), process.toHandle());
+                } catch (java.io.IOException error) {
+                    LauncherUI.LOGGER.warn("Failed to clear game process marker for {}", version,
+                            error);
+                }
                 if (launchLock != null) {
                     try {
                         launchLock.close();

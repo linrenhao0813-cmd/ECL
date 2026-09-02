@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "aiProvider": "OPENAI",
+  "apiKey": "fixture-key",
+  "baseUrl": "https://api.openai.com/v1/chat/completions",
+  "model": "gpt-4o-mini",
+  "oauthProvider": "GOOGLE",
+  "oauthClientId": "fixture-oauth-client",
+  "oauthUser": "fixture@example.invalid",
+  "futureField": {
+    "keep": true
+  }
+}

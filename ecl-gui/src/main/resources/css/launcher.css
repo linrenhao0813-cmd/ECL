@@ -1353,6 +1353,18 @@
 .assistant-pane {
     -fx-background-color: transparent;
 }
+.assistant-api-pane {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: -ecl-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 10;
+}
+.assistant-scroll,
+.assistant-scroll > .viewport {
+    -fx-background-color: transparent;
+}
 .assistant-status {
     -fx-font-weight: 700;
     -fx-text-fill: -ecl-text;

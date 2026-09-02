@@ -11,6 +11,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CompanionTaskStoreTest {
@@ -22,6 +23,7 @@ class CompanionTaskStoreTest {
         assertEquals(1, store.listTasks().size());
         assertEquals(CompanionTaskStatus.QUEUED, store.readStatus(task).status());
         assertTrue(Files.isRegularFile(store.taskPath(task.taskId())));
+        assertFalse(Files.readString(store.taskPath(task.taskId())).contains("apiKey"));
 
         CompanionTaskResult running = new CompanionTaskResult(1, task.taskId(),
                 CompanionTaskStatus.RUNNING, 3, 1, "正在寻找附近矿物",
@@ -57,5 +59,12 @@ class CompanionTaskStoreTest {
         assertFalse(CompanionTask.isSupportedInstruction("/give @p diamond"));
         assertFalse(CompanionTask.isSupportedInstruction("挖到钻石了"));
         assertEquals(5, CompanionTask.create("mine 5 blocks", null, true).requestedActions());
+    }
+
+    @Test
+    void rejectsTasksFromAnotherSource() {
+        assertThrows(IllegalArgumentException.class, () -> new CompanionTask(1,
+                UUID.randomUUID(), "挖3格", Instant.now().toString(),
+                CompanionTask.TargetPolicy.BOUND_PLAYER, null, true, "other"));
     }
 }

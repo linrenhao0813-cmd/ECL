@@ -8,6 +8,7 @@ import com.ecl.backup.BackupEntry;
 import com.ecl.game.InstanceLaunchProfile;
 import com.ecl.launcher.CrashAnalyzer;
 import com.ecl.launch.GameProcess;
+import com.ecl.launch.GameProcessMarker;
 import com.ecl.launch.LaunchOptions;
 import com.ecl.util.InstanceOperationLease;
 import com.ecl.modrinth.instance.ModInstanceContext;
@@ -78,6 +79,9 @@ final class GameLaunchCoordinator {
             try {
                 ensureVersionGameDirs(version);
                 createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
+                if (GameProcessMarker.isRunning(launchDir.toPath())) {
+                    throw new IOException("实例中的游戏进程仍在运行: " + version);
+                }
                 gameLock = InstanceOperationLease.tryAcquire(launchDir.toPath());
                 if (gameLock == null) {
                     throw new IOException("实例正在运行或被另一个启动器进程占用: " + version);
@@ -118,6 +122,12 @@ final class GameLaunchCoordinator {
                 ui.controller.invalidateLaunchVersion(version);
                 GameProcess gameProcess = ui.gameLauncher.launch(options);
                 Process process = gameProcess.process();
+                try {
+                    GameProcessMarker.record(launchDir.toPath(), process.toHandle());
+                } catch (IOException markerError) {
+                    gameProcess.close();
+                    throw new IOException("无法建立游戏进程运行标记，已停止本次启动", markerError);
+                }
                 long launchStartedAt = process.info().startInstant()
                         .map(Instant::toEpochMilli)
                         .orElseGet(System::currentTimeMillis);

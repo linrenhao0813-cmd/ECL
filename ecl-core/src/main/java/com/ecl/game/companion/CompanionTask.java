@@ -15,6 +15,7 @@ public record CompanionTask(int schemaVersion, UUID taskId, String instruction, 
                             TargetPolicy targetPolicy, UUID targetPlayerUuid, boolean autoSummon,
                             String source) {
     public static final int CURRENT_SCHEMA_VERSION = 1;
+    public static final String SOURCE_ECL = "ECL";
     public static final int MAX_INSTRUCTION_LENGTH = 256;
     private static final Pattern NUMBER = Pattern.compile("(\\d+)");
     private static final String COUNT = "[0-9一二两三四五六七八九十]+";
@@ -52,12 +53,15 @@ public record CompanionTask(int schemaVersion, UUID taskId, String instruction, 
             throw new IllegalArgumentException("不支持的目标策略");
         }
         source = requireText(source, "source", 32);
+        if (!SOURCE_ECL.equals(source)) {
+            throw new IllegalArgumentException("不支持的 Companion 任务来源");
+        }
     }
 
     public static CompanionTask create(String instruction, UUID targetPlayerUuid, boolean autoSummon) {
         return new CompanionTask(CURRENT_SCHEMA_VERSION, UUID.randomUUID(), instruction,
                 Instant.now().toString(), TargetPolicy.BOUND_PLAYER, targetPlayerUuid,
-                autoSummon, "ECL");
+                autoSummon, SOURCE_ECL);
     }
 
     public int requestedActions() {
