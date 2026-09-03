@@ -56,12 +56,8 @@ final class LauncherPageRouter {
         switch (ui.activeView) {
             case HOME -> addMainContent(ui.homePageFactory.getOrCreate(), null);
             case SAVES -> addMainContent(ui.pageFactory.createWorldSavesPage(), null);
-            case VERSIONS -> addMainContent(ui.pageFactory.createVersionsPage(), null);
-            case DOWNLOADS -> {
-                ui.downloadTasksPage = ui.pageFactory.createDownloadTasksPage();
-                addMainContent(ui.downloadTasksPage, null);
-            }
-            case MODRINTH -> addMainContent(ui.contentLibraryPageFactory.createPage(), null);
+            case DOWNLOADS -> addMainContent(
+                    ui.contentLibraryPageFactory.createPage(ui.downloadSection), null);
             case SERVERS -> addMainContent(ui.pageFactory.createServersPage(), null);
             case SETTINGS -> addMainContent(ui.pageFactory.createSettingsPage(), null);
             case LOGS -> addMainContent(ui.pageFactory.createLogsPage(), null);

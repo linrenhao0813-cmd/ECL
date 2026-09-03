@@ -1,7 +1,6 @@
 package com.ecl.ui;
 
 import com.ecl.util.Messages;
-import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
@@ -31,7 +30,7 @@ final class LauncherNavigationRail {
         for (AppView view : AppView.values()) {
             navigation.getChildren().add(createButton(view));
         }
-        Platform.runLater(() -> showSelected(selected));
+        showSelected(selected);
         return navigation;
     }
 
@@ -60,9 +59,7 @@ final class LauncherNavigationRail {
         return switch (view) {
             case HOME -> Messages.get("nav.short.home");
             case SAVES -> Messages.get("nav.short.saves");
-            case VERSIONS -> Messages.get("nav.short.versions");
             case DOWNLOADS -> Messages.get("nav.short.downloads");
-            case MODRINTH -> Messages.get("nav.short.modrinth");
             case SERVERS -> Messages.get("nav.short.servers");
             case LOGS -> Messages.get("nav.short.logs");
             case SETTINGS -> Messages.get("nav.short.settings");

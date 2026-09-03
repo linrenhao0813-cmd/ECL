@@ -33,52 +33,25 @@ final class LauncherPageFactory {
 
     VBox createVersionsPage() {
         VBox page = ui.createMainPage();
-
-        Button refreshVersionsButton = ui.createActionButton(
-                Messages.get("button.refresh"), "primary-button", () -> ui.versionActions.refreshVersions());
-        Button installLoaderButton = ui.createActionButton(
-                Messages.get("loader.install"), "primary-button", ui::showLoaderInstallDialog);
-        Button reinstallButton = ui.createActionButton(
-                Messages.get("version.reinstall"), "secondary-button",
-                () -> ui.versionActions.reinstallSelectedVersion());
-        Button deleteButton = ui.createActionButton(
-                Messages.get("version.delete"), "secondary-button",
-                () -> ui.versionActions.deleteSelectedVersion());
-        Button chooseVersionButton = ui.createActionButton(
-                Messages.get("button.back"), "secondary-button",
-                () -> ui.setActiveView(AppView.HOME));
-        Button openVersionsDirButton = ui.createActionButton(
-                Messages.get("button.openDir"), "ghost-button",
-                () -> ui.openLocalFolder(ECLConfig.getVersionsDir(), "版本目录"));
-        Button backupManagerButton = ui.createActionButton(
-                Messages.get("backup.manage"), "ghost-button", ui::showBackupManagerDialog);
-        Button desktopShortcutButton = ui.createActionButton(
-                Messages.get("shortcut.desktop"), "ghost-button",
-                () -> ui.createInstanceShortcut(false));
-        Button startMenuShortcutButton = ui.createActionButton(
-                Messages.get("shortcut.startMenu"), "ghost-button",
-                () -> ui.createInstanceShortcut(true));
-
-        HBox actions = new HBox(10, refreshVersionsButton, installLoaderButton, reinstallButton,
-                deleteButton, chooseVersionButton, openVersionsDirButton, backupManagerButton,
-                desktopShortcutButton, startMenuShortcutButton);
-        actions.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-
-        VBox versionCard = ui.createSurface(
-                Messages.get("version.page.title"),
-                null,
-                ui.createInfoRow(Messages.get("label.currentFilter"),
-                        ui.createStaticValueLabel(ui.versionActions.getSelectedVersionCategory().getLabel())),
-                ui.createInfoRow(Messages.get("label.currentVersion"), ui.createStaticValueLabel(
-                        ui.getSelectedVersion() == null
-                                ? Messages.get("label.notSelected") : ui.getSelectedVersion())),
-                ui.createInfoRow(Messages.get("info.localDir"),
-                        ui.createStaticValueLabel(ECLConfig.getVersionsDir().getAbsolutePath())),
-                actions
-        );
-
-        page.getChildren().add(versionCard);
+        showVersionsOverview(page);
         return page;
+    }
+
+    private void showVersionsOverview(VBox page) {
+        InstanceVersionCatalog versionCatalog = new InstanceVersionCatalog(
+                ui, version -> showVersionInstaller(page, version));
+
+        VBox catalogCard = ui.createSurface(
+                Messages.get("instance.catalog.title"),
+                Messages.get("instance.catalog.subtitle"),
+                versionCatalog);
+        page.getChildren().setAll(catalogCard);
+    }
+
+    private void showVersionInstaller(VBox page, String version) {
+        ui.versionCombo.setValue(version);
+        page.getChildren().setAll(new InstanceInstallPage(
+                ui, version, () -> showVersionsOverview(page)));
     }
 
     VBox createServersPage() {

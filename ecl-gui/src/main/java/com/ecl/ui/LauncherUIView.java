@@ -36,7 +36,6 @@ import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextArea;
-import javafx.scene.control.TitledPane;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
@@ -154,7 +153,6 @@ class LauncherUIView extends javafx.application.Application {
             new ContentLibraryPageFactory((LauncherUI) this);
     private final RuntimeSummaryPresenter runtimeSummaryPresenter =
             new RuntimeSummaryPresenter((LauncherUI) this);
-    TitledPane instanceSettingsPane;
     VBox homePage;
     HBox workspacePane;
     List<ContentTarget> contentTargets;
@@ -192,6 +190,7 @@ class LauncherUIView extends javafx.application.Application {
     private ModBrowserView activeModBrowserView;
     ServerBrowserView activeServerBrowserView;
     AppView activeView = AppView.HOME;
+    DownloadSection downloadSection = DownloadSection.INSTANCES;
 
     @Override
     public void start(Stage primaryStage) {
@@ -397,7 +396,7 @@ class LauncherUIView extends javafx.application.Application {
 
         topTaskLabel = new Label(Messages.get("download.none"));
         topTaskLabel.getStyleClass().add("task-chip");
-        topTaskLabel.setOnMouseClicked(event -> setActiveView(AppView.DOWNLOADS));
+        topTaskLabel.setOnMouseClicked(event -> openDownloadSection(DownloadSection.TASKS));
         topTaskLabel.setCursor(javafx.scene.Cursor.HAND);
 
         topAuthBadgeLabel = createValueLabel("Steve");
@@ -440,6 +439,15 @@ class LauncherUIView extends javafx.application.Application {
 
     void setActiveView(AppView view) {
         pageRouter.setActiveView(view);
+    }
+
+    void openDownloadSection(DownloadSection section) {
+        downloadSection = section == null ? DownloadSection.INSTANCES : section;
+        if (activeView == AppView.DOWNLOADS) {
+            pageRouter.renderActiveView();
+        } else {
+            setActiveView(AppView.DOWNLOADS);
+        }
     }
 
     boolean isHomeViewActive() {
@@ -599,14 +607,14 @@ class LauncherUIView extends javafx.application.Application {
         return button;
     }
 
-    void expandInstanceSettings(Control focusTarget) {
-        if (instanceSettingsPane == null) {
-            return;
-        }
-        instanceSettingsPane.setExpanded(true);
-        if (focusTarget != null) {
-            Platform.runLater(focusTarget::requestFocus);
-        }
+    void openInstanceSettings(boolean focusAccount) {
+        openDownloadSection(DownloadSection.INSTANCES);
+        Platform.runLater(() -> {
+            Control target = focusAccount ? authTypeCombo : versionCombo;
+            if (target != null) {
+                target.requestFocus();
+            }
+        });
     }
 
     VBox createMainPage() {
@@ -645,6 +653,10 @@ class LauncherUIView extends javafx.application.Application {
 
     void updateLoaderControls() {
         launchForm.updateLoaderControls();
+    }
+
+    void syncLoaderChoiceFromProfile(String profileId) {
+        launchForm.syncLoaderChoiceFromProfile(profileId);
     }
 
     void installSelectedLoader(Runnable afterSuccess) {

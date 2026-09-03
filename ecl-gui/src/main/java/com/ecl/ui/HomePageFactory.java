@@ -42,17 +42,12 @@ final class HomePageFactory {
         pageHeading.setAlignment(Pos.CENTER);
 
         HBox hero = createLaunchHero();
-        javafx.scene.layout.GridPane launchForm = ui.createForm();
+        // Build the controls once at startup so launch/auth state is available to the
+        // home summary. The visible editor now lives in Download > Game instances.
+        ui.createForm();
         HBox summaryCards = createHomeSummaryCards();
 
-        ui.instanceSettingsPane = new javafx.scene.control.TitledPane(
-                Messages.get("home.instanceAccount"), launchForm);
-        ui.instanceSettingsPane.getStyleClass().add("instance-settings");
-        ui.instanceSettingsPane.setExpanded(false);
-        ui.instanceSettingsPane.setAnimated(false);
-        ui.instanceSettingsPane.setMaxWidth(Double.MAX_VALUE);
-
-        pane.getChildren().addAll(pageHeading, hero, summaryCards, ui.instanceSettingsPane);
+        pane.getChildren().addAll(pageHeading, hero, summaryCards);
         return pane;
     }
 
@@ -115,7 +110,7 @@ final class HomePageFactory {
         Region accountSpacer = new Region();
         VBox.setVgrow(accountSpacer, Priority.ALWAYS);
         var manageAccount = ui.createLinkButton(
-                Messages.get("home.manageAccount"), () -> ui.expandInstanceSettings(ui.authTypeCombo));
+                Messages.get("home.manageAccount"), () -> ui.openInstanceSettings(true));
         ui.homeSkinUploadButton = ui.createLinkButton(
                 Messages.get("home.uploadSkin"), () -> ui.skins.chooseAndUploadSkin());
         Region accountActionSpacer = new Region();
@@ -164,7 +159,7 @@ final class HomePageFactory {
         taskCard.getChildren().addAll(taskLabel, ui.statusLabel, ui.detailLabel,
                 ui.downloadProgress, taskSpacer,
                 ui.createLinkButton(Messages.get("home.viewTasks"),
-                        () -> ui.setActiveView(AppView.DOWNLOADS)));
+                        () -> ui.openDownloadSection(DownloadSection.TASKS)));
 
         VBox playtimeCard = new VBox(12);
         playtimeCard.getStyleClass().addAll("home-card", "playtime-card");
@@ -178,7 +173,7 @@ final class HomePageFactory {
                 ui.createSummaryRow(Messages.get("playtime.lastLaunch"), ui.playtimeRecentLabel),
                 ui.createSummaryRow(Messages.get("playtime.launches"), ui.playtimeLaunchCountLabel),
                 ui.createLinkButton(Messages.get("shortcut.createLink"),
-                        () -> ui.setActiveView(AppView.VERSIONS)));
+                        () -> ui.openDownloadSection(DownloadSection.INSTANCES)));
 
         double preferredCardWidth = (LauncherUI.LAUNCH_WIDTH - 72) / 4.0;
         for (VBox card : java.util.List.of(accountCard, environmentCard, taskCard, playtimeCard)) {

@@ -14,13 +14,14 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-/** Builds the content-library navigation and modpack update page. */
+/** Builds the unified download workspace and its content-library sections. */
 final class ContentLibraryPageFactory {
     private final LauncherUI ui;
 
@@ -28,11 +29,11 @@ final class ContentLibraryPageFactory {
         this.ui = ui;
     }
 
-    VBox createPage() {
+    VBox createPage(DownloadSection initialSection) {
         VBox page = ui.createMainPage();
-        Label pageTitle = new Label(Messages.get("content.page.title"));
+        Label pageTitle = new Label(Messages.get("download.hub.title"));
         pageTitle.getStyleClass().add("page-title");
-        Label pageSubtitle = new Label(Messages.get("content.page.subtitle"));
+        Label pageSubtitle = new Label(Messages.get("download.hub.subtitle"));
         pageSubtitle.getStyleClass().add("page-subtitle");
         VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
         pageHeading.getStyleClass().add("content-library-heading");
@@ -42,9 +43,9 @@ final class ContentLibraryPageFactory {
         navigation.setPrefWidth(210);
         navigation.setMinWidth(210);
         navigation.setMaxWidth(210);
-        Label navigationTitle = new Label(Messages.get("content.category.title"));
+        Label navigationTitle = new Label(Messages.get("download.hub.categories"));
         navigationTitle.getStyleClass().add("content-library-nav-title");
-        Label navigationHint = new Label(Messages.get("content.category.hint"));
+        Label navigationHint = new Label(Messages.get("download.hub.hint"));
         navigationHint.getStyleClass().add("content-library-nav-hint");
         navigation.getChildren().addAll(navigationTitle, navigationHint);
 
@@ -54,14 +55,29 @@ final class ContentLibraryPageFactory {
         HBox.setHgrow(content, Priority.ALWAYS);
 
         List<Button> categoryButtons = new java.util.ArrayList<>();
+        Button instancesButton = createDownloadNavButton("I",
+                Messages.get("download.instances.title"),
+                Messages.get("download.instances.detail"));
+        categoryButtons.add(instancesButton);
+        navigation.getChildren().add(instancesButton);
+        instancesButton.setOnAction(event -> {
+            selectCategory(categoryButtons, instancesButton);
+            ui.downloadSection = DownloadSection.INSTANCES;
+            ui.closeActiveModBrowserView();
+            content.getChildren().setAll(embedded(ui.pageFactory.createVersionsPage()));
+        });
+
+        Button firstContentButton = null;
         for (ContentTarget target : ui.contentTargets) {
             Button categoryButton = createContentLibraryNavButton(target);
+            if (firstContentButton == null) {
+                firstContentButton = categoryButton;
+            }
             categoryButtons.add(categoryButton);
             navigation.getChildren().add(categoryButton);
             categoryButton.setOnAction(event -> {
-                categoryButtons.forEach(button ->
-                        button.getStyleClass().remove("content-library-nav-item-active"));
-                categoryButton.getStyleClass().add("content-library-nav-item-active");
+                selectCategory(categoryButtons, categoryButton);
+                ui.downloadSection = DownloadSection.CONTENT;
                 ui.closeActiveModBrowserView();
                 Node selectedContent = switch (target.projectType) {
                     case "mod" -> ui.createModLibraryContent();
@@ -72,13 +88,26 @@ final class ContentLibraryPageFactory {
             });
         }
         Button packUpdatesButton = createPackUpdatesNavButton();
+        categoryButtons.add(packUpdatesButton);
         navigation.getChildren().add(packUpdatesButton);
         packUpdatesButton.setOnAction(event -> {
-            categoryButtons.forEach(button ->
-                    button.getStyleClass().remove("content-library-nav-item-active"));
-            packUpdatesButton.getStyleClass().add("content-library-nav-item-active");
+            selectCategory(categoryButtons, packUpdatesButton);
+            ui.downloadSection = DownloadSection.CONTENT;
             ui.closeActiveModBrowserView();
             content.getChildren().setAll(createPackUpdatesContent());
+        });
+
+        Button tasksButton = createDownloadNavButton("T",
+                Messages.get("download.tasks.title"),
+                Messages.get("download.tasks.detail"));
+        categoryButtons.add(tasksButton);
+        navigation.getChildren().add(tasksButton);
+        tasksButton.setOnAction(event -> {
+            selectCategory(categoryButtons, tasksButton);
+            ui.downloadSection = DownloadSection.TASKS;
+            ui.closeActiveModBrowserView();
+            ui.downloadTasksPage = ui.pageFactory.createDownloadTasksPage();
+            content.getChildren().setAll(embedded(ui.downloadTasksPage));
         });
 
         HBox library = new HBox(18, navigation, content);
@@ -86,25 +115,46 @@ final class ContentLibraryPageFactory {
         library.setAlignment(Pos.TOP_LEFT);
         HBox.setHgrow(content, Priority.ALWAYS);
         page.getChildren().addAll(pageHeading, library);
-        if (!categoryButtons.isEmpty()) {
-            categoryButtons.getFirst().fire();
+        if (initialSection == DownloadSection.TASKS) {
+            tasksButton.fire();
+        } else if (initialSection == DownloadSection.CONTENT && firstContentButton != null) {
+            firstContentButton.fire();
+        } else {
+            instancesButton.fire();
         }
         return page;
     }
 
+    private static void selectCategory(List<Button> buttons, Button selected) {
+        buttons.forEach(button -> button.getStyleClass().remove("content-library-nav-item-active"));
+        selected.getStyleClass().add("content-library-nav-item-active");
+    }
+
+    private static Node embedded(Region content) {
+        content.setMinWidth(0);
+        content.setPrefWidth(Region.USE_COMPUTED_SIZE);
+        content.setMaxWidth(Double.MAX_VALUE);
+        return content;
+    }
+
     private Button createContentLibraryNavButton(ContentTarget target) {
-        Label icon = new Label(target.initial);
-        icon.getStyleClass().add("content-library-nav-icon");
-        Label title = new Label(target.title);
-        title.getStyleClass().add("content-library-nav-item-title");
-        Label detail = new Label(switch (target.projectType) {
+        String detail = switch (target.projectType) {
             case "mod" -> Messages.get("content.detail.mods");
             case "shader" -> Messages.get("content.detail.shaders");
             case "resourcepack" -> Messages.get("content.detail.resourcepacks");
             case "modpack" -> Messages.get("content.detail.modpacks");
             case "server" -> Messages.get("content.detail.server");
             default -> target.subtitle;
-        });
+        };
+        return createDownloadNavButton(target.initial, target.title, detail);
+    }
+
+    private Button createDownloadNavButton(String initial, String titleText, String detailText) {
+        Label icon = new Label(initial);
+        icon.getStyleClass().add("content-library-nav-icon");
+        Label title = new Label(titleText);
+        title.getStyleClass().add("content-library-nav-item-title");
+        Label detail = new Label(detailText);
         detail.getStyleClass().add("content-library-nav-item-detail");
         VBox labels = new VBox(2, title, detail);
         HBox row = new HBox(10, icon, labels);
@@ -117,19 +167,8 @@ final class ContentLibraryPageFactory {
     }
 
     private Button createPackUpdatesNavButton() {
-        Label icon = new Label("↻");
-        icon.getStyleClass().add("content-library-nav-icon");
-        Label title = new Label("整合包更新");
-        title.getStyleClass().add("content-library-nav-item-title");
-        Label detail = new Label("检查已安装整合包的新版本");
-        detail.getStyleClass().add("content-library-nav-item-detail");
-        HBox row = new HBox(10, icon, new VBox(2, title, detail));
-        row.setAlignment(Pos.CENTER_LEFT);
-        Button button = new Button();
-        button.setGraphic(row);
-        button.getStyleClass().add("content-library-nav-item");
-        button.setMaxWidth(Double.MAX_VALUE);
-        return button;
+        return createDownloadNavButton("↻", Messages.get("download.packUpdates.title"),
+                Messages.get("download.packUpdates.detail"));
     }
 
     private Node createPackUpdatesContent() {

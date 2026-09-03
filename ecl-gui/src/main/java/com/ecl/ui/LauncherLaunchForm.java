@@ -38,11 +38,6 @@ final class LauncherLaunchForm {
 
         String previousVersion = ui.versionCombo == null
                 ? ui.settingsManager.get(ECLConfig.KEY_SELECTED_VERSION) : ui.versionCombo.getValue();
-        VersionManager.VersionCategory previousCategory = ui.versionTypeCombo == null
-                || ui.versionTypeCombo.getValue() == null
-                ? ui.versionActions.parseVersionCategory(
-                        ui.settingsManager.get(ECLConfig.KEY_VERSION_CATEGORY))
-                : ui.versionTypeCombo.getValue();
         String previousAuthType = ui.authTypeCombo == null
                 ? auth.normalizeAuthType(ui.settingsManager.get(ECLConfig.KEY_AUTH_TYPE))
                 : auth.normalizeAuthType(ui.authTypeCombo.getValue());
@@ -114,7 +109,7 @@ final class LauncherLaunchForm {
 
         ui.versionTypeCombo = new ComboBox<>();
         ui.versionTypeCombo.getItems().addAll(VersionManager.VersionCategory.values());
-        ui.versionTypeCombo.setValue(previousCategory);
+        ui.versionTypeCombo.setValue(VersionManager.VersionCategory.FEATURED);
         ui.versionTypeCombo.setPrefWidth(176);
         ui.versionTypeCombo.setTooltip(new Tooltip("默认显示正式版、预览版/快照和愚人节版，也可以只看某一类"));
         ui.versionTypeCombo.setOnAction(e -> {
@@ -214,7 +209,7 @@ final class LauncherLaunchForm {
         HBox.setHgrow(ui.usernameField, Priority.ALWAYS);
         HBox.setHgrow(ui.microsoftAccountCombo, Priority.ALWAYS);
         VBox authHelpBox = new VBox(4, ui.authSummaryLabel, ui.authHintLabel);
-        HBox versionBox = new HBox(10, ui.versionTypeCombo, ui.versionCombo, ui.selectedVersionWikiButton);
+        HBox versionBox = new HBox(10, ui.versionCombo, ui.selectedVersionWikiButton);
         versionBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(ui.versionCombo, Priority.ALWAYS);
         Label loaderHint = new Label("安装后会自动切换到独立模组实例");
@@ -332,7 +327,7 @@ final class LauncherLaunchForm {
 
         Button switchInstanceButton = ui.createLinkButton(
                 "选择版本 / 加载器  ›",
-                () -> ui.expandInstanceSettings(ui.versionCombo));
+                () -> ui.openInstanceSettings(false));
 
         ui.refreshBtn = new Button("刷新版本");
         ui.refreshBtn.getStyleClass().addAll("app-button", "secondary-button");
@@ -397,6 +392,10 @@ final class LauncherLaunchForm {
 
     void updateLoaderControls() {
         loader.updateLoaderControls();
+    }
+
+    void syncLoaderChoiceFromProfile(String profileId) {
+        loader.syncLoaderChoiceFromProfile(profileId);
     }
 
     void installSelectedLoader(Runnable afterSuccess) {

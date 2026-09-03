@@ -12,7 +12,9 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 import javafx.stage.Stage;
@@ -153,8 +155,21 @@ public final class LauncherUiSnapshot {
                 }
                 return primaryStage.getScene();
             }
-            if ("versions".equalsIgnoreCase(mode)) {
-                showAppView("VERSIONS");
+            if ("versions".equalsIgnoreCase(mode) || "versions-dark".equalsIgnoreCase(mode)
+                    || "instance-install-dark".equalsIgnoreCase(mode)) {
+                String profileId = createVisualProfile("1.21.8", "", "1.21.8");
+                createVisualProfile("1.21.7", "", "1.21.7");
+                ComboBox<String> combo = versionCombo();
+                if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
+                combo.setValue(profileId);
+                createVisualVersionManifest();
+                if (mode.toLowerCase(java.util.Locale.ROOT).endsWith("-dark")) {
+                    applySnapshotTheme("DARK");
+                }
+                showAppView("DOWNLOADS");
+                if ("instance-install-dark".equalsIgnoreCase(mode)) {
+                    scheduleInstallerPreview(primaryStage);
+                }
                 return primaryStage.getScene();
             }
             if ("saves".equalsIgnoreCase(mode) || "saves-ai".equalsIgnoreCase(mode)) {
@@ -173,19 +188,14 @@ public final class LauncherUiSnapshot {
             }
             if ("downloads".equalsIgnoreCase(mode)) {
                 showAppView("DOWNLOADS");
+                selectDownloadCategory(primaryStage, 7);
                 return primaryStage.getScene();
             }
             if ("servers".equalsIgnoreCase(mode)
                     || "servers-dark".equalsIgnoreCase(mode)
                     || "servers-en".equalsIgnoreCase(mode)) {
                 if ("servers-dark".equalsIgnoreCase(mode)) {
-                    Field settingsField = LauncherUIView.class.getDeclaredField("settingsManager");
-                    settingsField.setAccessible(true);
-                    SettingsManager settings = (SettingsManager) settingsField.get(this);
-                    settings.set(ECLConfig.KEY_THEME, "DARK");
-                    Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme", String.class);
-                    applyTheme.setAccessible(true);
-                    applyTheme.invoke(this, "DARK");
+                    applySnapshotTheme("DARK");
                 }
                 if ("servers-en".equalsIgnoreCase(mode)) {
                     Method switchLanguage = LauncherUIView.class.getDeclaredMethod(
@@ -202,6 +212,7 @@ public final class LauncherUiSnapshot {
                 ComboBox<String> versionCombo = versionCombo();
                 if (!versionCombo.getItems().contains(profileId)) versionCombo.getItems().add(profileId);
                 versionCombo.setValue(profileId);
+                showAppView("DOWNLOADS");
                 Field loaderField = LauncherUIView.class.getDeclaredField("loaderChoiceCombo");
                 loaderField.setAccessible(true);
                 @SuppressWarnings("unchecked")
@@ -209,20 +220,15 @@ public final class LauncherUiSnapshot {
                 loaderCombo.getItems().stream()
                         .filter(item -> "Fabric".equals(item.toString()))
                         .findFirst().ifPresent(loaderCombo::setValue);
-                Field settingsPaneField = LauncherUIView.class.getDeclaredField("instanceSettingsPane");
-                settingsPaneField.setAccessible(true);
-                ((javafx.scene.control.TitledPane) settingsPaneField.get(this)).setExpanded(true);
                 return primaryStage.getScene();
             }
             if ("skin-upload".equalsIgnoreCase(mode)) {
+                showAppView("DOWNLOADS");
                 Field authTypeField = LauncherUIView.class.getDeclaredField("authTypeCombo");
                 authTypeField.setAccessible(true);
                 @SuppressWarnings("unchecked")
                 ComboBox<String> authType = (ComboBox<String>) authTypeField.get(this);
                 authType.setValue("MICROSOFT");
-                Field settingsPaneField = LauncherUIView.class.getDeclaredField("instanceSettingsPane");
-                settingsPaneField.setAccessible(true);
-                ((javafx.scene.control.TitledPane) settingsPaneField.get(this)).setExpanded(true);
                 return primaryStage.getScene();
             }
             if ("modrinth-vanilla".equalsIgnoreCase(mode)) {
@@ -230,7 +236,8 @@ public final class LauncherUiSnapshot {
                 ComboBox<String> combo = versionCombo();
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
-                showAppView("MODRINTH");
+                showAppView("DOWNLOADS");
+                selectDownloadCategory(primaryStage, 1);
                 return primaryStage.getScene();
             }
             if ("modrinth".equalsIgnoreCase(mode) || "modrinth-online".equalsIgnoreCase(mode)) {
@@ -238,7 +245,8 @@ public final class LauncherUiSnapshot {
                 ComboBox<String> combo = versionCombo();
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
-                showAppView("MODRINTH");
+                showAppView("DOWNLOADS");
+                selectDownloadCategory(primaryStage, 1);
                 return primaryStage.getScene();
             }
             if ("content-shader".equalsIgnoreCase(mode)
@@ -252,21 +260,16 @@ public final class LauncherUiSnapshot {
                 ComboBox<String> combo = versionCombo();
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
-                showAppView("MODRINTH");
+                showAppView("DOWNLOADS");
                 primaryStage.getScene().getRoot().applyCss();
                 String normalizedMode = mode.toLowerCase(java.util.Locale.ROOT);
-                int categoryIndex = normalizedMode.startsWith("content-shader") ? 1
-                        : normalizedMode.startsWith("content-resourcepack") ? 2
-                        : normalizedMode.startsWith("content-server") ? 4 : 3;
-                if (categoryIndex == 4) {
+                int categoryIndex = normalizedMode.startsWith("content-shader") ? 2
+                        : normalizedMode.startsWith("content-resourcepack") ? 3
+                        : normalizedMode.startsWith("content-server") ? 5 : 4;
+                if (categoryIndex == 5) {
                     createVisualServerVersion("1.21.4");
                 }
-                Button category = primaryStage.getScene().getRoot()
-                        .lookupAll(".content-library-nav-item").stream()
-                        .filter(Button.class::isInstance)
-                        .map(Button.class::cast)
-                        .toList().get(categoryIndex);
-                category.fire();
+                selectDownloadCategory(primaryStage, categoryIndex);
                 return primaryStage.getScene();
             }
             if ("settings-page".equalsIgnoreCase(mode)) {
@@ -274,14 +277,8 @@ public final class LauncherUiSnapshot {
                 return primaryStage.getScene();
             }
             if ("settings-page-dark".equalsIgnoreCase(mode)) {
-                Field settingsField = LauncherUIView.class.getDeclaredField("settingsManager");
-                settingsField.setAccessible(true);
-                SettingsManager settings = (SettingsManager) settingsField.get(this);
-                settings.set(ECLConfig.KEY_THEME, "DARK");
+                applySnapshotTheme("DARK");
                 showAppView("SETTINGS");
-                Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme", String.class);
-                applyTheme.setAccessible(true);
-                applyTheme.invoke(this, "DARK");
                 return primaryStage.getScene();
             }
             if ("settings".equalsIgnoreCase(mode)) {
@@ -385,6 +382,76 @@ public final class LauncherUiSnapshot {
                     .map(Window::getScene)
                     .findFirst()
                     .orElseThrow(() -> new IllegalStateException(failureMessage));
+        }
+
+        private void applySnapshotTheme(String theme) throws Exception {
+            Field settingsField = LauncherUIView.class.getDeclaredField("settingsManager");
+            settingsField.setAccessible(true);
+            SettingsManager settings = (SettingsManager) settingsField.get(this);
+            settings.set(ECLConfig.KEY_THEME, theme);
+            Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme", String.class);
+            applyTheme.setAccessible(true);
+            applyTheme.invoke(this, theme);
+        }
+
+        private void scheduleInstallerPreview(Stage stage) {
+            PauseTransition openInstaller = new PauseTransition(Duration.millis(300));
+            openInstaller.setOnFinished(event -> stage.getScene().getRoot()
+                    .lookupAll(".instance-version-list").stream()
+                    .filter(ListView.class::isInstance)
+                    .map(node -> (ListView<?>) node)
+                    .filter(list -> list.getItems().contains("1.21.7"))
+                    .findFirst().ifPresent(list -> list.getSelectionModel()
+                            .select(list.getItems().indexOf("1.21.7"))));
+            PauseTransition chooseFabric = new PauseTransition(Duration.millis(520));
+            chooseFabric.setOnFinished(event -> stage.getScene().getRoot()
+                    .lookupAll(".instance-install-choice").stream()
+                    .filter(ToggleButton.class::isInstance)
+                    .map(ToggleButton.class::cast)
+                    .filter(button -> button.getUserData() == LoaderChoice.FABRIC)
+                    .findFirst().ifPresent(ToggleButton::fire));
+            openInstaller.play();
+            chooseFabric.play();
+        }
+
+        private void createVisualVersionManifest() throws IOException {
+            Path manifest = ECLConfig.getVersionsDir().toPath().resolve("version_manifest.json");
+            Files.createDirectories(manifest.getParent());
+            Files.writeString(manifest, """
+                    {
+                      "latest": {"release": "1.21.8", "snapshot": "26w34a"},
+                      "versions": [
+                        {"id":"1.21.8","type":"release","releaseTime":"2026-07-17T00:00:00Z"},
+                        {"id":"1.21.7","type":"release","releaseTime":"2026-06-30T00:00:00Z"},
+                        {"id":"1.21.6","type":"release","releaseTime":"2026-06-17T00:00:00Z"},
+                        {"id":"1.21.5","type":"release","releaseTime":"2026-03-25T00:00:00Z"},
+                        {"id":"1.21.4","type":"release","releaseTime":"2025-12-03T00:00:00Z"},
+                        {"id":"1.21.3","type":"release","releaseTime":"2025-10-23T00:00:00Z"},
+                        {"id":"26w34a","type":"snapshot","releaseTime":"2026-08-19T00:00:00Z"},
+                        {"id":"26w33a","type":"snapshot","releaseTime":"2026-08-12T00:00:00Z"},
+                        {"id":"26w32a","type":"snapshot","releaseTime":"2026-08-05T00:00:00Z"},
+                        {"id":"26w31a","type":"snapshot","releaseTime":"2026-07-29T00:00:00Z"},
+                        {"id":"26w30a","type":"snapshot","releaseTime":"2026-07-22T00:00:00Z"},
+                        {"id":"26w14potato","type":"snapshot","releaseTime":"2026-04-01T00:00:00Z"},
+                        {"id":"25w14craftmine","type":"snapshot","releaseTime":"2025-04-01T00:00:00Z"},
+                        {"id":"24w14potato","type":"snapshot","releaseTime":"2024-04-01T00:00:00Z"},
+                        {"id":"23w13a_or_b","type":"snapshot","releaseTime":"2023-04-01T00:00:00Z"},
+                        {"id":"22w13oneblockatatime","type":"snapshot","releaseTime":"2022-04-01T00:00:00Z"},
+                        {"id":"20w14infinite","type":"snapshot","releaseTime":"2020-04-01T00:00:00Z"}
+                      ]
+                    }
+                    """);
+            versionManager.refresh();
+        }
+
+        private void selectDownloadCategory(Stage primaryStage, int index) {
+            primaryStage.getScene().getRoot().applyCss();
+            Button category = primaryStage.getScene().getRoot()
+                    .lookupAll(".content-library-nav-item").stream()
+                    .filter(Button.class::isInstance)
+                    .map(Button.class::cast)
+                    .toList().get(index);
+            category.fire();
         }
 
         @SuppressWarnings({"unchecked", "rawtypes"})
