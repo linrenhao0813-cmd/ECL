@@ -1,13 +1,13 @@
 package com.ecl.util;
 
+import com.ecl.ECLConfig;
+
 import java.io.InterruptedIOException;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** Process-wide concurrency gate shared by every binary download implementation. */
 final class DownloadConcurrencyGate {
-    private static final int MIN_LIMIT = 1;
-    private static final int MAX_LIMIT = 8;
     private static final ReentrantLock LOCK = new ReentrantLock(true);
     private static final Condition PERMIT_AVAILABLE = LOCK.newCondition();
     private static int limit = 2;
@@ -19,7 +19,7 @@ final class DownloadConcurrencyGate {
     static void setLimit(int value) {
         LOCK.lock();
         try {
-            limit = Math.max(MIN_LIMIT, Math.min(MAX_LIMIT, value));
+            limit = ECLConfig.clampDownloadConcurrency(value);
             PERMIT_AVAILABLE.signalAll();
         } finally {
             LOCK.unlock();

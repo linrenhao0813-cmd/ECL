@@ -1,5 +1,7 @@
 package com.ecl.download;
 
+import com.ecl.ECLConfig;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,9 +17,6 @@ import java.util.concurrent.atomic.AtomicReference;
  * for the actual I/O; this class owns ordering, concurrency, cancellation and retry.
  */
 public final class DownloadTaskCenter implements AutoCloseable {
-    private static final int MIN_CONCURRENCY = 1;
-    private static final int MAX_CONCURRENCY = 8;
-
     /**
      * 保留在任务列表中的最大已结束任务数。排队和进行中的任务不会被丢弃；每次任务
      * 结束时都会裁剪最旧历史，防止长期运行后 entries 与 UI 刷新成本无限增长。
@@ -88,7 +87,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
     }
 
     public DownloadTaskCenter(int maxConcurrent, long bandwidthLimitBytesPerSecond) {
-        this.maxConcurrent = clampConcurrency(maxConcurrent);
+        this.maxConcurrent = ECLConfig.clampDownloadConcurrency(maxConcurrent);
         this.bandwidthLimitBytesPerSecond = Math.max(0, bandwidthLimitBytesPerSecond);
     }
 
@@ -191,7 +190,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
 
     public void setMaxConcurrent(int value) {
         synchronized (lock) {
-            maxConcurrent = clampConcurrency(value);
+            maxConcurrent = ECLConfig.clampDownloadConcurrency(value);
         }
         fireChanged(true);
         pump();
@@ -401,10 +400,6 @@ public final class DownloadTaskCenter implements AutoCloseable {
 
     private void fireChanged(boolean immediate) {
         notifier.notifyChanged(immediate);
-    }
-
-    private static int clampConcurrency(int value) {
-        return Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, value));
     }
 
     private void ensureOpen() {

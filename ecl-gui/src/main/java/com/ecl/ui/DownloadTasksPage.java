@@ -62,7 +62,9 @@ final class DownloadTasksPage extends VBox {
         taskList.getItems().setAll(taskCenter.snapshots());
 
         ComboBox<Integer> concurrency = new ComboBox<>();
-        concurrency.getItems().addAll(1, 2, 3, 4, 5, 6, 7, 8);
+        for (int value = 1; value <= ECLConfig.MAX_DOWNLOAD_CONCURRENT; value++) {
+            concurrency.getItems().add(value);
+        }
         concurrency.setValue(taskCenter.maxConcurrent());
         concurrency.setOnAction(event -> {
             Integer value = concurrency.getValue();
