@@ -43,7 +43,7 @@ final class HomePageFactory {
 
         HBox hero = createLaunchHero();
         // Build the controls once at startup so launch/auth state is available to the
-        // home summary. The visible editor now lives in Download > Game instances.
+        // home summary. Account management reuses these controls in Settings.
         ui.createForm();
         HBox summaryCards = createHomeSummaryCards();
 
@@ -159,7 +159,7 @@ final class HomePageFactory {
         taskCard.getChildren().addAll(taskLabel, ui.statusLabel, ui.detailLabel,
                 ui.downloadProgress, taskSpacer,
                 ui.createLinkButton(Messages.get("home.viewTasks"),
-                        () -> ui.openDownloadSection(DownloadSection.TASKS)));
+                        ui::openDownloadTasks));
 
         VBox playtimeCard = new VBox(12);
         playtimeCard.getStyleClass().addAll("home-card", "playtime-card");

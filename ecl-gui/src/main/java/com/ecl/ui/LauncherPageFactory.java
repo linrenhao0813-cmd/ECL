@@ -7,8 +7,12 @@ import com.ecl.util.Messages;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
 import java.io.File;
@@ -75,6 +79,21 @@ final class LauncherPageFactory {
 
     VBox createSettingsPage() {
         VBox page = ui.createMainPage();
+        Tab general = new Tab(GuiMessages.get("settings.general"), createGeneralSettingsPage());
+        Tab accounts = new Tab(GuiMessages.get("accounts.title"), new AccountManagementPage(ui));
+        TabPane tabs = new TabPane(general, accounts);
+        tabs.setId("settings-tabs");
+        tabs.getStyleClass().add("mod-tabs");
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.getSelectionModel().select(ui.accountSettingsSelected ? accounts : general);
+        tabs.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) ->
+                ui.accountSettingsSelected = selected == accounts);
+        page.getChildren().add(tabs);
+        return page;
+    }
+
+    private VBox createGeneralSettingsPage() {
+        VBox page = ui.createMainPage();
 
         ComboBox<String> languageBox = new ComboBox<>();
         languageBox.getItems().addAll("zh-CN", "zh-TW", "en");
@@ -120,6 +139,27 @@ final class LauncherPageFactory {
     }
 
     VBox createLogsPage() {
+        VBox page = ui.createMainPage();
+        Tab consoleTab = new Tab(Messages.get("logs.tab.console"), createDiagnosticLogsPage());
+        ui.downloadTasksPage = createDownloadTasksPage();
+        ui.downloadTasksPage.setMinWidth(0);
+        ui.downloadTasksPage.setPrefWidth(Region.USE_COMPUTED_SIZE);
+        ui.downloadTasksPage.setMaxWidth(Double.MAX_VALUE);
+        ui.downloadTasksPage.updateTasks(ui.downloadTaskCenter.snapshots());
+        Tab downloadsTab = new Tab(Messages.get("download.center.title"), ui.downloadTasksPage);
+        TabPane tabs = new TabPane(consoleTab, downloadsTab);
+        tabs.setId("logs-tabs");
+        tabs.getStyleClass().add("mod-tabs");
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.getSelectionModel().select(ui.downloadTasksSelected ? downloadsTab : consoleTab);
+        tabs.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) ->
+                ui.downloadTasksSelected = selected == downloadsTab);
+        VBox.setVgrow(tabs, Priority.ALWAYS);
+        page.getChildren().add(tabs);
+        return page;
+    }
+
+    private VBox createDiagnosticLogsPage() {
         VBox page = ui.createMainPage();
 
         File crashDir = new File(ui.getActiveGameDir(), "crash-reports");

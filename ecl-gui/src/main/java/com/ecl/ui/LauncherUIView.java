@@ -191,6 +191,8 @@ class LauncherUIView extends javafx.application.Application {
     ServerBrowserView activeServerBrowserView;
     AppView activeView = AppView.HOME;
     DownloadSection downloadSection = DownloadSection.INSTANCES;
+    boolean downloadTasksSelected;
+    boolean accountSettingsSelected;
 
     @Override
     public void start(Stage primaryStage) {
@@ -396,7 +398,7 @@ class LauncherUIView extends javafx.application.Application {
 
         topTaskLabel = new Label(Messages.get("download.none"));
         topTaskLabel.getStyleClass().add("task-chip");
-        topTaskLabel.setOnMouseClicked(event -> openDownloadSection(DownloadSection.TASKS));
+        topTaskLabel.setOnMouseClicked(event -> openDownloadTasks());
         topTaskLabel.setCursor(javafx.scene.Cursor.HAND);
 
         topAuthBadgeLabel = createValueLabel("Steve");
@@ -447,6 +449,15 @@ class LauncherUIView extends javafx.application.Application {
             pageRouter.renderActiveView();
         } else {
             setActiveView(AppView.DOWNLOADS);
+        }
+    }
+
+    void openDownloadTasks() {
+        downloadTasksSelected = true;
+        if (activeView == AppView.LOGS) {
+            pageRouter.renderActiveView();
+        } else {
+            setActiveView(AppView.LOGS);
         }
     }
 
@@ -608,6 +619,10 @@ class LauncherUIView extends javafx.application.Application {
     }
 
     void openInstanceSettings(boolean focusAccount) {
+        if (focusAccount) {
+            openAccountSettings();
+            return;
+        }
         openDownloadSection(DownloadSection.INSTANCES);
         Platform.runLater(() -> {
             Control target = focusAccount ? authTypeCombo : versionCombo;
@@ -615,6 +630,12 @@ class LauncherUIView extends javafx.application.Application {
                 target.requestFocus();
             }
         });
+    }
+
+    void openAccountSettings() {
+        accountSettingsSelected = true;
+        if (activeView == AppView.SETTINGS) renderActiveView();
+        else setActiveView(AppView.SETTINGS);
     }
 
     VBox createMainPage() {

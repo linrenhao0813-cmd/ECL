@@ -65,7 +65,7 @@ final class LauncherLaunchForm {
             }
         });
         ui.authTypeCombo.setValue(previousAuthType);
-        ui.authTypeCombo.setOnAction(e -> auth.updateAuthFields());
+        ui.authTypeCombo.valueProperty().addListener((observable, previous, selected) -> auth.updateAuthFields());
         ui.applyFieldStyle(ui.authTypeCombo);
 
         ui.yggdrasilServerField = new TextField(ui.settingsManager.get(ECLConfig.KEY_YGGDRASIL_SERVER));

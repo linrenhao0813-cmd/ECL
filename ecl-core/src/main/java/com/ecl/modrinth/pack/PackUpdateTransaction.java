@@ -1,6 +1,5 @@
 package com.ecl.modrinth.pack;
 
-import com.ecl.ECLConfig;
 import com.ecl.util.FileLockLease;
 import com.ecl.util.InstanceOperationLease;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -40,8 +39,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
 
     private final Path instanceRoot;
     private final Path profileFile;
-    private final Path versionsRoot;
-    private final Path librariesRoot;
+    private final PackTransactionPaths paths;
     private final Path transactionRoot;
     private final Path transactionDirectory;
     private final Path stagingDirectory;
@@ -63,16 +61,8 @@ public final class PackUpdateTransaction implements AutoCloseable {
                 .toAbsolutePath().normalize();
         this.profileFile = Objects.requireNonNull(profileFile, "profileFile")
                 .toAbsolutePath().normalize();
-        this.versionsRoot = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
-        this.librariesRoot = ECLConfig.getLibrariesDir().toPath().toAbsolutePath().normalize();
-        if (this.instanceRoot.getParent() == null || this.profileFile.getParent() == null) {
-            throw new IOException("Pack transaction roots must have parent directories");
-        }
-        if (!this.profileFile.startsWith(this.versionsRoot)) {
-            throw new IOException("Pack profile metadata must be inside the versions directory");
-        }
-        MrpackPathPolicy.validateExistingAncestors(this.instanceRoot.getParent(), this.instanceRoot);
-        MrpackPathPolicy.validateExistingAncestors(this.versionsRoot, this.profileFile);
+        this.paths = new PackTransactionPaths(this.instanceRoot, this.profileFile);
+        paths.validateRoots();
         this.failAfterAppliedEntries = failAfterAppliedEntries;
         Files.createDirectories(this.instanceRoot);
         Files.createDirectories(this.profileFile.getParent());
@@ -127,7 +117,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
                 .toAbsolutePath().normalize();
         Path normalizedTargetRoot = Objects.requireNonNull(targetRoot, "targetRoot")
                 .toAbsolutePath().normalize();
-        externalScope(normalizedTargetRoot);
+        paths.validateExternalRoot(normalizedTargetRoot);
         if (!Files.exists(sourceRoot)) {
             return;
         }
@@ -151,7 +141,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
 
     private void addStage(Operation operation, Path stagedFile, Path target) {
         ensureOpen();
-        Path normalizedTarget = normalizeTarget(target);
+        Path normalizedTarget = paths.normalizeTarget(target);
         Path normalizedStaged = stagedFile == null ? null : stagedFile.toAbsolutePath().normalize();
         if (normalizedStaged != null && !normalizedStaged.startsWith(stagingDirectory)) {
             throw new IllegalArgumentException("Staged file escapes transaction directory: " + stagedFile);
@@ -194,7 +184,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
         List<JournalEntry> entries = new ArrayList<>(stages.size());
         for (int index = 0; index < stages.size(); index++) {
             Stage stage = stages.get(index);
-            Target target = target(stage.target());
+            PackTransactionPaths.Target target = paths.describeTarget(stage.target());
             entries.add(new JournalEntry(
                     stage.operation().name(),
                     target.scope().name(),
@@ -208,7 +198,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
     }
 
     private void applyEntry(JournalEntry entry) throws IOException {
-        Path target = resolveTarget(entry);
+        Path target = paths.resolveTarget(entry.targetScope(), entry.targetPath());
         Path backup = resolveTransactionPath(entry.backupFile());
         if (Boolean.TRUE.equals(entry.targetExisted()) && Files.exists(target)) {
             Files.createDirectories(backup.getParent());
@@ -268,7 +258,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
         java.util.Collections.reverse(reversed);
         for (JournalEntry entry : reversed) {
             try {
-                Path target = resolveTarget(entry);
+                Path target = paths.resolveTarget(entry.targetScope(), entry.targetPath());
                 Path backup = resolveTransactionPath(entry.backupFile());
                 if (Files.exists(backup)) {
                     Files.deleteIfExists(target);
@@ -378,8 +368,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
                                   Path existingDirectory) {
         this.instanceRoot = instanceRoot;
         this.profileFile = profileFile;
-        this.versionsRoot = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
-        this.librariesRoot = ECLConfig.getLibrariesDir().toPath().toAbsolutePath().normalize();
+        this.paths = new PackTransactionPaths(instanceRoot, profileFile);
         this.failAfterAppliedEntries = failAfterAppliedEntries;
         this.transactionRoot = existingDirectory.getParent();
         this.transactionDirectory = existingDirectory;
@@ -402,61 +391,6 @@ public final class PackUpdateTransaction implements AutoCloseable {
         } finally {
             Files.deleteIfExists(temporary);
         }
-    }
-
-    private Path normalizeTarget(Path target) {
-        Path result = Objects.requireNonNull(target, "target").toAbsolutePath().normalize();
-        if (!result.startsWith(instanceRoot) && !result.equals(profileFile)
-                && !result.startsWith(versionsRoot) && !result.startsWith(librariesRoot)) {
-            throw new IllegalArgumentException("Pack transaction target is outside its roots: " + target);
-        }
-        return result;
-    }
-
-    private Target target(Path path) {
-        if (path.equals(profileFile)) {
-            return new Target(Scope.PROFILE, "");
-        }
-        if (path.startsWith(versionsRoot)) {
-            return new Target(Scope.VERSIONS, portable(versionsRoot.relativize(path)));
-        }
-        if (path.startsWith(librariesRoot)) {
-            return new Target(Scope.LIBRARIES, portable(librariesRoot.relativize(path)));
-        }
-        return new Target(Scope.INSTANCE, portable(instanceRoot.relativize(path)));
-    }
-
-    private Path resolveTarget(JournalEntry entry) throws IOException {
-        Scope scope;
-        try {
-            scope = Scope.valueOf(entry.targetScope());
-        } catch (RuntimeException error) {
-            throw new IOException("Invalid pack transaction target scope", error);
-        }
-        if (scope == Scope.PROFILE) {
-            if (entry.targetPath() != null && !entry.targetPath().isBlank()) {
-                throw new IOException("Invalid profile target in pack transaction journal");
-            }
-            MrpackPathPolicy.validateExistingAncestors(versionsRoot, profileFile);
-            return profileFile;
-        }
-        if (scope == Scope.VERSIONS) {
-            return PackManifest.resolve(versionsRoot, entry.targetPath());
-        }
-        if (scope == Scope.LIBRARIES) {
-            return PackManifest.resolve(librariesRoot, entry.targetPath());
-        }
-        return PackManifest.resolve(instanceRoot, entry.targetPath());
-    }
-
-    private Scope externalScope(Path root) throws IOException {
-        if (root.equals(versionsRoot)) {
-            return Scope.VERSIONS;
-        }
-        if (root.equals(librariesRoot)) {
-            return Scope.LIBRARIES;
-        }
-        throw new IOException("Unsupported external transaction root: " + root);
     }
 
     private Path resolveTransactionPath(String relative) throws IOException {
@@ -577,10 +511,6 @@ public final class PackUpdateTransaction implements AutoCloseable {
         }
     }
 
-    private static String portable(Path path) {
-        return path.toString().replace('\\', '/');
-    }
-
     private void ensureOpen() {
         if (closed || committed) {
             throw new IllegalStateException("Pack transaction is already closed");
@@ -602,12 +532,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
 
     private enum Operation { REPLACE, DELETE }
 
-    private enum Scope { INSTANCE, PROFILE, VERSIONS, LIBRARIES }
-
     private record Stage(Operation operation, Path stagedFile, Path target) {
-    }
-
-    private record Target(Scope scope, String relative) {
     }
 
     public record Journal(String status, List<JournalEntry> entries) {

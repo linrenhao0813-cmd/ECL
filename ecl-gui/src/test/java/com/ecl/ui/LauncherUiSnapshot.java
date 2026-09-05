@@ -172,18 +172,14 @@ public final class LauncherUiSnapshot {
                 }
                 return primaryStage.getScene();
             }
-            if ("saves".equalsIgnoreCase(mode) || "saves-ai".equalsIgnoreCase(mode)) {
-                createVisualProfile("visual-save-vanilla", "", "1.20.1");
-                createVisualProfile("visual-save-fabric", "fabric", "1.20.1");
-                Field gameDirField = LauncherUIView.class.getDeclaredField("gameDir");
-                gameDirField.setAccessible(true);
-                File gameRoot = (File) gameDirField.get(this);
-                createVisualSave(gameRoot.toPath().resolve("saves/Alpine Base"));
-                createVisualSave(gameRoot.toPath().resolve("versions/visual-save-fabric/saves/Modded Valley"));
-                showAppView("SAVES");
-                if ("saves-ai".equalsIgnoreCase(mode)) {
-                    selectAssistantTab(primaryStage);
-                }
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("saves")) {
+                return prepareSavesCapture(primaryStage, mode);
+            }
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("accounts")) {
+                applySnapshotTheme(mode.endsWith("-dark") ? "DARK" : "LIGHT");
+                openAccountSettings();
+                if (mode.contains("microsoft")) authTypeCombo.setValue(LauncherUI.AUTH_MICROSOFT);
+                if (mode.contains("external")) authTypeCombo.setValue(LauncherUI.AUTH_YGGDRASIL);
                 return primaryStage.getScene();
             }
             if ("downloads".equalsIgnoreCase(mode)) {
@@ -276,6 +272,11 @@ public final class LauncherUiSnapshot {
                 showAppView("SETTINGS");
                 return primaryStage.getScene();
             }
+            if ("logs".equalsIgnoreCase(mode) || "logs-tasks".equalsIgnoreCase(mode)
+                    || "logs-tasks-dark".equalsIgnoreCase(mode)
+                    || "logs-tasks-compact".equalsIgnoreCase(mode)) {
+                return prepareLogsCapture(primaryStage, mode);
+            }
             if ("settings-page-dark".equalsIgnoreCase(mode)) {
                 applySnapshotTheme("DARK");
                 showAppView("SETTINGS");
@@ -321,7 +322,54 @@ public final class LauncherUiSnapshot {
             return primaryStage.getScene();
         }
 
+        private Scene prepareSavesCapture(Stage stage, String mode) throws Exception {
+            applySnapshotTheme(mode.endsWith("-dark") ? "DARK" : "LIGHT");
+            createVisualProfile("visual-save-vanilla", "", "1.20.1");
+            createVisualProfile("visual-save-fabric", "fabric", "1.20.1");
+            for (String name : java.util.List.of("Alpine Base", "Creative Coast", "Redstone Lab")) {
+                createVisualSave(gameDir.toPath().resolve("saves").resolve(name));
+            }
+            createVisualSave(gameDir.toPath().resolve("versions/visual-save-fabric/saves/Modded Valley"));
+            showAppView("SAVES");
+            if (mode.contains("compact")) {
+                stage.setWidth(1180);
+                stage.setHeight(720);
+            }
+            if (mode.contains("details") || mode.startsWith("saves-ai")) {
+                PauseTransition select = new PauseTransition(Duration.millis(500));
+                select.setOnFinished(event -> {
+                    try {
+                        var table = (javafx.scene.control.TableView<?>) stage.getScene().lookup("#save-file-table");
+                        if (table == null || table.getItems().isEmpty()) throw new IllegalStateException("No visual saves loaded");
+                        table.getSelectionModel().selectFirst();
+                        table.fireEvent(new javafx.scene.input.KeyEvent(javafx.scene.input.KeyEvent.KEY_PRESSED,
+                                "", "", javafx.scene.input.KeyCode.ENTER, false, false, false, false));
+                        if (mode.startsWith("saves-ai")) selectAssistantTab(stage);
+                    } catch (Throwable failure) {
+                        captureFailure = failure;
+                    }
+                });
+                select.play();
+            }
+            return stage.getScene();
+        }
+
+        private Scene prepareLogsCapture(Stage stage, String mode) throws Exception {
+            applySnapshotTheme("logs-tasks-dark".equalsIgnoreCase(mode) ? "DARK" : "LIGHT");
+            showAppView("LOGS");
+            if (!"logs".equalsIgnoreCase(mode)) {
+                openDownloadTasks();
+            }
+            if ("logs-tasks-compact".equalsIgnoreCase(mode)) {
+                stage.setWidth(1180);
+                stage.setHeight(720);
+            }
+            return stage.getScene();
+        }
+
         private static void selectAssistantTab(Stage stage) {
+            stage.getScene().getRoot().applyCss();
+            stage.getScene().getRoot().layout();
             javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
                     stage.getScene().lookup(".world-save-tabs");
             if (tabs == null || tabs.getTabs().size() < 2) {
