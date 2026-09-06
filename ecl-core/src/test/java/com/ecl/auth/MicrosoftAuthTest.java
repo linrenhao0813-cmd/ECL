@@ -40,6 +40,15 @@ class MicrosoftAuthTest {
     }
 
     @Test
+    void resolvesMicrosoftClientIdWithOverridesAndBundledDefault() {
+        assertEquals("property-client", MicrosoftOAuthClient.resolveClientId(
+                "  property-client  ", "environment-client"));
+        assertEquals("environment-client", MicrosoftOAuthClient.resolveClientId(
+                " ", "  environment-client  "));
+        assertEquals("00000000402b5328", MicrosoftOAuthClient.resolveClientId(null, null));
+    }
+
+    @Test
     void returnsAConsistentCachedSessionSnapshot() {
         MicrosoftAuth.CachedSession cached = new MicrosoftAuth.CachedSession(
                 "refresh", "access", 123L, "Player", "uuid");
@@ -117,6 +126,7 @@ class MicrosoftAuthTest {
         @Override
         public HttpUtil.Response postForm(String url, Map<String, String> form) {
             requests.add("oauth-refresh");
+            assertEquals("test-client-id", form.get("client_id"));
             assertEquals("saved-refresh", form.get("refresh_token"));
             return response(200, "{\"access_token\":\"microsoft-access\","
                     + "\"refresh_token\":\"rotated-refresh\"}");

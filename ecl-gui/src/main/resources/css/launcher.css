@@ -1358,7 +1358,6 @@
     -fx-text-fill: -ecl-text;
 }
 
-.scene-root.theme-dark .task-chip,
 .scene-root.theme-dark .account-chip,
 .scene-root.theme-dark .secondary-button,
 .scene-root.theme-dark .ghost-button {
@@ -1477,17 +1476,6 @@
     -fx-text-fill: -ecl-text;
     -fx-font-weight: 700;
     -fx-effect: null;
-}
-
-.task-chip {
-    -fx-background-color: #f5f5f7;
-    -fx-background-radius: 18;
-    -fx-padding: 8 14;
-    -fx-min-width: 108;
-    -fx-alignment: center;
-    -fx-text-fill: #515154;
-    -fx-font-size: 10px;
-    -fx-font-weight: 500;
 }
 
 .account-chip {

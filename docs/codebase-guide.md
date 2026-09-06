@@ -24,8 +24,8 @@ Gradle 依赖方向为 `ecl-boot` → `ecl-gui` → `ecl-core`。定位业务规
 | 账户与登录 | `auth/DefaultAccountService.java` | 账户服务协调具体认证提供者 |
 | 游戏启动 | `launch/DefaultLauncher.java` | 启动流程调用命令构建、原生库解压与进程管理 |
 | 游戏版本 | `launcher/VersionManager.java` | 配合版本清单、目录扫描与 profile 解析类 |
-| 下载任务 | `download/DownloadTaskCenter.java` | 排队、并发名额、取消、重试与历史保留 |
-| 下载执行 | `download/DownloadTaskExecutor.java` | 执行具体下载操作，把结果交回任务中心 |
+| 下载调度 | `download/DownloadTaskCenter.java` | 排队、并发名额、取消、重试与历史保留 |
+| 下载执行 | `download/DownloadTaskExecutor.java` | 执行具体下载操作，把结果交回调度器 |
 | 本地 Mod 扫描 | `modrinth/service/DefaultLocalModScanner.java` | 锁定实例、扫描文件、在线识别、整理记录并保存 |
 | 扫描缓存 | `modrinth/service/LocalModScanCache.java` | 读取缓存 JSON，原子替换缓存文件 |
 | 整合包安装与更新 | `modrinth/pack/MrpackInstaller.java` | 编排读取、依赖准备、安装与更新 |
@@ -36,7 +36,7 @@ Gradle 依赖方向为 `ecl-boot` → `ecl-gui` → `ecl-core`。定位业务规
 
 ### 下载任务结束
 
-`finishSuccess`、`finishFailure`、`finishCancelled` 都进入 `finish`。该方法在任务中心锁内
+`finishSuccess`、`finishFailure`、`finishCancelled` 都进入 `finish`。该方法在调度器锁内
 确定最终状态、释放并发名额并裁剪历史；锁外完成 future、通知监听器并调度后续任务。
 取消请求优先于操作返回的成功或失败。任务仍在取消中时继续占用并发名额，直到执行器报告结束。
 

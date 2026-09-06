@@ -5,7 +5,6 @@ import com.ecl.auth.MicrosoftAccountStore;
 import com.ecl.auth.MinecraftSkinService;
 import com.ecl.backup.WorldBackupService;
 import com.ecl.config.SettingsManager;
-import com.ecl.diagnostic.DiagnosticBundleService;
 import com.ecl.download.DownloadService;
 import com.ecl.download.DownloadTaskCenter;
 import com.ecl.download.ServerJarDownloader;
@@ -35,8 +34,6 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
-import javafx.scene.control.TextArea;
-import javafx.scene.control.Tooltip;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -44,7 +41,6 @@ import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import java.io.File;
@@ -61,8 +57,6 @@ import java.util.concurrent.CancellationException;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static com.ecl.util.TextUtil.abbreviate;
 
 class LauncherUIView extends javafx.application.Application {
     static final Logger LOGGER = LoggerFactory.getLogger(LauncherUI.class);
@@ -139,11 +133,9 @@ class LauncherUIView extends javafx.application.Application {
     Label homeAccountTypeLabel;
     Label homeAccountAvatarLabel;
     Label homeEnvironmentStatusLabel;
-    private Label topTaskLabel;
     Label playtimeTotalLabel;
     Label playtimeRecentLabel;
     Label playtimeLaunchCountLabel;
-    DownloadTasksPage downloadTasksPage;
     private final LauncherContentBrowser contentBrowser = new LauncherContentBrowser((LauncherUI) this);
     private final LauncherLaunchForm launchForm = new LauncherLaunchForm((LauncherUI) this);
     final LauncherPageFactory pageFactory = new LauncherPageFactory((LauncherUI) this);
@@ -167,16 +159,10 @@ class LauncherUIView extends javafx.application.Application {
     String quickServer;
     boolean closeAfterLaunch;
     int processorCount;
-    boolean showGameConsole;
     boolean backupOnLaunch;
     int backupKeepCount;
     boolean backupIncludeMods;
-    final LauncherLogBuffer liveGameLog =
-            new LauncherLogBuffer(ECLConfig.MAX_CAPTURED_GAME_LOG_CHARS);
     final PlaytimeTracker playtimeTracker = new PlaytimeTracker();
-    TextArea liveConsoleArea;
-    final StringBuilder pendingConsoleText = new StringBuilder();
-    final AtomicBoolean consoleFlushScheduled = new AtomicBoolean();
     final AtomicBoolean applicationStopping = new AtomicBoolean();
     volatile Process activeGameProcess;
     volatile String activeGameVersion;
@@ -191,7 +177,6 @@ class LauncherUIView extends javafx.application.Application {
     ServerBrowserView activeServerBrowserView;
     AppView activeView = AppView.HOME;
     DownloadSection downloadSection = DownloadSection.INSTANCES;
-    boolean downloadTasksSelected;
     boolean accountSettingsSelected;
 
     @Override
@@ -203,7 +188,6 @@ class LauncherUIView extends javafx.application.Application {
         versionManager = controller.versions();
         downloader = controller.gameDownloader();
         downloadTaskCenter = controller.downloadTasks();
-        downloadTaskCenter.addListener(this::onDownloadTasksChanged);
         applyRequestedInstanceArgument();
         serverJarDownloader = new ServerJarDownloader(versionManager);
         modLoaderInstaller = new ModLoaderInstaller();
@@ -235,7 +219,6 @@ class LauncherUIView extends javafx.application.Application {
         quickServer = settingsManager.get(ECLConfig.KEY_QUICK_SERVER);
         closeAfterLaunch = settingsManager.get(ECLConfig.KEY_CLOSE_AFTER_LAUNCH);
         processorCount = settingsManager.get(ECLConfig.KEY_PROCESSOR_COUNT);
-        showGameConsole = settingsManager.get(ECLConfig.KEY_SHOW_GAME_CONSOLE);
         backupOnLaunch = settingsManager.get(ECLConfig.KEY_BACKUP_ON_LAUNCH);
         backupKeepCount = Math.max(1, Math.min(100,
                 settingsManager.get(ECLConfig.KEY_BACKUP_KEEP_COUNT)));
@@ -292,26 +275,6 @@ class LauncherUIView extends javafx.application.Application {
         }
     }
 
-    private void onDownloadTasksChanged(List<DownloadTaskCenter.TaskSnapshot> tasks) {
-        Runnable update = () -> {
-            long active = tasks.stream().filter(task -> task.status() == DownloadTaskCenter.Status.QUEUED
-                    || task.status() == DownloadTaskCenter.Status.RUNNING
-                    || task.status() == DownloadTaskCenter.Status.CANCELLING).count();
-            long failed = tasks.stream().filter(task -> task.status() == DownloadTaskCenter.Status.FAILED).count();
-            if (topTaskLabel != null) {
-                topTaskLabel.setText(active == 0 && failed == 0
-                        ? Messages.get("download.none")
-                        : Messages.format("download.summary.count", active, failed));
-                topTaskLabel.setTooltip(new Tooltip(Messages.get("download.tooltip.open")));
-            }
-            if (downloadTasksPage != null) {
-                downloadTasksPage.updateTasks(tasks);
-            }
-        };
-        if (Platform.isFxApplicationThread()) update.run();
-        else Platform.runLater(update);
-    }
-
     @Override
     public void stop() {
         applicationStopping.set(true);
@@ -332,22 +295,6 @@ class LauncherUIView extends javafx.application.Application {
                     this::languageDisplayName, this::applyThemeToScene);
         }
         firstRunWizard.show(primaryStage);
-    }
-
-    void exportDiagnosticBundle() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle(Messages.get("diagnostic.export"));
-        chooser.setInitialFileName("ecl-diagnostics.zip");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("ZIP", "*.zip"));
-        File selected = chooser.showSaveDialog(primaryStage);
-        if (selected == null) return;
-        try {
-            Path exported = new DiagnosticBundleService().export(
-                    selected.toPath(), ECLConfig.getBaseDir().toPath(), getActiveGameDir().toPath());
-            setStatus(Messages.get("diagnostic.export"), exported.toString());
-        } catch (IOException error) {
-            setStatus(Messages.get("diagnostic.export"), cleanMessage(error));
-        }
     }
 
     private Pane createRoot() {
@@ -396,11 +343,6 @@ class LauncherUIView extends javafx.application.Application {
         HBox.setHgrow(leftSpacer, Priority.ALWAYS);
         HBox.setHgrow(rightSpacer, Priority.ALWAYS);
 
-        topTaskLabel = new Label(Messages.get("download.none"));
-        topTaskLabel.getStyleClass().add("task-chip");
-        topTaskLabel.setOnMouseClicked(event -> openDownloadTasks());
-        topTaskLabel.setCursor(javafx.scene.Cursor.HAND);
-
         topAuthBadgeLabel = createValueLabel("Steve");
         topAuthBadgeLabel.getStyleClass().add("account-chip");
 
@@ -416,7 +358,6 @@ class LauncherUIView extends javafx.application.Application {
                 leftSpacer,
                 navigation,
                 rightSpacer,
-                topTaskLabel,
                 topAuthBadgeLabel,
                 windowControls
         );
@@ -452,15 +393,6 @@ class LauncherUIView extends javafx.application.Application {
         }
     }
 
-    void openDownloadTasks() {
-        downloadTasksSelected = true;
-        if (activeView == AppView.LOGS) {
-            pageRouter.renderActiveView();
-        } else {
-            setActiveView(AppView.LOGS);
-        }
-    }
-
     boolean isHomeViewActive() {
         return pageRouter.isHomeViewActive();
     }
@@ -477,12 +409,6 @@ class LauncherUIView extends javafx.application.Application {
         return ContentTargetFactory.create(
                 this::resolveModsDir, this::resolveVersionGameDir,
                 this::getConfiguredGameRootDir);
-    }
-
-    int countCrashReports() {
-        File crashDir = new File(getActiveGameDir(), "crash-reports");
-        File[] reports = crashDir.listFiles((dir, name) -> name.endsWith(".txt"));
-        return reports == null ? 0 : reports.length;
     }
 
     void createInstanceShortcut(boolean startMenu) {
@@ -729,18 +655,6 @@ class LauncherUIView extends javafx.application.Application {
         if (detailLabel != null) {
             detailLabel.setText(safeDetail);
         }
-        if (topTaskLabel != null && !downloadTaskChipHasAttention()) {
-            topTaskLabel.setText(abbreviate(safeTitle, 12));
-            topTaskLabel.setTooltip(safeDetail.isBlank() ? null : new Tooltip(safeDetail));
-        }
-    }
-
-    private boolean downloadTaskChipHasAttention() {
-        return downloadTaskCenter != null && downloadTaskCenter.snapshots().stream()
-                .anyMatch(task -> task.status() == DownloadTaskCenter.Status.QUEUED
-                        || task.status() == DownloadTaskCenter.Status.RUNNING
-                        || task.status() == DownloadTaskCenter.Status.CANCELLING
-                        || task.status() == DownloadTaskCenter.Status.FAILED);
     }
 
     void startProgressAnimation(ProgressBar progressBar) {

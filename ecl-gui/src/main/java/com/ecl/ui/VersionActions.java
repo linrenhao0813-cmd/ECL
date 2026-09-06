@@ -261,67 +261,50 @@ final class VersionActions {
     }
 
     void restoreVersionComboItems(String preferredVersion) {
-        if (ui.versionCombo == null || ui.versionTypeCombo == null || ui.versionManager == null) {
+        if (ui.versionCombo == null || ui.versionManager == null) {
             return;
         }
-        VersionManager.VersionCategory category = getSelectedVersionCategory();
         long generation = versionListGeneration.incrementAndGet();
-        // 本地版本档案扫描与合并放到后台线程，完成后在 FX 线程回填下拉框，
-        // 避免首页构建时同步扫描解析全部本地版本 JSON 造成卡顿。
+        // 首页只列出配置的 .minecraft/versions 下已经存在且具有本地启动配置的实例。
+        // 新实例统一从下载页创建，避免在线版本选择意外替换当前启动目标。
         ui.runAsync("ecl-restore-versions", () -> {
             try {
-                List<String> versions = ui.versionManager.mergeLocalLoaderProfiles(
-                        ui.versionManager.getVersions(category));
+                ui.versionManager.invalidateLocalVersionProfiles();
+                List<String> versions = ui.gameRepository().installedInstanceDirectories();
                 Platform.runLater(() -> {
                     if (generation != versionListGeneration.get() || ui.versionCombo == null) {
                         return;
                     }
-                    ui.versionCombo.getItems().setAll(versions);
-                    if (preferredVersion != null && versions.contains(preferredVersion)) {
-                        ui.versionCombo.getSelectionModel().select(preferredVersion);
-                    } else if (preferredVersion != null) {
-                        // 与同步旧行为一致：目标版本不在列表时仍直接设置为当前值。
-                        ui.versionCombo.setValue(preferredVersion);
-                    } else if (!versions.isEmpty()) {
-                        ui.versionCombo.getSelectionModel().select(0);
-                    }
+                    applyInstalledVersions(versions, preferredVersion);
                 });
             } catch (Exception e) {
-                LauncherUI.LOGGER.warn("Failed to restore version choices", e);
+                LauncherUI.LOGGER.warn("Failed to restore installed instance choices", e);
             }
         });
     }
 
     void refreshVersions() {
-        VersionManager.VersionCategory category = getSelectedVersionCategory();
         long generation = versionListGeneration.incrementAndGet();
-        String categoryLabel = category.getLabel();
         ui.refreshBtn.setDisable(true);
         ui.versionCombo.setDisable(true);
-        ui.versionTypeCombo.setDisable(true);
         ui.updateSelectedVersionWikiButton();
-        ui.setStatus("正在获取版本列表...", "正在加载 " + categoryLabel + "，失败时会回退到本地缓存。 ");
+        ui.setStatus("正在读取本地实例...", "正在扫描 .minecraft/versions 中已下载的实例。 ");
 
         ui.runAsync("ecl-refresh-versions", () -> {
             try {
-                ui.versionManager.refresh();
-                List<String> versions = ui.versionManager.mergeLocalLoaderProfiles(
-                        ui.versionManager.getVersions(category));
+                ui.versionManager.invalidateLocalVersionProfiles();
+                List<String> versions = ui.gameRepository().installedInstanceDirectories();
                 Platform.runLater(() -> {
                     if (generation != versionListGeneration.get()) {
                         return;
                     }
                     String current = ui.versionCombo.getValue();
-                    ui.versionCombo.getItems().setAll(versions);
-                    if (current != null && versions.contains(current)) {
-                        ui.versionCombo.getSelectionModel().select(current);
-                    } else if (!versions.isEmpty()) {
-                        ui.versionCombo.getSelectionModel().select(0);
-                    }
-                    ui.setStatus("版本列表已更新", versions.isEmpty() ? "没有发现可用的" + categoryLabel + "。" : "已载入 " + versions.size() + " 个" + categoryLabel + "。 ");
+                    applyInstalledVersions(versions, current);
+                    ui.setStatus("本地实例已更新", versions.isEmpty()
+                            ? "没有发现已下载实例，请先到“下载”页安装。"
+                            : "已载入 " + versions.size() + " 个本地实例。 ");
                     ui.refreshBtn.setDisable(false);
                     ui.versionCombo.setDisable(false);
-                    ui.versionTypeCombo.setDisable(false);
                     ui.updateRuntimeSummary();
                     ui.updateSelectedVersionWikiButton();
                 });
@@ -333,12 +316,32 @@ final class VersionActions {
                     ui.setStatus("获取版本列表失败", ui.cleanMessage(e));
                     ui.refreshBtn.setDisable(false);
                     ui.versionCombo.setDisable(false);
-                    ui.versionTypeCombo.setDisable(false);
                     ui.updateRuntimeSummary();
                     ui.updateSelectedVersionWikiButton();
                 });
             }
         });
+    }
+
+    private void applyInstalledVersions(List<String> versions, String preferredVersion) {
+        ui.versionCombo.getItems().setAll(versions);
+        String selected = chooseInstalledVersion(versions, preferredVersion);
+        if (selected == null) {
+            ui.versionCombo.getSelectionModel().clearSelection();
+            ui.versionCombo.setValue(null);
+            return;
+        }
+        ui.versionCombo.getSelectionModel().select(selected);
+    }
+
+    static String chooseInstalledVersion(List<String> versions, String preferredVersion) {
+        if (versions == null || versions.isEmpty()) {
+            return null;
+        }
+        if (preferredVersion != null && versions.contains(preferredVersion)) {
+            return preferredVersion;
+        }
+        return versions.getFirst();
     }
 
     VersionManager.VersionCategory getSelectedVersionCategory() {

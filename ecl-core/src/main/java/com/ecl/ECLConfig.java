@@ -16,7 +16,6 @@ public class ECLConfig {
     public static final int MIRROR_SOURCE_TIMEOUT_MS = 60000;
     public static final int MAX_DOWNLOAD_CONCURRENT = 8;
     public static final int DOWNLOAD_THREADS = parseDownloadThreads();
-    public static final int MAX_CAPTURED_GAME_LOG_CHARS = 80_000;
 
     /** A stored value of zero means that the launcher should calculate the heap automatically. */
     public static final int AUTO_MEMORY_MB = 0;
@@ -61,8 +60,6 @@ public class ECLConfig {
             new SettingKey<>("closeAfterLaunch", Boolean.class, false);
     public static final SettingKey<Integer> KEY_PROCESSOR_COUNT =
             new SettingKey<>("processorCount", Integer.class, 0);
-    public static final SettingKey<Boolean> KEY_SHOW_GAME_CONSOLE =
-            new SettingKey<>("showGameConsole", Boolean.class, true);
     public static final SettingKey<Boolean> KEY_BACKUP_ON_LAUNCH =
             new SettingKey<>("backupOnLaunch", Boolean.class, true);
     public static final SettingKey<Integer> KEY_BACKUP_KEEP_COUNT =

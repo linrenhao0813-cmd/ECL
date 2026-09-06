@@ -403,7 +403,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
     }
 
     private void ensureOpen() {
-        if (closed) throw new IllegalStateException("下载任务中心已关闭");
+        if (closed) throw new IllegalStateException("下载调度器已关闭");
     }
 
     @Override

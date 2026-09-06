@@ -90,7 +90,7 @@ final class LauncherLaunchForm {
         ui.authHintLabel.setWrapText(true);
 
         ui.versionCombo = new ComboBox<>();
-        ui.versionCombo.setPromptText("选择游戏版本");
+        ui.versionCombo.setPromptText("选择已下载实例");
         ui.versionCombo.setVisibleRowCount(14);
         ui.versionCombo.setCellFactory(list -> createVersionCell());
         ui.versionCombo.setButtonCell(createVersionCell());
@@ -225,7 +225,7 @@ final class LauncherLaunchForm {
         ui.passwordLabel = new Label("密码");
         ui.passwordLabel.getStyleClass().add("field-label");
 
-        Label gameVersionLabel = new Label("游戏版本");
+        Label gameVersionLabel = new Label("游戏实例");
         gameVersionLabel.getStyleClass().add("field-label");
         grid.add(gameVersionLabel, 0, row);
         grid.add(versionBox, 1, row++);
@@ -326,8 +326,8 @@ final class LauncherLaunchForm {
         loader.updateLoaderControls();
 
         Button switchInstanceButton = ui.createLinkButton(
-                "选择版本 / 加载器  ›",
-                () -> ui.openInstanceSettings(false));
+                "选择本地实例  ›",
+                () -> ui.setActiveView(AppView.VERSIONS));
 
         ui.refreshBtn = new Button("刷新版本");
         ui.refreshBtn.getStyleClass().addAll("app-button", "secondary-button");

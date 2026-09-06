@@ -42,8 +42,8 @@ final class HomePageFactory {
         pageHeading.setAlignment(Pos.CENTER);
 
         HBox hero = createLaunchHero();
-        // Build the controls once at startup so launch/auth state is available to the
-        // home summary. Account management reuses these controls in Settings.
+        // Build the controls once so the selected local instance and authentication state
+        // remain available to the home summary. Instance selection has its own top-level page.
         ui.createForm();
         HBox summaryCards = createHomeSummaryCards();
 
@@ -157,9 +157,7 @@ final class HomePageFactory {
         Region taskSpacer = new Region();
         VBox.setVgrow(taskSpacer, Priority.ALWAYS);
         taskCard.getChildren().addAll(taskLabel, ui.statusLabel, ui.detailLabel,
-                ui.downloadProgress, taskSpacer,
-                ui.createLinkButton(Messages.get("home.viewTasks"),
-                        ui::openDownloadTasks));
+                ui.downloadProgress, taskSpacer);
 
         VBox playtimeCard = new VBox(12);
         playtimeCard.getStyleClass().addAll("home-card", "playtime-card");

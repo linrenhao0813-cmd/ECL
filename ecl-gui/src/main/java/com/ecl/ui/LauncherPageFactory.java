@@ -9,13 +9,8 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
-import javafx.scene.control.TextArea;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-
-import java.io.File;
 
 import static com.ecl.util.TextUtil.abbreviate;
 
@@ -25,10 +20,6 @@ final class LauncherPageFactory {
 
     LauncherPageFactory(LauncherUI ui) {
         this.ui = ui;
-    }
-
-    DownloadTasksPage createDownloadTasksPage() {
-        return new DownloadTasksPage(ui.downloadTaskCenter, ui.settingsManager);
     }
 
     WorldSavesPage createWorldSavesPage() {
@@ -53,7 +44,6 @@ final class LauncherPageFactory {
     }
 
     private void showVersionInstaller(VBox page, String version) {
-        ui.versionCombo.setValue(version);
         page.getChildren().setAll(new InstanceInstallPage(
                 ui, version, () -> showVersionsOverview(page)));
     }
@@ -138,75 +128,4 @@ final class LauncherPageFactory {
         return page;
     }
 
-    VBox createLogsPage() {
-        VBox page = ui.createMainPage();
-        Tab consoleTab = new Tab(Messages.get("logs.tab.console"), createDiagnosticLogsPage());
-        ui.downloadTasksPage = createDownloadTasksPage();
-        ui.downloadTasksPage.setMinWidth(0);
-        ui.downloadTasksPage.setPrefWidth(Region.USE_COMPUTED_SIZE);
-        ui.downloadTasksPage.setMaxWidth(Double.MAX_VALUE);
-        ui.downloadTasksPage.updateTasks(ui.downloadTaskCenter.snapshots());
-        Tab downloadsTab = new Tab(Messages.get("download.center.title"), ui.downloadTasksPage);
-        TabPane tabs = new TabPane(consoleTab, downloadsTab);
-        tabs.setId("logs-tabs");
-        tabs.getStyleClass().add("mod-tabs");
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.getSelectionModel().select(ui.downloadTasksSelected ? downloadsTab : consoleTab);
-        tabs.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) ->
-                ui.downloadTasksSelected = selected == downloadsTab);
-        VBox.setVgrow(tabs, Priority.ALWAYS);
-        page.getChildren().add(tabs);
-        return page;
-    }
-
-    private VBox createDiagnosticLogsPage() {
-        VBox page = ui.createMainPage();
-
-        File crashDir = new File(ui.getActiveGameDir(), "crash-reports");
-        File logsDir = new File(ui.getActiveGameDir(), "logs");
-        Button crashButton = ui.createActionButton(
-                Messages.get("logs.openCrash"), "primary-button",
-                () -> ui.openLocalFolder(crashDir, "崩溃报告目录"));
-        Button logsButton = ui.createActionButton(
-                Messages.get("logs.openLogs"), "secondary-button",
-                () -> ui.openLocalFolder(logsDir, "日志目录"));
-        Button modsButton = ui.createActionButton(
-                Messages.get("logs.openMods"), "ghost-button",
-                () -> ui.openLocalFolder(ui.resolveModsDir(ui.getSelectedVersion()), "模组目录"));
-        Button clearConsoleButton = ui.createActionButton(Messages.get("logs.clearConsole"),
-                "ghost-button", () -> {
-                    ui.liveGameLog.clear();
-                    if (ui.liveConsoleArea != null) {
-                        ui.liveConsoleArea.clear();
-                    }
-                });
-        Button diagnosticButton = ui.createActionButton(
-                Messages.get("diagnostic.export"), "secondary-button", ui::exportDiagnosticBundle);
-
-        HBox actions = new HBox(10, crashButton, logsButton, modsButton,
-                clearConsoleButton, diagnosticButton);
-        actions.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-
-        ui.liveConsoleArea = new TextArea(ui.liveGameLog.toString());
-        ui.liveConsoleArea.setEditable(false);
-        ui.liveConsoleArea.setWrapText(false);
-        ui.liveConsoleArea.setPrefRowCount(18);
-        ui.liveConsoleArea.setStyle("-fx-font-family: 'Consolas'; -fx-font-size: 12px;");
-
-        VBox logsCard = ui.createSurface(
-                Messages.get("logs.title"),
-                Messages.get("logs.subtitle"),
-                ui.createInfoRow(Messages.get("label.diagStatus"),
-                        ui.createStaticValueLabel(Messages.get("info.normal"))),
-                ui.createInfoRow(Messages.get("label.crashReports"),
-                        ui.createStaticValueLabel(Messages.format("crash.count", ui.countCrashReports()))),
-                ui.createInfoRow(Messages.get("info.gameDir"),
-                        ui.createStaticValueLabel(abbreviate(ui.getActiveGameDir().getAbsolutePath(), 72))),
-                actions,
-                ui.liveConsoleArea
-        );
-
-        page.getChildren().add(logsCard);
-        return page;
-    }
 }

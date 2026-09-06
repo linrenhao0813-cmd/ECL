@@ -43,6 +43,16 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     }
 
     @Test
+    void localVersionsHaveTheirOwnMenuInsteadOfOpeningDownloads() {
+        interact(() -> {
+            launcher.setActiveView(AppView.VERSIONS);
+
+            assertEquals(AppView.VERSIONS, launcher.activeView);
+            assertNotNull(stage.getScene().lookup("#installed-instance-list"));
+        });
+    }
+
+    @Test
     void accountSettingsShareLaunchIdentityAcrossPageChanges() {
         interact(() -> {
             String previousName = launcher.usernameField.getText();

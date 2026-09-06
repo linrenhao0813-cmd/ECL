@@ -182,6 +182,9 @@ public final class LauncherUiSnapshot {
                 if (mode.contains("external")) authTypeCombo.setValue(LauncherUI.AUTH_YGGDRASIL);
                 return primaryStage.getScene();
             }
+            if ("local-versions".equalsIgnoreCase(mode)) {
+                return prepareLocalVersionsCapture(primaryStage);
+            }
             if ("downloads".equalsIgnoreCase(mode)) {
                 showAppView("DOWNLOADS");
                 selectDownloadCategory(primaryStage, 7);
@@ -272,11 +275,6 @@ public final class LauncherUiSnapshot {
                 showAppView("SETTINGS");
                 return primaryStage.getScene();
             }
-            if ("logs".equalsIgnoreCase(mode) || "logs-tasks".equalsIgnoreCase(mode)
-                    || "logs-tasks-dark".equalsIgnoreCase(mode)
-                    || "logs-tasks-compact".equalsIgnoreCase(mode)) {
-                return prepareLogsCapture(primaryStage, mode);
-            }
             if ("settings-page-dark".equalsIgnoreCase(mode)) {
                 applySnapshotTheme("DARK");
                 showAppView("SETTINGS");
@@ -322,6 +320,15 @@ public final class LauncherUiSnapshot {
             return primaryStage.getScene();
         }
 
+        private Scene prepareLocalVersionsCapture(Stage stage) throws Exception {
+            String vanilla = createVisualProfile("visual-local-vanilla", "", "1.21.8");
+            String fabric = createVisualProfile("visual-local-fabric", "fabric", "1.21.7");
+            Files.createDirectories(gameDir.toPath().resolve("versions").resolve(vanilla));
+            Files.createDirectories(gameDir.toPath().resolve("versions").resolve(fabric));
+            showAppView("VERSIONS");
+            return stage.getScene();
+        }
+
         private Scene prepareSavesCapture(Stage stage, String mode) throws Exception {
             applySnapshotTheme(mode.endsWith("-dark") ? "DARK" : "LIGHT");
             createVisualProfile("visual-save-vanilla", "", "1.20.1");
@@ -350,19 +357,6 @@ public final class LauncherUiSnapshot {
                     }
                 });
                 select.play();
-            }
-            return stage.getScene();
-        }
-
-        private Scene prepareLogsCapture(Stage stage, String mode) throws Exception {
-            applySnapshotTheme("logs-tasks-dark".equalsIgnoreCase(mode) ? "DARK" : "LIGHT");
-            showAppView("LOGS");
-            if (!"logs".equalsIgnoreCase(mode)) {
-                openDownloadTasks();
-            }
-            if ("logs-tasks-compact".equalsIgnoreCase(mode)) {
-                stage.setWidth(1180);
-                stage.setHeight(720);
             }
             return stage.getScene();
         }
