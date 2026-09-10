@@ -342,7 +342,7 @@ public final class LauncherUiSnapshot {
                 stage.setWidth(1180);
                 stage.setHeight(720);
             }
-            if (mode.contains("details") || mode.startsWith("saves-ai")) {
+            if (mode.contains("details")) {
                 PauseTransition select = new PauseTransition(Duration.millis(500));
                 select.setOnFinished(event -> {
                     try {
@@ -351,7 +351,6 @@ public final class LauncherUiSnapshot {
                         table.getSelectionModel().selectFirst();
                         table.fireEvent(new javafx.scene.input.KeyEvent(javafx.scene.input.KeyEvent.KEY_PRESSED,
                                 "", "", javafx.scene.input.KeyCode.ENTER, false, false, false, false));
-                        if (mode.startsWith("saves-ai")) selectAssistantTab(stage);
                     } catch (Throwable failure) {
                         captureFailure = failure;
                     }
@@ -359,17 +358,6 @@ public final class LauncherUiSnapshot {
                 select.play();
             }
             return stage.getScene();
-        }
-
-        private static void selectAssistantTab(Stage stage) {
-            stage.getScene().getRoot().applyCss();
-            stage.getScene().getRoot().layout();
-            javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
-                    stage.getScene().lookup(".world-save-tabs");
-            if (tabs == null || tabs.getTabs().size() < 2) {
-                throw new IllegalStateException("AI Assistant tab was not rendered");
-            }
-            tabs.getSelectionModel().select(1);
         }
 
         private String createVisualProfile(String profileId, String loader) throws IOException {
