@@ -32,6 +32,42 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     }
 
     @Test
+    void forestHomeRoutesRealControlsAndReflectsBusyState() {
+        interact(() -> {
+            assertNotNull(stage.getScene().lookup("#forest-hero"));
+            Button switchInstance = (Button) stage.getScene().lookup("#home-switch-instance");
+            launcher.setControlsBusy(true);
+            assertTrue(switchInstance.isDisabled());
+            launcher.setControlsBusy(false);
+            switchInstance.fire();
+            assertEquals(AppView.VERSIONS, launcher.activeView);
+            launcher.setActiveView(AppView.HOME);
+            ((Button) stage.getScene().lookup("#recent-view-all")).fire();
+            assertEquals(AppView.VERSIONS, launcher.activeView);
+            ((Button) stage.getScene().lookup("#top-account-button")).fire();
+            assertEquals(AppView.SETTINGS, launcher.activeView);
+            assertTrue(launcher.accountSettingsSelected);
+        });
+    }
+
+    @Test
+    void changingLanguageRefreshesTheHomeSummaryEvenWithoutAnInstance() {
+        interact(() -> {
+            String locale = com.ecl.util.Messages.locale().toLanguageTag();
+            try {
+                launcher.versionCombo.setValue(null);
+                launcher.switchLanguage("en");
+                assertFalse(launcher.javaSummaryLabel.getText().isBlank());
+                assertFalse(launcher.homeAccountTypeLabel.getText().isBlank());
+                assertFalse(launcher.launchReadinessLabel.getText().isBlank());
+                assertEquals("Play", launcher.launchBtn.getText());
+            } finally {
+                launcher.switchLanguage(locale);
+            }
+        });
+    }
+
+    @Test
     void rendersEveryPrimaryNavigationView() {
         for (AppView view : AppView.values()) {
             interact(() -> launcher.setActiveView(view));

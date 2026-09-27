@@ -248,7 +248,7 @@ final class GameLaunchCoordinator {
             }
         }
         return new RuntimeSummary(
-                customJava ? "实例 Java 自定义" : "实例 Java 自动",
+                GuiMessages.get(customJava ? "forest.javaCustom" : "forest.javaAuto"),
                 customJava ? javaPath : "",
                 memoryMb,
                 autoMemory,
@@ -274,16 +274,13 @@ final class GameLaunchCoordinator {
     }
 
     String getMemoryDisplayText() {
-        RuntimeSummary summary = runtimeSummary(ui.getSelectedVersion());
-        return summary.autoMemory()
-                ? "自动 " + summary.memoryMb() + " MB"
-                : summary.memoryMb() + " MB";
+        return runtimeSummary(ui.getSelectedVersion()).memoryText();
     }
 
     record RuntimeSummary(String javaText, String javaPath, int memoryMb, boolean autoMemory,
                           String jvmArguments) {
         String memoryText() {
-            return autoMemory ? "自动 " + memoryMb + " MB" : memoryMb + " MB";
+            return autoMemory ? GuiMessages.get("forest.memoryAuto", String.valueOf(memoryMb)) : memoryMb + " MB";
         }
     }
 }

@@ -50,19 +50,28 @@ final class RuntimeSummaryPresenter {
         }
         if (ui.selectedVersionTitleLabel != null) {
             ui.selectedVersionTitleLabel.setText(selectedVersion == null || selectedVersion.isBlank()
-                    ? Messages.get("home.selectVersion") : versionDisplay);
+                    ? Messages.get("home.selectVersion") : selectedVersion);
+            ui.selectedVersionTitleLabel.setTooltip(new Tooltip(versionDisplay));
         }
         if (ui.topVersionBadgeLabel != null) {
             ui.topVersionBadgeLabel.setText(selectedVersion == null || selectedVersion.isBlank()
                     ? Messages.get("label.notSelected") : abbreviate(versionDisplay, 16));
         }
+        if (ui.selectedRuntimeMetaLabel != null) {
+            String metadata = GuiMessages.get("forest.chooseHint");
+            if (selectedVersion != null && !selectedVersion.isBlank()) {
+                metadata = ui.versionManager.getLocalVersionProfiles().stream()
+                        .filter(profile -> profile.profileId().equals(selectedVersion))
+                        .map(profile -> "Minecraft " + profile.minecraftVersion() + "  ·  "
+                                + (profile.loader().isBlank() ? GuiMessages.get("forest.vanilla")
+                                : ui.loaderChoiceForProfile(selectedVersion).displayName))
+                        .findFirst().orElse("Minecraft " + selectedVersion + "  ·  " + GuiMessages.get("forest.vanilla"));
+            }
+            ui.selectedRuntimeMetaLabel.setText(metadata);
+        }
     }
 
     private void updateAccountAndMemory(GameLaunchCoordinator.RuntimeSummary runtime) {
-        if (ui.selectedRuntimeMetaLabel != null) {
-            ui.selectedRuntimeMetaLabel.setText(
-                    Messages.format("home.runtimeMeta", runtime.javaText(), runtime.memoryText()));
-        }
         String accountName = ui.getAuthDisplayName();
         setText(ui.topAuthBadgeLabel, accountName);
         setText(ui.homeAccountNameLabel, accountName);
@@ -129,12 +138,12 @@ final class RuntimeSummaryPresenter {
         String authType = ui.authTypeCombo == null
                 ? LauncherUI.AUTH_OFFLINE : ui.authTypeCombo.getValue();
         if (LauncherUI.AUTH_MICROSOFT.equals(authType)) {
-            return "Microsoft 账号";
+            return GuiMessages.get("forest.microsoft");
         }
         if (LauncherUI.AUTH_YGGDRASIL.equals(authType)) {
-            return "外置登录";
+            return GuiMessages.get("forest.external");
         }
-        return "离线登录";
+        return GuiMessages.get("forest.offline");
     }
 
     private static void setSummaryText(Label label, String value, int maxLength) {

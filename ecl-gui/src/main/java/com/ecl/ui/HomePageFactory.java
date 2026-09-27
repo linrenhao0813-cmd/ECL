@@ -2,17 +2,23 @@ package com.ecl.ui;
 
 import com.ecl.util.Messages;
 import javafx.geometry.Pos;
+import javafx.beans.binding.Bindings;
+import javafx.scene.Node;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Rectangle;
 
-/** Builds and caches the launcher home page. */
+/** Builds the forest launch home while retaining the shared launch/account controls. */
 final class HomePageFactory {
     private final LauncherUI ui;
+    private RecentInstancesPane recentInstances;
 
     HomePageFactory(LauncherUI ui) {
         this.ui = ui;
@@ -22,167 +28,132 @@ final class HomePageFactory {
         if (ui.homePage == null) {
             ui.homePage = createLaunchPane();
         }
+        ui.updateRuntimeSummary();
+        recentInstances.refresh();
         return ui.homePage;
     }
 
     private VBox createLaunchPane() {
-        VBox pane = new VBox(24);
-        pane.getStyleClass().add("launch-pane");
+        VBox pane = new VBox(18);
+        pane.getStyleClass().addAll("launch-pane", "forest-home");
         pane.setPrefWidth(LauncherUI.LAUNCH_WIDTH);
-        pane.setMaxWidth(LauncherUI.LAUNCH_WIDTH);
-        pane.setFillWidth(true);
+        pane.setMaxWidth(Double.MAX_VALUE);
+        pane.setMinWidth(0);
         HBox.setHgrow(pane, Priority.ALWAYS);
-
-        Label pageTitle = new Label(Messages.get("home.title"));
-        pageTitle.getStyleClass().add("page-title");
-        Label pageSubtitle = new Label(Messages.get("home.subtitle"));
-        pageSubtitle.getStyleClass().add("page-subtitle");
-        VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
-        pageHeading.getStyleClass().add("page-heading");
-        pageHeading.setAlignment(Pos.CENTER);
-
-        HBox hero = createLaunchHero();
-        // Build the controls once so the selected local instance and authentication state
-        // remain available to the home summary. Instance selection has its own top-level page.
+        // Shared controls continue to own authentication and the selected local instance.
         ui.createForm();
-        HBox summaryCards = createHomeSummaryCards();
-
-        pane.getChildren().addAll(pageHeading, hero, summaryCards);
+        StackPane hero = createLaunchHero();
+        HBox summary = createStatusStrip();
+        recentInstances = new RecentInstancesPane(ui);
+        pane.getChildren().addAll(hero, summary, recentInstances, createActivity());
         return pane;
     }
 
-    private HBox createLaunchHero() {
-        Label eyebrow = new Label(Messages.get("home.currentInstance"));
-        eyebrow.getStyleClass().add("launch-eyebrow");
-        ui.selectedVersionTitleLabel = new Label(Messages.get("home.selectVersion"));
-        ui.selectedVersionTitleLabel.getStyleClass().add("launch-version-big");
-        ui.selectedRuntimeMetaLabel = new Label(Messages.format("home.runtimeMeta",
-                Runtime.version().feature(), ui.gameLaunch.getMemoryDisplayText()));
-        ui.selectedRuntimeMetaLabel.getStyleClass().add("launch-version-meta");
-        ui.launchReadinessLabel = new Label(Messages.get("home.autoCheck"));
-        ui.launchReadinessLabel.getStyleClass().add("ready-pill");
-
+    private StackPane createLaunchHero() {
+        Region landscape = new Region();
+        landscape.getStyleClass().add("forest-landscape");
+        Region shade = new Region();
+        shade.getStyleClass().add("forest-shade");
+        Label eyebrow = label(Messages.get("home.currentInstance"), "forest-eyebrow");
+        ui.selectedVersionTitleLabel = label(Messages.get("home.selectVersion"), "forest-title");
+        ui.selectedVersionTitleLabel.setMaxWidth(600);
+        ui.selectedRuntimeMetaLabel = label("", "forest-meta");
+        ui.selectedRuntimeMetaLabel.setMaxWidth(600);
+        Label description = label(GuiMessages.get("forest.description"), "forest-description");
+        description.setWrapText(true);
+        description.setMaxWidth(410);
         VBox details = new VBox(16, eyebrow, ui.selectedVersionTitleLabel,
-                ui.selectedRuntimeMetaLabel, ui.launchReadinessLabel, ui.createActionBar());
-        details.getStyleClass().add("launch-details");
+                ui.selectedRuntimeMetaLabel, ui.createActionBar(), description);
+        details.getStyleClass().add("forest-details");
         details.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(details, Priority.ALWAYS);
-
-        StackPane artwork = createHeroArtwork();
-        HBox hero = new HBox(48, details, artwork);
-        hero.getStyleClass().addAll("launch-surface", "launch-hero");
-        hero.setAlignment(Pos.CENTER);
+        details.setMaxWidth(Double.MAX_VALUE);
+        StackPane hero = new StackPane(landscape, shade, details);
+        hero.setId("forest-hero");
+        hero.getStyleClass().add("forest-hero");
+        hero.prefHeightProperty().bind(Bindings.when(ui.primaryStage.heightProperty().lessThan(800))
+                .then(360).otherwise(420));
+        Rectangle clip = new Rectangle();
+        clip.widthProperty().bind(hero.widthProperty());
+        clip.heightProperty().bind(hero.heightProperty());
+        clip.setArcWidth(24);
+        clip.setArcHeight(24);
+        hero.setClip(clip);
         return hero;
     }
 
-    private StackPane createHeroArtwork() {
-        Region glow = new Region();
-        glow.getStyleClass().add("orb-glow");
-        Region outerRing = new Region();
-        outerRing.getStyleClass().add("orb-ring-outer");
-        Region innerRing = new Region();
-        innerRing.getStyleClass().add("orb-ring-inner");
-        Region orb = new Region();
-        orb.getStyleClass().add("orb-core");
-        Label play = new Label("▶");
-        play.getStyleClass().add("orb-play");
-
-        StackPane artwork = new StackPane(glow, outerRing, innerRing, orb, play);
-        artwork.getStyleClass().add("hero-artwork");
-        artwork.setAlignment(Pos.CENTER);
-        return artwork;
+    private HBox createStatusStrip() {
+        ui.javaSummaryLabel = label("", "forest-stat-value");
+        ui.memorySummaryLabel = label("", "forest-stat-value");
+        ui.launchReadinessLabel = label("", "forest-stat-value");
+        ui.homeEnvironmentStatusLabel = label("", "forest-stat-caption");
+        ui.homeAccountNameLabel = label(ui.getAuthDisplayName(), "forest-stat-value");
+        ui.homeAccountTypeLabel = label("", "forest-stat-caption");
+        ui.playtimeTotalLabel = label("", "forest-stat-value");
+        ui.playtimeRecentLabel = label("", "forest-stat-caption");
+        ui.playtimeLaunchCountLabel = label("0", "forest-stat-caption");
+        Tooltip playtimeDetails = new Tooltip();
+        playtimeDetails.textProperty().bind(Bindings.concat(Messages.get("playtime.lastLaunch"), ": ",
+                ui.playtimeRecentLabel.textProperty(), "\n", Messages.get("playtime.launches"), ": ",
+                ui.playtimeLaunchCountLabel.textProperty()));
+        ui.playtimeTotalLabel.setTooltip(playtimeDetails);
+        HBox strip = new HBox(
+                stat("java", ui.javaSummaryLabel, label(Messages.get("info.java"), "forest-stat-caption")),
+                stat("memory", ui.memorySummaryLabel, label(Messages.get("home.memory"), "forest-stat-caption")),
+                stat("check", ui.launchReadinessLabel, ui.homeEnvironmentStatusLabel),
+                stat("account", ui.homeAccountNameLabel, ui.homeAccountTypeLabel),
+                stat("clock", ui.playtimeTotalLabel, label(Messages.get("playtime.total"), "forest-stat-caption")));
+        strip.getStyleClass().add("forest-status-strip");
+        return strip;
     }
 
-    private HBox createHomeSummaryCards() {
-        VBox accountCard = new VBox(14);
-        accountCard.getStyleClass().addAll("home-card", "account-card");
-        Label accountLabel = new Label(Messages.get("home.account"));
-        accountLabel.getStyleClass().add("card-kicker");
-        ui.homeAccountAvatarLabel = new Label("S");
-        ui.homeAccountAvatarLabel.getStyleClass().add("account-avatar");
-        ui.homeAccountNameLabel = new Label(ui.getAuthDisplayName());
-        ui.homeAccountNameLabel.getStyleClass().add("card-title");
-        ui.homeAccountTypeLabel = new Label(Messages.get("auth.offline"));
-        ui.homeAccountTypeLabel.getStyleClass().add("card-subtitle");
-        VBox accountText = new VBox(3, ui.homeAccountNameLabel, ui.homeAccountTypeLabel);
-        HBox accountProfile = new HBox(14, ui.homeAccountAvatarLabel, accountText);
-        accountProfile.setAlignment(Pos.CENTER_LEFT);
-        Region accountSpacer = new Region();
-        VBox.setVgrow(accountSpacer, Priority.ALWAYS);
-        var manageAccount = ui.createLinkButton(
-                Messages.get("home.manageAccount"), () -> ui.openInstanceSettings(true));
-        ui.homeSkinUploadButton = ui.createLinkButton(
-                Messages.get("home.uploadSkin"), () -> ui.skins.chooseAndUploadSkin());
-        Region accountActionSpacer = new Region();
-        HBox.setHgrow(accountActionSpacer, Priority.ALWAYS);
-        HBox accountActions = new HBox(8, manageAccount, accountActionSpacer,
-                ui.homeSkinUploadButton);
-        accountActions.setAlignment(Pos.CENTER_LEFT);
-        accountCard.getChildren().addAll(accountLabel, accountProfile, accountSpacer, accountActions);
-
-        VBox environmentCard = new VBox(12);
-        environmentCard.getStyleClass().addAll("home-card", "environment-card");
-        Label environmentLabel = new Label(Messages.get("home.environment"));
-        environmentLabel.getStyleClass().add("card-kicker");
-        ui.homeEnvironmentStatusLabel = new Label(Messages.get("home.environmentStatus"));
-        ui.homeEnvironmentStatusLabel.getStyleClass().add("card-title");
-        Label environmentCheck = new Label("✓");
-        environmentCheck.getStyleClass().add("environment-check");
-        Region environmentTitleSpacer = new Region();
-        HBox.setHgrow(environmentTitleSpacer, Priority.ALWAYS);
-        HBox environmentTitle = new HBox(ui.homeEnvironmentStatusLabel,
-                environmentTitleSpacer, environmentCheck);
-        environmentTitle.setAlignment(Pos.CENTER_LEFT);
-        ui.javaSummaryLabel = ui.createValueLabel(
-                Messages.format("home.javaSummary", Runtime.version().feature()));
-        ui.memorySummaryLabel = ui.createValueLabel(ui.gameLaunch.getMemoryDisplayText());
-        ui.versionSummaryLabel = ui.createValueLabel(Messages.get("home.versionPending"));
-        environmentCard.getChildren().addAll(environmentLabel, environmentTitle,
-                ui.createSummaryRow(Messages.get("info.java"), ui.javaSummaryLabel),
-                ui.createSummaryRow(Messages.get("home.memory"), ui.memorySummaryLabel),
-                ui.createSummaryRow(Messages.get("home.instance"), ui.versionSummaryLabel));
-
-        VBox taskCard = new VBox(12);
-        taskCard.getStyleClass().addAll("home-card", "task-card");
-        Label taskLabel = new Label(Messages.get("home.currentActivity"));
-        taskLabel.getStyleClass().add("card-kicker");
-        ui.statusLabel = new Label(Messages.get("home.noTasks"));
-        ui.statusLabel.getStyleClass().add("card-title");
-        ui.detailLabel = new Label(Messages.get("home.taskDetail"));
-        ui.detailLabel.getStyleClass().add("card-subtitle");
-        ui.detailLabel.setWrapText(true);
-        ui.downloadProgress = new ProgressBar(0);
-        ui.downloadProgress.getStyleClass().add("download-progress");
-        ui.downloadProgress.setMaxWidth(Double.MAX_VALUE);
-        Region taskSpacer = new Region();
-        VBox.setVgrow(taskSpacer, Priority.ALWAYS);
-        taskCard.getChildren().addAll(taskLabel, ui.statusLabel, ui.detailLabel,
-                ui.downloadProgress, taskSpacer);
-
-        VBox playtimeCard = new VBox(12);
-        playtimeCard.getStyleClass().addAll("home-card", "playtime-card");
-        Label playtimeTitle = new Label(Messages.get("playtime.title"));
-        playtimeTitle.getStyleClass().add("card-kicker");
-        ui.playtimeTotalLabel = ui.createValueLabel(Messages.get("label.notSelected"));
-        ui.playtimeRecentLabel = ui.createValueLabel(Messages.get("playtime.never"));
-        ui.playtimeLaunchCountLabel = ui.createValueLabel("0");
-        playtimeCard.getChildren().addAll(playtimeTitle,
-                ui.createSummaryRow(Messages.get("playtime.total"), ui.playtimeTotalLabel),
-                ui.createSummaryRow(Messages.get("playtime.lastLaunch"), ui.playtimeRecentLabel),
-                ui.createSummaryRow(Messages.get("playtime.launches"), ui.playtimeLaunchCountLabel),
-                ui.createLinkButton(Messages.get("shortcut.createLink"),
-                        () -> ui.openDownloadSection(DownloadSection.INSTANCES)));
-
-        double preferredCardWidth = (LauncherUI.LAUNCH_WIDTH - 72) / 4.0;
-        for (VBox card : java.util.List.of(accountCard, environmentCard, taskCard, playtimeCard)) {
-            card.setMinWidth(0);
-            card.setPrefWidth(preferredCardWidth);
-            card.setMaxWidth(Double.MAX_VALUE);
-            HBox.setHgrow(card, Priority.ALWAYS);
+    private HBox stat(String icon, Label value, Label caption) {
+        value.setMinWidth(0);
+        value.setMaxWidth(Double.MAX_VALUE);
+        if (value.getTooltip() == null) {
+            Tooltip tooltip = new Tooltip();
+            tooltip.textProperty().bind(value.textProperty());
+            value.setTooltip(tooltip);
         }
-        HBox cards = new HBox(24, accountCard, environmentCard, taskCard, playtimeCard);
-        cards.getStyleClass().add("home-summary");
-        cards.setFillHeight(true);
-        return cards;
+        caption.setMinWidth(0);
+        VBox text = new VBox(6, value, caption);
+        text.setMinWidth(0);
+        HBox cell = new HBox(12, ForestIcons.create(icon), text);
+        cell.setAlignment(Pos.CENTER_LEFT);
+        cell.setMinWidth(0);
+        cell.setPrefWidth(220);
+        cell.setMaxWidth(Double.MAX_VALUE);
+        cell.getStyleClass().add("forest-stat");
+        HBox.setHgrow(cell, Priority.ALWAYS);
+        HBox.setHgrow(text, Priority.ALWAYS);
+        return cell;
+    }
+
+    private HBox createActivity() {
+        ui.statusLabel = label(Messages.get("home.noTasks"), "forest-activity-title");
+        ui.detailLabel = label(Messages.get("home.taskDetail"), "forest-stat-caption");
+        ui.detailLabel.setMinWidth(0);
+        ui.downloadProgress = new ProgressBar(0);
+        ui.downloadProgress.setPrefWidth(90);
+        ui.downloadProgress.getStyleClass().add("download-progress");
+        Button account = ui.createLinkButton(Messages.get("home.manageAccount"), ui::openAccountSettings);
+        ui.homeSkinUploadButton = ui.createLinkButton(Messages.get("home.uploadSkin"),
+                () -> ui.skins.chooseAndUploadSkin());
+        HBox activity = new HBox(12, ui.downloadProgress, ui.statusLabel, ui.detailLabel,
+                spacer(), account, ui.homeSkinUploadButton);
+        activity.getStyleClass().add("forest-activity");
+        activity.setAlignment(Pos.CENTER_LEFT);
+        return activity;
+    }
+
+    static Label label(String text, String style) {
+        Label label = new Label(text);
+        label.getStyleClass().add(style);
+        return label;
+    }
+
+    static Node spacer() {
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        return spacer;
     }
 }

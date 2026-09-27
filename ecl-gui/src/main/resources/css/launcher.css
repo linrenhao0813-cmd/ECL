@@ -1300,24 +1300,24 @@
 .scene-root.theme-dark.root-pane > *,
 .scene-root.theme-dark .root-pane,
 .scene-root.theme-dark .root-pane > * {
-    -ecl-canvas: #0b1120;
-    -ecl-surface: #111827;
-    -ecl-surface-muted: #172033;
-    -ecl-text: #f1f5f9;
-    -ecl-secondary: #a8b3c7;
-    -ecl-tertiary: #7f8ca3;
-    -ecl-border: #293548;
-    -ecl-blue: #38bdf8;
-    -ecl-blue-hover: #7dd3fc;
-    -ecl-blue-pressed: #0ea5e9;
-    -ecl-track: #263247;
+    -ecl-canvas: #101915;
+    -ecl-surface: #141f19;
+    -ecl-surface-muted: #1b2922;
+    -ecl-text: #edf3ed;
+    -ecl-secondary: #a9b6ad;
+    -ecl-tertiary: #86978c;
+    -ecl-border: #2a3930;
+    -ecl-blue: #b4d7b6;
+    -ecl-blue-hover: #cbe5ca;
+    -ecl-blue-pressed: #97bd9c;
+    -ecl-track: #2a3930;
     -ecl-success-text: #6ee7a0;
     -ecl-success-bg: #10291d;
     -ecl-danger: #fb7185;
 }
 
 .scene-root.theme-dark {
-    -fx-background-color: linear-gradient(to bottom, #0b1120, #101827);
+    -fx-background-color: linear-gradient(to bottom, #101915, #111b16);
 }
 
 .scene-root.theme-dark .window-title-bar,
@@ -1333,7 +1333,7 @@
 }
 
 .scene-root.theme-dark .launch-surface {
-    -fx-background-color: linear-gradient(to bottom right, #172033 0%, #111827 100%);
+    -fx-background-color: linear-gradient(to bottom right, #1b2922 0%, #141f19 100%);
     -fx-border-color: -ecl-border;
     -fx-border-width: 1;
 }
@@ -1344,7 +1344,7 @@
 }
 
 .scene-root.theme-dark .account-avatar {
-    -fx-background-color: #263247;
+    -fx-background-color: #2a3930;
     -fx-text-fill: -ecl-text;
 }
 
@@ -1367,11 +1367,11 @@
 
 .scene-root.theme-dark .content-library-nav-item-active,
 .scene-root.theme-dark .content-library-nav-item-active:hover {
-    -fx-background-color: #17314a;
+    -fx-background-color: #294332;
 }
 
 .scene-root.theme-dark .content-library-nav-icon {
-    -fx-background-color: #263247;
+    -fx-background-color: #2a3930;
     -fx-text-fill: -ecl-secondary;
 }
 
@@ -2286,7 +2286,7 @@
 }
 
 .scene-root.theme-dark .instance-install-choice:selected {
-    -fx-background-color: #17314a;
+    -fx-background-color: #294332;
 }
 
 .scene-root.theme-dark .instance-install-choice-detail {
@@ -2742,3 +2742,127 @@
     -fx-font-weight: 400;
     -fx-letter-spacing: 0;
 }
+
+/* Forest home: native controls over an independently generated landscape. */
+.window-title-bar {
+    -fx-padding: 0 24;
+    -fx-spacing: 12;
+    -fx-min-height: 72;
+    -fx-pref-height: 72;
+    -fx-max-height: 72;
+}
+.window-title, .brand-label { -fx-min-width: 96; -fx-font-size: 25px; }
+.global-nav { -fx-spacing: 0; }
+.main-body { -fx-padding: 24 28 12 28; }
+.forest-home { -fx-spacing: 18; -fx-padding: 0; }
+.forest-icon-path { -fx-fill: transparent; -fx-stroke: -ecl-secondary; -fx-stroke-width: 1.5; }
+.brand-label .forest-icon-path { -fx-stroke: -ecl-blue; -fx-fill: -ecl-blue; }
+.nav-button { -fx-padding: 20 8; -fx-font-size: 13px; -fx-min-height: 71; -fx-pref-height: 71; }
+.nav-button-selected, .nav-button:focused {
+    -fx-border-color: transparent transparent -ecl-blue transparent;
+    -fx-text-fill: -ecl-blue;
+}
+.nav-button-selected .forest-icon-path { -fx-stroke: -ecl-blue; }
+.forest-account-button {
+    -fx-background-color: transparent;
+    -fx-padding: 8;
+    -fx-cursor: hand;
+    -fx-background-radius: 8;
+}
+.forest-account-button:hover { -fx-background-color: -ecl-surface-muted; }
+.scene-root .account-chip, .scene-root.theme-dark .account-chip {
+    -fx-background-color: transparent;
+    -fx-padding: 2 0;
+    -fx-font-size: 13px;
+    -fx-text-fill: -ecl-text;
+    -fx-max-width: 110;
+}
+.forest-hero { -fx-min-height: 320; -fx-pref-height: 420; }
+.forest-landscape {
+    -fx-background-color: #14241b;
+    -fx-background-image: url('../images/forest-hero.png');
+    -fx-background-size: cover;
+    -fx-background-position: center;
+    -fx-background-repeat: no-repeat;
+    -fx-background-radius: 12;
+}
+.forest-shade {
+    -fx-background-color: linear-gradient(to right, rgba(5, 16, 10, 0.88) 0%, rgba(5, 16, 10, 0.65) 34%, rgba(5, 16, 10, 0.06) 80%);
+    -fx-background-radius: 12;
+}
+.forest-details { -fx-padding: 34 44; }
+.scene-root .forest-home .forest-eyebrow { -fx-text-fill: #b5c7b8; -fx-font-size: 13px; }
+.scene-root .forest-home .forest-title { -fx-text-fill: #f5f8f4; -fx-font-size: 42px; -fx-font-weight: bold; }
+.scene-root .forest-home .forest-meta { -fx-text-fill: #c4cfc7; -fx-font-size: 16px; }
+.scene-root .forest-home .forest-description {
+    -fx-text-fill: #adbdb1;
+    -fx-font-size: 13px;
+    -fx-padding: 16 0 0 0;
+    -fx-border-color: #45604a transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+.forest-home .launch-actions { -fx-padding: 8 0; -fx-spacing: 28; }
+.forest-home .launch-button {
+    -fx-background-color: #b4d7b6;
+    -fx-background-radius: 9;
+    -fx-text-fill: #102016;
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+    -fx-min-width: 192;
+    -fx-pref-width: 192;
+    -fx-min-height: 56;
+    -fx-pref-height: 56;
+    -fx-effect: none;
+}
+.forest-home .launch-button:hover { -fx-background-color: #cbe5ca; }
+.scene-root .forest-home .launch-play-icon { -fx-text-fill: #102016; -fx-font-size: 18px; }
+.forest-home .launch-actions .link-button { -fx-text-fill: #cee2cf; -fx-font-size: 14px; }
+.forest-home .launch-actions .link-button:hover { -fx-background-color: rgba(180, 215, 182, 0.12); }
+.forest-status-strip {
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+    -fx-background-color: -ecl-surface;
+    -fx-padding: 20 4;
+}
+.forest-stat { -fx-padding: 0 18; -fx-border-color: transparent -ecl-border transparent transparent; -fx-border-width: 0 1 0 0; }
+.scene-root .forest-home .forest-stat-value { -fx-text-fill: -ecl-text; -fx-font-size: 14px; }
+.scene-root .forest-home .forest-stat-caption { -fx-text-fill: -ecl-secondary; -fx-font-size: 12px; }
+.scene-root .forest-home .forest-section-title { -fx-text-fill: -ecl-text; -fx-font-size: 18px; -fx-font-weight: bold; }
+.forest-recents .link-button { -fx-text-fill: -ecl-secondary; }
+.forest-recent-card, .forest-empty {
+    -fx-background-color: -ecl-surface;
+    -fx-background-radius: 10;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 10;
+    -fx-padding: 12 16;
+    -fx-min-height: 92;
+    -fx-alignment: center-left;
+}
+.forest-recent-card { -fx-cursor: hand; }
+.forest-recent-card:hover { -fx-background-color: -ecl-surface-muted; -fx-border-color: -ecl-blue; }
+.forest-recent-thumbnail {
+    -fx-min-width: 70; -fx-pref-width: 70; -fx-max-width: 70;
+    -fx-min-height: 56; -fx-pref-height: 56; -fx-max-height: 56;
+    -fx-background-image: url('../images/forest-hero.png');
+    -fx-background-size: cover;
+    -fx-background-position: right center;
+    -fx-background-radius: 6;
+}
+.scene-root .forest-home .forest-recent-title { -fx-text-fill: -ecl-text; -fx-font-size: 15px; -fx-font-weight: bold; }
+.scene-root .forest-home .forest-empty { -fx-text-fill: -ecl-secondary; -fx-font-size: 13px; }
+.forest-activity { -fx-padding: 0 4; }
+.scene-root .forest-home .forest-activity-title { -fx-text-fill: -ecl-secondary; -fx-font-size: 11px; }
+.forest-activity .link-button { -fx-font-size: 11px; }
+.scene-root.theme-dark .link-button, .scene-root.theme-dark .wiki-link-button { -fx-text-fill: -ecl-blue; }
+.scene-root.theme-dark .primary-button { -fx-text-fill: #102016; }
+.scene-root.theme-dark .primary-button:hover { -fx-text-fill: #102016; }
+.scene-root.theme-dark .download-progress > .track { -fx-background-color: -ecl-track; }
+.scene-root.theme-dark .download-progress > .bar { -fx-background-color: -ecl-blue; }
+.scene-root.theme-dark .list-view, .scene-root.theme-dark .mod-result-list { -fx-background-color: -ecl-surface; }
+.scene-root.theme-dark .list-view .list-cell { -fx-border-color: transparent transparent -ecl-border transparent; }
+.scene-root.theme-dark .list-view .list-cell:filled:selected { -fx-background-color: -ecl-surface-muted; }
+.scene-root.theme-dark .window-button:hover { -fx-background-color: -ecl-surface-muted; -fx-text-fill: -ecl-text; }
+.scene-root.theme-dark .window-close-button:hover { -fx-background-color: #5a2930; }
+.scene-root.theme-dark .main-scroll .scroll-bar:vertical .thumb { -fx-background-color: -ecl-border; }
+.footer-bar { -fx-padding: 4 28 10 28; }

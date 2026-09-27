@@ -317,7 +317,7 @@ final class LauncherLaunchForm {
     HBox createActionBar() {
         Label playIcon = new Label("▶");
         playIcon.getStyleClass().add("launch-play-icon");
-        ui.launchBtn = new Button("启动游戏");
+        ui.launchBtn = new Button(GuiMessages.get("forest.launch"));
         ui.launchBtn.setGraphic(playIcon);
         ui.launchBtn.setGraphicTextGap(10);
         ui.launchBtn.getStyleClass().addAll("app-button", "launch-button");
@@ -326,8 +326,10 @@ final class LauncherLaunchForm {
         loader.updateLoaderControls();
 
         Button switchInstanceButton = ui.createLinkButton(
-                "选择本地实例  ›",
+                GuiMessages.get("forest.switchInstance"),
                 () -> ui.setActiveView(AppView.VERSIONS));
+        switchInstanceButton.setId("home-switch-instance");
+        switchInstanceButton.disableProperty().bind(ui.launchBtn.disabledProperty());
 
         ui.refreshBtn = new Button("刷新版本");
         ui.refreshBtn.getStyleClass().addAll("app-button", "secondary-button");

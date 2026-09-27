@@ -335,6 +335,8 @@ class LauncherUIView extends javafx.application.Application {
 
         Label title = new Label("ECL");
         title.getStyleClass().addAll("window-title", "brand-label");
+        title.setGraphic(ForestIcons.create("leaf"));
+        title.setGraphicTextGap(12);
 
         HBox navigation = navigationRail.createTopNavigation(activeView);
 
@@ -345,6 +347,12 @@ class LauncherUIView extends javafx.application.Application {
 
         topAuthBadgeLabel = createValueLabel("Steve");
         topAuthBadgeLabel.getStyleClass().add("account-chip");
+        Button accountButton = new Button();
+        accountButton.setId("top-account-button");
+        accountButton.setGraphic(new HBox(8, ForestIcons.create("account"), topAuthBadgeLabel));
+        accountButton.getStyleClass().add("forest-account-button");
+        accountButton.setAccessibleText(GuiMessages.get("accounts.title"));
+        accountButton.setOnAction(event -> openAccountSettings());
 
         topVersionBadgeLabel = createValueLabel("未选择");
         runtimeBadgeLabel = createValueLabel("检查中");
@@ -358,7 +366,7 @@ class LauncherUIView extends javafx.application.Application {
                 leftSpacer,
                 navigation,
                 rightSpacer,
-                topAuthBadgeLabel,
+                accountButton,
                 windowControls
         );
         windowChrome.installDragBehavior(titleBar);
@@ -372,6 +380,7 @@ class LauncherUIView extends javafx.application.Application {
         Label version = new Label("ECL " + Messages.get("app.version"));
         version.getStyleClass().add("footer-info");
         Label state = new Label(Messages.get("footer.ready"));
+        state.setId("footer-ready");
         state.getStyleClass().add("footer-info");
 
         HBox footer = new HBox(8, version, spacer, state);
@@ -850,6 +859,8 @@ class LauncherUIView extends javafx.application.Application {
         settingsManager.save();
         primaryStage.setTitle(Messages.get("app.title"));
         navigationRail.refreshTexts();
+        Node footerStatus = primaryStage.getScene().lookup("#footer-ready");
+        if (footerStatus instanceof Label label) label.setText(Messages.get("footer.ready"));
         if (authTypeCombo != null) authTypeCombo.requestLayout();
         homePage = null;
         contentTargets = createContentTargets();

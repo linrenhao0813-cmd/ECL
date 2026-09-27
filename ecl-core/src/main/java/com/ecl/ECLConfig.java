@@ -74,7 +74,7 @@ public class ECLConfig {
     public static final SettingKey<String> KEY_LANGUAGE =
             new SettingKey<>("language", String.class, "zh-CN");
     public static final SettingKey<String> KEY_THEME =
-            new SettingKey<>("theme", String.class, "LIGHT");
+            new SettingKey<>("theme", String.class, "DARK");
     public static final SettingKey<Boolean> KEY_FIRST_RUN_COMPLETED =
             new SettingKey<>("firstRunCompleted", Boolean.class, false);
 

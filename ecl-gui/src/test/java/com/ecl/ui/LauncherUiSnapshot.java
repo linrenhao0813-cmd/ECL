@@ -62,6 +62,12 @@ public final class LauncherUiSnapshot {
 
         int width = Math.max(1, (int) Math.ceil(scene.getWidth()));
         int height = Math.max(1, (int) Math.ceil(scene.getHeight()));
+        if (mode != null && mode.startsWith("forest")) {
+            Node controls = scene.lookup(".window-controls");
+            if (controls == null || controls.localToScene(controls.getBoundsInLocal()).getMaxX() > width) {
+                throw new IllegalStateException("Window controls overflow the forest layout");
+            }
+        }
         WritableImage snapshot = new WritableImage(width, height);
         scene.snapshot(snapshot);
 
@@ -149,6 +155,7 @@ public final class LauncherUiSnapshot {
 
         private Scene prepareCaptureScene(Stage primaryStage) throws Exception {
             String mode = System.getProperty("ecl.snapshot.mode", "home");
+            if (mode.startsWith("forest")) return prepareForestCapture(primaryStage, mode);
             if ("initial-dark".equalsIgnoreCase(mode)) {
                 if (!primaryStage.getScene().getRoot().getStyleClass().contains("theme-dark")) {
                     throw new IllegalStateException("Initial launcher scene did not apply the dark theme");
@@ -318,6 +325,39 @@ public final class LauncherUiSnapshot {
                 return findSecondaryScene(primaryStage, "Backup dialog did not open");
             }
             return primaryStage.getScene();
+        }
+
+        private Scene prepareForestCapture(Stage stage, String mode) throws Exception {
+            applySnapshotTheme(mode.endsWith("light") ? "LIGHT" : "DARK");
+            switchLanguage(mode.contains("en") ? "en" : "zh-CN");
+            if (mode.endsWith("empty")) {
+                gameDir = Files.createTempDirectory(Path.of(System.getProperty("user.home")), "forest-empty-").toFile();
+                versionActions.restoreVersionComboItems(null);
+                homePageFactory.getOrCreate();
+                return stage.getScene();
+            }
+            String selected = createVisualProfile("生存世界", "fabric", "1.21.1");
+            String second = createVisualProfile("原版探索", "", "1.21.1");
+            for (String id : java.util.List.of(selected, second)) {
+                Path root = resolveVersionInstanceRoot(id).toPath();
+                Files.createDirectories(root.resolve(".ecl/config"));
+                String date = id.equals(selected) ? "2026-09-26T10:30:00Z" : "2026-09-25T08:00:00Z";
+                Files.writeString(root.resolve(".ecl/config/playtime.json"), """
+                        {"totalSeconds":88560,"launchCount":12,"lastLaunchedAt":"%s"}
+                        """.formatted(date));
+            }
+            versionManager.invalidateLocalVersionProfiles();
+            maxMemoryMb = 4096;
+            versionCombo.getItems().setAll(selected, second);
+            versionCombo.setValue(selected);
+            versionActions.restoreVersionComboItems(selected);
+            updateRuntimeSummary();
+            homePageFactory.getOrCreate();
+            if (mode.contains("compact")) {
+                stage.setWidth(1180);
+                stage.setHeight(720);
+            }
+            return stage.getScene();
         }
 
         private Scene prepareLocalVersionsCapture(Stage stage) throws Exception {

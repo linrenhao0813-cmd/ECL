@@ -107,7 +107,7 @@ final class LauncherLoaderWorkflow {
             }
         }
         if (ui.launchBtn != null) {
-            ui.launchBtn.setText(requiresInstall ? "安装并启动" : "启动游戏");
+            ui.launchBtn.setText(GuiMessages.get(requiresInstall ? "forest.installLaunch" : "forest.launch"));
         }
     }
 
