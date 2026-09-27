@@ -19,7 +19,6 @@ import javafx.stage.StageStyle;
 
 import java.net.URL;
 import java.util.List;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -28,16 +27,13 @@ final class FirstRunWizard {
     private final SettingsManager settings;
     private final Consumer<String> languageSwitcher;
     private final Function<String, String> languageDisplayName;
-    private final BiConsumer<Scene, String> themeApplier;
     private Stage stage;
 
     FirstRunWizard(SettingsManager settings, Consumer<String> languageSwitcher,
-                   Function<String, String> languageDisplayName,
-                   BiConsumer<Scene, String> themeApplier) {
+                   Function<String, String> languageDisplayName) {
         this.settings = settings;
         this.languageSwitcher = languageSwitcher;
         this.languageDisplayName = languageDisplayName;
-        this.themeApplier = themeApplier;
     }
 
     void show(Stage owner) {
@@ -109,7 +105,7 @@ final class FirstRunWizard {
             scene.getStylesheets().add(stylesheet.toExternalForm());
         }
         wizard.setScene(scene);
-        themeApplier.accept(scene, settings.get(ECLConfig.KEY_THEME));
+        LauncherThemeManager.applyToScene(scene);
         wizard.setOnCloseRequest(event -> finish(wizard));
         update.run();
         wizard.show();

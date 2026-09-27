@@ -200,7 +200,7 @@ final class MicrosoftAccountCoordinator {
             scene.getStylesheets().add(stylesheet.toExternalForm());
         }
         dialog.setScene(scene);
-        ui.applyThemeToScene(scene, ui.settingsManager.get(ECLConfig.KEY_THEME));
+        ui.applyThemeToScene(scene);
         dialog.show();
         codeField.requestFocus();
         codeField.selectAll();

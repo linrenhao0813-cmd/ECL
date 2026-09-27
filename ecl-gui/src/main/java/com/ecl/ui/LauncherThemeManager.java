@@ -6,7 +6,7 @@ import javafx.scene.Scene;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 
-/** Applies launcher locale labels and light/dark theme classes. */
+/** Applies launcher locale labels and the fixed dark theme class. */
 final class LauncherThemeManager {
     private LauncherThemeManager() {
     }
@@ -19,33 +19,25 @@ final class LauncherThemeManager {
         };
     }
 
-    static String themeDisplayName(String theme) {
-        return "LIGHT".equalsIgnoreCase(theme)
-                ? Messages.get("theme.light") : Messages.get("theme.dark");
-    }
-
-    static String normalize(String theme) {
-        return "LIGHT".equalsIgnoreCase(theme) ? "LIGHT" : "DARK";
-    }
-
-    static void applyToAllWindows(Stage primaryStage, String requestedTheme) {
+    static void applyToAllWindows(Stage primaryStage) {
         if (primaryStage != null && primaryStage.getScene() != null) {
-            applyToScene(primaryStage.getScene(), requestedTheme);
+            applyToScene(primaryStage.getScene());
         }
         for (Window window : Window.getWindows()) {
             if (window != primaryStage && window.getScene() != null) {
-                applyToScene(window.getScene(), requestedTheme);
+                applyToScene(window.getScene());
             }
         }
     }
 
-    static void applyToScene(Scene scene, String requestedTheme) {
+    static void applyToScene(Scene scene) {
         if (scene == null || scene.getRoot() == null) {
             return;
         }
         Node root = scene.getRoot();
-        root.getStyleClass().removeAll("theme-dark", "theme-light");
-        root.getStyleClass().add("LIGHT".equals(normalize(requestedTheme))
-                ? "theme-light" : "theme-dark");
+        root.getStyleClass().remove("theme-light");
+        if (!root.getStyleClass().contains("theme-dark")) {
+            root.getStyleClass().add("theme-dark");
+        }
     }
 }

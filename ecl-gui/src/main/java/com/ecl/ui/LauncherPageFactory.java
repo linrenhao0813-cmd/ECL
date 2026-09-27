@@ -91,17 +91,6 @@ final class LauncherPageFactory {
         ui.configureLocalizedCombo(languageBox, ui::languageDisplayName);
         languageBox.setOnAction(event -> ui.switchLanguage(languageBox.getValue()));
 
-        ComboBox<String> themeBox = new ComboBox<>();
-        themeBox.getItems().addAll("DARK", "LIGHT");
-        themeBox.setValue(ui.normalizeTheme(ui.settingsManager.get(ECLConfig.KEY_THEME)));
-        ui.configureLocalizedCombo(themeBox, ui::themeDisplayName);
-        themeBox.setOnAction(event -> {
-            String theme = ui.normalizeTheme(themeBox.getValue());
-            ui.settingsManager.set(ECLConfig.KEY_THEME, theme);
-            ui.settingsManager.save();
-            ui.applyTheme(theme);
-        });
-
         Button advancedButton = ui.createActionButton(
                 Messages.get("settings.advanced"), "primary-button", ui::showSettingsDialog);
         Button dataDirButton = ui.createActionButton(
@@ -119,7 +108,6 @@ final class LauncherPageFactory {
                 "// " + Messages.get("settings.system"),
                 Messages.get("settings.subtitle"),
                 ui.createControlRow(Messages.get("settings.language"), languageBox),
-                ui.createControlRow(Messages.get("settings.theme"), themeBox),
                 ui.createInfoRow("Java", ui.createStaticValueLabel(
                         ui.javaPath == null || ui.javaPath.isBlank() ? "-" : abbreviate(ui.javaPath, 72))),
                 actions

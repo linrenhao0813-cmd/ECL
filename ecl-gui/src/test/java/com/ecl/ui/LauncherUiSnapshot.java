@@ -3,7 +3,6 @@ package com.ecl.ui;
 import com.ecl.ECLConfig;
 import com.ecl.backup.BackupEntry;
 import com.ecl.backup.WorldBackupService;
-import com.ecl.config.SettingsManager;
 import javafx.animation.PauseTransition;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -114,12 +113,6 @@ public final class LauncherUiSnapshot {
     public static final class SnapshotApplication extends LauncherUI {
         @Override
         public void start(Stage stage) {
-            if ("initial-dark".equalsIgnoreCase(System.getProperty("ecl.snapshot.mode"))) {
-                SettingsManager settings = new SettingsManager();
-                settings.load();
-                settings.set(ECLConfig.KEY_THEME, "DARK");
-                settings.save();
-            }
             super.start(stage);
             stage.setIconified(false);
 
@@ -170,9 +163,7 @@ public final class LauncherUiSnapshot {
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
                 createVisualVersionManifest();
-                if (mode.toLowerCase(java.util.Locale.ROOT).endsWith("-dark")) {
-                    applySnapshotTheme("DARK");
-                }
+                applySnapshotTheme();
                 showAppView("DOWNLOADS");
                 if ("instance-install-dark".equalsIgnoreCase(mode)) {
                     scheduleInstallerPreview(primaryStage);
@@ -183,7 +174,7 @@ public final class LauncherUiSnapshot {
                 return prepareSavesCapture(primaryStage, mode);
             }
             if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("accounts")) {
-                applySnapshotTheme(mode.endsWith("-dark") ? "DARK" : "LIGHT");
+                applySnapshotTheme();
                 openAccountSettings();
                 if (mode.contains("microsoft")) authTypeCombo.setValue(LauncherUI.AUTH_MICROSOFT);
                 if (mode.contains("external")) authTypeCombo.setValue(LauncherUI.AUTH_YGGDRASIL);
@@ -200,9 +191,6 @@ public final class LauncherUiSnapshot {
             if ("servers".equalsIgnoreCase(mode)
                     || "servers-dark".equalsIgnoreCase(mode)
                     || "servers-en".equalsIgnoreCase(mode)) {
-                if ("servers-dark".equalsIgnoreCase(mode)) {
-                    applySnapshotTheme("DARK");
-                }
                 if ("servers-en".equalsIgnoreCase(mode)) {
                     Method switchLanguage = LauncherUIView.class.getDeclaredMethod(
                             "switchLanguage", String.class);
@@ -283,7 +271,7 @@ public final class LauncherUiSnapshot {
                 return primaryStage.getScene();
             }
             if ("settings-page-dark".equalsIgnoreCase(mode)) {
-                applySnapshotTheme("DARK");
+                applySnapshotTheme();
                 showAppView("SETTINGS");
                 return primaryStage.getScene();
             }
@@ -328,7 +316,7 @@ public final class LauncherUiSnapshot {
         }
 
         private Scene prepareForestCapture(Stage stage, String mode) throws Exception {
-            applySnapshotTheme(mode.endsWith("light") ? "LIGHT" : "DARK");
+            applySnapshotTheme();
             switchLanguage(mode.contains("en") ? "en" : "zh-CN");
             if (mode.endsWith("empty")) {
                 gameDir = Files.createTempDirectory(Path.of(System.getProperty("user.home")), "forest-empty-").toFile();
@@ -370,7 +358,7 @@ public final class LauncherUiSnapshot {
         }
 
         private Scene prepareSavesCapture(Stage stage, String mode) throws Exception {
-            applySnapshotTheme(mode.endsWith("-dark") ? "DARK" : "LIGHT");
+            applySnapshotTheme();
             createVisualProfile("visual-save-vanilla", "", "1.20.1");
             createVisualProfile("visual-save-fabric", "fabric", "1.20.1");
             for (String name : java.util.List.of("Alpine Base", "Creative Coast", "Redstone Lab")) {
@@ -454,14 +442,10 @@ public final class LauncherUiSnapshot {
                     .orElseThrow(() -> new IllegalStateException(failureMessage));
         }
 
-        private void applySnapshotTheme(String theme) throws Exception {
-            Field settingsField = LauncherUIView.class.getDeclaredField("settingsManager");
-            settingsField.setAccessible(true);
-            SettingsManager settings = (SettingsManager) settingsField.get(this);
-            settings.set(ECLConfig.KEY_THEME, theme);
-            Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme", String.class);
+        private void applySnapshotTheme() throws Exception {
+            Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme");
             applyTheme.setAccessible(true);
-            applyTheme.invoke(this, theme);
+            applyTheme.invoke(this);
         }
 
         private void scheduleInstallerPreview(Stage stage) {

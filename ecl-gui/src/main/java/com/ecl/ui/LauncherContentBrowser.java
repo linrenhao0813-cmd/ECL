@@ -1,6 +1,5 @@
 package com.ecl.ui;
 
-import com.ecl.ECLConfig;
 import com.ecl.download.DownloadTaskCenter;
 import com.ecl.modrinth.model.ContentProject;
 import com.ecl.modrinth.model.ContentVersion;
@@ -355,7 +354,7 @@ final class LauncherContentBrowser {
             scene.getStylesheets().add(stylesheet.toExternalForm());
         }
         dialog.setScene(scene);
-        ui.applyThemeToScene(scene, ui.settingsManager.get(ECLConfig.KEY_THEME));
+        ui.applyThemeToScene(scene);
         dialog.show();
         searchController.searchModrinthContent(sourceCombo.getValue(), target, initialInstance,
                 searchField, resultList, dialogStatus, searchBtn, importBtn, searchGeneration);

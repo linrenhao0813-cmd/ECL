@@ -240,7 +240,7 @@ class LauncherUIView extends javafx.application.Application {
         primaryStage.setMinWidth(1180);
         primaryStage.setMinHeight(720);
         primaryStage.setScene(scene);
-        applyTheme(settingsManager.get(ECLConfig.KEY_THEME));
+        applyTheme();
         primaryStage.show();
         primaryStage.centerOnScreen();
         root.setFocusTraversable(true);
@@ -292,7 +292,7 @@ class LauncherUIView extends javafx.application.Application {
     void showFirstRunWizard() {
         if (firstRunWizard == null) {
             firstRunWizard = new FirstRunWizard(settingsManager, this::switchLanguage,
-                    this::languageDisplayName, this::applyThemeToScene);
+                    this::languageDisplayName);
         }
         firstRunWizard.show(primaryStage);
     }
@@ -844,14 +844,6 @@ class LauncherUIView extends javafx.application.Application {
         return LauncherThemeManager.languageDisplayName(tag);
     }
 
-    String themeDisplayName(String theme) {
-        return LauncherThemeManager.themeDisplayName(theme);
-    }
-
-    String normalizeTheme(String theme) {
-        return LauncherThemeManager.normalize(theme);
-    }
-
     void switchLanguage(String languageTag) {
         if (languageTag == null) return;
         Messages.setLocale(Locale.forLanguageTag(languageTag));
@@ -867,12 +859,12 @@ class LauncherUIView extends javafx.application.Application {
         renderActiveView();
     }
 
-    void applyTheme(String requestedTheme) {
-        LauncherThemeManager.applyToAllWindows(primaryStage, requestedTheme);
+    void applyTheme() {
+        LauncherThemeManager.applyToAllWindows(primaryStage);
     }
 
-    void applyThemeToScene(Scene scene, String requestedTheme) {
-        LauncherThemeManager.applyToScene(scene, requestedTheme);
+    void applyThemeToScene(Scene scene) {
+        LauncherThemeManager.applyToScene(scene);
     }
 
     Label createValueLabel() {
