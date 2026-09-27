@@ -21,9 +21,10 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖版本安装�
 
 ### 账户与皮肤
 
-- 支持离线账户、Microsoft 设备码登录和 Yggdrasil 外置登录，保存的凭据采用加密存储。
+- 支持离线账户和 Microsoft 设备码登录，保存的凭据采用加密存储。旧版 Yggdrasil 账号记录保留，但不再提供外置登录。
 - Microsoft 登录默认使用内置公共客户端 ID，可通过 `ecl.microsoft.clientId` 或环境变量 `ECL_MICROSOFT_CLIENT_ID` 覆盖。
 - Microsoft 正版账户可上传官方皮肤；离线账户可导入本地皮肤，并在启动游戏时自动注入。两种方式均支持 64×64 或 64×32 的 PNG（最大 1 MiB），可选经典（宽手臂）或纤细（细手臂）模型。
+- 窗口右上角的玩家头像显示 Microsoft 账号或已导入离线皮肤的头部；没有可用皮肤时显示史蒂夫头部。
 
 ### 内容下载与 Mod 管理
 

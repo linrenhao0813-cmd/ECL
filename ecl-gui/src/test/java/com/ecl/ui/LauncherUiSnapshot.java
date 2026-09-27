@@ -177,7 +177,6 @@ public final class LauncherUiSnapshot {
                 applySnapshotTheme();
                 openAccountSettings();
                 if (mode.contains("microsoft")) authTypeCombo.setValue(LauncherUI.AUTH_MICROSOFT);
-                if (mode.contains("external")) authTypeCombo.setValue(LauncherUI.AUTH_YGGDRASIL);
                 return primaryStage.getScene();
             }
             if ("local-versions".equalsIgnoreCase(mode)) {

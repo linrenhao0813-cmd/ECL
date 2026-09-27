@@ -29,7 +29,6 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
-import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
@@ -61,7 +60,6 @@ class LauncherUIView extends javafx.application.Application {
     static final Logger LOGGER = LoggerFactory.getLogger(LauncherUI.class);
     static final String AUTH_OFFLINE = "OFFLINE";
     static final String AUTH_MICROSOFT = "MICROSOFT";
-    static final String AUTH_YGGDRASIL = "YGGDRASIL";
     static final String MC_CHINESE_WIKI_VERSION_URL_PREFIX = "https://zh.minecraft.wiki/w/";
     private static final double WINDOW_WIDTH = 1440;
     private static final double WINDOW_HEIGHT = 900;
@@ -93,7 +91,6 @@ class LauncherUIView extends javafx.application.Application {
     Button installSelectedLoaderButton;
     boolean syncingLoaderChoice;
     TextField usernameField;
-    PasswordField passwordField;
     ProgressBar downloadProgress;
     Label statusLabel;
     Label detailLabel;
@@ -109,9 +106,6 @@ class LauncherUIView extends javafx.application.Application {
     volatile boolean lastMicrosoftAccountPersisted = true;
     Button selectedVersionWikiButton;
     ComboBox<String> authTypeCombo;
-    TextField yggdrasilServerField;
-    Label serverLabel;
-    Label passwordLabel;
 
     Label authSummaryLabel;
     Label authHintLabel;
@@ -129,6 +123,7 @@ class LauncherUIView extends javafx.application.Application {
             new ContentLibraryPageFactory((LauncherUI) this);
     private final RuntimeSummaryPresenter runtimeSummaryPresenter =
             new RuntimeSummaryPresenter((LauncherUI) this);
+    final AccountAvatarPresenter accountAvatarPresenter = new AccountAvatarPresenter((LauncherUI) this);
     VBox homePage;
     HBox workspacePane;
     ScrollPane mainScrollPane;
@@ -335,7 +330,9 @@ class LauncherUIView extends javafx.application.Application {
         topAuthBadgeLabel.getStyleClass().add("account-chip");
         Button accountButton = new Button();
         accountButton.setId("top-account-button");
-        accountButton.setGraphic(new HBox(8, ForestIcons.create("account"), topAuthBadgeLabel));
+        HBox accountGraphic = new HBox(8, accountAvatarPresenter.view(), topAuthBadgeLabel);
+        accountGraphic.setAlignment(Pos.CENTER_LEFT);
+        accountButton.setGraphic(accountGraphic);
         accountButton.getStyleClass().add("forest-account-button");
         accountButton.setAccessibleText(GuiMessages.get("accounts.title"));
         accountButton.setOnAction(event -> openAccountSettings());

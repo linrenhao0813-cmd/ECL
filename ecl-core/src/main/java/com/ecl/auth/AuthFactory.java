@@ -13,7 +13,4 @@ public class AuthFactory {
         return new MicrosoftAuth();
     }
 
-    public static AuthProvider createYggdrasil(String authServer) {
-        return new YggdrasilAuth(authServer);
-    }
 }

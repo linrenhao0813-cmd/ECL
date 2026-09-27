@@ -25,9 +25,6 @@ final class LauncherPageRouter {
             return;
         }
         int slideDirection = Integer.compare(view.ordinal(), ui.activeView.ordinal());
-        if (view != AppView.HOME && ui.passwordField != null) {
-            ui.passwordField.clear();
-        }
         ui.activeView = view;
         renderActiveView(slideDirection);
         ui.navigationRail.showSelected(view);

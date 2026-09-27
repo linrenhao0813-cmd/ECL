@@ -106,6 +106,7 @@ final class SkinCoordinator {
                             ? auth.getUsername() : result.profileName();
                     ui.setStatus("皮肤上传成功", account + " 已使用 " + variant + " 皮肤。重新进入游戏后生效。");
                     ui.setControlsBusy(false);
+                    ui.accountAvatarPresenter.showUploadedSkin(skin);
                 });
             } catch (Exception error) {
                 Platform.runLater(() -> {
@@ -193,6 +194,7 @@ final class SkinCoordinator {
                             "离线账号 " + username + " 已使用本地皮肤，重新启动游戏后生效。");
                     ui.setControlsBusy(false);
                     ui.updateOfflineSkinControls();
+                    ui.accountAvatarPresenter.refresh();
                 });
             } catch (Exception error) {
                 Platform.runLater(() -> {
@@ -220,5 +222,6 @@ final class SkinCoordinator {
             ui.setStatus("清除皮肤失败", ui.cleanMessage(failure));
         }
         ui.updateOfflineSkinControls();
+        ui.accountAvatarPresenter.refresh();
     }
 }

@@ -42,11 +42,6 @@ final class AccountManagementPage extends VBox {
         followVisibility(username, ui.usernameField);
         VBox saved = field(GuiMessages.get("accounts.saved"), ui.microsoftAccountCombo);
         followVisibility(saved, ui.microsoftAccountCombo);
-        VBox server = field(GuiMessages.get("accounts.server"), ui.yggdrasilServerField);
-        followVisibility(server, ui.yggdrasilServerField);
-        VBox password = field(GuiMessages.get("accounts.password"), ui.passwordField);
-        followVisibility(password, ui.passwordField);
-
         Button remove = ui.createActionButton(GuiMessages.get("accounts.remove"), "ghost-button", this::removeAccount);
         remove.disableProperty().bind(ui.microsoftAccountCombo.valueProperty().isNull()
                 .or(ui.microsoftLoginBtn.disableProperty()));
@@ -63,7 +58,7 @@ final class AccountManagementPage extends VBox {
         help.textProperty().bind(ui.authHintLabel.textProperty());
         help.setWrapText(true);
         help.getStyleClass().add("status-detail");
-        return new VBox(16, mode, username, saved, microsoftActions, server, password,
+        return new VBox(16, mode, username, saved, microsoftActions,
                 skinActions, help, apply, feedback);
     }
 
@@ -107,16 +102,8 @@ final class AccountManagementPage extends VBox {
             ui.usernameField.requestFocus();
             return;
         }
-        if (LauncherUI.AUTH_YGGDRASIL.equals(type) && ui.yggdrasilServerField.getText().isBlank()) {
-            feedback.setText(GuiMessages.get("accounts.serverRequired"));
-            ui.yggdrasilServerField.requestFocus();
-            return;
-        }
         ui.settingsManager.set(ECLConfig.KEY_AUTH_TYPE, type);
         ui.settingsManager.set(ECLConfig.KEY_USERNAME, username);
-        if (LauncherUI.AUTH_YGGDRASIL.equals(type)) {
-            ui.settingsManager.set(ECLConfig.KEY_YGGDRASIL_SERVER, ui.yggdrasilServerField.getText().trim());
-        }
         feedback.setText(GuiMessages.get(ui.settingsManager.save() ? "accounts.savedOk" : "accounts.saveFailed"));
         ui.updateRuntimeSummary();
     }

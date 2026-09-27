@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DefaultAccountServiceTest {
@@ -65,6 +66,21 @@ class DefaultAccountServiceTest {
         assertTrue(Files.readString(file, StandardCharsets.UTF_8).contains("not-ciphertext"));
         assertTrue(service.remove("MICROSOFT:id"));
         assertFalse(Files.readString(file, StandardCharsets.UTF_8).contains("not-ciphertext"));
+    }
+
+    @Test
+    void legacyYggdrasilAccountRemainsReadableButCannotBeUsed() {
+        System.setProperty("ecl.crypto.keyFile", temp.resolve("secret.key").toString());
+        com.ecl.util.CryptoUtil.resetKeyCache();
+        DefaultAccountService service = new DefaultAccountService(
+                temp.resolve("accounts.json"), new AuthProviderRegistry());
+        AuthAccount legacy = new AuthAccount(AuthType.YGGDRASIL, "legacy-id", "OldPlayer", "OldPlayer",
+                "", "", 0, "https://auth.example.invalid/", false);
+        service.save(legacy);
+
+        assertEquals(AuthType.YGGDRASIL, service.list().getFirst().type());
+        assertThrows(IllegalArgumentException.class, () -> service.createProvider(legacy));
+        assertFalse(new AuthProviderRegistry().providerIds().contains("ecl-yggdrasil"));
     }
 
     @Test

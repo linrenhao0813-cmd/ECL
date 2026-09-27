@@ -55,6 +55,7 @@ final class RuntimeSummaryPresenter {
     private void updateAccount() {
         String accountName = ui.getAuthDisplayName();
         setText(ui.topAuthBadgeLabel, accountName);
+        ui.accountAvatarPresenter.update();
     }
 
     private static void setText(Label label, String value) {

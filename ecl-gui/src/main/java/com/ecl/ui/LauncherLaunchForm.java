@@ -7,7 +7,6 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
-import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.GridPane;
@@ -49,7 +48,7 @@ final class LauncherLaunchForm {
         }
 
         ui.authTypeCombo = new ComboBox<>();
-        ui.authTypeCombo.getItems().addAll(LauncherUI.AUTH_OFFLINE, LauncherUI.AUTH_MICROSOFT, LauncherUI.AUTH_YGGDRASIL);
+        ui.authTypeCombo.getItems().addAll(LauncherUI.AUTH_OFFLINE, LauncherUI.AUTH_MICROSOFT);
         ui.authTypeCombo.setCellFactory(list -> new ListCell<>() {
             @Override
             protected void updateItem(String item, boolean empty) {
@@ -68,10 +67,6 @@ final class LauncherLaunchForm {
         ui.authTypeCombo.valueProperty().addListener((observable, previous, selected) -> auth.updateAuthFields());
         ui.applyFieldStyle(ui.authTypeCombo);
 
-        ui.yggdrasilServerField = new TextField(ui.settingsManager.get(ECLConfig.KEY_YGGDRASIL_SERVER));
-        ui.yggdrasilServerField.setPromptText("输入 Yggdrasil 认证地址");
-        ui.applyFieldStyle(ui.yggdrasilServerField);
-
         ui.usernameField = new TextField(previousUsername);
         ui.usernameField.setPromptText("输入玩家名称");
         ui.applyFieldStyle(ui.usernameField);
@@ -79,10 +74,6 @@ final class LauncherLaunchForm {
             ui.updateRuntimeSummary();
             auth.updateOfflineSkinControls();
         });
-
-        ui.passwordField = new PasswordField();
-        ui.passwordField.setPromptText("外置登录时需要");
-        ui.applyFieldStyle(ui.passwordField);
 
         ui.authSummaryLabel = ui.createValueLabel();
         ui.authHintLabel = new Label();
@@ -161,6 +152,53 @@ final class LauncherLaunchForm {
         HBox.setHgrow(gameDirField, Priority.ALWAYS);
         HBox jvmBox = new HBox(10, jvmField, jvmButton);
         HBox.setHgrow(jvmField, Priority.ALWAYS);
+        HBox authBox = createAccountControls();
+        VBox authHelpBox = new VBox(4, ui.authSummaryLabel, ui.authHintLabel);
+        HBox versionBox = new HBox(10, ui.versionCombo, ui.selectedVersionWikiButton);
+        versionBox.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(ui.versionCombo, Priority.ALWAYS);
+        Label loaderHint = new Label("安装后会自动切换到独立模组实例");
+        loaderHint.getStyleClass().add("status-detail");
+        HBox loaderBox = new HBox(10, ui.loaderChoiceCombo, ui.installSelectedLoaderButton, loaderHint);
+        loaderBox.setAlignment(Pos.CENTER_LEFT);
+        ui.versionCombo.valueProperty().addListener((obs, oldValue, newValue) ->
+                gameDirField.setText(abbreviate(ui.getActiveGameDir().getAbsolutePath(), 72)));
+
+        int row = 0;
+        Label gameVersionLabel = new Label("游戏实例");
+        gameVersionLabel.getStyleClass().add("field-label");
+        grid.add(gameVersionLabel, 0, row);
+        grid.add(versionBox, 1, row++);
+
+        Label modLoaderLabel = new Label("模组加载器");
+        modLoaderLabel.getStyleClass().add("field-label");
+        grid.add(modLoaderLabel, 0, row);
+        grid.add(loaderBox, 1, row++);
+
+        Label accountModeLabel = new Label("账号模式");
+        accountModeLabel.getStyleClass().add("field-label");
+        grid.add(accountModeLabel, 0, row);
+        grid.add(authBox, 1, row++);
+
+        Label loginStatusLabel = new Label("登录状态");
+        loginStatusLabel.getStyleClass().add("field-label");
+        grid.add(loginStatusLabel, 0, row);
+        grid.add(authHelpBox, 1, row++);
+
+        Label gameDirLabel = new Label("游戏目录");
+        gameDirLabel.getStyleClass().add("field-label");
+        grid.add(gameDirLabel, 0, row);
+        grid.add(gameDirBox, 1, row++);
+
+        Label jvmParamsLabel = new Label("JVM 参数");
+        jvmParamsLabel.getStyleClass().add("field-label");
+        grid.add(jvmParamsLabel, 0, row);
+        grid.add(jvmBox, 1, row);
+
+        return grid;
+    }
+
+    private HBox createAccountControls() {
         ui.authTypeCombo.setPrefWidth(200);
         ui.microsoftLoginBtn = new Button("正版登录");
         ui.microsoftLoginBtn.getStyleClass().addAll("app-button", "secondary-button", "compact-button");
@@ -208,60 +246,7 @@ final class LauncherLaunchForm {
         authBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(ui.usernameField, Priority.ALWAYS);
         HBox.setHgrow(ui.microsoftAccountCombo, Priority.ALWAYS);
-        VBox authHelpBox = new VBox(4, ui.authSummaryLabel, ui.authHintLabel);
-        HBox versionBox = new HBox(10, ui.versionCombo, ui.selectedVersionWikiButton);
-        versionBox.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(ui.versionCombo, Priority.ALWAYS);
-        Label loaderHint = new Label("安装后会自动切换到独立模组实例");
-        loaderHint.getStyleClass().add("status-detail");
-        HBox loaderBox = new HBox(10, ui.loaderChoiceCombo, ui.installSelectedLoaderButton, loaderHint);
-        loaderBox.setAlignment(Pos.CENTER_LEFT);
-        ui.versionCombo.valueProperty().addListener((obs, oldValue, newValue) ->
-                gameDirField.setText(abbreviate(ui.getActiveGameDir().getAbsolutePath(), 72)));
-
-        int row = 0;
-        ui.serverLabel = new Label("外置服务器");
-        ui.serverLabel.getStyleClass().add("field-label");
-        ui.passwordLabel = new Label("密码");
-        ui.passwordLabel.getStyleClass().add("field-label");
-
-        Label gameVersionLabel = new Label("游戏实例");
-        gameVersionLabel.getStyleClass().add("field-label");
-        grid.add(gameVersionLabel, 0, row);
-        grid.add(versionBox, 1, row++);
-
-        Label modLoaderLabel = new Label("模组加载器");
-        modLoaderLabel.getStyleClass().add("field-label");
-        grid.add(modLoaderLabel, 0, row);
-        grid.add(loaderBox, 1, row++);
-
-        Label accountModeLabel = new Label("账号模式");
-        accountModeLabel.getStyleClass().add("field-label");
-        grid.add(accountModeLabel, 0, row);
-        grid.add(authBox, 1, row++);
-
-        grid.add(ui.serverLabel, 0, row);
-        grid.add(ui.yggdrasilServerField, 1, row++);
-
-        grid.add(ui.passwordLabel, 0, row);
-        grid.add(ui.passwordField, 1, row++);
-
-        Label loginStatusLabel = new Label("登录状态");
-        loginStatusLabel.getStyleClass().add("field-label");
-        grid.add(loginStatusLabel, 0, row);
-        grid.add(authHelpBox, 1, row++);
-
-        Label gameDirLabel = new Label("游戏目录");
-        gameDirLabel.getStyleClass().add("field-label");
-        grid.add(gameDirLabel, 0, row);
-        grid.add(gameDirBox, 1, row++);
-
-        Label jvmParamsLabel = new Label("JVM 参数");
-        jvmParamsLabel.getStyleClass().add("field-label");
-        grid.add(jvmParamsLabel, 0, row);
-        grid.add(jvmBox, 1, row);
-
-        return grid;
+        return authBox;
     }
 
     VBox createLoaderSelectionPage(String profileId, String minecraftVersion) {
@@ -276,12 +261,6 @@ final class LauncherLaunchForm {
                 guidance));
         return page;
     }
-
-    /**
-     * Offline account path: pick a PNG, confirm the model, and copy it into the launcher data
-     * directory. The skin is injected at launch time through the built-in Yggdrasil skin service,
-     * so it works in single player and on offline-mode servers without any mods or premium login.
-     */
 
     ListCell<String> createVersionCell() {
         return new ListCell<>() {
@@ -377,8 +356,6 @@ final class LauncherLaunchForm {
         ui.versionActions.updateSelectedVersionWikiButton();
         ui.authTypeCombo.setDisable(busy);
         ui.usernameField.setDisable(busy || LauncherUI.AUTH_MICROSOFT.equals(ui.authTypeCombo.getValue()));
-        ui.yggdrasilServerField.setDisable(busy);
-        ui.passwordField.setDisable(busy);
         if (!busy) {
             loader.updateLoaderControls();
         }

@@ -18,11 +18,9 @@ import javafx.application.Platform;
 import java.io.File;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 /** Owns game launch, download-and-launch, process monitoring, and crash handling. */
 final class GameLaunchCoordinator {
@@ -55,11 +53,7 @@ final class GameLaunchCoordinator {
 
     private void startGame(String version) {
         String authType = ui.authTypeCombo.getValue();
-        String server = ui.yggdrasilServerField.getText().trim();
         String username = ui.usernameField.getText().trim();
-        AtomicReference<char[]> passwordRef = new AtomicReference<>(
-                ui.passwordField.getText().toCharArray());
-        ui.passwordField.clear(); // 尽快清除 UI 中的密码，减少敏感数据驻留时间
 
         ui.setControlsBusy(true);
         ui.stopProgressAnimation(ui.downloadProgress, true);
@@ -68,7 +62,6 @@ final class GameLaunchCoordinator {
         ui.runAsync("ecl-launch-game", () -> {
             File launchDir = ui.resolveVersionGameDir(version);
             File instanceRoot = ui.resolveVersionInstanceRoot(version);
-            char[] password = passwordRef.getAndSet(null);
             InstanceOperationLease gameLock = null;
             boolean monitorOwnsGameLock = false;
             try {
@@ -91,9 +84,7 @@ final class GameLaunchCoordinator {
                 }
                 int instanceMemoryMb = launchProfile.memoryMode() == InstanceLaunchProfile.MemoryMode.AUTO
                         ? ECLConfig.calculateAutoMemoryMb() : launchProfile.maxMemoryMb();
-                AuthProvider auth = authFactory.create(authType, server, username, password);
-                Arrays.fill(password, '\0');
-                password = null;
+                AuthProvider auth = authFactory.create(authType, username);
                 OfflineSkin offlineSkin = auth.getType() == com.ecl.auth.AuthType.OFFLINE
                         ? new OfflineSkinStore()
                                 .find(OfflineSkinStore.identityForOffline(auth.getUsername()))
@@ -149,13 +140,6 @@ final class GameLaunchCoordinator {
                     ui.setControlsBusy(false);
                 });
             } finally {
-                if (password != null) {
-                    Arrays.fill(password, '\0');
-                }
-                char[] queuedPassword = passwordRef.getAndSet(null);
-                if (queuedPassword != null) {
-                    Arrays.fill(queuedPassword, '\0');
-                }
                 if (!monitorOwnsGameLock && gameLock != null) {
                     try {
                         gameLock.close();

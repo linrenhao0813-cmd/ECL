@@ -55,8 +55,6 @@ final class GameLaunchPreparation {
         ui.settingsManager.set(ECLConfig.KEY_SELECTED_VERSION, selectedVersion);
         ui.settingsManager.set(ECLConfig.KEY_AUTH_TYPE, ui.authTypeCombo.getValue());
         ui.settingsManager.set(ECLConfig.KEY_USERNAME, ui.usernameField.getText().trim());
-        if (LauncherUI.AUTH_YGGDRASIL.equals(ui.authTypeCombo.getValue()))
-            ui.settingsManager.set(ECLConfig.KEY_YGGDRASIL_SERVER, ui.yggdrasilServerField.getText().trim());
         ui.runAsync("ecl-save-settings", () -> {
             if (!ui.settingsManager.save()) Platform.runLater(() -> ui.setStatus("设置保存失败",
                     "无法写入 settings.json，请检查目录权限或查看日志。"));

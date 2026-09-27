@@ -13,12 +13,13 @@ public final class AuthProviderRegistry {
     public AuthProviderRegistry() {
         register(new BuiltInFactory(AuthType.OFFLINE));
         register(new BuiltInFactory(AuthType.MICROSOFT));
-        register(new BuiltInFactory(AuthType.YGGDRASIL));
         ServiceLoader.load(AuthProviderFactory.class).forEach(this::register);
     }
 
     public void register(AuthProviderFactory factory) {
-        if (factory != null) factories.put(factory.type(), factory);
+        if (factory != null && factory.type() != AuthType.YGGDRASIL) {
+            factories.put(factory.type(), factory);
+        }
     }
 
     public AuthProvider create(AuthAccount account) {
@@ -46,8 +47,7 @@ public final class AuthProviderRegistry {
                 case MICROSOFT -> new MicrosoftAuth(new MicrosoftAuth.CachedSession(
                         account.refreshToken(), account.accessToken(), account.tokenExpiry(),
                         account.username(), account.uuid()), null);
-                case YGGDRASIL -> new YggdrasilAuth(account.authServerUrl(), account.username(),
-                        account.uuid(), account.accessToken(), account.refreshToken());
+                case YGGDRASIL -> throw new IllegalArgumentException("Yggdrasil login is no longer supported");
             };
         }
     }

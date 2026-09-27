@@ -25,7 +25,6 @@ public class ECLConfig {
     public static final int MAX_AUTO_MEMORY_MB = 8_192;
     public static final int RESERVED_SYSTEM_MEMORY_MB = 2_048;
 
-    public static final String DEFAULT_YGGDRASIL_SERVER = "https://littleskin.cn/api/yggdrasil/";
 
     // ---- Type-safe SettingKey constants ----
     public static final SettingKey<String> KEY_JAVA_PATH = new SettingKey<>("javaPath", String.class, "");
@@ -41,7 +40,6 @@ public class ECLConfig {
     public static final SettingKey<String> KEY_VERSION_CATEGORY = new SettingKey<>("versionCategory2", String.class, "FEATURED");
     public static final SettingKey<String> KEY_AUTH_TYPE = new SettingKey<>("authType", String.class, "OFFLINE");
     public static final SettingKey<String> KEY_USERNAME = new SettingKey<>("username", String.class, "");
-    public static final SettingKey<String> KEY_YGGDRASIL_SERVER = new SettingKey<>("yggdrasilServer", String.class, DEFAULT_YGGDRASIL_SERVER);
     public static final SettingKey<String> KEY_MOD_RELEASE_CHANNEL =
             new SettingKey<>("modReleaseChannel", String.class, "RELEASE_AND_BETA");
     public static final SettingKey<String> KEY_DEFAULT_ISOLATION_TYPE =

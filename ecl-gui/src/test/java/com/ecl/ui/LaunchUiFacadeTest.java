@@ -22,8 +22,6 @@ class LaunchUiFacadeTest {
         @Override public LoaderChoice loaderForProfile(String version) { return LoaderChoice.VANILLA; }
         @Override public String authType() { return LauncherUI.AUTH_OFFLINE; }
         @Override public String username() { return "Player"; }
-        @Override public String yggdrasilServer() { return ""; }
-        @Override public String password() { return ""; }
         @Override public String lastContentVersion() { return ""; }
         @Override public boolean isVersionDownloaded(String version) { return true; }
         @Override public void setStatus(String title, String detail) { }

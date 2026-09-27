@@ -3,6 +3,8 @@ package com.ecl.ui;
 import com.ecl.ECLConfig;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.image.ImageView;
+import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -35,6 +37,10 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     void forestHomeRoutesRealControlsAndReflectsBusyState() {
         interact(() -> {
             assertNotNull(stage.getScene().lookup("#forest-hero"));
+            StackPane avatar = (StackPane) stage.getScene().lookup(".account-avatar");
+            assertNotNull(avatar);
+            assertEquals(2, avatar.getChildren().size());
+            assertEquals(64, ((ImageView) avatar.getChildren().get(0)).getImage().getWidth());
             assertEquals(1, launcher.homePage.getChildren().size());
             assertTrue(launcher.mainScrollPane.isFitToHeight());
             assertTrue(stage.getScene().getRoot().lookupAll(".forest-status-strip").isEmpty());
@@ -101,9 +107,10 @@ class LauncherUiHeadlessTest extends ApplicationTest {
                 stage.getScene().getRoot().applyCss();
                 stage.getScene().getRoot().layout();
                 assertEquals(AppView.SETTINGS, launcher.activeView);
-                launcher.authTypeCombo.setValue(LauncherUI.AUTH_YGGDRASIL);
-                assertTrue(launcher.yggdrasilServerField.isVisible());
-                assertTrue(launcher.passwordField.isVisible());
+                assertEquals(2, launcher.authTypeCombo.getItems().size());
+                assertFalse(launcher.authTypeCombo.getItems().contains("YGGDRASIL"));
+                assertEquals(LauncherUI.AUTH_OFFLINE,
+                        new LauncherAuthController(launcher).normalizeAuthType("YGGDRASIL"));
                 launcher.authTypeCombo.setValue(LauncherUI.AUTH_MICROSOFT);
                 assertTrue(launcher.microsoftAccountCombo.isVisible());
                 assertFalse(launcher.usernameField.isVisible());
@@ -116,7 +123,6 @@ class LauncherUiHeadlessTest extends ApplicationTest {
                 launcher.openAccountSettings();
                 assertEquals("ExplorerTestPlayer", launcher.usernameField.getText());
                 assertTrue(launcher.usernameField.isVisible());
-                assertFalse(launcher.passwordField.isVisible());
             } finally {
                 launcher.authTypeCombo.setValue(previousType);
                 launcher.usernameField.setText(previousName);
