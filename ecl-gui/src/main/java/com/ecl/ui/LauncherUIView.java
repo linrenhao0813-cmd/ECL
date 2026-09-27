@@ -103,7 +103,6 @@ class LauncherUIView extends javafx.application.Application {
     Button microsoftLoginBtn;
     Button microsoftAddAccountBtn;
     Button skinUploadBtn;
-    Button homeSkinUploadButton;
     Button offlineSkinRemoveBtn;
     ComboBox<MicrosoftAccountStore.Account> microsoftAccountCombo;
     volatile MicrosoftAccountStore.Account selectedMicrosoftAccount;
@@ -121,9 +120,6 @@ class LauncherUIView extends javafx.application.Application {
     Label topVersionBadgeLabel;
     Label selectedVersionTitleLabel;
     Label selectedRuntimeMetaLabel;
-    Label homeAccountNameLabel;
-    Label homeAccountTypeLabel;
-    Label homeAccountAvatarLabel;
     private final LauncherContentBrowser contentBrowser = new LauncherContentBrowser((LauncherUI) this);
     private final LauncherLaunchForm launchForm = new LauncherLaunchForm((LauncherUI) this);
     final LauncherPageFactory pageFactory = new LauncherPageFactory((LauncherUI) this);
@@ -135,6 +131,7 @@ class LauncherUIView extends javafx.application.Application {
             new RuntimeSummaryPresenter((LauncherUI) this);
     VBox homePage;
     HBox workspacePane;
+    ScrollPane mainScrollPane;
     List<ContentTarget> contentTargets;
 
     String javaPath;
@@ -296,7 +293,9 @@ class LauncherUIView extends javafx.application.Application {
         workspacePane.setAlignment(Pos.TOP_CENTER);
         workspacePane.setFillHeight(true);
         renderActiveView();
-        root.setCenter(createWheelScrollPane(workspacePane));
+        mainScrollPane = createWheelScrollPane(workspacePane);
+        mainScrollPane.setFitToHeight(activeView == AppView.HOME);
+        root.setCenter(mainScrollPane);
         BorderPane.setMargin(root.getCenter(), Insets.EMPTY);
         root.setBottom(createFooterBar());
         BorderPane.setMargin(root.getBottom(), Insets.EMPTY);

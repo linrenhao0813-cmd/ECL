@@ -2782,19 +2782,6 @@
 .scene-root .forest-home .launch-play-icon { -fx-text-fill: #102016; -fx-font-size: 18px; }
 .forest-home .launch-actions .link-button { -fx-text-fill: #cee2cf; -fx-font-size: 14px; }
 .forest-home .launch-actions .link-button:hover { -fx-background-color: rgba(180, 215, 182, 0.12); }
-.forest-status-strip {
-    -fx-border-color: -ecl-border;
-    -fx-border-radius: 10;
-    -fx-background-radius: 10;
-    -fx-background-color: -ecl-surface;
-    -fx-padding: 20 4;
-}
-.forest-stat { -fx-padding: 0 18; -fx-border-color: transparent -ecl-border transparent transparent; -fx-border-width: 0 1 0 0; }
-.scene-root .forest-home .forest-stat-value { -fx-text-fill: -ecl-text; -fx-font-size: 14px; }
-.scene-root .forest-home .forest-stat-caption { -fx-text-fill: -ecl-secondary; -fx-font-size: 12px; }
-.forest-activity { -fx-padding: 0 4; }
-.scene-root .forest-home .forest-activity-title { -fx-text-fill: -ecl-secondary; -fx-font-size: 11px; }
-.forest-activity .link-button { -fx-font-size: 11px; }
 .scene-root.theme-dark .link-button, .scene-root.theme-dark .wiki-link-button { -fx-text-fill: -ecl-blue; }
 .scene-root.theme-dark .primary-button { -fx-text-fill: #102016; }
 .scene-root.theme-dark .primary-button:hover { -fx-text-fill: #102016; }

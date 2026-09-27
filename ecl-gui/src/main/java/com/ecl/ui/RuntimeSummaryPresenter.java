@@ -4,8 +4,6 @@ import com.ecl.util.Messages;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
 
-import java.util.Locale;
-
 import static com.ecl.util.TextUtil.abbreviate;
 
 /** Updates the launcher's account and version summary surfaces. */
@@ -57,24 +55,6 @@ final class RuntimeSummaryPresenter {
     private void updateAccount() {
         String accountName = ui.getAuthDisplayName();
         setText(ui.topAuthBadgeLabel, accountName);
-        setText(ui.homeAccountNameLabel, accountName);
-        setText(ui.homeAccountTypeLabel, authModeLabel());
-        if (ui.homeAccountAvatarLabel != null) {
-            ui.homeAccountAvatarLabel.setText(accountName.isBlank()
-                    ? "E" : accountName.substring(0, 1).toUpperCase(Locale.ROOT));
-        }
-    }
-
-    private String authModeLabel() {
-        String authType = ui.authTypeCombo == null
-                ? LauncherUI.AUTH_OFFLINE : ui.authTypeCombo.getValue();
-        if (LauncherUI.AUTH_MICROSOFT.equals(authType)) {
-            return GuiMessages.get("forest.microsoft");
-        }
-        if (LauncherUI.AUTH_YGGDRASIL.equals(authType)) {
-            return GuiMessages.get("forest.external");
-        }
-        return GuiMessages.get("forest.offline");
     }
 
     private static void setText(Label label, String value) {

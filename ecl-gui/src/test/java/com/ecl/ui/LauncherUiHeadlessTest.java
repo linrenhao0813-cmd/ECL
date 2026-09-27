@@ -35,13 +35,19 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     void forestHomeRoutesRealControlsAndReflectsBusyState() {
         interact(() -> {
             assertNotNull(stage.getScene().lookup("#forest-hero"));
+            assertEquals(1, launcher.homePage.getChildren().size());
+            assertTrue(launcher.mainScrollPane.isFitToHeight());
+            assertTrue(stage.getScene().getRoot().lookupAll(".forest-status-strip").isEmpty());
+            assertTrue(stage.getScene().getRoot().lookupAll(".forest-activity").isEmpty());
             Button switchInstance = (Button) stage.getScene().lookup("#home-switch-instance");
             launcher.setControlsBusy(true);
             assertTrue(switchInstance.isDisabled());
             launcher.setControlsBusy(false);
             switchInstance.fire();
             assertEquals(AppView.VERSIONS, launcher.activeView);
+            assertFalse(launcher.mainScrollPane.isFitToHeight());
             launcher.setActiveView(AppView.HOME);
+            assertTrue(launcher.mainScrollPane.isFitToHeight());
             ((Button) stage.getScene().lookup("#top-account-button")).fire();
             assertEquals(AppView.SETTINGS, launcher.activeView);
             assertTrue(launcher.accountSettingsSelected);
@@ -49,13 +55,13 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     }
 
     @Test
-    void changingLanguageRefreshesTheHomeSummaryEvenWithoutAnInstance() {
+    void changingLanguageRefreshesTheHomeControlsEvenWithoutAnInstance() {
         interact(() -> {
             String locale = com.ecl.util.Messages.locale().toLanguageTag();
             try {
                 launcher.versionCombo.setValue(null);
                 launcher.switchLanguage("en");
-                assertFalse(launcher.homeAccountTypeLabel.getText().isBlank());
+                assertFalse(launcher.topAuthBadgeLabel.getText().isBlank());
                 assertFalse(launcher.selectedVersionTitleLabel.getText().isBlank());
                 assertEquals("Play", launcher.launchBtn.getText());
             } finally {
@@ -106,7 +112,7 @@ class LauncherUiHeadlessTest extends ApplicationTest {
                 ((Button) stage.getScene().lookup("#account-apply")).fire();
                 assertEquals("ExplorerTestPlayer", launcher.settingsManager.get(ECLConfig.KEY_USERNAME));
                 launcher.setActiveView(AppView.HOME);
-                assertEquals("ExplorerTestPlayer", launcher.homeAccountNameLabel.getText());
+                assertEquals("ExplorerTestPlayer", launcher.topAuthBadgeLabel.getText());
                 launcher.openAccountSettings();
                 assertEquals("ExplorerTestPlayer", launcher.usernameField.getText());
                 assertTrue(launcher.usernameField.isVisible());

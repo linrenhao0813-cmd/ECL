@@ -50,6 +50,9 @@ final class LauncherPageRouter {
         if (ui.workspacePane == null) {
             return;
         }
+        if (ui.mainScrollPane != null) {
+            ui.mainScrollPane.setFitToHeight(ui.activeView == AppView.HOME);
+        }
         ui.closeActiveModBrowserView();
         ui.closeActiveServerBrowserView();
         ui.workspacePane.getChildren().clear();

@@ -32,7 +32,6 @@ final class LauncherAuthController {
         LauncherUiFactory.setVisible(ui.microsoftLoginBtn, microsoft);
         LauncherUiFactory.setVisible(ui.microsoftAddAccountBtn, microsoft);
         LauncherUiFactory.setVisible(ui.skinUploadBtn, microsoft || offline);
-        LauncherUiFactory.setVisible(ui.homeSkinUploadButton, microsoft || offline);
         LauncherUiFactory.setVisible(ui.serverLabel, yggdrasil);
         LauncherUiFactory.setVisible(ui.yggdrasilServerField, yggdrasil);
         LauncherUiFactory.setVisible(ui.passwordLabel, yggdrasil);
@@ -44,8 +43,6 @@ final class LauncherAuthController {
             ui.authHintLabel.setText("会优先静默恢复已保存的登录状态；仅在缓存和刷新令牌失效时显示设备码。 ");
             ui.skinUploadBtn.setText("上传皮肤");
             ui.skinUploadBtn.setTooltip(new Tooltip("上传 PNG 皮肤到当前 Minecraft Java 正版账号"));
-            ui.homeSkinUploadButton.setText("上传皮肤  ›");
-            ui.homeSkinUploadButton.setTooltip(new Tooltip("上传 PNG 皮肤到当前 Minecraft Java 正版账号"));
         } else if (yggdrasil) {
             ui.usernameField.setPromptText("输入外置登录用户名或邮箱");
             ui.authSummaryLabel.setText("外置登录 / Yggdrasil");
@@ -56,8 +53,6 @@ final class LauncherAuthController {
             ui.authHintLabel.setText("会为当前用户名生成本地 UUID，适合单机和快速调试。 ");
             ui.skinUploadBtn.setText("导入皮肤");
             ui.skinUploadBtn.setTooltip(new Tooltip("为离线账号导入本地 PNG 皮肤，启动游戏时自动注入，无需正版账号"));
-            ui.homeSkinUploadButton.setText("导入皮肤  ›");
-            ui.homeSkinUploadButton.setTooltip(new Tooltip("为离线账号导入本地 PNG 皮肤，启动游戏时自动注入，无需正版账号"));
         }
 
         updateOfflineSkinControls();

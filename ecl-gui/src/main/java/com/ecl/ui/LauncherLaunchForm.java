@@ -360,9 +360,6 @@ final class LauncherLaunchForm {
         if (ui.skinUploadBtn != null) {
             ui.skinUploadBtn.setDisable(busy);
         }
-        if (ui.homeSkinUploadButton != null) {
-            ui.homeSkinUploadButton.setDisable(busy);
-        }
         if (ui.offlineSkinRemoveBtn != null) {
             ui.offlineSkinRemoveBtn.setDisable(busy);
         }
