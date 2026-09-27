@@ -19,10 +19,14 @@ import java.util.concurrent.CompletableFuture;
 
 /** Online mod metadata extension point independent from the UI. */
 public interface ModMetadataProvider extends AutoCloseable {
-    ContentSource source();
+    /** Normalized, lowercase source identity exposed to the UI, for example {@code modrinth}. */
+    String id();
 
-    default String id() {
-        return source().id();
+    /** Human-readable source name shown to the user. */
+    default String displayName() {
+        String value = id() == null ? "" : id();
+        return value.isEmpty() ? value
+                : Character.toUpperCase(value.charAt(0)) + value.substring(1);
     }
 
     CompletableFuture<ModSearchResult> search(ModSearchQuery query);

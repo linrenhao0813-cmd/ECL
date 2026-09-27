@@ -25,8 +25,7 @@ public final class ModMetadataProviderRegistry implements AutoCloseable {
 
     public synchronized void register(ModMetadataProvider provider) {
         if (provider == null) return;
-        providers.removeIf(existing -> existing.source() == provider.source()
-                || existing.id().equalsIgnoreCase(provider.id()));
+        providers.removeIf(existing -> existing.id().equalsIgnoreCase(provider.id()));
         providers.add(provider);
     }
 
@@ -34,11 +33,11 @@ public final class ModMetadataProviderRegistry implements AutoCloseable {
         return List.copyOf(providers);
     }
 
-    public synchronized ModMetadataProvider require(ContentSource source) {
+    public synchronized ModMetadataProvider require(String id) {
         return providers.stream()
-                .filter(provider -> provider.source() == source)
+                .filter(provider -> provider.id().equalsIgnoreCase(id))
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Content source is unavailable: " + source));
+                .orElseThrow(() -> new IllegalArgumentException("Content source is unavailable: " + id));
     }
 
     @Override

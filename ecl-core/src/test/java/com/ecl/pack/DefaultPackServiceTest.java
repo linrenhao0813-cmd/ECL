@@ -165,22 +165,14 @@ class DefaultPackServiceTest {
     }
 
     @Test
-    void curseForgeRemoteEntriesFailInsteadOfProducingIncompleteInstance() throws Exception {
-        Path archive = temp.resolve("curseforge.zip");
-        String manifest = """
-                {"manifestType":"minecraftModpack","manifestVersion":1,"name":"Pack",
-                 "minecraft":{"version":"1.20.1","modLoaders":[]},
-                 "files":[{"projectID":1,"fileID":2}],"overrides":"overrides"}
-                """;
+    void unrecognizedArchiveIsRejectedWithoutCreatingAnInstance() throws Exception {
+        Path archive = temp.resolve("unknown.zip");
         try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
             zip.putNextEntry(new ZipEntry("manifest.json"));
-            zip.write(manifest.getBytes(StandardCharsets.UTF_8));
-            zip.closeEntry();
-            zip.putNextEntry(new ZipEntry("overrides/options.txt"));
-            zip.write("options".getBytes(StandardCharsets.UTF_8));
+            zip.write("{\"name\":\"Pack\"}".getBytes(StandardCharsets.UTF_8));
             zip.closeEntry();
         }
-        Path root = Files.createDirectories(temp.resolve("curse-instances"));
+        Path root = Files.createDirectories(temp.resolve("unknown-instances"));
 
         assertThrows(java.io.IOException.class,
                 () -> new DefaultPackService().importPack(archive, root, "Imported"));

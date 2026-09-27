@@ -9,7 +9,6 @@ import com.ecl.modrinth.model.ContentVersion;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
 import com.ecl.util.InstanceOperationLease;
 import com.ecl.modrinth.pack.MrpackInstaller;
-import com.ecl.modrinth.provider.ContentSource;
 import javafx.application.Platform;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
@@ -18,7 +17,6 @@ import javafx.scene.control.ProgressBar;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -93,7 +91,6 @@ final class ContentDownloadWorkflow {
     }
 
     DownloadTaskCenter.TaskHandle<?> downloadSelectedContent(
-            ContentSource source,
             ContentTarget target,
             ContentProject project,
             ContentVersion selectedVersion,
@@ -158,7 +155,7 @@ final class ContentDownloadWorkflow {
                     if (ui.isVersionRunning(instance.profileId())) {
                         throw new IOException("实例正在运行，不能安装内容: " + instance.profileId());
                     }
-                result = ui.controller.contentDownloader(source).downloadVersion(
+                result = ui.controller.contentDownloader().downloadVersion(
                         project, selectedVersion, gameVersion, loader, importDir,
                         target.downloadDependencies,
                         contentDownloadListener(context, generation, downloadGeneration,
@@ -173,52 +170,38 @@ final class ContentDownloadWorkflow {
                         throw new IOException("整合包下载完成，但没有找到安装文件");
                     }
                     File installArchive = result.getMainFile();
-                    boolean converted = source == ContentSource.CURSEFORGE;
-                    if (converted) {
-                        Platform.runLater(() -> {
-                            if (generation == downloadGeneration.get()) {
-                                dialogStatus.setText("正在解析 CurseForge 整合包清单...");
-                            }
-                        });
-                        installArchive = ui.controller.curseForgeDownloader()
-                                .convertModpackToMrpack(result.getMainFile());
-                    }
-                    try {
-                        packResult = ui.mrpackInstaller.install(
-                                installArchive,
-                                ui.getConfiguredGameRootDir(),
-                                project.getTitle(),
-                                source == ContentSource.MODRINTH ? project.getProjectId() : "",
-                                source == ContentSource.MODRINTH ? selectedVersion.versionId() : "",
-                                new MrpackInstaller.Listener() {
-                                    @Override
-                                    public void onStatus(String message) {
-                                        if (context.isCancelled()) {
-                                            throw new java.util.concurrent.CancellationException("整合包安装已取消");
-                                        }
-                                        context.updateStatus(message);
-                                        Platform.runLater(() -> {
-                                            if (generation != downloadGeneration.get()) return;
-                                            dialogStatus.setText(message);
-                                            ui.setStatus("正在安装整合包", message);
-                                        });
+                    packResult = ui.mrpackInstaller.install(
+                            installArchive,
+                            ui.getConfiguredGameRootDir(),
+                            project.getTitle(),
+                            project.getProjectId(),
+                            selectedVersion.versionId(),
+                            new MrpackInstaller.Listener() {
+                                @Override
+                                public void onStatus(String message) {
+                                    if (context.isCancelled()) {
+                                        throw new java.util.concurrent.CancellationException("整合包安装已取消");
                                     }
-                                    @Override
-                                    public void onProgress(long downloaded, long total) {
-                                        if (context.isCancelled()) {
-                                            throw new java.util.concurrent.CancellationException("整合包安装已取消");
-                                        }
-                                        context.updateProgress(downloaded, total);
-                                        Platform.runLater(() -> {
-                                            if (generation != downloadGeneration.get()) return;
-                                            ui.updateProgress(modProgress, downloaded, total);
-                                            ui.updateProgress(ui.downloadProgress, downloaded, total);
-                                        });
+                                    context.updateStatus(message);
+                                    Platform.runLater(() -> {
+                                        if (generation != downloadGeneration.get()) return;
+                                        dialogStatus.setText(message);
+                                        ui.setStatus("正在安装整合包", message);
+                                    });
+                                }
+                                @Override
+                                public void onProgress(long downloaded, long total) {
+                                    if (context.isCancelled()) {
+                                        throw new java.util.concurrent.CancellationException("整合包安装已取消");
                                     }
-                                });
-                    } finally {
-                        if (converted) Files.deleteIfExists(installArchive.toPath());
-                    }
+                                    context.updateProgress(downloaded, total);
+                                    Platform.runLater(() -> {
+                                        if (generation != downloadGeneration.get()) return;
+                                        ui.updateProgress(modProgress, downloaded, total);
+                                        ui.updateProgress(ui.downloadProgress, downloaded, total);
+                                    });
+                                }
+                            });
                     ui.gameRepository().applyDefaultIsolationSettingForNewInstance(packResult.profileId());
                 }
                 }

@@ -3,7 +3,6 @@ package com.ecl.ui;
 import com.ecl.download.ContentDownloader;
 import com.ecl.modrinth.model.ContentProject;
 import com.ecl.modrinth.model.ContentVersion;
-import com.ecl.modrinth.provider.ContentSource;
 import com.ecl.modrinth.ui.ChineseDescriptionService;
 import com.ecl.modrinth.ui.RemoteImageLoader;
 import javafx.application.Platform;
@@ -23,7 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static com.ecl.util.TextUtil.formatCount;
 
-/** Owns Modrinth/CurseForge search, version loading, and project-list rendering. */
+/** Owns Modrinth search, version loading, and project-list rendering. */
 final class ContentSearchController {
     private final LauncherUI ui;
 
@@ -32,7 +31,6 @@ final class ContentSearchController {
     }
 
     void loadProjectVersions(
-            ContentSource source,
             ContentTarget target,
             ContentProject project,
             ContentInstance instance,
@@ -47,10 +45,10 @@ final class ContentSearchController {
         importBtn.setDisable(true);
         dialogStatus.setText("正在加载 " + project.getTitle() + " 的兼容版本...");
 
-        ui.runAsync("ecl-load-" + source.id() + "-versions", () -> {
+        ui.runAsync("ecl-load-" + target.projectType + "-versions", () -> {
             try {
                 List<ContentVersion> versions =
-                        ui.controller.contentDownloader(source).listProjectVersions(
+                        ui.controller.contentDownloader().listProjectVersions(
                                 project, instance.minecraftVersion(), loader).stream()
                                 .filter(version -> ui.controller.preferredModReleaseChannel()
                                         .allows(version.versionType()))
@@ -86,7 +84,7 @@ final class ContentSearchController {
         });
     }
 
-    void searchModrinthContent(ContentSource source, ContentTarget target,
+    void searchModrinthContent(ContentTarget target,
                                ContentInstance instance, TextField searchField,
                                ListView<ContentProject> resultList, Label dialogStatus,
                                Button searchBtn, Button importBtn, AtomicLong searchGeneration) {
@@ -95,7 +93,7 @@ final class ContentSearchController {
         String gameVersion = instance.minecraftVersion();
         String loader = target.usesLoader() ? instance.loader() : null;
         String loaderLabel = loader == null ? "" : " / " + loader;
-        String sourceName = source == ContentSource.CURSEFORGE ? "CurseForge" : "Modrinth";
+        String sourceName = "Modrinth";
         boolean officialList = query == null || query.trim().isBlank();
 
         searchBtn.setDisable(true);
@@ -107,9 +105,9 @@ final class ContentSearchController {
         ui.setStatus(officialList ? "正在加载官网列表" : "正在搜索" + target.title,
                 officialList ? sourceName + " " + target.title + " · 下载量排序" : query.trim());
 
-        ui.runAsync("ecl-search-" + source.id() + "-" + target.projectType, () -> {
+        ui.runAsync("ecl-search-" + target.projectType, () -> {
             try {
-                ContentDownloader contentDownloader = ui.controller.contentDownloader(source);
+                ContentDownloader contentDownloader = ui.controller.contentDownloader();
                 List<ContentProject> projects = officialList
                         ? contentDownloader.listOfficialProjects(
                                 gameVersion, target.projectType, loader, 24)
@@ -199,30 +197,6 @@ final class ContentSearchController {
                 HBox row = new HBox(12, cover, labels);
                 row.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
                 setGraphic(row);
-            }
-        };
-    }
-
-    ComboBox<ContentSource> createContentSourceCombo() {
-        ComboBox<ContentSource> combo = new ComboBox<>();
-        combo.getItems().setAll(ContentSource.MODRINTH, ContentSource.CURSEFORGE);
-        combo.setValue(ContentSource.MODRINTH);
-        combo.setPrefWidth(132);
-        combo.setCellFactory(list -> contentSourceCell());
-        combo.setButtonCell(contentSourceCell());
-        ui.applyFieldStyle(combo);
-        return combo;
-    }
-
-    private static ListCell<ContentSource> contentSourceCell() {
-        return new ListCell<>() {
-            @Override
-            protected void updateItem(ContentSource item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : switch (item) {
-                    case MODRINTH -> "Modrinth";
-                    case CURSEFORGE -> "CurseForge";
-                });
             }
         };
     }

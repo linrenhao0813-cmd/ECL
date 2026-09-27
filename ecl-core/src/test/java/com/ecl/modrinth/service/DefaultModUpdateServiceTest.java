@@ -10,7 +10,6 @@ import com.ecl.modrinth.model.InstalledMod;
 import com.ecl.modrinth.model.ModProject;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
-import com.ecl.modrinth.provider.ContentSource;
 import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.repository.FileInstalledModRepository;
 import com.ecl.modrinth.transaction.InstallationPlanBuilder;
@@ -74,7 +73,7 @@ class DefaultModUpdateServiceTest {
             this.version = version;
         }
 
-        @Override public ContentSource source() { return ContentSource.CURSEFORGE; }
+        @Override public String id() { return "legacy"; }
         @Override public boolean supportsSha1HashLookup() { return false; }
         @Override public boolean canCheckUpdates(InstalledMod installedMod) {
             return installedMod.versionId().startsWith(installedMod.projectId() + ":");

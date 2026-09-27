@@ -27,7 +27,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
-/** Safe, transactional import/export for ECL, MultiMC, CurseForge and Modrinth archives. */
+/** Safe, transactional import/export for ECL, MultiMC and Modrinth archives. */
 public final class DefaultPackService implements PackService {
     private static final int MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
     private final MrpackInstaller mrpackInstaller;
@@ -76,13 +76,12 @@ public final class DefaultPackService implements PackService {
                 move(payload, target);
                 return new PackImportResult(preview.format(), name, target, installed);
             }
-            rejectUnsupportedRemoteManifest(archive, preview.format());
             List<ZipUtil.ArchivedFile> files = ZipUtil.extractSafely(archive, staging, null);
             Path payload = switch (preview.format()) {
                 case ECL -> staging.resolve("instance");
                 case MULTIMC -> Files.isDirectory(staging.resolve(".minecraft"))
                         ? staging.resolve(".minecraft") : staging.resolve("minecraft");
-                case MRPACK, CURSEFORGE -> staging.resolve("overrides");
+                case MRPACK -> staging.resolve("overrides");
             };
             if (!Files.isDirectory(payload)) {
                 throw new IOException("整合包缺少实例内容目录: " + payload.getFileName());
@@ -91,18 +90,6 @@ public final class DefaultPackService implements PackService {
             return new PackImportResult(preview.format(), name, target, files.size());
         } finally {
             if (Files.exists(staging)) FileUtil.deleteDirectory(staging);
-        }
-    }
-
-    private static void rejectUnsupportedRemoteManifest(Path archive, PackFormat format) throws IOException {
-        if (format != PackFormat.CURSEFORGE) return;
-        try (ZipFile zip = new ZipFile(archive.toFile(), StandardCharsets.UTF_8)) {
-            JsonObject value = manifest(zip, format);
-            if (value.has("files") && value.get("files").isJsonArray()
-                    && !value.getAsJsonArray("files").isEmpty()) {
-                throw new IOException("CurseForge packs with remote file entries are not supported; "
-                        + "the import was not changed");
-            }
         }
     }
 
@@ -120,7 +107,7 @@ public final class DefaultPackService implements PackService {
         String prefix = switch (effective) {
             case ECL -> "instance/";
             case MULTIMC -> "minecraft/";
-            case MRPACK, CURSEFORGE -> "overrides/";
+            case MRPACK -> "overrides/";
         };
         try (OutputStream raw = Files.newOutputStream(archive);
              ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(raw))) {
@@ -165,19 +152,6 @@ public final class DefaultPackService implements PackService {
                 manifest.add("dependencies", dependencies);
                 putJson(zip, "modrinth.index.json", manifest);
             }
-            case CURSEFORGE -> {
-                manifest.addProperty("manifestType", "minecraftModpack");
-                manifest.addProperty("manifestVersion", 1);
-                manifest.addProperty("version", "1.0.0");
-                manifest.addProperty("author", "ECL");
-                JsonObject minecraft = new JsonObject();
-                minecraft.addProperty("version", version);
-                minecraft.add("modLoaders", new com.google.gson.JsonArray());
-                manifest.add("minecraft", minecraft);
-                manifest.add("files", new com.google.gson.JsonArray());
-                manifest.addProperty("overrides", "overrides");
-                putJson(zip, "manifest.json", manifest);
-            }
         }
     }
 
@@ -208,7 +182,6 @@ public final class DefaultPackService implements PackService {
 
     private static PackFormat detect(ZipFile zip) throws IOException {
         if (zip.getEntry("modrinth.index.json") != null) return PackFormat.MRPACK;
-        if (zip.getEntry("manifest.json") != null) return PackFormat.CURSEFORGE;
         if (zip.getEntry("mmc-pack.json") != null) return PackFormat.MULTIMC;
         if (zip.getEntry("ecl-pack.json") != null) return PackFormat.ECL;
         throw new IOException("无法识别整合包格式");
@@ -217,7 +190,6 @@ public final class DefaultPackService implements PackService {
     private static JsonObject manifest(ZipFile zip, PackFormat format) throws IOException {
         String name = switch (format) {
             case MRPACK -> "modrinth.index.json";
-            case CURSEFORGE -> "manifest.json";
             case MULTIMC -> "mmc-pack.json";
             case ECL -> "ecl-pack.json";
         };
@@ -240,9 +212,6 @@ public final class DefaultPackService implements PackService {
         if (format == PackFormat.ECL) return text(manifest, "minecraftVersion", "");
         if (format == PackFormat.MRPACK && manifest.has("dependencies")) {
             return text(manifest.getAsJsonObject("dependencies"), "minecraft", "");
-        }
-        if (format == PackFormat.CURSEFORGE && manifest.has("minecraft")) {
-            return text(manifest.getAsJsonObject("minecraft"), "version", "");
         }
         if (format == PackFormat.MULTIMC && manifest.has("components")) {
             for (var element : manifest.getAsJsonArray("components")) {

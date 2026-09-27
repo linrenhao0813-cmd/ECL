@@ -17,7 +17,6 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
-import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -222,18 +221,6 @@ final class SettingsDialog {
         });
         ui.applyFieldStyle(modReleaseChannelField);
 
-        PasswordField curseForgeApiKeyField = new PasswordField();
-        String storedCurseForgeKey = ui.settingsManager.getEncrypted(
-                ECLConfig.KEY_CURSEFORGE_API_KEY);
-        boolean unreadableCurseForgeKey =
-                ui.settingsManager.consumeUnreadableEncryptedSetting() != null;
-        curseForgeApiKeyField.setText(storedCurseForgeKey == null ? "" : storedCurseForgeKey);
-        curseForgeApiKeyField.setPromptText("可留空，或使用 CURSEFORGE_API_KEY 环境变量");
-        if (unreadableCurseForgeKey) {
-            curseForgeApiKeyField.setPromptText("已保存的 API Key 解密失败，请重新输入");
-        }
-        ui.applyFieldStyle(curseForgeApiKeyField);
-
         VBox dialogRoot = new VBox(18,
                 ui.createSurface("Java 路径", "指向 java.exe 或 JDK 根目录", javaBox),
                 ui.createSurface("游戏目录", "Minecraft 实例根目录", dirBox),
@@ -255,10 +242,7 @@ final class SettingsDialog {
                         backupBehaviorBox),
                 ui.createSurface("Modrinth 发布通道",
                         "控制默认版本、依赖版本和更新版本的稳定性范围",
-                        modReleaseChannelField),
-                ui.createSurface("CurseForge API Key",
-                        "用于 CurseForge 模组、光影、材质包和整合包搜索下载；保存时加密存储",
-                        curseForgeApiKeyField)
+                        modReleaseChannelField)
         );
         dialogRoot.getStyleClass().add("root-pane");
         dialogRoot.setPadding(new Insets(24));
@@ -356,8 +340,6 @@ final class SettingsDialog {
                 default -> ReleaseChannel.RELEASE_AND_BETA;
             };
             ui.settingsManager.set(ECLConfig.KEY_MOD_RELEASE_CHANNEL, modReleaseChannel.name());
-            ui.settingsManager.setEncrypted(ECLConfig.KEY_CURSEFORGE_API_KEY,
-                    curseForgeApiKeyField.getText().trim());
             if (selectedInstanceId != null && !selectedInstanceId.isBlank()) {
                 try {
                     DefaultGameRepository repository = ui.gameRepository();

@@ -3,7 +3,6 @@ package com.ecl.ui;
 import com.ecl.download.DownloadTaskCenter;
 import com.ecl.modrinth.model.ContentProject;
 import com.ecl.modrinth.model.ContentVersion;
-import com.ecl.modrinth.provider.ContentSource;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -53,7 +52,7 @@ final class LauncherContentBrowser {
         String activeProfile = ui.getSelectedVersion();
         String initialProfile = profileIds.contains(activeProfile) ? activeProfile : profileIds.getFirst();
         ContentInstance initialInstance = downloadWorkflow.resolveContentInstance(initialProfile);
-        Label eyebrow = new Label("MODRINTH + CURSEFORGE / "
+        Label eyebrow = new Label("MODRINTH / "
                 + target.projectType.toUpperCase(java.util.Locale.ROOT));
         eyebrow.getStyleClass().add("eyebrow");
         Label title = new Label(target.title);
@@ -76,8 +75,7 @@ final class LauncherContentBrowser {
         ui.applyFieldStyle(searchField);
         HBox.setHgrow(searchField, Priority.ALWAYS);
         Button searchButton = ui.createActionButton("搜索", "primary-button", () -> { });
-        ComboBox<ContentSource> sourceCombo = searchController.createContentSourceCombo();
-        HBox searchBar = new HBox(8, sourceCombo, searchField, searchButton);
+        HBox searchBar = new HBox(8, searchField, searchButton);
         ListView<ContentProject> resultList = new ListView<>();
         resultList.getStyleClass().add("mod-result-list");
         resultList.setPrefHeight(330);
@@ -136,7 +134,7 @@ final class LauncherContentBrowser {
             if (selected != null) {
                 searchController.setTranslatedProjectDescription(selected, projectDescription,
                         descriptionGeneration, selectedDescriptionGeneration);
-                searchController.loadProjectVersions(sourceCombo.getValue(), target, selected,
+                searchController.loadProjectVersions(target, selected,
                         downloadWorkflow.resolveContentInstance(targetProfileCombo.getValue()),
                         versionComboBox, status, downloadButton, versionGeneration);
             }
@@ -144,19 +142,11 @@ final class LauncherContentBrowser {
         versionComboBox.valueProperty().addListener((observable, oldValue, selected) ->
                 downloadButton.setDisable(selected == null
                         || resultList.getSelectionModel().getSelectedItem() == null));
-        Runnable search = () -> searchController.searchModrinthContent(sourceCombo.getValue(), target,
+        Runnable search = () -> searchController.searchModrinthContent(target,
                 downloadWorkflow.resolveContentInstance(targetProfileCombo.getValue()),
                 searchField, resultList, status, searchButton, downloadButton, searchGeneration);
         searchButton.setOnAction(event -> search.run());
         searchField.setOnAction(event -> search.run());
-        sourceCombo.setOnAction(event -> {
-            versionGeneration.incrementAndGet();
-            versionComboBox.getItems().clear();
-            versionComboBox.setDisable(true);
-            resultList.getItems().clear();
-            downloadButton.setDisable(true);
-            search.run();
-        });
         targetProfileCombo.setOnAction(event -> {
             ContentInstance inst = downloadWorkflow.resolveContentInstance(targetProfileCombo.getValue());
             downloadWorkflow.updateContentTargetLabel(target, inst, targetLabel);
@@ -176,7 +166,7 @@ final class LauncherContentBrowser {
                 status.setText("无法创建目录: " + ui.cleanMessage(error));
                 return;
             }
-            downloadWorkflow.downloadSelectedContent(sourceCombo.getValue(), target,
+            downloadWorkflow.downloadSelectedContent(target,
                     resultList.getSelectionModel().getSelectedItem(),
                     versionComboBox.getValue(), inst, directory, status, progress,
                     searchButton, downloadButton, targetProfileCombo, downloadGeneration,
@@ -234,8 +224,7 @@ final class LauncherContentBrowser {
         HBox targetBar = new HBox(10, targetProfileCombo, loaderCombo);
         HBox.setHgrow(targetProfileCombo, Priority.ALWAYS);
         loaderCombo.setPrefWidth(132);
-        ComboBox<ContentSource> sourceCombo = searchController.createContentSourceCombo();
-        HBox searchBar = new HBox(10, sourceCombo, searchField, searchBtn);
+        HBox searchBar = new HBox(10, searchField, searchBtn);
         HBox.setHgrow(searchField, Priority.ALWAYS);
         ListView<ContentProject> resultList = new ListView<>();
         resultList.getStyleClass().add("mod-result-list");
@@ -298,25 +287,17 @@ final class LauncherContentBrowser {
                 searchController.setTranslatedProjectDescription(selected, descriptionLabel,
                         descriptionGeneration, selectedDescriptionGeneration);
                 ContentInstance inst = downloadWorkflow.resolveContentInstance(targetProfileCombo.getValue());
-                searchController.loadProjectVersions(sourceCombo.getValue(), target, selected,
+                searchController.loadProjectVersions(target, selected,
                         inst, projectVersionCombo, dialogStatus, importBtn, versionGeneration);
             }
         });
         projectVersionCombo.valueProperty().addListener((obs, oldValue, selectedVersion) ->
                 importBtn.setDisable(selectedVersion == null
                         || resultList.getSelectionModel().getSelectedItem() == null));
-        searchBtn.setOnAction(e -> searchController.searchModrinthContent(sourceCombo.getValue(), target,
+        searchBtn.setOnAction(e -> searchController.searchModrinthContent(target,
                 downloadWorkflow.resolveContentInstance(targetProfileCombo.getValue()),
                 searchField, resultList, dialogStatus, searchBtn, importBtn, searchGeneration));
         searchField.setOnAction(e -> searchBtn.fire());
-        sourceCombo.setOnAction(e -> {
-            versionGeneration.incrementAndGet();
-            projectVersionCombo.getItems().clear();
-            projectVersionCombo.setDisable(true);
-            resultList.getItems().clear();
-            importBtn.setDisable(true);
-            searchBtn.fire();
-        });
         targetProfileCombo.setOnAction(e -> {
             ContentInstance inst = downloadWorkflow.resolveContentInstance(targetProfileCombo.getValue());
             if (target.usesLoader()) {
@@ -330,10 +311,10 @@ final class LauncherContentBrowser {
             resultList.getItems().clear();
             importBtn.setDisable(true);
             descriptionLabel.setText("正在加载所选实例的兼容内容...");
-            searchController.searchModrinthContent(sourceCombo.getValue(), target, inst,
+            searchController.searchModrinthContent(target, inst,
                     searchField, resultList, dialogStatus, searchBtn, importBtn, searchGeneration);
         });
-        configureImportAction(importBtn, targetProfileCombo, sourceCombo, target, resultList,
+        configureImportAction(importBtn, targetProfileCombo, target, resultList,
                 projectVersionCombo, dialogStatus, modProgress, searchBtn, downloadGeneration,
                 activeDownloadGeneration, activeDownloadTask);
         HBox actions = new HBox(10, importBtn, folderBtn, closeBtn);
@@ -356,7 +337,7 @@ final class LauncherContentBrowser {
         dialog.setScene(scene);
         ui.applyThemeToScene(scene);
         dialog.show();
-        searchController.searchModrinthContent(sourceCombo.getValue(), target, initialInstance,
+        searchController.searchModrinthContent(target, initialInstance,
                 searchField, resultList, dialogStatus, searchBtn, importBtn, searchGeneration);
     }
 
@@ -381,7 +362,7 @@ final class LauncherContentBrowser {
     }
 
     private void configureImportAction(
-            Button importBtn, ComboBox<String> targetProfileCombo, ComboBox<ContentSource> sourceCombo,
+            Button importBtn, ComboBox<String> targetProfileCombo,
             ContentTarget target, ListView<ContentProject> resultList,
             ComboBox<ContentVersion> projectVersionCombo, Label dialogStatus, ProgressBar modProgress,
             Button searchBtn, AtomicLong downloadGeneration, AtomicLong activeDownloadGeneration,
@@ -396,7 +377,7 @@ final class LauncherContentBrowser {
                 return;
             }
             DownloadTaskCenter.TaskHandle<?> task = downloadWorkflow.downloadSelectedContent(
-                    sourceCombo.getValue(), target, resultList.getSelectionModel().getSelectedItem(),
+                    target, resultList.getSelectionModel().getSelectedItem(),
                     projectVersionCombo.getValue(), inst, importDir, dialogStatus, modProgress,
                     searchBtn, importBtn, targetProfileCombo, downloadGeneration,
                     activeDownloadGeneration);

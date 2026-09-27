@@ -25,7 +25,7 @@ final class InstalledModController {
     private final java.util.function.Consumer<String> setError;
     private final java.util.function.Consumer<String> setOperation;
     private final Map<String, String> health = new LinkedHashMap<>();
-    private LocalModScanner scanner;
+    private final LocalModScanner scanner;
     private boolean loaded;
 
     InstalledModController(ModManagementService managementService, LocalModScanner scanner,
@@ -43,10 +43,6 @@ final class InstalledModController {
         this.errorFormatter = errorFormatter;
         this.setError = setError;
         this.setOperation = setOperation;
-    }
-
-    void setScanner(LocalModScanner value) {
-        scanner = value;
     }
 
     boolean isLoaded() {

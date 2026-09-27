@@ -12,12 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 class ModMetadataProviderRegistryTest {
     @Test
-    void resolvesRegisteredProviderByNormalizedSource() {
+    void resolvesRegisteredProviderByNormalizedId() {
         ModrinthMetadataProvider provider = new ModrinthMetadataProvider(
                 new TestFixtures.FakeApi(), false);
         try (ModMetadataProviderRegistry registry = new ModMetadataProviderRegistry(provider)) {
-            assertSame(provider, registry.require(ContentSource.MODRINTH));
-            assertEquals(ContentSource.MODRINTH, provider.source());
+            assertSame(provider, registry.require("modrinth"));
+            assertEquals("modrinth", provider.id());
+            assertEquals("Modrinth", provider.displayName());
         }
     }
 

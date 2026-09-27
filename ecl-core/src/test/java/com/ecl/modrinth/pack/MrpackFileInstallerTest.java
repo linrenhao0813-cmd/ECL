@@ -38,7 +38,7 @@ class MrpackFileInstallerTest {
     private AutoCloseable loopbackDownloads;
 
     @Test
-    void defaultPolicyTrustsModrinthAndCurseForgeCdnHosts() {
+    void defaultPolicyTrustsModrinthAndForgeCdnHosts() {
         assertTrue(MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS
                 .contains("cdn.modrinth.com"));
         assertTrue(MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS

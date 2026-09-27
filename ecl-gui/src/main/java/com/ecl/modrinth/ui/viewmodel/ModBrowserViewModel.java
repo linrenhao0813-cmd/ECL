@@ -12,7 +12,6 @@ import com.ecl.modrinth.model.ModProject;
 import com.ecl.modrinth.model.ModUpdate;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
-import com.ecl.modrinth.provider.ContentSource;
 import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.service.LocalModScanner;
 import com.ecl.modrinth.service.ModDependencyResolver;
@@ -46,14 +45,14 @@ import java.util.concurrent.CompletionException;
 import java.nio.file.Path;
 
 public final class ModBrowserViewModel implements AutoCloseable {
-    private ModMetadataProvider metadataProvider;
-    private ModDependencyResolver dependencyResolver;
+    private final ModMetadataProvider metadataProvider;
+    private final ModDependencyResolver dependencyResolver;
     private final InstallationPlanBuilder planBuilder;
     private final ModInstallationService installationService;
     private final ModManagementService managementService;
     private final DownloadTaskCenter downloadTaskCenter;
-    private LocalModScanner localScanner;
-    private ModUpdateService updateService;
+    private final LocalModScanner localScanner;
+    private final ModUpdateService updateService;
 
     private final StringProperty searchText = new SimpleStringProperty("");
     private final ObjectProperty<ModSearchIndex> sortIndex =
@@ -134,35 +133,6 @@ public final class ModBrowserViewModel implements AutoCloseable {
         updateCoordinator.reset();
         installedModController.setLoaded(false);
         refreshInstalled();
-    }
-
-    public void setMetadataProvider(ModMetadataProvider provider) {
-        setMetadataProvider(provider, dependencyResolver, localScanner, updateService);
-    }
-
-    public void setMetadataProvider(ModMetadataProvider provider,
-                                    ModDependencyResolver resolver,
-                                    LocalModScanner scanner,
-                                    ModUpdateService updater) {
-        ModMetadataProvider selected = Objects.requireNonNull(provider, "provider");
-        if (metadataProvider == selected && dependencyResolver == resolver
-                && localScanner == scanner && updateService == updater) {
-            return;
-        }
-        cancelActiveRequest();
-        metadataProvider = selected;
-        dependencyResolver = Objects.requireNonNull(resolver, "resolver");
-        localScanner = Objects.requireNonNull(scanner, "scanner");
-        updateService = Objects.requireNonNull(updater, "updater");
-        searchController.setProvider(selected);
-        dependencyLoader.setMetadataProvider(selected);
-        installedModController.setScanner(localScanner);
-        updateCoordinator.setUpdateService(updateService);
-        currentOperation.set("已切换数据源至 " + selected.source().name());
-    }
-
-    public ContentSource contentSource() {
-        return metadataProvider.source();
     }
 
     public void setCategory(String value) {
