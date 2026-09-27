@@ -2792,29 +2792,6 @@
 .forest-stat { -fx-padding: 0 18; -fx-border-color: transparent -ecl-border transparent transparent; -fx-border-width: 0 1 0 0; }
 .scene-root .forest-home .forest-stat-value { -fx-text-fill: -ecl-text; -fx-font-size: 14px; }
 .scene-root .forest-home .forest-stat-caption { -fx-text-fill: -ecl-secondary; -fx-font-size: 12px; }
-.scene-root .forest-home .forest-section-title { -fx-text-fill: -ecl-text; -fx-font-size: 18px; -fx-font-weight: bold; }
-.forest-recents .link-button { -fx-text-fill: -ecl-secondary; }
-.forest-recent-card, .forest-empty {
-    -fx-background-color: -ecl-surface;
-    -fx-background-radius: 10;
-    -fx-border-color: -ecl-border;
-    -fx-border-radius: 10;
-    -fx-padding: 12 16;
-    -fx-min-height: 92;
-    -fx-alignment: center-left;
-}
-.forest-recent-card { -fx-cursor: hand; }
-.forest-recent-card:hover { -fx-background-color: -ecl-surface-muted; -fx-border-color: -ecl-blue; }
-.forest-recent-thumbnail {
-    -fx-min-width: 70; -fx-pref-width: 70; -fx-max-width: 70;
-    -fx-min-height: 56; -fx-pref-height: 56; -fx-max-height: 56;
-    -fx-background-image: url('../images/forest-hero.png');
-    -fx-background-size: cover;
-    -fx-background-position: right center;
-    -fx-background-radius: 6;
-}
-.scene-root .forest-home .forest-recent-title { -fx-text-fill: -ecl-text; -fx-font-size: 15px; -fx-font-weight: bold; }
-.scene-root .forest-home .forest-empty { -fx-text-fill: -ecl-secondary; -fx-font-size: 13px; }
 .forest-activity { -fx-padding: 0 4; }
 .scene-root .forest-home .forest-activity-title { -fx-text-fill: -ecl-secondary; -fx-font-size: 11px; }
 .forest-activity .link-button { -fx-font-size: 11px; }

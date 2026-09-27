@@ -9,7 +9,6 @@ import com.ecl.download.DownloadService;
 import com.ecl.download.DownloadTaskCenter;
 import com.ecl.download.ServerJarDownloader;
 import com.ecl.game.DefaultGameRepository;
-import com.ecl.game.PlaytimeTracker;
 import com.ecl.launch.Launcher;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.launcher.VersionManager;
@@ -117,25 +116,14 @@ class LauncherUIView extends javafx.application.Application {
 
     Label authSummaryLabel;
     Label authHintLabel;
-    Label javaSummaryLabel;
-    Label gameDirSummaryLabel;
     Label versionSummaryLabel;
-    Label memorySummaryLabel;
-    Label jvmArgsSummaryLabel;
-    Label runtimeBadgeLabel;
     Label topAuthBadgeLabel;
     Label topVersionBadgeLabel;
-    Label topMemoryBadgeLabel;
     Label selectedVersionTitleLabel;
     Label selectedRuntimeMetaLabel;
-    Label launchReadinessLabel;
     Label homeAccountNameLabel;
     Label homeAccountTypeLabel;
     Label homeAccountAvatarLabel;
-    Label homeEnvironmentStatusLabel;
-    Label playtimeTotalLabel;
-    Label playtimeRecentLabel;
-    Label playtimeLaunchCountLabel;
     private final LauncherContentBrowser contentBrowser = new LauncherContentBrowser((LauncherUI) this);
     private final LauncherLaunchForm launchForm = new LauncherLaunchForm((LauncherUI) this);
     final LauncherPageFactory pageFactory = new LauncherPageFactory((LauncherUI) this);
@@ -162,7 +150,6 @@ class LauncherUIView extends javafx.application.Application {
     boolean backupOnLaunch;
     int backupKeepCount;
     boolean backupIncludeMods;
-    final PlaytimeTracker playtimeTracker = new PlaytimeTracker();
     final AtomicBoolean applicationStopping = new AtomicBoolean();
     volatile Process activeGameProcess;
     volatile String activeGameVersion;
@@ -355,8 +342,6 @@ class LauncherUIView extends javafx.application.Application {
         accountButton.setOnAction(event -> openAccountSettings());
 
         topVersionBadgeLabel = createValueLabel("未选择");
-        runtimeBadgeLabel = createValueLabel("检查中");
-        topMemoryBadgeLabel = createValueLabel("自动");
 
         LauncherWindowChrome windowChrome = new LauncherWindowChrome(primaryStage);
         HBox windowControls = windowChrome.createControls();

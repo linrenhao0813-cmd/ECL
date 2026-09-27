@@ -31,7 +31,6 @@ final class GameLaunchCoordinator {
     private final LaunchAuthFactory authFactory;
     private final GameProcessMonitor processMonitor;
     private final GameLaunchPreparation preparation;
-    private final GamePlaytimeService playtime;
 
     GameLaunchCoordinator(LauncherUI ui) {
         this(ui, new LauncherUiFacadeAdapter(ui));
@@ -41,10 +40,8 @@ final class GameLaunchCoordinator {
         this.ui = ui;
         this.facade = facade;
         this.authFactory = new LaunchAuthFactory(ui);
-        this.playtime = new GamePlaytimeService(ui);
         this.preparation = new GameLaunchPreparation(ui, facade);
-        this.processMonitor = new GameProcessMonitor(ui,
-                this::showGameErrorDialog, playtime::recordSession);
+        this.processMonitor = new GameProcessMonitor(ui, this::showGameErrorDialog);
     }
 
     void launchGame() {
@@ -129,8 +126,6 @@ final class GameLaunchCoordinator {
                 long launchStartedAt = process.info().startInstant()
                         .map(Instant::toEpochMilli)
                         .orElseGet(System::currentTimeMillis);
-                long launchStartedNanos = System.nanoTime();
-                playtime.recordLaunch(version, launchStartedAt);
                 ui.registerActiveGameProcess(process, version);
                 UUID runningInstanceId = registerRunningModInstance(version);
                 boolean minimizeThisLaunch = ui.closeAfterLaunch;
@@ -144,7 +139,6 @@ final class GameLaunchCoordinator {
                     }
                 });
                 processMonitor.monitor(gameProcess, version, launchDir, launchStartedAt,
-                        launchStartedNanos,
                         runningInstanceId, minimizeThisLaunch, gameLock);
                 monitorOwnsGameLock = true;
             } catch (Exception e) {
@@ -253,10 +247,6 @@ final class GameLaunchCoordinator {
                 memoryMb,
                 autoMemory,
                 jvmArguments);
-    }
-
-    void updatePlaytimeSummary() {
-        playtime.updateSummary();
     }
 
     int getEffectiveMaxMemoryMb() {

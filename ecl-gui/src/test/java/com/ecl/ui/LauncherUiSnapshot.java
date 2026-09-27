@@ -326,14 +326,6 @@ public final class LauncherUiSnapshot {
             }
             String selected = createVisualProfile("生存世界", "fabric", "1.21.1");
             String second = createVisualProfile("原版探索", "", "1.21.1");
-            for (String id : java.util.List.of(selected, second)) {
-                Path root = resolveVersionInstanceRoot(id).toPath();
-                Files.createDirectories(root.resolve(".ecl/config"));
-                String date = id.equals(selected) ? "2026-09-26T10:30:00Z" : "2026-09-25T08:00:00Z";
-                Files.writeString(root.resolve(".ecl/config/playtime.json"), """
-                        {"totalSeconds":88560,"launchCount":12,"lastLaunchedAt":"%s"}
-                        """.formatted(date));
-            }
             versionManager.invalidateLocalVersionProfiles();
             maxMemoryMb = 4096;
             versionCombo.getItems().setAll(selected, second);

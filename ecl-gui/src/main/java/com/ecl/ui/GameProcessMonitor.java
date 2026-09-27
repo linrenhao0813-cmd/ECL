@@ -14,22 +14,14 @@ import java.util.function.BiConsumer;
 final class GameProcessMonitor {
     private final LauncherUI ui;
     private final BiConsumer<CrashAnalyzer.Report, File> errorConsumer;
-    private final SessionRecorder sessionRecorder;
 
-    @FunctionalInterface
-    interface SessionRecorder {
-        void record(String version, long launchStartedAt, long elapsedNanos);
-    }
-
-    GameProcessMonitor(LauncherUI ui, BiConsumer<CrashAnalyzer.Report, File> errorConsumer,
-                       SessionRecorder sessionRecorder) {
+    GameProcessMonitor(LauncherUI ui, BiConsumer<CrashAnalyzer.Report, File> errorConsumer) {
         this.ui = ui;
         this.errorConsumer = errorConsumer;
-        this.sessionRecorder = sessionRecorder;
     }
 
     void monitor(GameProcess gameProcess, String version, File launchDir,
-                 long launchStartedAt, long launchStartedNanos,
+                 long launchStartedAt,
                  UUID runningInstanceId, boolean restoreLauncher,
                  InstanceOperationLease launchLock) {
         // 守护线程：关闭启动器窗口后进程能立即退出，不会被该监控线程拖住；
@@ -58,7 +50,6 @@ final class GameProcessMonitor {
                     errorConsumer.accept(report, launchDir);
                 });
             } finally {
-                sessionRecorder.record(version, launchStartedAt, System.nanoTime() - launchStartedNanos);
                 if (runningInstanceId != null) {
                     ui.controller.setInstanceRunning(runningInstanceId, false);
                 }

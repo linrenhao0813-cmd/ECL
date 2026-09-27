@@ -13,7 +13,7 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖版本安装�
 - 安装、重装、删除 Minecraft 正式版、快照和愚人节版本，下载时校验客户端、资源和依赖文件。
 - “实例”菜单从用户配置的 `.minecraft/versions` 中检测已有实例，直接切换启动目标；不会默认选中在线版本从零下载。
 - 带加载器的实例使用隔离运行目录，原版实例共享游戏根目录。
-- 首页展示累计游玩时长，悬停可查看最近启动时间和启动次数；最近游玩按本地启动记录展示最多两个实例卡片。打包版可为所选实例创建桌面或开始菜单快捷方式。
+- 打包版可为所选实例创建桌面或开始菜单快捷方式。
 
 ### 模组加载器
 
@@ -116,7 +116,7 @@ cd ECL
 
 | 模式 | 说明 |
 | --- | --- |
-| `-PuiSnapshotMode=forest` | 带固定实例与游玩记录的森林首页 |
+| `-PuiSnapshotMode=forest` | 带固定实例的森林首页 |
 | `-PuiSnapshotMode=forest-compact` | 1180×720 紧凑窗口 |
 | `-PuiSnapshotMode=forest-en` | 英文界面 |
 | `-PuiSnapshotMode=forest-empty` | 无本地实例 |
@@ -146,7 +146,6 @@ GitHub Actions 在 Windows 上执行 `check`（PR 另有依赖审查），随后
 数据目录保存版本元数据、库、资源、运行时、配置、备份和运行日志；游戏目录可在设置中覆盖。实例目录内部：
 
 - `.ecl/config/launch-profile.json` — 实例启动配置，带 `schemaVersion` 的 UTF-8 JSON，临时文件 + 原子替换写入。实例首次读取时迁移现有全局 `javaPath`、`maxMemoryMb` 和 `jvmArgs`，旧全局设置保留为未迁移实例的默认值。
-- `.ecl/config/playtime.json` — 游玩时长、启动次数和最近启动记录。
 - `.ecl/operations/` — 操作协调器持久化的操作日志（`operationId` 及运行中、成功、失败状态）。Mod 安装、启用、禁用、卸载、索引修复和整合包更新共享同一协调器：同一实例的文件变更串行执行，不同实例互不阻塞。
 - `.ecl/game-process.json` — 运行中游戏的 PID 与启动时间。
 

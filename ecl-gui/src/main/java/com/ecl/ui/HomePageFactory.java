@@ -18,7 +18,6 @@ import javafx.scene.shape.Rectangle;
 /** Builds the forest launch home while retaining the shared launch/account controls. */
 final class HomePageFactory {
     private final LauncherUI ui;
-    private RecentInstancesPane recentInstances;
 
     HomePageFactory(LauncherUI ui) {
         this.ui = ui;
@@ -29,7 +28,6 @@ final class HomePageFactory {
             ui.homePage = createLaunchPane();
         }
         ui.updateRuntimeSummary();
-        recentInstances.refresh();
         return ui.homePage;
     }
 
@@ -44,8 +42,7 @@ final class HomePageFactory {
         ui.createForm();
         StackPane hero = createLaunchHero();
         HBox summary = createStatusStrip();
-        recentInstances = new RecentInstancesPane(ui);
-        pane.getChildren().addAll(hero, summary, recentInstances, createActivity());
+        pane.getChildren().addAll(hero, summary, createActivity());
         return pane;
     }
 
@@ -82,26 +79,10 @@ final class HomePageFactory {
     }
 
     private HBox createStatusStrip() {
-        ui.javaSummaryLabel = label("", "forest-stat-value");
-        ui.memorySummaryLabel = label("", "forest-stat-value");
-        ui.launchReadinessLabel = label("", "forest-stat-value");
-        ui.homeEnvironmentStatusLabel = label("", "forest-stat-caption");
         ui.homeAccountNameLabel = label(ui.getAuthDisplayName(), "forest-stat-value");
         ui.homeAccountTypeLabel = label("", "forest-stat-caption");
-        ui.playtimeTotalLabel = label("", "forest-stat-value");
-        ui.playtimeRecentLabel = label("", "forest-stat-caption");
-        ui.playtimeLaunchCountLabel = label("0", "forest-stat-caption");
-        Tooltip playtimeDetails = new Tooltip();
-        playtimeDetails.textProperty().bind(Bindings.concat(Messages.get("playtime.lastLaunch"), ": ",
-                ui.playtimeRecentLabel.textProperty(), "\n", Messages.get("playtime.launches"), ": ",
-                ui.playtimeLaunchCountLabel.textProperty()));
-        ui.playtimeTotalLabel.setTooltip(playtimeDetails);
         HBox strip = new HBox(
-                stat("java", ui.javaSummaryLabel, label(Messages.get("info.java"), "forest-stat-caption")),
-                stat("memory", ui.memorySummaryLabel, label(Messages.get("home.memory"), "forest-stat-caption")),
-                stat("check", ui.launchReadinessLabel, ui.homeEnvironmentStatusLabel),
-                stat("account", ui.homeAccountNameLabel, ui.homeAccountTypeLabel),
-                stat("clock", ui.playtimeTotalLabel, label(Messages.get("playtime.total"), "forest-stat-caption")));
+                stat("account", ui.homeAccountNameLabel, ui.homeAccountTypeLabel));
         strip.getStyleClass().add("forest-status-strip");
         return strip;
     }

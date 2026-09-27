@@ -42,8 +42,6 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             switchInstance.fire();
             assertEquals(AppView.VERSIONS, launcher.activeView);
             launcher.setActiveView(AppView.HOME);
-            ((Button) stage.getScene().lookup("#recent-view-all")).fire();
-            assertEquals(AppView.VERSIONS, launcher.activeView);
             ((Button) stage.getScene().lookup("#top-account-button")).fire();
             assertEquals(AppView.SETTINGS, launcher.activeView);
             assertTrue(launcher.accountSettingsSelected);
@@ -57,9 +55,8 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             try {
                 launcher.versionCombo.setValue(null);
                 launcher.switchLanguage("en");
-                assertFalse(launcher.javaSummaryLabel.getText().isBlank());
                 assertFalse(launcher.homeAccountTypeLabel.getText().isBlank());
-                assertFalse(launcher.launchReadinessLabel.getText().isBlank());
+                assertFalse(launcher.selectedVersionTitleLabel.getText().isBlank());
                 assertEquals("Play", launcher.launchBtn.getText());
             } finally {
                 launcher.switchLanguage(locale);
