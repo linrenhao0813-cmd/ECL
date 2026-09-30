@@ -63,7 +63,7 @@ import java.util.function.Supplier;
 public final class MainController implements AutoCloseable {
     private final SettingsManager settingsManager;
     private final VersionManager versionManager;
-    private final DownloadService gameDownloader;
+    private final GameDownloader gameDownloader;
     private final DownloadTaskCenter downloadTaskCenter;
     private final ModrinthDownloader modrinthDownloader;
     private final ModrinthApiClient modrinthApiClient;
@@ -167,7 +167,16 @@ public final class MainController implements AutoCloseable {
                 installationPlanBuilder, modInstallationService, modInstances::get);
         instanceUpdateService = new InstanceUpdateService(
                 new LoaderUpdateService(ECLConfig.getVersionsDir().toPath(), new ModLoaderInstaller(),
-                        instanceOperations, backgroundExecutor, this::isInstanceRunning),
+                        instanceOperations, backgroundExecutor, this::isInstanceRunning,
+                        (profileId, listener) -> gameDownloader.downloadLibrariesForVersion(
+                                profileId, new GameDownloader.DownloadListener() {
+                                    @Override public void onStatus(String message) { listener.onStatus(message); }
+                                    @Override public void onProgress(long downloaded, long total) {
+                                        listener.onProgress(downloaded, total);
+                                    }
+                                    @Override public void onError(String message) { }
+                                    @Override public void onComplete() { }
+                                })),
                 localModScanner, modUpdateService, this::isInstanceRunning);
         modpackUpdateService = new DefaultModpackUpdateService(
                 metadataProvider, backgroundExecutor, instanceOperations,

@@ -370,6 +370,14 @@ public class GameDownloader implements DownloadService {
         return GameManifestParser.getMissingLibraries(versionJson);
     }
 
+    /** Download dependencies declared by a locally installed profile, including inherited libraries. */
+    public void downloadLibrariesForVersion(String versionId, DownloadListener listener) throws IOException {
+        JsonObject versionJson = new com.ecl.game.VersionRepository(ECLConfig.getVersionsDir())
+                .resolveRaw(versionId);
+        if (listener != null) listener.onStatus("正在准备加载器依赖库...");
+        downloadLibraries(versionJson, listener);
+    }
+
     static String nativeClassifierKey(JsonObject library, String osName, String archBits) {
         return InstallHelpers.nativeClassifierKey(library, osName, archBits);
     }

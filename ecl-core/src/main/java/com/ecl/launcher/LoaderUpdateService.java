@@ -28,10 +28,18 @@ public final class LoaderUpdateService {
     private final InstanceOperationLock operationLock;
     private final Executor executor;
     private final Predicate<UUID> instanceRunning;
+    private final ProfileDependencyPreparer dependencyPreparer;
 
     public LoaderUpdateService(Path versionsDirectory, ModLoaderInstaller installer,
                                InstanceOperationLock operationLock, Executor executor,
                                Predicate<UUID> instanceRunning) {
+        this(versionsDirectory, installer, operationLock, executor, instanceRunning,
+                (profileId, listener) -> { });
+    }
+
+    public LoaderUpdateService(Path versionsDirectory, ModLoaderInstaller installer,
+                               InstanceOperationLock operationLock, Executor executor,
+                               Predicate<UUID> instanceRunning, ProfileDependencyPreparer dependencyPreparer) {
         this(versionsDirectory, new Backend() {
             @Override
             public List<String> listVersions(String minecraftVersion, ModLoaderInstaller.Loader loader) throws IOException {
@@ -43,16 +51,24 @@ public final class LoaderUpdateService {
                                                             String version, ModLoaderInstaller.Listener listener) throws IOException {
                 return installer.install(minecraftVersion, loader, version, listener);
             }
-        }, operationLock, executor, instanceRunning);
+        }, operationLock, executor, instanceRunning, dependencyPreparer);
     }
 
     public LoaderUpdateService(Path versionsDirectory, Backend backend, InstanceOperationLock operationLock,
                                Executor executor, Predicate<UUID> instanceRunning) {
+        this(versionsDirectory, backend, operationLock, executor, instanceRunning,
+                (profileId, listener) -> { });
+    }
+
+    public LoaderUpdateService(Path versionsDirectory, Backend backend, InstanceOperationLock operationLock,
+                               Executor executor, Predicate<UUID> instanceRunning,
+                               ProfileDependencyPreparer dependencyPreparer) {
         this.versionsDirectory = Objects.requireNonNull(versionsDirectory).toAbsolutePath().normalize();
         this.backend = Objects.requireNonNull(backend);
         this.operationLock = Objects.requireNonNull(operationLock);
         this.executor = Objects.requireNonNull(executor);
         this.instanceRunning = Objects.requireNonNull(instanceRunning);
+        this.dependencyPreparer = Objects.requireNonNull(dependencyPreparer);
     }
 
     public CompletableFuture<Result> update(ModInstanceContext instance, ModLoaderInstaller.Listener listener) {
@@ -107,6 +123,9 @@ public final class LoaderUpdateService {
                     || !instance.loaderName().equals(prepared.modLoader())) {
                 throw new IOException("新版加载器与当前实例不兼容");
             }
+            dependencyPreparer.prepare(installed.profileId(), listener);
+            checkCancelled();
+            ensureStopped(instance);
             JsonObject updated = new JsonObject();
             // Launch fields now come from the new loader, avoiding old libraries and arguments.
             original.entrySet().stream().filter(entry -> entry.getKey().startsWith("ecl"))
@@ -153,5 +172,10 @@ public final class LoaderUpdateService {
 
         ModLoaderInstaller.InstallResult install(String minecraftVersion, ModLoaderInstaller.Loader loader,
                                                 String version, ModLoaderInstaller.Listener listener) throws IOException;
+    }
+
+    @FunctionalInterface
+    public interface ProfileDependencyPreparer {
+        void prepare(String profileId, ModLoaderInstaller.Listener listener) throws IOException;
     }
 }
