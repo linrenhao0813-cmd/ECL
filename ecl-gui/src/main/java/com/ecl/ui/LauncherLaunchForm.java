@@ -320,7 +320,8 @@ final class LauncherLaunchForm {
         ui.settingsBtn.setOnAction(e -> ui.showSettingsDialog());
         LauncherUiFactory.setVisible(ui.settingsBtn, false);
 
-        HBox buttonBar = new HBox(14, ui.launchBtn, switchInstanceButton, ui.refreshBtn, ui.settingsBtn);
+        HBox buttonBar = new HBox(14, ui.launchBtn, ui.instanceUpdates.createButton(),
+                switchInstanceButton, ui.refreshBtn, ui.settingsBtn);
         buttonBar.getStyleClass().add("launch-actions");
         buttonBar.setAlignment(Pos.CENTER_LEFT);
         return buttonBar;
@@ -359,6 +360,7 @@ final class LauncherLaunchForm {
         if (!busy) {
             loader.updateLoaderControls();
         }
+        ui.instanceUpdates.updateButton();
     }
 
     // Delegates kept for LauncherUIView wrappers

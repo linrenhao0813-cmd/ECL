@@ -58,7 +58,7 @@ final class HomePageFactory {
         description.setWrapText(true);
         description.setMaxWidth(410);
         VBox details = new VBox(16, eyebrow, ui.selectedVersionTitleLabel,
-                ui.selectedRuntimeMetaLabel, ui.createActionBar(), description);
+                ui.selectedRuntimeMetaLabel, ui.createActionBar(), ui.instanceUpdates.createStatusPane(), description);
         details.getStyleClass().add("forest-details");
         details.setAlignment(Pos.CENTER_LEFT);
         details.setMaxWidth(Double.MAX_VALUE);

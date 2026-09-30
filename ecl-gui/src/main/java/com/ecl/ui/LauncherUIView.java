@@ -95,6 +95,7 @@ class LauncherUIView extends javafx.application.Application {
     Label statusLabel;
     Label detailLabel;
     Button launchBtn;
+    Button updateInstanceButton;
     Button refreshBtn;
     Button settingsBtn;
     Button microsoftLoginBtn;
@@ -119,6 +120,7 @@ class LauncherUIView extends javafx.application.Application {
     final LauncherPageFactory pageFactory = new LauncherPageFactory((LauncherUI) this);
     private final LauncherPathService pathService = new LauncherPathService((LauncherUI) this);
     final HomePageFactory homePageFactory = new HomePageFactory((LauncherUI) this);
+    final InstanceUpdateWorkflow instanceUpdates = new InstanceUpdateWorkflow((LauncherUI) this);
     final ContentLibraryPageFactory contentLibraryPageFactory =
             new ContentLibraryPageFactory((LauncherUI) this);
     private final RuntimeSummaryPresenter runtimeSummaryPresenter =

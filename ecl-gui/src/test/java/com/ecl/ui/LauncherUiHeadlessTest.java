@@ -18,6 +18,36 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     private LauncherUI launcher;
     private Stage stage;
 
+    @Test
+    void upgradeButtonTracksModdedVanillaAndMissingInstances() throws Exception {
+        String id = "upgrade-button-test";
+        java.nio.file.Path profile = ECLConfig.getVersionsDir().toPath().resolve(id).resolve(id + ".json");
+        java.nio.file.Files.createDirectories(profile.getParent());
+        java.nio.file.Files.writeString(profile, """
+                {"id":"upgrade-button-test","eclMinecraftVersion":"1.21.1","eclModLoader":"fabric",
+                 "eclModLoaderVersion":"0.16.0","mainClass":"net.fabricmc.loader.impl.launch.knot.KnotClient"}
+                """);
+        try {
+            interact(() -> {
+                launcher.versionManager.invalidateLocalVersionProfiles();
+                launcher.versionCombo.getItems().add(id);
+                launcher.versionCombo.setValue(id);
+                assertFalse(launcher.updateInstanceButton.isDisabled());
+                launcher.setControlsBusy(true);
+                assertTrue(launcher.updateInstanceButton.isDisabled());
+                launcher.setControlsBusy(false);
+                assertFalse(launcher.updateInstanceButton.isDisabled());
+                launcher.versionCombo.setValue("uninstalled-vanilla-test");
+                assertTrue(launcher.updateInstanceButton.isDisabled());
+                launcher.versionCombo.setValue(null);
+                assertTrue(launcher.updateInstanceButton.isDisabled());
+            });
+        } finally {
+            java.nio.file.Files.deleteIfExists(profile);
+            launcher.versionManager.invalidateLocalVersionProfiles();
+        }
+    }
+
     @Override
     public void start(Stage primaryStage) {
         launcher = new LauncherUI();
@@ -46,8 +76,12 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             assertTrue(stage.getScene().getRoot().lookupAll(".forest-status-strip").isEmpty());
             assertTrue(stage.getScene().getRoot().lookupAll(".forest-activity").isEmpty());
             Button switchInstance = (Button) stage.getScene().lookup("#home-switch-instance");
+            Button upgrade = (Button) stage.getScene().lookup("#home-update-instance");
+            assertNotNull(upgrade);
+            assertNotNull(stage.getScene().lookup("#instance-update-progress"));
             launcher.setControlsBusy(true);
             assertTrue(switchInstance.isDisabled());
+            assertTrue(upgrade.isDisabled());
             launcher.setControlsBusy(false);
             switchInstance.fire();
             assertEquals(AppView.VERSIONS, launcher.activeView);
@@ -70,6 +104,9 @@ class LauncherUiHeadlessTest extends ApplicationTest {
                 assertFalse(launcher.topAuthBadgeLabel.getText().isBlank());
                 assertFalse(launcher.selectedVersionTitleLabel.getText().isBlank());
                 assertEquals("Play", launcher.launchBtn.getText());
+                Button upgrade = (Button) stage.getScene().lookup("#home-update-instance");
+                assertEquals("Upgrade all", upgrade.getText());
+                assertTrue(upgrade.isDisabled());
             } finally {
                 launcher.switchLanguage(locale);
             }

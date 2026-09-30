@@ -13,6 +13,8 @@ import com.ecl.launch.Launcher;
 import com.ecl.game.InstanceLaunchProfileStore;
 import com.ecl.game.VersionRepository;
 import com.ecl.launcher.VersionManager;
+import com.ecl.launcher.LoaderUpdateService;
+import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.modrinth.api.DefaultModrinthApiClient;
 import com.ecl.modrinth.api.ModrinthApiClient;
 import com.ecl.modrinth.download.HashVerifier;
@@ -34,6 +36,7 @@ import com.ecl.modrinth.service.ModDependencyResolver;
 import com.ecl.modrinth.service.ModInstallationService;
 import com.ecl.modrinth.service.ModManagementService;
 import com.ecl.modrinth.service.ModUpdateService;
+import com.ecl.modrinth.service.InstanceUpdateService;
 import com.ecl.modrinth.service.ModVersionSelector;
 import com.ecl.modrinth.pack.DefaultModpackUpdateService;
 import com.ecl.modrinth.pack.ModpackUpdateService;
@@ -78,6 +81,7 @@ public final class MainController implements AutoCloseable {
     private final ModManagementService modManagementService;
     private final LocalModScanner localModScanner;
     private final ModUpdateService modUpdateService;
+    private final InstanceUpdateService instanceUpdateService;
     private final ModpackUpdateService modpackUpdateService;
     private final InstallationPlanBuilder installationPlanBuilder;
     private final InstanceLaunchProfileStore instanceLaunchProfiles;
@@ -161,6 +165,10 @@ public final class MainController implements AutoCloseable {
         modUpdateService = new DefaultModUpdateService(
                 metadataProvider, modVersionSelector, modDependencyResolver,
                 installationPlanBuilder, modInstallationService, modInstances::get);
+        instanceUpdateService = new InstanceUpdateService(
+                new LoaderUpdateService(ECLConfig.getVersionsDir().toPath(), new ModLoaderInstaller(),
+                        instanceOperations, backgroundExecutor, this::isInstanceRunning),
+                localModScanner, modUpdateService, this::isInstanceRunning);
         modpackUpdateService = new DefaultModpackUpdateService(
                 metadataProvider, backgroundExecutor, instanceOperations,
                 this::isInstanceRunning);
@@ -182,6 +190,7 @@ public final class MainController implements AutoCloseable {
     public ModManagementService modManagementService() { return modManagementService; }
     public LocalModScanner localModScanner() { return localModScanner; }
     public ModUpdateService modUpdateService() { return modUpdateService; }
+    public InstanceUpdateService instanceUpdateService() { return instanceUpdateService; }
     public ModpackUpdateService modpackUpdateService() { return modpackUpdateService; }
     public InstanceLaunchProfileStore instanceLaunchProfiles() { return instanceLaunchProfiles; }
     public InstanceOperationCoordinator instanceOperations() { return instanceOperations; }

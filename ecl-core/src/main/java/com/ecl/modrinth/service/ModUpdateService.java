@@ -7,6 +7,7 @@ import com.ecl.modrinth.model.ReleaseChannel;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 public interface ModUpdateService {
@@ -17,4 +18,9 @@ public interface ModUpdateService {
     );
 
     CompletableFuture<ModInstallationResult> applyUpdate(ModUpdate update);
+
+    /** Protect skipped projects when an automatic update also resolves dependencies. */
+    default CompletableFuture<ModInstallationResult> applyUpdate(ModUpdate update, Set<String> protectedProjects) {
+        return applyUpdate(update);
+    }
 }

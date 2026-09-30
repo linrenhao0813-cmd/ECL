@@ -20,6 +20,7 @@ final class RuntimeSummaryPresenter {
                 ? Messages.get("home.versionPending")
                 : ui.versionManager.getVersionDisplayName(selectedVersion);
         updateVersion(selectedVersion, versionDisplay);
+        ui.instanceUpdates.updateButton();
         updateAccount();
     }
 
