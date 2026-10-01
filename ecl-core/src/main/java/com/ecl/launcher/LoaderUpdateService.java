@@ -99,6 +99,9 @@ public final class LoaderUpdateService {
             String latest = versions.getFirst();
             if (!current.modLoaderVersion().isBlank()
                     && ModLoaderInstaller.compareVersionsDescending(latest, current.modLoaderVersion()) >= 0) {
+                dependencyPreparer.prepare(instance.profileId(), listener);
+                checkCancelled();
+                ensureStopped(instance);
                 return new Result(false, loader.displayName(), current.modLoaderVersion());
             }
             Path target = FileUtil.safeVersionJson(versionsDirectory.toFile(), instance.profileId()).toPath();
