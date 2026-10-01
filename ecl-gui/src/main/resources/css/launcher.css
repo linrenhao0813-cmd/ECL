@@ -3209,3 +3209,23 @@
     -fx-font-size: 12px;
     -fx-font-weight: 700;
 }
+
+/* Match the global settings frame to the launcher, including its title bar. */
+.settings-dialog-title-bar {
+    -fx-min-height: 48;
+    -fx-pref-height: 48;
+    -fx-max-height: 48;
+    -fx-padding: 0 16;
+}
+
+.scene-root.theme-dark .check-box > .box,
+.scene-root.theme-dark .radio-button > .radio {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: -ecl-tertiary;
+}
+.scene-root.theme-dark .radio-button > .radio { -fx-border-radius: 100; }
+.scene-root.theme-dark .check-box > .box { -fx-border-radius: 3; }
+.scene-root.theme-dark .check-box:selected > .box > .mark,
+.scene-root.theme-dark .radio-button:selected > .radio > .dot {
+    -fx-background-color: -ecl-blue;
+}

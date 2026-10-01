@@ -36,6 +36,9 @@ final class LauncherThemeManager {
         }
         Node root = scene.getRoot();
         root.getStyleClass().remove("theme-light");
+        if (!root.getStyleClass().contains("scene-root")) {
+            root.getStyleClass().add("scene-root");
+        }
         if (!root.getStyleClass().contains("theme-dark")) {
             root.getStyleClass().add("theme-dark");
         }

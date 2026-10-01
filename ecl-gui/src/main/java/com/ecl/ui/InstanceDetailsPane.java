@@ -79,6 +79,8 @@ final class InstanceDetailsPane extends VBox {
     private final VBox maintenanceActions = new VBox(10);
     private final Label maintenanceHint = new Label();
 
+    private final InstanceRunDirectoryPane runDirectory;
+
     private final TabPane tabs = new TabPane();
     private final VBox body = new VBox(14);
 
@@ -151,13 +153,16 @@ final class InstanceDetailsPane extends VBox {
         HBox configActions = new HBox(10, saveConfigButton, reloadConfigButton);
         configActions.setAlignment(Pos.CENTER_LEFT);
 
+        runDirectory = new InstanceRunDirectoryPane(ui, this::refreshOverview);
         VBox configTab = new VBox(14,
                 ui.createSurface(Messages.get("instances.config.java"), null,
                         javaAuto, javaCustom, javaRow),
                 ui.createSurface(Messages.get("instances.config.memory"),
                         Messages.get("instances.config.scope"), memoryRow),
                 ui.createSurface(Messages.get("instances.config.jvm"), null, jvmField),
-                configStatus, configActions);
+                configStatus, configActions,
+                ui.createSurface(Messages.get("instances.directory.title"),
+                        Messages.get("instances.directory.scope"), runDirectory));
         configTab.getStyleClass().add("instance-config-tab");
 
         maintenanceHint.getStyleClass().add("status-detail");
@@ -262,6 +267,7 @@ final class InstanceDetailsPane extends VBox {
         updateOverviewRows(minecraftVersion, loader);
         loadDisplaySettings();
         loadLaunchConfig();
+        runDirectory.load(instanceId);
         rebuildMaintenance();
     }
 
@@ -359,6 +365,13 @@ final class InstanceDetailsPane extends VBox {
     private void openInstanceFolder() {
         ui.openLocalFolder(ui.resolveVersionGameDir(instanceId),
                 Messages.get("local.instances.folderTitle"));
+    }
+
+    private void refreshOverview() {
+        VersionManager.LocalVersionProfile profile = localProfile(instanceId);
+        updateOverviewRows(profile == null ? instanceId : profile.minecraftVersion(),
+                profile == null || profile.loader().isBlank() ? GuiMessages.get("forest.vanilla")
+                        : ui.loaderChoiceForProfile(instanceId).displayName);
     }
 
     private void updateOverviewRows(String minecraftVersion, String loader) {

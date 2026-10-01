@@ -165,12 +165,13 @@ final class LauncherPageFactory {
 
         Button advancedButton = ui.createActionButton(
                 Messages.get("settings.advanced"), "primary-button", ui::showSettingsDialog);
+        advancedButton.setId("settings-global-open");
         Button dataDirButton = ui.createActionButton(
                 Messages.get("settings.openData"), "secondary-button",
                 () -> ui.openLocalFolder(ECLConfig.getBaseDir(), Messages.get("settings.openData")));
         Button gameDirButton = ui.createActionButton(
                 Messages.get("settings.openGame"), "ghost-button",
-                () -> ui.openLocalFolder(ui.getActiveGameDir(), Messages.get("settings.openGame")));
+                () -> ui.openLocalFolder(ui.gameDir, Messages.get("settings.openGame")));
         Button wizardButton = ui.createActionButton(
                 Messages.get("wizard.title"), "ghost-button", ui::showFirstRunWizard);
 
@@ -181,7 +182,7 @@ final class LauncherPageFactory {
                 Messages.get("settings.subtitle"),
                 ui.createControlRow(Messages.get("settings.language"), languageBox),
                 ui.createInfoRow(Messages.get("label.gameDir"), ui.createStaticValueLabel(
-                        ui.getActiveGameDir().getAbsolutePath())),
+                        ui.gameDir.getAbsolutePath())),
                 actions
         );
         page.getChildren().add(settingsCard);
@@ -392,7 +393,7 @@ final class LauncherPageFactory {
     }
 
     /** Prevents a failed save from becoming the source of a later discard or auto-save. */
-    private boolean saveFormSettings(Runnable update, SettingKey<?>... keys) {
+    boolean saveFormSettings(Runnable update, SettingKey<?>... keys) {
         SettingsManager manager = ui.settingsManager;
         synchronized (manager) {
             List<Runnable> rollback = new ArrayList<>();
@@ -432,14 +433,12 @@ final class LauncherPageFactory {
                 () -> ui.openLocalFolder(ECLConfig.getBaseDir(), Messages.get("settings.openData")));
         Button gameDirButton = ui.createActionButton(Messages.get("settings.openGame"),
                 "secondary-button",
-                () -> ui.openLocalFolder(ui.getActiveGameDir(), Messages.get("settings.openGame")));
+                () -> ui.openLocalFolder(ui.gameDir, Messages.get("settings.openGame")));
         Button crashButton = ui.createActionButton(Messages.get("settings.openCrash"),
                 "ghost-button", () -> ui.openLocalFolder(
                         new File(ui.getActiveGameDir(), "crash-reports"),
                         Messages.get("label.crashReports")));
-        Button diagnosticsButton = ui.createActionButton(Messages.get("settings.advanced"),
-                "ghost-button", ui::showSettingsDialog);
-        HBox actions = new HBox(10, dataDirButton, gameDirButton, crashButton, diagnosticsButton);
+        HBox actions = new HBox(10, dataDirButton, gameDirButton, crashButton);
         actions.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
         page.getChildren().add(ui.createSurface(
@@ -450,7 +449,7 @@ final class LauncherPageFactory {
                 ui.createInfoRow("Java", ui.createStaticValueLabel(ui.javaPath == null
                         || ui.javaPath.isBlank() ? "-" : abbreviate(ui.javaPath, 72))),
                 ui.createInfoRow(Messages.get("label.gameDir"),
-                        ui.createStaticValueLabel(ui.getActiveGameDir().getAbsolutePath())),
+                        ui.createStaticValueLabel(ui.gameDir.getAbsolutePath())),
                 ui.createInfoRow(Messages.get("settings.about.data"),
                         ui.createStaticValueLabel(ECLConfig.getBaseDir().getAbsolutePath())),
                 actions));

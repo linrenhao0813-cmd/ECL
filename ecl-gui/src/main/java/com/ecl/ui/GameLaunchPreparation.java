@@ -44,7 +44,8 @@ final class GameLaunchPreparation {
                 .profileFile(ui.resolveVersionInstanceRoot(selectedVersion).toPath()));
         if (profileNeedsMigration && !configuredJavaPath.isBlank()
                 && !com.ecl.util.JavaRuntimeUtil.isUsableJavaPath(configuredJavaPath)) {
-            ui.setStatus("Java 路径无效", "高级设置里的 Java 路径不可用，请重新选择 java.exe 或 JDK 根目录。 ");
+            ui.setStatus(com.ecl.util.Messages.get("status.javaInvalid"),
+                    com.ecl.util.Messages.get("status.javaInvalid.detail.path"));
             return;
         }
         if (configuredJavaPath.isBlank()) ui.javaPath = "";

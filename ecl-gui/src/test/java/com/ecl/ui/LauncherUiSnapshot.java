@@ -51,7 +51,8 @@ public final class LauncherUiSnapshot {
         scene.getRoot().applyCss();
         scene.getRoot().layout();
         String mode = System.getProperty("ecl.snapshot.mode");
-        if ("settings".equalsIgnoreCase(mode) || "loader-choice".equalsIgnoreCase(mode)) {
+        if ((mode != null && (mode.startsWith("settings-dialog-bottom") || mode.startsWith("local-versions-config-bottom")))
+                || "settings".equalsIgnoreCase(mode) || "loader-choice".equalsIgnoreCase(mode)) {
             ScrollPane scrollPane = findScrollPane(scene.getRoot());
             if (scrollPane != null) {
                 scrollPane.setVvalue(1.0);
@@ -288,13 +289,14 @@ public final class LauncherUiSnapshot {
                 showAppView("SETTINGS");
                 return primaryStage.getScene();
             }
-            if ("settings".equalsIgnoreCase(mode)) {
+            if ((mode != null && mode.startsWith("settings-dialog")) || "settings".equalsIgnoreCase(mode)) {
                 Method settingsDialog = LauncherUIView.class.getDeclaredMethod("showSettingsDialog");
                 settingsDialog.setAccessible(true);
                 settingsDialog.invoke(this);
                 Scene scene = findSecondaryScene(primaryStage, "Settings dialog did not open");
-                if (scene.getRoot() instanceof ScrollPane scrollPane) {
-                    scrollPane.setVvalue(1.0);
+                if (mode.contains("bottom")) {
+                    ScrollPane scrollPane = findScrollPane(scene.getRoot());
+                    if (scrollPane != null) scrollPane.setVvalue(1.0);
                 }
                 return scene;
             }
@@ -380,6 +382,12 @@ public final class LauncherUiSnapshot {
             if (mode.contains("compact")) {
                 stage.setWidth(1180);
                 stage.setHeight(720);
+            }
+            if (mode.contains("config")) {
+                stage.getScene().getRoot().applyCss();
+                javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
+                        stage.getScene().lookup("#instance-detail-tabs");
+                tabs.getSelectionModel().select(1);
             }
             return stage.getScene();
         }
