@@ -10,6 +10,7 @@ import com.ecl.modrinth.download.ModrinthDownloader;
 import com.ecl.launch.DefaultLauncher;
 import com.ecl.launch.LaunchEnvironment;
 import com.ecl.launch.Launcher;
+import com.ecl.game.InstanceDisplayMetadataStore;
 import com.ecl.game.InstanceLaunchProfileStore;
 import com.ecl.game.VersionRepository;
 import com.ecl.launcher.VersionManager;
@@ -24,6 +25,9 @@ import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.provider.ModMetadataProviderRegistry;
 import com.ecl.modrinth.provider.ModrinthMetadataProvider;
+import com.ecl.pack.DefaultPackService;
+import com.ecl.pack.PackService;
+import com.ecl.server.LocalServerManager;
 import com.ecl.modrinth.repository.FileInstalledModRepository;
 import com.ecl.modrinth.repository.InstalledModRepository;
 import com.ecl.modrinth.service.DefaultLocalModScanner;
@@ -86,6 +90,9 @@ public final class MainController implements AutoCloseable {
     private final InstallationPlanBuilder installationPlanBuilder;
     private final InstanceLaunchProfileStore instanceLaunchProfiles;
     private final InstanceOperationCoordinator instanceOperations;
+    private final PackService packService;
+    private final InstanceDisplayMetadataStore instanceDisplayMetadata;
+    private final LocalServerManager localServers = new LocalServerManager(ECLConfig.getBaseDir().toPath());
     private final Map<UUID, ModInstanceContext> modInstances = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicInteger> runningInstances = new ConcurrentHashMap<>();
 
@@ -181,6 +188,8 @@ public final class MainController implements AutoCloseable {
         modpackUpdateService = new DefaultModpackUpdateService(
                 metadataProvider, backgroundExecutor, instanceOperations,
                 this::isInstanceRunning);
+        packService = new DefaultPackService();
+        instanceDisplayMetadata = new InstanceDisplayMetadataStore();
     }
 
     public SettingsManager settings() { return settingsManager; }
@@ -203,6 +212,9 @@ public final class MainController implements AutoCloseable {
     public ModpackUpdateService modpackUpdateService() { return modpackUpdateService; }
     public InstanceLaunchProfileStore instanceLaunchProfiles() { return instanceLaunchProfiles; }
     public InstanceOperationCoordinator instanceOperations() { return instanceOperations; }
+    public PackService packService() { return packService; }
+    public InstanceDisplayMetadataStore instanceDisplayMetadata() { return instanceDisplayMetadata; }
+    public LocalServerManager localServers() { return localServers; }
     public Launcher gameLauncher() { return gameLauncher; }
     public LaunchEnvironment launchEnvironment() { return launchEnvironment; }
 

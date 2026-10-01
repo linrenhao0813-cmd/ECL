@@ -42,6 +42,8 @@ final class SettingsDialog {
     void show() {
         String selectedInstanceId = ui.getSelectedVersion();
         InstanceLaunchProfile selectedLaunchProfile = loadExistingProfile(selectedInstanceId);
+        Scene ownerScene = ui.primaryStage.getScene();
+        javafx.scene.Node focusReturnTarget = ownerScene == null ? null : ownerScene.getFocusOwner();
         Stage dialog = new Stage();
         dialog.initOwner(ui.primaryStage);
         dialog.initModality(Modality.APPLICATION_MODAL);
@@ -404,8 +406,8 @@ final class SettingsDialog {
         }
         dialog.setScene(scene);
         ui.applyThemeToScene(scene);
+        LauncherUiFactory.restoreFocusOnClose(dialog, focusReturnTarget);
         dialog.show();
-    
     }
 
     private InstanceLaunchProfile loadExistingProfile(String instanceId) {

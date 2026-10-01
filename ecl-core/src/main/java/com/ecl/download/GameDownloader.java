@@ -136,56 +136,7 @@ public class GameDownloader implements DownloadService {
                 HttpUtil.writeJson(versionJsonFile, versionJson);
                 checkCancelled();
 
-                JsonObject downloads = versionJson.has("downloads")
-                        ? versionJson.getAsJsonObject("downloads") : null;
-                JsonObject client = downloads != null && downloads.has("client")
-                        ? downloads.getAsJsonObject("client") : null;
-                if (client != null) {
-                    if (runListener != null) runListener.onStatus("正在下载游戏主文件...");
-                    String clientUrl = client.get("url").getAsString();
-                    String clientSha1 = InstallHelpers.requireSha1(
-                            client.has("sha1") ? client.get("sha1").getAsString() : null,
-                            "Minecraft client");
-                    long clientSize = GameManifestParser.requiredPositiveSize(
-                            client, "size", "Minecraft client");
-                    File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
-                    if (assetVerifier.needsDownload(clientJar, clientSha1)) {
-                        try {
-                            HttpUtil.downloadFileWithProgress(clientUrl, clientJar,
-                                    new HttpUtil.ProgressCallback() {
-                                        @Override
-                                        public void onStart(long total) {
-                                            if (runListener != null) {
-                                                runListener.onProgress(0, total);
-                                            }
-                                        }
-
-                                        @Override
-                                        public void onProgress(long downloaded, long total) {
-                                            if (runListener != null) {
-                                                runListener.onProgress(downloaded, total);
-                                            }
-                                        }
-
-                                        @Override
-                                        public void onComplete(File file) {
-                                        }
-                                    }, batchExecutor.sourceCallback(
-                                            "游戏主文件", runListener), clientSize);
-                            if (clientJar.length() != clientSize) {
-                                throw new IOException(
-                                        "Minecraft client size does not match metadata");
-                            }
-                            assetVerifier.verifyDownloadedFile(clientJar, clientSha1);
-                        } catch (IOException failure) {
-                            Files.deleteIfExists(clientJar.toPath());
-                            throw failure;
-                        }
-                    }
-                } else if (!GameManifestParser.hasUsableInheritedClient(versionJson)) {
-                    throw new IOException("版本缺少 client 下载信息，且继承版本客户端不可用: "
-                            + versionId);
-                }
+                downloadClient(versionJson, versionId, runListener);
                 checkCancelled();
 
                 if (runListener != null) runListener.onStatus("正在下载依赖库...");
@@ -214,6 +165,61 @@ public class GameDownloader implements DownloadService {
             LOGGER.warn("Game download failed for version {}", versionId, e);
             if (runListener != null) runListener.onError(GameDownloadErrorClassifier.classify(e));
             throw e;
+        }
+    }
+
+    private void downloadClient(JsonObject versionJson, String versionId,
+                                DownloadListener runListener) throws IOException {
+        JsonObject downloads = versionJson.has("downloads")
+                ? versionJson.getAsJsonObject("downloads") : null;
+        JsonObject client = downloads != null && downloads.has("client")
+                ? downloads.getAsJsonObject("client") : null;
+        if (client == null) {
+            if (!GameManifestParser.hasUsableInheritedClient(versionJson)) {
+                throw new IOException("版本缺少 client 下载信息，且继承版本客户端不可用: "
+                        + versionId);
+            }
+            return;
+        }
+
+        if (runListener != null) runListener.onStatus("正在下载游戏主文件...");
+        String clientUrl = client.get("url").getAsString();
+        String clientSha1 = InstallHelpers.requireSha1(
+                client.has("sha1") ? client.get("sha1").getAsString() : null,
+                "Minecraft client");
+        long clientSize = GameManifestParser.requiredPositiveSize(
+                client, "size", "Minecraft client");
+        File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
+        if (!assetVerifier.needsDownload(clientJar, clientSha1)) return;
+
+        try {
+            HttpUtil.downloadFileWithProgress(clientUrl, clientJar,
+                    new HttpUtil.ProgressCallback() {
+                        @Override
+                        public void onStart(long total) {
+                            if (runListener != null) {
+                                runListener.onProgress(0, total);
+                            }
+                        }
+
+                        @Override
+                        public void onProgress(long downloaded, long total) {
+                            if (runListener != null) {
+                                runListener.onProgress(downloaded, total);
+                            }
+                        }
+
+                        @Override
+                        public void onComplete(File file) {
+                        }
+                    }, batchExecutor.sourceCallback("游戏主文件", runListener), clientSize);
+            if (clientJar.length() != clientSize) {
+                throw new IOException("Minecraft client size does not match metadata");
+            }
+            assetVerifier.verifyDownloadedFile(clientJar, clientSha1);
+        } catch (IOException failure) {
+            Files.deleteIfExists(clientJar.toPath());
+            throw failure;
         }
     }
 
@@ -268,39 +274,52 @@ public class GameDownloader implements DownloadService {
         NativePlatform nativePlatform = NativePlatform.current();
         List<GameDownloadBatchExecutor.DownloadTask> tasks = new ArrayList<>();
 
-        for (JsonElement el : libraries) {
-            JsonObject lib = el.getAsJsonObject();
-            if (lib.has("rules") && !RuleEvaluator.isAllowed(lib.getAsJsonArray("rules"))) {
+        for (JsonElement libraryElement : libraries) {
+            JsonObject library = libraryElement.getAsJsonObject();
+            if (library.has("rules") && !RuleEvaluator.isAllowed(library.getAsJsonArray("rules"))) {
                 continue;
             }
-            JsonObject artifacts = lib.has("downloads") ? lib.getAsJsonObject("downloads") : null;
-            if (artifacts != null && artifacts.has("artifact")) {
-                JsonObject artifact = artifacts.getAsJsonObject("artifact");
-                addDownloadIfNeeded(tasks, artifact, "依赖库");
-            } else if (artifacts == null) {
-                String name = lib.has("name") ? lib.get("name").getAsString() : "";
-                String repository = lib.has("url") ? lib.get("url").getAsString() : "";
-                if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {
-                    JsonObject artifact = new JsonObject();
-                    String resolvedUrl = MavenCoordinates.repositoryUrl(repository, name);
-                    artifact.addProperty("path", MavenCoordinates.repositoryPath(name));
-                    artifact.addProperty("url", resolvedUrl);
-                    artifact.addProperty("sha1", InstallHelpers.resolveRemoteSha1(
-                            resolvedUrl, "Maven library " + name));
-                    addDownloadIfNeeded(tasks, artifact, "依赖库");
-                }
-            }
-            if (artifacts != null && artifacts.has("classifiers")) {
-                JsonObject classifiers = artifacts.getAsJsonObject("classifiers");
-                String nativeKey = InstallHelpers.nativeClassifierKey(lib, classifiers,
-                        nativePlatform.osName(), nativePlatform.archBits(),
-                        nativePlatform.nativeClassifier());
-                if (nativeKey != null) {
-                    addDownloadIfNeeded(tasks, classifiers.getAsJsonObject(nativeKey), "原生库");
-                }
-            }
+            JsonObject downloads = library.has("downloads") ? library.getAsJsonObject("downloads") : null;
+            addLibraryArtifact(tasks, library, downloads);
+            addNativeArtifact(tasks, library, downloads, nativePlatform);
         }
         batchExecutor.download(tasks, "依赖库", runListener);
+    }
+
+    private void addLibraryArtifact(List<GameDownloadBatchExecutor.DownloadTask> tasks,
+                                    JsonObject library, JsonObject downloads) throws IOException {
+        if (downloads != null) {
+            if (downloads.has("artifact")) {
+                addDownloadIfNeeded(tasks, downloads.getAsJsonObject("artifact"), "依赖库");
+            }
+            return;
+        }
+
+        String name = library.has("name") ? library.get("name").getAsString() : "";
+        String repository = library.has("url") ? library.get("url").getAsString() : "";
+        if (!MavenCoordinates.isSimpleCoordinate(name) || repository.isBlank()) return;
+
+        JsonObject artifact = new JsonObject();
+        String resolvedUrl = MavenCoordinates.repositoryUrl(repository, name);
+        artifact.addProperty("path", MavenCoordinates.repositoryPath(name));
+        artifact.addProperty("url", resolvedUrl);
+        artifact.addProperty("sha1", InstallHelpers.resolveRemoteSha1(
+                resolvedUrl, "Maven library " + name));
+        addDownloadIfNeeded(tasks, artifact, "依赖库");
+    }
+
+    private void addNativeArtifact(List<GameDownloadBatchExecutor.DownloadTask> tasks,
+                                   JsonObject library, JsonObject downloads,
+                                   NativePlatform nativePlatform) throws IOException {
+        if (downloads == null || !downloads.has("classifiers")) return;
+
+        JsonObject classifiers = downloads.getAsJsonObject("classifiers");
+        String nativeKey = InstallHelpers.nativeClassifierKey(library, classifiers,
+                nativePlatform.osName(), nativePlatform.archBits(),
+                nativePlatform.nativeClassifier());
+        if (nativeKey != null) {
+            addDownloadIfNeeded(tasks, classifiers.getAsJsonObject(nativeKey), "原生库");
+        }
     }
 
     private void addDownloadIfNeeded(

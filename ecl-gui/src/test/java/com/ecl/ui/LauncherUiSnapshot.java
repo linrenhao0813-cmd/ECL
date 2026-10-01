@@ -146,8 +146,21 @@ public final class LauncherUiSnapshot {
             settle.play();
         }
 
+        private void applySnapshotLanguage(String mode) throws Exception {
+            String normalized = mode.toLowerCase(java.util.Locale.ROOT);
+            String language = normalized.endsWith("-en") ? "en"
+                    : normalized.endsWith("-zh-tw") || normalized.endsWith("-zhtw")
+                    ? "zh-TW" : "zh-CN";
+            Method switchLanguage = LauncherUIView.class.getDeclaredMethod(
+                    "switchLanguage", String.class);
+            switchLanguage.setAccessible(true);
+            switchLanguage.invoke(this, language);
+        }
+
         private Scene prepareCaptureScene(Stage primaryStage) throws Exception {
             String mode = System.getProperty("ecl.snapshot.mode", "home");
+            // Deterministic locale: "-en" for English, "-zh-TW" for Traditional Chinese, else zh-CN.
+            applySnapshotLanguage(mode);
             if (mode.startsWith("forest")) return prepareForestCapture(primaryStage, mode);
             if ("initial-dark".equalsIgnoreCase(mode)) {
                 if (!primaryStage.getScene().getRoot().getStyleClass().contains("theme-dark")) {
@@ -179,23 +192,28 @@ public final class LauncherUiSnapshot {
                 if (mode.contains("microsoft")) authTypeCombo.setValue(LauncherUI.AUTH_MICROSOFT);
                 return primaryStage.getScene();
             }
-            if ("local-versions".equalsIgnoreCase(mode)) {
-                return prepareLocalVersionsCapture(primaryStage);
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("local-versions")) {
+                return prepareLocalVersionsCapture(primaryStage, mode);
             }
-            if ("downloads".equalsIgnoreCase(mode)) {
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("downloads")) {
                 showAppView("DOWNLOADS");
-                selectDownloadCategory(primaryStage, 7);
+                // Category 6 is the last entry (modpack updates); the navigation has 7 items.
+                selectDownloadCategory(primaryStage, 6);
+                return primaryStage.getScene();
+            }
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("local-servers")) {
+                prepareLocalServer();
+                showAppView("SERVERS");
+                javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
+                        primaryStage.getScene().lookup("#servers-tabs");
+                if (tabs == null) throw new IllegalStateException("Missing server tabs");
+                tabs.getSelectionModel().select(1);
+                if (mode.contains("compact")) primaryStage.setWidth(1180);
                 return primaryStage.getScene();
             }
             if ("servers".equalsIgnoreCase(mode)
                     || "servers-dark".equalsIgnoreCase(mode)
                     || "servers-en".equalsIgnoreCase(mode)) {
-                if ("servers-en".equalsIgnoreCase(mode)) {
-                    Method switchLanguage = LauncherUIView.class.getDeclaredMethod(
-                            "switchLanguage", String.class);
-                    switchLanguage.setAccessible(true);
-                    switchLanguage.invoke(this, "en");
-                }
                 showAppView("SERVERS");
                 return primaryStage.getScene();
             }
@@ -265,11 +283,7 @@ public final class LauncherUiSnapshot {
                 selectDownloadCategory(primaryStage, categoryIndex);
                 return primaryStage.getScene();
             }
-            if ("settings-page".equalsIgnoreCase(mode)) {
-                showAppView("SETTINGS");
-                return primaryStage.getScene();
-            }
-            if ("settings-page-dark".equalsIgnoreCase(mode)) {
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("settings-page")) {
                 applySnapshotTheme();
                 showAppView("SETTINGS");
                 return primaryStage.getScene();
@@ -314,9 +328,27 @@ public final class LauncherUiSnapshot {
             return primaryStage.getScene();
         }
 
+        private void prepareLocalServer() throws Exception {
+            com.ecl.server.LocalServerManager manager = new com.ecl.server.LocalServerManager(
+                    ECLConfig.getBaseDir().toPath());
+            if (!manager.list().isEmpty()) return;
+            Path jar = ECLConfig.getBaseDir().toPath().resolve("snapshot-server.jar");
+            java.util.jar.Manifest manifest = new java.util.jar.Manifest();
+            manifest.getMainAttributes().put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0");
+            manifest.getMainAttributes().put(java.util.jar.Attributes.Name.MAIN_CLASS, "SnapshotOnly");
+            try (java.util.jar.JarOutputStream archive = new java.util.jar.JarOutputStream(
+                    Files.newOutputStream(jar), manifest)) {
+                archive.putNextEntry(new java.util.jar.JarEntry("snapshot-only.txt"));
+                archive.write("Visual fixture; never execute".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                archive.closeEntry();
+            }
+            manager.importJar("Minecraft 1.21.1 · ECL QA", jar,
+                    Path.of(System.getProperty("java.home"), "bin", "java.exe"), 2048);
+        }
+
         private Scene prepareForestCapture(Stage stage, String mode) throws Exception {
             applySnapshotTheme();
-            switchLanguage(mode.contains("en") ? "en" : "zh-CN");
+            // The locale was already applied from the mode suffix in prepareCaptureScene.
             if (mode.endsWith("empty")) {
                 gameDir = Files.createTempDirectory(Path.of(System.getProperty("user.home")), "forest-empty-").toFile();
                 versionActions.restoreVersionComboItems(null);
@@ -339,12 +371,16 @@ public final class LauncherUiSnapshot {
             return stage.getScene();
         }
 
-        private Scene prepareLocalVersionsCapture(Stage stage) throws Exception {
+        private Scene prepareLocalVersionsCapture(Stage stage, String mode) throws Exception {
             String vanilla = createVisualProfile("visual-local-vanilla", "", "1.21.8");
             String fabric = createVisualProfile("visual-local-fabric", "fabric", "1.21.7");
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(vanilla));
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(fabric));
             showAppView("VERSIONS");
+            if (mode.contains("compact")) {
+                stage.setWidth(1180);
+                stage.setHeight(720);
+            }
             return stage.getScene();
         }
 

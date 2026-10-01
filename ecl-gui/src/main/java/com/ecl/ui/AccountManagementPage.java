@@ -32,8 +32,38 @@ final class AccountManagementPage extends VBox {
         current.setWrapText(true);
         current.getStyleClass().add("account-current");
         getChildren().addAll(ui.createSurface(GuiMessages.get("accounts.current"), null, current),
+                createRecoverySurface(),
                 ui.createSurface(GuiMessages.get("accounts.title"), GuiMessages.get("accounts.subtitle"), createEditor()));
         ui.updateAuthFields();
+    }
+
+    /**
+     * Single place showing how many Microsoft accounts are saved and how to recover a stale session,
+     * so an expired sign-in is never a dead end.
+     */
+    private VBox createRecoverySurface() {
+        Label recoveryHint = new Label();
+        recoveryHint.setWrapText(true);
+        recoveryHint.getStyleClass().add("status-detail");
+        recoveryHint.textProperty().bind(Bindings.createStringBinding(() -> {
+            int saved = ui.microsoftAccountCombo.getItems().size();
+            return saved == 0
+                    ? GuiMessages.get("accounts.recovery.none")
+                    : GuiMessages.get("accounts.recovery.saved", saved);
+        }, ui.microsoftAccountCombo.getItems()));
+        Button relogin = ui.createActionButton(GuiMessages.get("accounts.relogin"),
+                "secondary-button", () -> ui.microsoftAccounts.loginMicrosoftAccount());
+        relogin.setId("account-relogin");
+        relogin.setAccessibleText(GuiMessages.get("accounts.relogin"));
+        relogin.disableProperty().bind(ui.microsoftLoginBtn.disableProperty());
+        Button addAnother = ui.createActionButton(GuiMessages.get("accounts.addAnother"),
+                "ghost-button", () -> ui.microsoftAccounts.addMicrosoftAccount());
+        addAnother.setId("account-add-another");
+        addAnother.disableProperty().bind(ui.microsoftAddAccountBtn.disableProperty());
+        FlowPane actions = new FlowPane(10, 8, relogin, addAnother);
+        return ui.createSurface(GuiMessages.get("accounts.recovery"),
+                GuiMessages.get("accounts.recovery.subtitle"),
+                recoveryHint, actions);
     }
 
     private VBox createEditor() {

@@ -10,4 +10,8 @@ public interface PackService {
 
     Path exportInstance(Path instanceDirectory, String minecraftVersion,
                         PackFormat format, Path output) throws IOException;
+
+    /** Exports the actual game payload together with the selected instance's own metadata. */
+    Path exportInstance(Path instanceRoot, Path runDirectory, String minecraftVersion,
+                        PackFormat format, Path output) throws IOException;
 }

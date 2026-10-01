@@ -31,6 +31,18 @@ final class InstanceInstallWorkflow {
     }
 
     void install(String minecraftVersion, LoaderChoice choice, Listener listener) {
+        install(minecraftVersion, choice, listener, true);
+    }
+
+    /**
+     * Installs a base version and optional loader as one download task.
+     *
+     * @param selectAfterInstall when false the freshly installed profile is only added to the
+     *                           instance list; the launch target stays untouched. The instance
+     *                           manager wizard offers an explicit "set as launch target" instead.
+     */
+    void install(String minecraftVersion, LoaderChoice choice, Listener listener,
+                 boolean selectAfterInstall) {
         if (minecraftVersion == null || minecraftVersion.isBlank() || choice == null) {
             listener.onFailure("请选择 Minecraft 版本和实例类型。");
             return;
@@ -50,9 +62,12 @@ final class InstanceInstallWorkflow {
                 ui.setStatus(ui.isCancellation(error) ? "实例安装已取消" : "实例安装失败", message);
                 return;
             }
-            ui.versionActions.restoreVersionComboItems(profileId);
-            ui.versionCombo.setValue(profileId);
-            ui.syncLoaderChoiceFromProfile(profileId);
+            ui.versionActions.restoreVersionComboItems(
+                    selectAfterInstall ? profileId : ui.getSelectedVersion(), selectAfterInstall);
+            if (selectAfterInstall) {
+                ui.setLaunchTarget(profileId);
+                ui.syncLoaderChoiceFromProfile(profileId);
+            }
             listener.onComplete(profileId);
             ui.setStatus("实例安装完成", profileId + " 已准备就绪。");
         }));

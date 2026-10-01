@@ -58,7 +58,8 @@ final class LauncherLoaderWorkflow {
             return;
         }
         LoaderChoice requested = ui.loaderChoiceCombo.getValue();
-        String selectedProfile = ui.versionCombo.getValue();
+        // The launch target lives in the shared instance state, not in the selector control.
+        String selectedProfile = ui.getSelectedVersion();
         if (requested == null || selectedProfile == null || selectedProfile.isBlank()) {
             updateLoaderControls();
             return;

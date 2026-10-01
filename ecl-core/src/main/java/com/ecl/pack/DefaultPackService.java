@@ -1,8 +1,10 @@
 package com.ecl.pack;
 
+import com.ecl.ECLConfig;
 import com.ecl.util.FileUtil;
 import com.ecl.util.GsonProvider;
 import com.ecl.util.ZipUtil;
+import com.ecl.game.InstanceGameSettingsStore;
 import com.ecl.modrinth.pack.MrpackInstaller;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -21,8 +23,11 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
@@ -30,6 +35,13 @@ import java.util.zip.ZipOutputStream;
 /** Safe, transactional import/export for ECL, MultiMC and Modrinth archives. */
 public final class DefaultPackService implements PackService {
     private static final int MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
+    private static final Set<String> SHARED_GAME_CONTENT = Set.of(
+            "saves", "mods", "config", "resourcepacks", "shaderpacks", "texturepacks", "screenshots",
+            "defaultconfigs", "kubejs", "scripts", "schematics", "journeymap", "options.txt", "optionsof.txt",
+            "optionsshaders.txt", "servers.dat", "servers.dat_old", "hotbar.nbt");
+    private static final Set<String> LAUNCHER_CONTENT = Set.of("versions", "libraries", "assets", ".ecl");
+    private static final Set<String> LAUNCHER_CREDENTIALS = Set.of(
+            "accounts.json", "accounts.dat", "credentials.json", "launcher_msa_credentials.bin");
     private final MrpackInstaller mrpackInstaller;
 
     public DefaultPackService() {
@@ -118,6 +130,130 @@ public final class DefaultPackService implements PackService {
             throw failure;
         }
         return archive;
+    }
+
+    @Override
+    public Path exportInstance(Path instanceRoot, Path runDirectory, String minecraftVersion,
+                               PackFormat format, Path output) throws IOException {
+        Path instance = requireDirectory(instanceRoot);
+        Path runtime = requireDirectory(runDirectory);
+        Path archive = Objects.requireNonNull(output, "output").toAbsolutePath().normalize();
+        PackFormat effective = format == null ? PackFormat.ECL : format;
+        String prefix = switch (effective) {
+            case ECL -> "instance/";
+            case MULTIMC -> "minecraft/";
+            case MRPACK -> "overrides/";
+        };
+        boolean shared = Objects.equals(instance.getParent(), runtime.resolve("versions"));
+        Map<String, Path> files = new LinkedHashMap<>();
+        collectRuntimeFiles(files, instance, runtime, archive, shared);
+        collectInstanceMetadata(files, instance, archive);
+        files.remove(InstanceGameSettingsStore.SETTINGS_RELATIVE_PATH);
+        if (archive.getParent() != null) Files.createDirectories(archive.getParent());
+        try (OutputStream raw = Files.newOutputStream(archive);
+             ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(raw))) {
+            writeManifest(zip, instance.getFileName().toString(), minecraftVersion, effective);
+            // The exported payload becomes the imported instance's own run directory.
+            JsonObject runSettings = new JsonObject();
+            runSettings.addProperty("overrideRunningDirectory", true);
+            runSettings.addProperty("runningDirectory", "");
+            putJson(zip, prefix + InstanceGameSettingsStore.SETTINGS_RELATIVE_PATH, runSettings);
+            for (Map.Entry<String, Path> entry : files.entrySet()) {
+                zip.putNextEntry(new ZipEntry(prefix + entry.getKey()));
+                try (InputStream input = new BufferedInputStream(Files.newInputStream(entry.getValue()))) {
+                    input.transferTo(zip);
+                }
+                zip.closeEntry();
+            }
+        } catch (IOException failure) {
+            Files.deleteIfExists(archive);
+            throw failure;
+        }
+        return archive;
+    }
+
+    private static Path requireDirectory(Path directory) throws IOException {
+        Path result = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
+        FileUtil.validateExistingAncestors(result.getRoot(), result);
+        if (!Files.isDirectory(result) || Files.isSymbolicLink(result)) {
+            throw new IOException("实例目录不可用: " + result);
+        }
+        return result;
+    }
+
+    private static void collectRuntimeFiles(Map<String, Path> files, Path instance, Path runtime,
+                                            Path archive, boolean shared) throws IOException {
+        Files.walkFileTree(runtime, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                if (!dir.equals(runtime)) {
+                    if (!instance.equals(runtime) && dir.equals(instance)) return FileVisitResult.SKIP_SUBTREE;
+                    String top = runtime.relativize(dir).getName(0).toString();
+                    if (LAUNCHER_CONTENT.contains(top) || (shared && !SHARED_GAME_CONTENT.contains(top))) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                }
+                FileUtil.validateExistingAncestors(runtime, dir);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Path relative = runtime.relativize(file);
+                String top = relative.getName(0).toString();
+                if (LAUNCHER_CONTENT.contains(top) || (shared && !SHARED_GAME_CONTENT.contains(top))) {
+                    return FileVisitResult.CONTINUE;
+                }
+                if (relative.getNameCount() == 1
+                        && (top.startsWith("launcher_") || LAUNCHER_CREDENTIALS.contains(top))) {
+                    return FileVisitResult.CONTINUE;
+                }
+                collectFile(files, runtime, file, attrs, archive);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private static void collectInstanceMetadata(Map<String, Path> files, Path instance, Path archive) throws IOException {
+        Path config = instance.resolve(".ecl/config");
+        if (Files.exists(config)) {
+            Files.walkFileTree(config, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                    FileUtil.validateExistingAncestors(instance, dir);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    collectFile(files, instance, file, attrs, archive);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        }
+        String id = instance.getFileName().toString();
+        Path cachedVersion = FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), id).toPath();
+        for (String name : List.of(id + ".json", id + ".jar", ".ecl-pack-manifest.json")) {
+            Path file = instance.resolve(name);
+            Path metadataRoot = instance;
+            if (!Files.exists(file) && !name.equals(".ecl-pack-manifest.json")) {
+                file = cachedVersion.resolve(name);
+                metadataRoot = cachedVersion;
+            }
+            if (Files.exists(file)) {
+                collectFile(files, metadataRoot, file, Files.readAttributes(file, BasicFileAttributes.class,
+                        java.nio.file.LinkOption.NOFOLLOW_LINKS), archive);
+            }
+        }
+    }
+
+    private static void collectFile(Map<String, Path> files, Path root, Path file,
+                                    BasicFileAttributes attrs, Path archive) throws IOException {
+        if (file.equals(archive)) return;
+        FileUtil.validateExistingAncestors(root, file);
+        if (attrs.isRegularFile()) {
+            files.put(root.relativize(file).toString().replace('\\', '/'), file);
+        }
     }
 
     private static void writeManifest(ZipOutputStream zip, String name, String version,

@@ -430,6 +430,23 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         viewModel.refreshInstalled();
     }
 
+    /** Current search text, so the hosting page can restore it when the browser is rebuilt. */
+    public String searchQuery() {
+        String text = viewModel.searchTextProperty().get();
+        return text == null ? "" : text;
+    }
+
+    /**
+     * Restores a previous search. Writing the bound property updates the field, whose listener
+     * debounces and runs the search, so no extra search call is needed here.
+     */
+    public void restoreSearch(String query) {
+        if (query == null || query.isBlank()) {
+            return;
+        }
+        viewModel.searchTextProperty().set(query);
+    }
+
     @Override
     public void close() {
         searchDebounce.stop();

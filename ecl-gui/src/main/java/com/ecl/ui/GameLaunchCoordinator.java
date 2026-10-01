@@ -57,6 +57,7 @@ final class GameLaunchCoordinator {
 
         ui.setControlsBusy(true);
         ui.stopProgressAnimation(ui.downloadProgress, true);
+        ui.clearLaunchFailure();
         ui.setStatus("正在启动游戏...", "准备认证、拼接类路径并拉起客户端进程。 ");
 
         ui.runAsync("ecl-launch-game", () -> {
@@ -136,6 +137,7 @@ final class GameLaunchCoordinator {
                 CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
                 runOnUiIfActive(() -> {
                     ui.setStatus("启动失败", report.getTitle());
+                    ui.markLaunchFailure(report.getTitle());
                     showGameErrorDialog(report, launchDir);
                     ui.setControlsBusy(false);
                 });

@@ -261,6 +261,10 @@ final class VersionActions {
     }
 
     void restoreVersionComboItems(String preferredVersion) {
+        restoreVersionComboItems(preferredVersion, true);
+    }
+
+    void restoreVersionComboItems(String preferredVersion, boolean selectFirstWhenMissing) {
         if (ui.versionCombo == null || ui.versionManager == null) {
             return;
         }
@@ -275,7 +279,8 @@ final class VersionActions {
                     if (generation != versionListGeneration.get() || ui.versionCombo == null) {
                         return;
                     }
-                    applyInstalledVersions(versions, preferredVersion);
+                    applyInstalledVersions(versions,
+                            selectFirstWhenMissing ? preferredVersion : ui.getSelectedVersion(), selectFirstWhenMissing);
                 });
             } catch (Exception e) {
                 LauncherUI.LOGGER.warn("Failed to restore installed instance choices", e);
@@ -324,8 +329,12 @@ final class VersionActions {
     }
 
     private void applyInstalledVersions(List<String> versions, String preferredVersion) {
+        applyInstalledVersions(versions, preferredVersion, true);
+    }
+
+    private void applyInstalledVersions(List<String> versions, String preferredVersion, boolean selectFirstWhenMissing) {
+        String selected = chooseInstalledVersion(versions, preferredVersion, selectFirstWhenMissing);
         ui.versionCombo.getItems().setAll(versions);
-        String selected = chooseInstalledVersion(versions, preferredVersion);
         if (selected == null) {
             ui.versionCombo.getSelectionModel().clearSelection();
             ui.versionCombo.setValue(null);
@@ -335,13 +344,17 @@ final class VersionActions {
     }
 
     static String chooseInstalledVersion(List<String> versions, String preferredVersion) {
+        return chooseInstalledVersion(versions, preferredVersion, true);
+    }
+
+    static String chooseInstalledVersion(List<String> versions, String preferredVersion, boolean selectFirstWhenMissing) {
         if (versions == null || versions.isEmpty()) {
             return null;
         }
         if (preferredVersion != null && versions.contains(preferredVersion)) {
             return preferredVersion;
         }
-        return versions.getFirst();
+        return selectFirstWhenMissing ? versions.getFirst() : null;
     }
 
     VersionManager.VersionCategory getSelectedVersionCategory() {

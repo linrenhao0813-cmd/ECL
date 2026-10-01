@@ -2,6 +2,7 @@ package com.ecl.ui;
 
 import com.ecl.ECLConfig;
 import com.ecl.launcher.VersionManager;
+import com.ecl.util.Messages;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
@@ -22,6 +23,9 @@ final class LauncherLaunchForm {
     private final LauncherUI ui;
     private final LauncherAuthController auth;
     private final LauncherLoaderWorkflow loader;
+    private Label launchHintLabel;
+    private Button launchHintAction;
+    private boolean controlsBusy;
 
     LauncherLaunchForm(LauncherUI ui) {
         this.ui = ui;
@@ -35,7 +39,9 @@ final class LauncherLaunchForm {
         grid.setHgap(10);
         grid.setVgap(12);
 
-        String previousVersion = ui.versionCombo == null
+        // The instance selector now lives in the persistent instance bar; fall back to the saved
+        // profile while its item list is still loading.
+        String previousVersion = ui.versionCombo == null || ui.versionCombo.getValue() == null
                 ? ui.settingsManager.get(ECLConfig.KEY_SELECTED_VERSION) : ui.versionCombo.getValue();
         String previousAuthType = ui.authTypeCombo == null
                 ? auth.normalizeAuthType(ui.settingsManager.get(ECLConfig.KEY_AUTH_TYPE))
@@ -80,24 +86,6 @@ final class LauncherLaunchForm {
         ui.authHintLabel.getStyleClass().add("status-detail");
         ui.authHintLabel.setWrapText(true);
 
-        ui.versionCombo = new ComboBox<>();
-        ui.versionCombo.setPromptText("选择已下载实例");
-        ui.versionCombo.setVisibleRowCount(14);
-        ui.versionCombo.setCellFactory(list -> createVersionCell());
-        ui.versionCombo.setButtonCell(createVersionCell());
-        ui.applyFieldStyle(ui.versionCombo);
-        ui.versionCombo.valueProperty().addListener((obs, oldValue, newValue) -> {
-            if (newValue != null && !newValue.isBlank()) {
-                ui.settingsManager.set(ECLConfig.KEY_SELECTED_VERSION, newValue);
-                if (!ui.settingsManager.save()) {
-                    ui.setStatus("设置保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
-                }
-            }
-            ui.updateRuntimeSummary();
-            ui.versionActions.updateSelectedVersionWikiButton();
-            loader.syncLoaderChoiceFromProfile(newValue);
-        });
-
         ui.versionTypeCombo = new ComboBox<>();
         ui.versionTypeCombo.getItems().addAll(VersionManager.VersionCategory.values());
         ui.versionTypeCombo.setValue(VersionManager.VersionCategory.FEATURED);
@@ -127,7 +115,6 @@ final class LauncherLaunchForm {
         ui.installSelectedLoaderButton.setDisable(true);
         ui.installSelectedLoaderButton.setOnAction(event -> loader.installSelectedLoader(null));
 
-        ui.selectedVersionWikiButton = createSelectedVersionWikiButton();
         ui.versionActions.restoreVersionComboItems(previousVersion);
         ui.versionActions.updateSelectedVersionWikiButton();
 
@@ -154,9 +141,6 @@ final class LauncherLaunchForm {
         HBox.setHgrow(jvmField, Priority.ALWAYS);
         HBox authBox = createAccountControls();
         VBox authHelpBox = new VBox(4, ui.authSummaryLabel, ui.authHintLabel);
-        HBox versionBox = new HBox(10, ui.versionCombo, ui.selectedVersionWikiButton);
-        versionBox.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(ui.versionCombo, Priority.ALWAYS);
         Label loaderHint = new Label("安装后会自动切换到独立模组实例");
         loaderHint.getStyleClass().add("status-detail");
         HBox loaderBox = new HBox(10, ui.loaderChoiceCombo, ui.installSelectedLoaderButton, loaderHint);
@@ -165,11 +149,6 @@ final class LauncherLaunchForm {
                 gameDirField.setText(abbreviate(ui.getActiveGameDir().getAbsolutePath(), 72)));
 
         int row = 0;
-        Label gameVersionLabel = new Label("游戏实例");
-        gameVersionLabel.getStyleClass().add("field-label");
-        grid.add(gameVersionLabel, 0, row);
-        grid.add(versionBox, 1, row++);
-
         Label modLoaderLabel = new Label("模组加载器");
         modLoaderLabel.getStyleClass().add("field-label");
         grid.add(modLoaderLabel, 0, row);
@@ -273,7 +252,7 @@ final class LauncherLaunchForm {
     }
 
     Button createSelectedVersionWikiButton() {
-        Button button = new Button("更新说明");
+        Button button = new Button(Messages.get("instanceBar.wiki"));
         button.getStyleClass().addAll("app-button", "wiki-link-button");
         button.setTooltip(new Tooltip("打开 mc 中文 Wiki 的当前版本更新介绍"));
         button.setOnAction(e -> ui.versionActions.openMinecraftWikiVersionPage(ui.getSelectedVersion()));
@@ -293,7 +272,7 @@ final class LauncherLaunchForm {
                 : "正式版和快照版可打开 mc 中文 Wiki 更新介绍"));
     }
 
-    HBox createActionBar() {
+    VBox createActionBar() {
         Label playIcon = new Label("▶");
         playIcon.getStyleClass().add("launch-play-icon");
         ui.launchBtn = new Button(GuiMessages.get("forest.launch"));
@@ -301,8 +280,13 @@ final class LauncherLaunchForm {
         ui.launchBtn.setGraphicTextGap(10);
         ui.launchBtn.getStyleClass().addAll("app-button", "launch-button");
         ui.launchBtn.setDefaultButton(true);
-        ui.launchBtn.setOnAction(e -> ui.gameLaunch.launchGame());
+        ui.launchBtn.setOnAction(e -> handleLaunchAction());
+        updateLaunchButtonLabel();
         loader.updateLoaderControls();
+
+        Button instanceSettingsButton = ui.createActionButton(
+                Messages.get("home.instanceSettings"), "secondary-button", this::openInstanceManager);
+        instanceSettingsButton.setId("home-instance-settings");
 
         Button switchInstanceButton = ui.createLinkButton(
                 GuiMessages.get("forest.switchInstance"),
@@ -320,14 +304,157 @@ final class LauncherLaunchForm {
         ui.settingsBtn.setOnAction(e -> ui.showSettingsDialog());
         LauncherUiFactory.setVisible(ui.settingsBtn, false);
 
-        HBox buttonBar = new HBox(14, ui.launchBtn, ui.instanceUpdates.createButton(),
+        HBox buttonBar = new HBox(14, ui.launchBtn, instanceSettingsButton,
+                ui.instanceUpdates.createButton(),
                 switchInstanceButton, ui.refreshBtn, ui.settingsBtn);
         buttonBar.getStyleClass().add("launch-actions");
         buttonBar.setAlignment(Pos.CENTER_LEFT);
-        return buttonBar;
+
+        launchHintLabel = new Label();
+        launchHintLabel.getStyleClass().add("launch-hint");
+        launchHintLabel.setWrapText(true);
+        launchHintLabel.setMaxWidth(520);
+        launchHintAction = new Button();
+        launchHintAction.setId("home-launch-hint-action");
+        launchHintAction.getStyleClass().addAll("app-button", "link-button");
+        HBox hintRow = new HBox(10, launchHintLabel, launchHintAction);
+        hintRow.setAlignment(Pos.CENTER_LEFT);
+        hintRow.getStyleClass().add("launch-hint-row");
+
+        VBox bar = new VBox(8, buttonBar, hintRow);
+        bar.setAlignment(Pos.CENTER_LEFT);
+        updateLaunchButtonLabel();
+        return bar;
+    }
+
+    private void handleLaunchAction() {
+        switch (launchState()) {
+            case INSTALL -> ui.openDownloadSection(DownloadSection.INSTANCES);
+            case CHOOSE -> ui.setActiveView(AppView.VERSIONS);
+            case RELOGIN -> ui.openAccountSettings();
+            case FAILED, READY -> {
+                ui.clearLaunchFailure();
+                ui.gameLaunch.launchGame();
+            }
+            default -> {
+                // BUSY and RUNNING keep the primary button disabled.
+            }
+        }
+    }
+
+    /** The primary action always matches what the launcher will actually do next. */
+    private enum LaunchState {
+        INSTALL, CHOOSE, READY, BUSY, RUNNING, RELOGIN, FAILED
+    }
+
+    private LaunchState launchState() {
+        if (controlsBusy) {
+            return LaunchState.BUSY;
+        }
+        if (ui.launchFailure != null) {
+            return LaunchState.FAILED;
+        }
+        String target = ui.getSelectedVersion();
+        if (target == null) {
+            return hasAnyInstance() ? LaunchState.CHOOSE : LaunchState.INSTALL;
+        }
+        if (ui.isVersionRunning(target)) {
+            return LaunchState.RUNNING;
+        }
+        if (needsMicrosoftLogin()) {
+            return LaunchState.RELOGIN;
+        }
+        return LaunchState.READY;
+    }
+
+    private boolean hasAnyInstance() {
+        return ui.versionCombo != null && !ui.versionCombo.getItems().isEmpty();
+    }
+
+    /** True when Microsoft sign-in is selected but no usable saved account is available. */
+    private boolean needsMicrosoftLogin() {
+        if (ui.authTypeCombo == null
+                || !LauncherUI.AUTH_MICROSOFT.equals(ui.authTypeCombo.getValue())) {
+            return false;
+        }
+        return ui.selectedMicrosoftAccount == null
+                || (ui.microsoftAccountCombo != null && ui.microsoftAccountCombo.getItems().isEmpty());
+    }
+
+    private String launchStateText(LaunchState state) {
+        return switch (state) {
+            case INSTALL -> Messages.get("home.installGame");
+            case CHOOSE -> Messages.get("home.chooseInstance");
+            case RUNNING -> Messages.get("home.gameRunning");
+            case RELOGIN -> Messages.get("home.relogin");
+            case FAILED -> Messages.get("home.retryLaunch");
+            case READY, BUSY -> GuiMessages.get("forest.launch");
+        };
+    }
+
+    private String launchStateHint(LaunchState state) {
+        return switch (state) {
+            case INSTALL -> Messages.get("home.hint.install");
+            case CHOOSE -> GuiMessages.get("forest.chooseHint");
+            case RUNNING -> Messages.format("home.hint.running", ui.getSelectedVersion());
+            case RELOGIN -> Messages.get("home.hint.relogin");
+            case FAILED -> Messages.format("home.hint.failed", ui.launchFailure);
+            case READY, BUSY -> "";
+        };
+    }
+
+    /** Keeps the primary button honest about what happens next. */
+    void updateLaunchButtonLabel() {
+        if (ui.launchBtn == null) {
+            return;
+        }
+        LaunchState state = launchState();
+        String text = launchStateText(state);
+        ui.launchBtn.setText(text);
+        ui.launchBtn.setAccessibleText(text);
+        ui.launchBtn.setDisable(state == LaunchState.BUSY || state == LaunchState.RUNNING);
+        if (launchHintLabel == null) {
+            return;
+        }
+        String hint = launchStateHint(state);
+        launchHintLabel.setText(hint);
+        LauncherUiFactory.setVisible(launchHintLabel, !hint.isBlank());
+        configureHintAction(state);
+    }
+
+    private void configureHintAction(LaunchState state) {
+        if (launchHintAction == null) {
+            return;
+        }
+        switch (state) {
+            case RUNNING -> {
+                launchHintAction.setText(Messages.get("home.hint.viewTasks"));
+                launchHintAction.setOnAction(event -> ui.statusBar.showDetail());
+                LauncherUiFactory.setVisible(launchHintAction, true);
+            }
+            case FAILED -> {
+                launchHintAction.setText(Messages.get("home.hint.openLogs"));
+                launchHintAction.setOnAction(event -> ui.openLocalFolder(
+                        new java.io.File(ui.getActiveGameDir(), "logs"),
+                        Messages.get("home.hint.openLogs")));
+                LauncherUiFactory.setVisible(launchHintAction, true);
+            }
+            default -> LauncherUiFactory.setVisible(launchHintAction, false);
+        }
+    }
+
+    /** Opens the instance manager focused on the current launch target. */
+    private void openInstanceManager() {
+        String target = ui.getSelectedVersion();
+        ui.setActiveView(AppView.VERSIONS);
+        if (target != null && !target.isBlank()) {
+            ui.instanceSelection.setViewedInstance(target);
+        }
+        ui.setStatus(Messages.get("instances.detail.opened"), Messages.get("instances.tab.config"));
     }
 
     void setControlsBusy(boolean busy) {
+        controlsBusy = busy;
         ui.launchBtn.setDisable(busy);
         ui.refreshBtn.setDisable(busy);
         ui.settingsBtn.setDisable(busy);
@@ -361,6 +488,8 @@ final class LauncherLaunchForm {
             loader.updateLoaderControls();
         }
         ui.instanceUpdates.updateButton();
+        // Recompute last so the primary action reflects the settled busy state.
+        updateLaunchButtonLabel();
     }
 
     // Delegates kept for LauncherUIView wrappers

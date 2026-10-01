@@ -15,9 +15,11 @@ final class LauncherWindowChrome {
     }
 
     HBox createControls() {
-        Button minimize = button("—", () -> stage.setIconified(true));
-        Button maximize = button("□", () -> stage.setMaximized(!stage.isMaximized()));
-        Button close = button("×", stage::close);
+        Button minimize = button("—", com.ecl.util.Messages.get("window.minimize"),
+                () -> stage.setIconified(true));
+        Button maximize = button("□", com.ecl.util.Messages.get("window.maximize"),
+                () -> stage.setMaximized(!stage.isMaximized()));
+        Button close = button("×", com.ecl.util.Messages.get("window.close"), stage::close);
         close.getStyleClass().add("window-close-button");
         HBox controls = new HBox(4, minimize, maximize, close);
         controls.getStyleClass().add("window-controls");
@@ -43,10 +45,11 @@ final class LauncherWindowChrome {
         });
     }
 
-    private static Button button(String text, Runnable action) {
+    private static Button button(String text, String accessibleText, Runnable action) {
         Button button = new Button(text);
         button.getStyleClass().add("window-button");
         button.setFocusTraversable(false);
+        button.setAccessibleText(accessibleText);
         button.setOnAction(event -> action.run());
         return button;
     }

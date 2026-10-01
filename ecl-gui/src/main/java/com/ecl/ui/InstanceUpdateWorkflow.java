@@ -33,6 +33,17 @@ final class InstanceUpdateWorkflow {
         return ui.updateInstanceButton;
     }
 
+    Button createButtonFor(String profileId) {
+        Button button = ui.createActionButton(GuiMessages.get("instanceUpdate.button"),
+                "secondary-button", () -> startFor(profileId));
+        button.setTooltip(new Tooltip(GuiMessages.get("instanceUpdate.hint")));
+        return button;
+    }
+
+    boolean isUpdating() {
+        return updating;
+    }
+
     VBox createStatusPane() {
         status.getStyleClass().add("forest-meta");
         status.setId("instance-update-status");
@@ -58,8 +69,12 @@ final class InstanceUpdateWorkflow {
     }
 
     private void start() {
-        if (updating) return;
-        String selected = ui.getSelectedVersion();
+        startFor(ui.getSelectedVersion());
+    }
+
+    /** Runs the loader/mod upgrade for one explicit instance, independent of the launch target. */
+    void startFor(String selected) {
+        if (updating || selected == null || selected.isBlank()) return;
         ModInstanceContext instance;
         try {
             instance = VersionProfileModInstanceContext.load(selected, ECLConfig.getVersionsDir().toPath(),

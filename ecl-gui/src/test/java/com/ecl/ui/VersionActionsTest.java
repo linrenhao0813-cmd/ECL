@@ -15,6 +15,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VersionActionsTest {
     @Test
+    void wizardRefreshPreservesMissingOrExistingLaunchSelection() {
+        List<String> installed = List.of("1.20.1", "1.21.1-fabric");
+        assertNull(VersionActions.chooseInstalledVersion(installed, null, false));
+        assertNull(VersionActions.chooseInstalledVersion(installed, "removed-instance", false));
+        assertEquals("1.21.1-fabric", VersionActions.chooseInstalledVersion(installed, "1.21.1-fabric", false));
+    }
+
+    @Test
     void lifecycleLockProtectsSecondPhaseInstanceDeletion(@TempDir Path root)
             throws Exception {
         Path instance = root.resolve("versions/example");

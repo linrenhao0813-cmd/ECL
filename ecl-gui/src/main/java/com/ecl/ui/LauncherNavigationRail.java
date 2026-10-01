@@ -3,8 +3,10 @@ package com.ecl.ui;
 import com.ecl.util.Messages;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
-import javafx.scene.layout.HBox;
+import javafx.scene.control.Tooltip;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
 
 import java.util.EnumMap;
 import java.util.Map;
@@ -14,22 +16,38 @@ import java.util.function.Consumer;
 final class LauncherNavigationRail {
     private final Map<AppView, Button> buttons = new EnumMap<>(AppView.class);
     private final Consumer<AppView> selectionHandler;
+    private VBox rail;
+    private boolean compact;
 
     LauncherNavigationRail(Consumer<AppView> selectionHandler) {
         this.selectionHandler = selectionHandler;
     }
 
-    HBox createTopNavigation(AppView selected) {
-        HBox navigation = new HBox(4);
-        navigation.getStyleClass().add("global-nav");
-        navigation.setAlignment(Pos.CENTER);
-        navigation.setMinWidth(Region.USE_PREF_SIZE);
+    /** Builds the persistent left navigation column used by the window shell. */
+    VBox createVerticalNavigation(AppView selected) {
+        rail = new VBox(2);
+        rail.getStyleClass().add("nav-rail-vertical");
+        rail.setAlignment(Pos.TOP_LEFT);
+        rail.setMinWidth(Region.USE_PREF_SIZE);
         buttons.clear();
         for (AppView view : AppView.values()) {
-            navigation.getChildren().add(createButton(view));
+            rail.getChildren().add(createButton(view));
         }
+        Region spacer = new Region();
+        VBox.setVgrow(spacer, Priority.ALWAYS);
+        rail.getChildren().add(spacer);
         showSelected(selected);
-        return navigation;
+        applyCompact();
+        return rail;
+    }
+
+    /** Collapses the rail to an icon-only column for narrow windows. */
+    void setCompact(boolean compact) {
+        if (compact == this.compact) {
+            return;
+        }
+        this.compact = compact;
+        applyCompact();
     }
 
     void showSelected(AppView selected) {
@@ -42,12 +60,36 @@ final class LauncherNavigationRail {
     }
 
     void refreshTexts() {
+        if (compact) {
+            buttons.forEach((view, button) ->
+                    button.setTooltip(new Tooltip(titleFor(view))));
+            return;
+        }
         buttons.forEach((view, button) -> button.setText(titleFor(view)));
+    }
+
+    private void applyCompact() {
+        if (rail == null) {
+            return;
+        }
+        if (compact) {
+            if (!rail.getStyleClass().contains("nav-rail-compact")) {
+                rail.getStyleClass().add("nav-rail-compact");
+            }
+        } else {
+            rail.getStyleClass().remove("nav-rail-compact");
+        }
+        buttons.forEach((view, button) -> {
+            String title = titleFor(view);
+            button.setText(compact ? null : title);
+            button.setTooltip(compact ? new Tooltip(title) : null);
+        });
     }
 
     private Button createButton(AppView view) {
         Button button = new Button(titleFor(view));
         button.setMinWidth(Region.USE_PREF_SIZE);
+        button.setAccessibleText(titleFor(view));
         button.setGraphic(ForestIcons.create(switch (view) {
             case HOME -> "home";
             case VERSIONS -> "instances";
@@ -56,8 +98,8 @@ final class LauncherNavigationRail {
             case SERVERS -> "servers";
             case SETTINGS -> "settings";
         }));
-        button.setGraphicTextGap(9);
-        button.getStyleClass().add("nav-button");
+        button.setGraphicTextGap(10);
+        button.getStyleClass().addAll("nav-button", "nav-button-vertical");
         button.setOnAction(event -> selectionHandler.accept(view));
         buttons.put(view, button);
         return button;

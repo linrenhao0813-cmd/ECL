@@ -45,8 +45,8 @@ final class WorldSavesPage extends VBox {
         setSpacing(18);
         setPadding(new Insets(2, 0, 24, 0));
         getStyleClass().addAll("launch-pane", "world-saves-page");
-        setPrefWidth(LauncherUI.LAUNCH_WIDTH);
-        setMaxWidth(LauncherUI.LAUNCH_WIDTH);
+        setMinWidth(0);
+        setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(this, Priority.ALWAYS);
         build();
         refresh();

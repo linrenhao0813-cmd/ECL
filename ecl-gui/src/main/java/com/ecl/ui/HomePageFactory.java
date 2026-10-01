@@ -2,8 +2,8 @@ package com.ecl.ui;
 
 import com.ecl.util.Messages;
 import javafx.geometry.Pos;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.control.ProgressBar;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -39,7 +39,6 @@ final class HomePageFactory {
         ui.createForm();
         StackPane hero = createLaunchHero();
         VBox.setVgrow(hero, Priority.ALWAYS);
-        initializeProgressState();
         pane.getChildren().add(hero);
         return pane;
     }
@@ -58,7 +57,8 @@ final class HomePageFactory {
         description.setWrapText(true);
         description.setMaxWidth(410);
         VBox details = new VBox(16, eyebrow, ui.selectedVersionTitleLabel,
-                ui.selectedRuntimeMetaLabel, ui.createActionBar(), ui.instanceUpdates.createStatusPane(), description);
+                ui.selectedRuntimeMetaLabel, ui.createActionBar(),
+                ui.instanceUpdates.createStatusPane(), createQuickEntries(), description);
         details.getStyleClass().add("forest-details");
         details.setAlignment(Pos.CENTER_LEFT);
         details.setMaxWidth(Double.MAX_VALUE);
@@ -75,11 +75,41 @@ final class HomePageFactory {
         return hero;
     }
 
-    private void initializeProgressState() {
-        // Workflows still share these controls even though the home activity row is hidden.
-        ui.statusLabel = new Label(Messages.get("home.noTasks"));
-        ui.detailLabel = new Label(Messages.get("home.taskDetail"));
-        ui.downloadProgress = new ProgressBar(0);
+    /** Shortcuts that take the current instance straight to its most common management pages. */
+    private HBox createQuickEntries() {
+        HBox row = new HBox(12,
+                quickEntry(Messages.get("home.quickMods"), Messages.get("home.quickMods.detail"),
+                        () -> ui.openDownloadSection(DownloadSection.CONTENT)),
+                quickEntry(Messages.get("home.quickSaves"), Messages.get("home.quickSaves.detail"),
+                        () -> ui.setActiveView(AppView.SAVES)),
+                quickEntry(Messages.get("home.quickUpdate"), Messages.get("home.quickUpdate.detail"),
+                        this::checkComponentUpdates));
+        row.setId("home-quick-entries");
+        row.getStyleClass().add("quick-entry-row");
+        row.setAlignment(Pos.CENTER_LEFT);
+        row.setMaxWidth(600);
+        return row;
+    }
+
+    private void checkComponentUpdates() {
+        if (ui.updateInstanceButton != null && !ui.updateInstanceButton.isDisabled()) {
+            ui.updateInstanceButton.fire();
+            return;
+        }
+        ui.setActiveView(AppView.VERSIONS);
+    }
+
+    private Button quickEntry(String title, String detail, Runnable action) {
+        VBox text = new VBox(2, label(title, "quick-entry-title"), label(detail, "quick-entry-detail"));
+        text.setAlignment(Pos.CENTER_LEFT);
+        Button button = new Button();
+        button.setGraphic(text);
+        button.getStyleClass().add("quick-entry");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setAccessibleText(title);
+        HBox.setHgrow(button, Priority.ALWAYS);
+        button.setOnAction(event -> action.run());
+        return button;
     }
 
     static Label label(String text, String style) {

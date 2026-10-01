@@ -100,8 +100,8 @@ final class LauncherUiFactory {
         return row(key, control);
     }
 
-    static void configureLocalizedCombo(
-            ComboBox<String> combo, Function<String, String> displayName) {
+    static <T> void configureLocalizedCombo(
+            ComboBox<T> combo, Function<T, String> displayName) {
         combo.setCellFactory(list -> localizedCell(displayName));
         combo.setButtonCell(localizedCell(displayName));
         applyFieldStyle(combo);
@@ -120,8 +120,18 @@ final class LauncherUiFactory {
                 34, "icon-button-image"));
         button.getStyleClass().addAll("app-button", "icon-button");
         button.setTooltip(new Tooltip(tooltip));
+        // Icon-only buttons still need a readable name for screen readers.
+        button.setAccessibleText(tooltip);
         button.setOnAction(event -> action.run());
         return button;
+    }
+
+    /** Returns keyboard focus to the control that opened a dialog once it closes. */
+    static void restoreFocusOnClose(javafx.stage.Stage dialog, Node trigger) {
+        if (dialog == null || trigger == null) {
+            return;
+        }
+        dialog.setOnHidden(event -> javafx.application.Platform.runLater(trigger::requestFocus));
     }
 
     static Node iconNode(Class<?> anchor, String resourcePath, String fallbackText,
@@ -151,10 +161,10 @@ final class LauncherUiFactory {
         return row;
     }
 
-    private static ListCell<String> localizedCell(Function<String, String> displayName) {
+    private static <T> ListCell<T> localizedCell(Function<T, String> displayName) {
         return new ListCell<>() {
             @Override
-            protected void updateItem(String item, boolean empty) {
+            protected void updateItem(T item, boolean empty) {
                 super.updateItem(item, empty);
                 setText(empty || item == null ? null : displayName.apply(item));
             }

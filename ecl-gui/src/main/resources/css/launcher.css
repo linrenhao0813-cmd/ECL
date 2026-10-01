@@ -2794,3 +2794,418 @@
 .scene-root.theme-dark .window-close-button:hover { -fx-background-color: #5a2930; }
 .scene-root.theme-dark .main-scroll .scroll-bar:vertical .thumb { -fx-background-color: -ecl-border; }
 .footer-bar { -fx-padding: 4 28 10 28; }
+
+/* ============================================================
+   Window shell: left navigation rail, instance bar, task dock
+   ============================================================ */
+
+/* ---------- Left navigation rail ---------- */
+.nav-rail-vertical {
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: transparent -ecl-border transparent transparent;
+    -fx-border-width: 0 1 0 0;
+    -fx-padding: 16 10;
+    -fx-spacing: 2;
+    -fx-min-width: 192;
+    -fx-pref-width: 192;
+    -fx-max-width: 192;
+    -fx-effect: null;
+}
+
+.nav-rail-vertical.nav-rail-compact {
+    -fx-padding: 16 8;
+    -fx-min-width: 68;
+    -fx-pref-width: 68;
+    -fx-max-width: 68;
+}
+
+.nav-button-vertical {
+    -fx-background-color: transparent;
+    -fx-background-radius: 10;
+    -fx-border-color: transparent;
+    -fx-border-width: 0 0 0 3;
+    -fx-border-insets: 0;
+    -fx-border-radius: 0;
+    -fx-padding: 10 12;
+    -fx-min-height: 44;
+    -fx-pref-height: 44;
+    -fx-alignment: center-left;
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 13px;
+    -fx-font-weight: 500;
+    -fx-graphic-text-gap: 10;
+    -fx-cursor: hand;
+    -fx-effect: null;
+}
+
+.nav-button-vertical:hover {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-text-fill: -ecl-text;
+}
+
+.nav-button-vertical.nav-button-selected,
+.nav-button-vertical.nav-button-selected:hover {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: transparent transparent transparent -ecl-blue;
+    -fx-border-width: 0 0 0 3;
+    -fx-text-fill: -ecl-blue;
+    -fx-font-weight: 700;
+}
+
+.nav-rail-compact .nav-button-vertical {
+    -fx-padding: 10;
+    -fx-alignment: center;
+}
+
+.nav-button-vertical:focused {
+    -fx-border-color: transparent transparent transparent -ecl-blue;
+    -fx-border-width: 0 0 0 3;
+    -fx-border-radius: 0;
+    -fx-effect: none;
+}
+
+/* ---------- Content shell + instance bar ---------- */
+.content-shell {
+    -fx-background-color: transparent;
+}
+
+.instance-bar {
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: transparent transparent -ecl-border transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 12 28;
+    -fx-min-height: 62;
+}
+
+.instance-bar-label {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+}
+
+.instance-bar .instance-bar-selector,
+.instance-bar .instance-bar-selector:focused {
+    -fx-min-height: 36;
+    -fx-pref-height: 36;
+    -fx-padding: 0 10;
+}
+
+.instance-bar-badge {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 12;
+    -fx-padding: 5 12;
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 11px;
+    -fx-font-weight: 600;
+}
+
+/* ---------- Home quick entries ---------- */
+.quick-entry-row {
+    -fx-spacing: 12;
+}
+
+.quick-entry {
+    -fx-background-color: rgba(10, 24, 16, 0.55);
+    -fx-background-radius: 12;
+    -fx-border-color: rgba(180, 215, 182, 0.35);
+    -fx-border-radius: 12;
+    -fx-border-width: 1;
+    -fx-padding: 10 14;
+    -fx-min-height: 58;
+    -fx-cursor: hand;
+    -fx-effect: null;
+}
+
+.quick-entry:hover {
+    -fx-background-color: rgba(180, 215, 182, 0.16);
+    -fx-border-color: rgba(180, 215, 182, 0.72);
+}
+
+.quick-entry-title {
+    -fx-text-fill: #e8f2e8;
+    -fx-font-size: 13px;
+    -fx-font-weight: 700;
+}
+
+.quick-entry-detail {
+    -fx-text-fill: #a9bdb0;
+    -fx-font-size: 11px;
+}
+
+/* ---------- Bottom task dock ---------- */
+.task-dock {
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: -ecl-border transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+.window-status-bar {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 6 28;
+    -fx-min-height: 36;
+    -fx-pref-height: 36;
+    -fx-spacing: 10;
+}
+
+.status-version {
+    -fx-text-fill: -ecl-tertiary;
+    -fx-font-size: 11px;
+    -fx-font-weight: 500;
+}
+
+.status-title {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+}
+
+.status-task-button {
+    -fx-padding: 5 12;
+    -fx-min-height: 26;
+    -fx-font-size: 11px;
+}
+
+.status-progress {
+    -fx-pref-width: 180;
+    -fx-max-width: 180;
+    -fx-min-height: 6;
+    -fx-max-height: 6;
+}
+
+.task-detail-panel {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: transparent transparent -ecl-border transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 12 28 14 28;
+}
+
+.task-list {
+    -fx-background-color: -ecl-surface;
+    -fx-background-radius: 10;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 10;
+    -fx-border-width: 1;
+}
+
+.task-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 8 10;
+    -fx-border-color: transparent transparent -ecl-border transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.task-list .list-cell:filled:hover {
+    -fx-background-color: -ecl-surface-muted;
+}
+
+.task-list .list-cell:empty {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.task-item-title {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+}
+
+.task-item-stage {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 11px;
+}
+
+.task-item-state {
+    -fx-background-radius: 8;
+    -fx-padding: 2 8;
+    -fx-font-size: 10px;
+    -fx-font-weight: 700;
+}
+
+.task-state-active {
+    -fx-background-color: rgba(0, 113, 227, 0.16);
+    -fx-text-fill: -ecl-blue;
+}
+
+.task-state-done {
+    -fx-background-color: -ecl-success-bg;
+    -fx-text-fill: -ecl-success-text;
+}
+
+.task-state-failed {
+    -fx-background-color: #3a2126;
+    -fx-text-fill: #ff8a94;
+}
+
+.task-state-idle {
+    -fx-background-color: -ecl-track;
+    -fx-text-fill: -ecl-secondary;
+}
+
+.tiny-button {
+    -fx-padding: 3 10;
+    -fx-min-height: 24;
+    -fx-font-size: 11px;
+}
+
+/* ---------- Home launch state hint ---------- */
+.launch-hint-row {
+    -fx-padding: 0;
+}
+
+.launch-hint {
+    -fx-text-fill: #c4cfc7;
+    -fx-font-size: 12px;
+}
+
+/* ============================================================
+   Instance manager: list column + detail workspace
+   ============================================================ */
+.instance-workspace {
+    -fx-alignment: top-left;
+}
+
+.instance-workspace-narrow {
+    -fx-spacing: 14;
+}
+
+.instance-list-column {
+    -fx-alignment: top-left;
+}
+
+.instance-list-column .instance-version-list {
+    -fx-max-height: Infinity;
+    -fx-max-width: Infinity;
+}
+
+.instance-list-column .instance-version-list .list-cell {
+    -fx-padding: 10 12;
+}
+
+.instance-details,
+.instance-details-body {
+    -fx-alignment: top-left;
+}
+
+.instance-details {
+    -fx-padding: 0;
+}
+
+.instance-details-body {
+    -fx-background-color: -ecl-surface;
+    -fx-background-radius: 16;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 16;
+    -fx-border-width: 1;
+    -fx-padding: 16 18 18 18;
+}
+
+.instance-target-badge,
+.instance-target-badge-current,
+.instance-target-badge-other {
+    -fx-background-radius: 10;
+    -fx-padding: 5 10;
+    -fx-font-size: 10px;
+    -fx-font-weight: 700;
+}
+
+.instance-target-badge-current {
+    -fx-background-color: -ecl-success-bg;
+    -fx-text-fill: -ecl-success-text;
+}
+
+.instance-target-badge-other {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-text-fill: -ecl-tertiary;
+}
+
+.list-cell .instance-target-badge-current {
+    -fx-padding: 2 7;
+}
+
+.instance-config-tab,
+.instance-maintenance-tab {
+    -fx-alignment: top-left;
+}
+
+.instance-maintenance-tab .surface {
+    -fx-alignment: top-left;
+}
+
+.instance-favorite {
+    -fx-text-fill: #f0b429;
+    -fx-font-size: 14px;
+}
+
+.instance-cover-thumb,
+.instance-cover-preview {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 8;
+}
+
+.instance-cover-preview {
+    -fx-background-radius: 12;
+}
+
+.instance-display-box .check-box {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 12px;
+}
+
+.danger-button {
+    -fx-text-fill: #e06c75;
+}
+
+.danger-button:hover {
+    -fx-text-fill: #ff8a94;
+}
+
+/* ============================================================
+   Content library: horizontal categories + install target strip
+   ============================================================ */
+.content-library-category-bar {
+    -fx-padding: 0 0 2 0;
+}
+
+.content-category-chip {
+    -fx-padding: 7 13;
+    -fx-min-height: 38;
+    -fx-pref-height: 38;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+    -fx-text-fill: -ecl-secondary;
+}
+
+.content-category-chip .content-library-nav-icon {
+    -fx-min-width: 22;
+    -fx-pref-width: 22;
+    -fx-min-height: 22;
+    -fx-pref-height: 22;
+    -fx-background-radius: 7;
+    -fx-font-size: 10px;
+}
+
+.content-category-chip:hover {
+    -fx-text-fill: -ecl-text;
+}
+
+.content-target-strip {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 12;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 12;
+    -fx-border-width: 1;
+    -fx-padding: 8 14;
+}
+
+.content-target-caption {
+    -fx-text-fill: -ecl-tertiary;
+    -fx-font-size: 11px;
+    -fx-font-weight: 600;
+}
+
+.content-target-value {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+}
