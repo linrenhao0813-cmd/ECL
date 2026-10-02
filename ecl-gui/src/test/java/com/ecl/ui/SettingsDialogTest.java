@@ -79,7 +79,7 @@ class SettingsDialogTest extends ApplicationTest {
                 launcher.setActiveView(AppView.SETTINGS);
                 stage.getScene().getRoot().applyCss();
                 stage.getScene().getRoot().layout();
-                stage.getScene().lookup("#settings-global-open").requestFocus();
+                stage.getScene().lookup("#settings-language").requestFocus();
                 Scene scene = openDialog();
                 field(scene, "settings-global-width").setText("1440");
                 ((Button) scene.lookup("#settings-global-save")).fire();
@@ -95,7 +95,7 @@ class SettingsDialogTest extends ApplicationTest {
                 manager.close();
             }
         });
-        interact(() -> assertEquals(stage.getScene().lookup("#settings-global-open"), stage.getScene().getFocusOwner()));
+        interact(() -> assertEquals(stage.getScene().lookup("#settings-language"), stage.getScene().getFocusOwner()));
         assertEquals(before, Files.readString(profileFile));
     }
 

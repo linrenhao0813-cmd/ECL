@@ -28,12 +28,11 @@ import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
-import static com.ecl.util.TextUtil.abbreviate;
-
 /** Builds the small, self-contained launcher pages that do not own business workflows. */
 final class LauncherPageFactory {
     private final LauncherUI ui;
     private SettingsPageGuard settingsGuard;
+    private String requestedInstance;
     private Function<Tab, SettingsPageGuard.Choice> settingsChoiceProvider = this::showSettingsChoice;
 
     LauncherPageFactory(LauncherUI ui) {
@@ -96,11 +95,11 @@ final class LauncherPageFactory {
     /**
      * Settings are split by save scope so a value never lands somewhere the user did not expect:
      * general and downloads are global, defaults only apply to instances without a profile, and the
-     * current instance's Java/memory/JVM live in the instance manager.
+     * instance settings edit only the instance selected within their own workspace.
      */
     VBox createSettingsPage() {
         VBox page = ui.createMainPage();
-        Tab general = new Tab(Messages.get("settings.tab.general"), createGeneralSettingsPage());
+        Tab general = new Tab(Messages.get("settings.tab.general"));
         Tab downloads = new Tab(Messages.get("settings.tab.downloads"));
         Tab defaults = new Tab(Messages.get("settings.tab.defaults"));
         Tab accounts = new Tab(GuiMessages.get("accounts.title"), new AccountManagementPage(ui));
@@ -112,17 +111,46 @@ final class LauncherPageFactory {
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         SettingsPageGuard guard = new SettingsPageGuard(tabs, tab -> settingsChoiceProvider.apply(tab));
         settingsGuard = guard;
+        general.setContent(buildGeneralSettingsTab(general, guard));
         downloads.setContent(buildDownloadSettingsTab(downloads, guard));
         defaults.setContent(buildDefaultSettingsTab(defaults, guard));
         // "Discard" simply rebuilds the tab, which restores every field from the saved settings.
         guard.onDiscard(downloads, () -> downloads.setContent(buildDownloadSettingsTab(downloads, guard)));
         guard.onDiscard(defaults, () -> defaults.setContent(buildDefaultSettingsTab(defaults, guard)));
+        guard.onDiscard(general, () -> general.setContent(buildGeneralSettingsTab(general, guard)));
 
         tabs.getSelectionModel().select(ui.accountSettingsSelected ? accounts : general);
-        tabs.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) ->
-                ui.accountSettingsSelected = tabs.getSelectionModel().getSelectedItem() == accounts);
+        tabs.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) -> {
+            ui.accountSettingsSelected = tabs.getSelectionModel().getSelectedItem() == accounts;
+        });
         page.getChildren().add(tabs);
         return page;
+    }
+
+    InstalledInstancesPage createInstalledInstancesPage() {
+        if (requestedInstance != null) {
+            ui.instanceSelection.setViewedInstance(requestedInstance);
+            requestedInstance = null;
+        }
+        InstalledInstancesPage page = new InstalledInstancesPage(ui);
+        SettingsPageGuard guard = page.createGuard(tab -> settingsChoiceProvider.apply(tab));
+        settingsGuard = guard;
+        page.guardChanges(guard::confirmDeparture, () -> settingsGuard == guard);
+        return page;
+    }
+
+    void openInstanceSettings(String instanceId) {
+        if (instanceId == null || instanceId.isBlank()) {
+            ui.setActiveView(AppView.VERSIONS);
+            return;
+        }
+        if (!confirmSettingsDeparture()) return;
+        requestedInstance = instanceId;
+        if (ui.activeView == AppView.VERSIONS) {
+            ui.renderActiveView();
+        } else {
+            ui.setActiveView(AppView.VERSIONS);
+        }
     }
 
     /** Confirms a destructive page departure before navigation or rebuilding the workspace. */
@@ -154,44 +182,48 @@ final class LauncherPageFactory {
                 : choice == discard ? SettingsPageGuard.Choice.DISCARD : SettingsPageGuard.Choice.CANCEL;
     }
 
-    private VBox createGeneralSettingsPage() {
+    private VBox buildGeneralSettingsTab(Tab tab, SettingsPageGuard guard) {
         VBox page = ui.createMainPage();
+        page.getStyleClass().add("settings-general");
 
         ComboBox<String> languageBox = new ComboBox<>();
+        languageBox.setId("settings-language");
         languageBox.getItems().addAll("zh-CN", "zh-TW", "en");
         languageBox.setValue(Messages.locale().toLanguageTag());
         ui.configureLocalizedCombo(languageBox, ui::languageDisplayName);
-        languageBox.setOnAction(event -> ui.switchLanguage(languageBox.getValue()));
+        languageBox.setOnAction(event -> changeSettingsLanguage(languageBox));
 
-        Button advancedButton = ui.createActionButton(
-                Messages.get("settings.advanced"), "primary-button", ui::showSettingsDialog);
-        advancedButton.setId("settings-global-open");
-        Button dataDirButton = ui.createActionButton(
-                Messages.get("settings.openData"), "secondary-button",
-                () -> ui.openLocalFolder(ECLConfig.getBaseDir(), Messages.get("settings.openData")));
-        Button gameDirButton = ui.createActionButton(
-                Messages.get("settings.openGame"), "ghost-button",
-                () -> ui.openLocalFolder(ui.gameDir, Messages.get("settings.openGame")));
-        Button wizardButton = ui.createActionButton(
-                Messages.get("wizard.title"), "ghost-button", ui::showFirstRunWizard);
-
-        HBox actions = new HBox(10, advancedButton, dataDirButton, gameDirButton, wizardButton);
-        actions.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-        VBox settingsCard = ui.createSurface(
-                "// " + Messages.get("settings.system"),
-                Messages.get("settings.subtitle"),
-                ui.createControlRow(Messages.get("settings.language"), languageBox),
-                ui.createInfoRow(Messages.get("label.gameDir"), ui.createStaticValueLabel(
-                        ui.gameDir.getAbsolutePath())),
-                actions
-        );
-        page.getChildren().add(settingsCard);
+        GlobalGameSettingsPane global = new GlobalGameSettingsPane(ui, true);
+        guard.onDirtyCheck(tab, global::hasUnsavedChanges);
+        guard.onSave(tab, global::save);
+        global.setOnDiscard(() -> tab.setContent(buildGeneralSettingsTab(tab, guard)));
+        page.getChildren().addAll(
+                ui.createSurface(Messages.get("settings.group.interface"), null,
+                        ui.createControlRow(Messages.get("settings.language"), languageBox)),
+                global);
         return page;
+    }
+
+    private void changeSettingsLanguage(ComboBox<String> languageBox) {
+        if (java.util.Objects.equals(languageBox.getValue(), Messages.locale().toLanguageTag())) return;
+        ui.switchLanguage(languageBox.getValue());
+        String actual = Messages.locale().toLanguageTag();
+        if (!java.util.Objects.equals(languageBox.getValue(), actual)) {
+            var action = languageBox.getOnAction();
+            languageBox.setOnAction(null);
+            try {
+                languageBox.setValue(actual);
+            } finally {
+                languageBox.setOnAction(action);
+            }
+        }
     }
 
     /** Download concurrency, speed limit and the content release channel. */
     private VBox buildDownloadSettingsTab(Tab tab, SettingsPageGuard guard) {
         VBox page = ui.createMainPage();
+        page.getStyleClass().add("settings-form");
+        page.setSpacing(14);
         Runnable markDirty = () -> guard.markDirty(tab);
 
         TextField concurrencyField = new TextField(Integer.toString(
@@ -216,14 +248,9 @@ final class LauncherPageFactory {
         ui.configureLocalizedCombo(channelBox, LauncherPageFactory::releaseChannelName);
         channelBox.valueProperty().addListener((observable, previous, value) -> markDirty.run());
 
-        ComboBox<DefaultIsolationType> isolationBox = new ComboBox<>();
-        isolationBox.getItems().setAll(DefaultIsolationType.values());
-        isolationBox.setValue(DefaultIsolationType.parse(
-                ui.settingsManager.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE)));
-        ui.configureLocalizedCombo(isolationBox, LauncherPageFactory::isolationName);
-        isolationBox.valueProperty().addListener((observable, previous, value) -> markDirty.run());
-
         Label status = ui.createBodyText("");
+        status.visibleProperty().bind(status.textProperty().isNotEmpty());
+        status.managedProperty().bind(status.visibleProperty());
         BooleanSupplier performSave = () -> {
             int concurrency;
             int rate;
@@ -242,9 +269,8 @@ final class LauncherPageFactory {
                 ui.settingsManager.set(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT, concurrency);
                 ui.settingsManager.set(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB, rate);
                 ui.settingsManager.set(ECLConfig.KEY_MOD_RELEASE_CHANNEL, channelBox.getValue().name());
-                ui.settingsManager.set(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE, isolationBox.getValue().name());
             }, ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT, ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB,
-                    ECLConfig.KEY_MOD_RELEASE_CHANNEL, ECLConfig.KEY_DEFAULT_ISOLATION_TYPE);
+                    ECLConfig.KEY_MOD_RELEASE_CHANNEL);
             if (!saved) {
                 status.setText(Messages.get("status.settingsSaveFailed.detail"));
                 return false;
@@ -269,24 +295,26 @@ final class LauncherPageFactory {
         actions.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
         page.getChildren().add(ui.createSurface(
-                Messages.get("settings.tab.downloads"),
+                Messages.get("settings.group.transfer"),
                 Messages.get("settings.download.subtitle"),
                 ui.createControlRow(Messages.get("settings.download.parallel"), concurrencyField),
-                ui.createControlRow(Messages.get("settings.download.rate"), rateField),
-                ui.createControlRow(Messages.get("settings.download.channel"), channelBox),
-                ui.createControlRow(Messages.get("settings.download.isolation"), isolationBox),
-                status, actions));
+                ui.createControlRow(Messages.get("settings.download.rate"), rateField)));
+        page.getChildren().addAll(ui.createSurface(Messages.get("settings.group.content"), null,
+                ui.createControlRow(Messages.get("settings.download.channel"), channelBox)), status, actions);
         return page;
     }
 
     /** Java, memory and JVM defaults used by instances without their own launch profile. */
     private VBox buildDefaultSettingsTab(Tab tab, SettingsPageGuard guard) {
         VBox page = ui.createMainPage();
+        page.getStyleClass().add("settings-form");
+        page.setSpacing(14);
         Runnable markDirty = () -> guard.markDirty(tab);
 
         TextField javaField = new TextField(ui.javaPath == null ? "" : ui.javaPath);
         javaField.setId("settings-default-java");
         javaField.setPromptText(Messages.get("instances.java.prompt"));
+        javaField.setPrefWidth(320);
         ui.applyFieldStyle(javaField);
         javaField.textProperty().addListener((observable, previous, value) -> markDirty.run());
         Button detectJava = ui.createActionButton(Messages.get("settings.detect"),
@@ -322,10 +350,20 @@ final class LauncherPageFactory {
         TextField jvmField = new TextField(ui.extraJvmArgs == null ? "" : ui.extraJvmArgs);
         jvmField.setId("settings-default-jvm");
         jvmField.setPromptText(Messages.get("instances.jvm.prompt"));
+        jvmField.setPrefWidth(420);
         ui.applyFieldStyle(jvmField);
         jvmField.textProperty().addListener((observable, previous, value) -> markDirty.run());
 
+        ComboBox<DefaultIsolationType> isolationBox = new ComboBox<>();
+        isolationBox.setId("settings-default-isolation");
+        isolationBox.getItems().setAll(DefaultIsolationType.values());
+        isolationBox.setValue(DefaultIsolationType.parse(ui.settingsManager.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE)));
+        ui.configureLocalizedCombo(isolationBox, LauncherPageFactory::isolationName);
+        isolationBox.valueProperty().addListener((observable, previous, value) -> markDirty.run());
+
         Label status = ui.createBodyText("");
+        status.visibleProperty().bind(status.textProperty().isNotEmpty());
+        status.managedProperty().bind(status.visibleProperty());
         BooleanSupplier performSave = () -> {
             String javaValue = javaField.getText() == null ? "" : javaField.getText().trim();
             if (!javaValue.isBlank() && !JavaRuntimeUtil.isUsableJavaPath(javaValue)) {
@@ -351,7 +389,8 @@ final class LauncherPageFactory {
                 ui.settingsManager.set(ECLConfig.KEY_JAVA_PATH, resolvedJava);
                 ui.settingsManager.set(ECLConfig.KEY_MAX_MEMORY_MB, memoryMb);
                 ui.settingsManager.set(ECLConfig.KEY_JVM_ARGS, jvmArgs);
-            }, ECLConfig.KEY_JAVA_PATH, ECLConfig.KEY_MAX_MEMORY_MB, ECLConfig.KEY_JVM_ARGS);
+                ui.settingsManager.set(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE, isolationBox.getValue().name());
+            }, ECLConfig.KEY_JAVA_PATH, ECLConfig.KEY_MAX_MEMORY_MB, ECLConfig.KEY_JVM_ARGS, ECLConfig.KEY_DEFAULT_ISOLATION_TYPE);
             if (!saved) {
                 status.setText(Messages.get("status.settingsSaveFailed.detail"));
                 return false;
@@ -377,18 +416,21 @@ final class LauncherPageFactory {
                     javaField.setText("");
                     memoryField.setText("");
                     jvmField.setText("");
+                    isolationBox.setValue(DefaultIsolationType.MODDED);
                     status.setText(Messages.get("settings.defaults.restored"));
                 });
         HBox actions = new HBox(10, save, discard, restore);
         actions.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
         page.getChildren().add(ui.createSurface(
-                Messages.get("settings.tab.defaults"),
+                Messages.get("settings.group.runtime"),
                 Messages.get("settings.defaults.subtitle"),
                 ui.createControlRow(Messages.get("label.javaPath"), javaRow),
                 ui.createControlRow(Messages.get("label.maxMemory"), memoryField),
-                ui.createControlRow(Messages.get("label.jvmParams"), jvmField),
-                status, actions));
+                ui.createControlRow(Messages.get("label.jvmParams"), jvmField)));
+        page.getChildren().addAll(ui.createSurface(Messages.get("settings.group.instanceStorage"),
+                Messages.get("settings.defaults.isolationHint"),
+                ui.createControlRow(Messages.get("settings.download.isolation"), isolationBox)), status, actions);
         return page;
     }
 
@@ -428,31 +470,26 @@ final class LauncherPageFactory {
     /** Version information, local folders and diagnostics entry points. */
     private VBox createAboutSettingsPage() {
         VBox page = ui.createMainPage();
-        Button dataDirButton = ui.createActionButton(Messages.get("settings.openData"),
-                "secondary-button",
-                () -> ui.openLocalFolder(ECLConfig.getBaseDir(), Messages.get("settings.openData")));
-        Button gameDirButton = ui.createActionButton(Messages.get("settings.openGame"),
-                "secondary-button",
-                () -> ui.openLocalFolder(ui.gameDir, Messages.get("settings.openGame")));
+        Button logsButton = ui.createActionButton(Messages.get("settings.openLogs"),
+                "secondary-button", () -> ui.openLocalFolder(
+                        new File(System.getProperty("user.home"), ".ecl/logs"), Messages.get("settings.openLogs")));
+        logsButton.setId("settings-open-logs");
+        Button wizardButton = ui.createActionButton(Messages.get("wizard.title"),
+                "ghost-button", ui::showFirstRunWizard);
         Button crashButton = ui.createActionButton(Messages.get("settings.openCrash"),
                 "ghost-button", () -> ui.openLocalFolder(
                         new File(ui.getActiveGameDir(), "crash-reports"),
                         Messages.get("label.crashReports")));
-        HBox actions = new HBox(10, dataDirButton, gameDirButton, crashButton);
-        actions.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+        javafx.scene.layout.FlowPane actions = new javafx.scene.layout.FlowPane(10, 8, logsButton, crashButton, wizardButton);
 
         page.getChildren().add(ui.createSurface(
                 Messages.get("settings.tab.about"),
                 Messages.get("settings.about.subtitle"),
                 ui.createInfoRow(Messages.get("settings.about.version"),
                         ui.createStaticValueLabel(Messages.get("app.version"))),
-                ui.createInfoRow("Java", ui.createStaticValueLabel(ui.javaPath == null
-                        || ui.javaPath.isBlank() ? "-" : abbreviate(ui.javaPath, 72))),
-                ui.createInfoRow(Messages.get("label.gameDir"),
-                        ui.createStaticValueLabel(ui.gameDir.getAbsolutePath())),
-                ui.createInfoRow(Messages.get("settings.about.data"),
-                        ui.createStaticValueLabel(ECLConfig.getBaseDir().getAbsolutePath())),
-                actions));
+                ui.createInfoRow("Java", ui.createStaticValueLabel(System.getProperty("java.version")))));
+        page.getChildren().add(ui.createSurface(Messages.get("settings.group.diagnostics"),
+                Messages.get("settings.about.subtitle"), actions));
         return page;
     }
 

@@ -66,7 +66,7 @@ final class LauncherPageRouter {
         switch (ui.activeView) {
             case HOME -> addMainContent(ui.homePageFactory.getOrCreate(), null);
             case VERSIONS -> {
-                InstalledInstancesPage page = new InstalledInstancesPage(ui);
+                InstalledInstancesPage page = ui.pageFactory.createInstalledInstancesPage();
                 ui.compactLayoutConsumer = page::setCompact;
                 addMainContent(page, null);
             }

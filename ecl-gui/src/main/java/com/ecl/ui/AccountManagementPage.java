@@ -32,7 +32,6 @@ final class AccountManagementPage extends VBox {
         current.setWrapText(true);
         current.getStyleClass().add("account-current");
         getChildren().addAll(ui.createSurface(GuiMessages.get("accounts.current"), null, current),
-                createRecoverySurface(),
                 ui.createSurface(GuiMessages.get("accounts.title"), GuiMessages.get("accounts.subtitle"), createEditor()));
         ui.updateAuthFields();
     }
@@ -75,7 +74,7 @@ final class AccountManagementPage extends VBox {
         Button remove = ui.createActionButton(GuiMessages.get("accounts.remove"), "ghost-button", this::removeAccount);
         remove.disableProperty().bind(ui.microsoftAccountCombo.valueProperty().isNull()
                 .or(ui.microsoftLoginBtn.disableProperty()));
-        FlowPane microsoftActions = actions(ui.microsoftLoginBtn, ui.microsoftAddAccountBtn, remove);
+        FlowPane microsoftActions = actions(remove);
         followVisibility(microsoftActions, ui.microsoftAccountCombo);
         FlowPane skinActions = actions(ui.skinUploadBtn, ui.offlineSkinRemoveBtn);
         followVisibility(skinActions, ui.skinUploadBtn);
@@ -88,7 +87,7 @@ final class AccountManagementPage extends VBox {
         help.textProperty().bind(ui.authHintLabel.textProperty());
         help.setWrapText(true);
         help.getStyleClass().add("status-detail");
-        return new VBox(16, mode, username, saved, microsoftActions,
+        return new VBox(16, mode, username, saved, createRecoverySurface(), microsoftActions,
                 skinActions, help, apply, feedback);
     }
 

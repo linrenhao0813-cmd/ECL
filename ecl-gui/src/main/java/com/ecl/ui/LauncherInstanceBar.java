@@ -2,7 +2,6 @@ package com.ecl.ui;
 
 import com.ecl.util.Messages;
 import javafx.geometry.Pos;
-import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
@@ -16,8 +15,6 @@ import javafx.scene.layout.Region;
 final class LauncherInstanceBar {
     private final LauncherUI ui;
     private Label caption;
-    private Button manageButton;
-    private Button refreshButton;
 
     LauncherInstanceBar(LauncherUI ui) {
         this.ui = ui;
@@ -66,26 +63,12 @@ final class LauncherInstanceBar {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        manageButton = ui.createActionButton(
-                Messages.get("instanceBar.manage"), "secondary-button",
-                () -> ui.setActiveView(AppView.VERSIONS));
-        manageButton.setId("instance-bar-manage");
-
-        refreshButton = ui.createActionButton(
-                Messages.get("instanceBar.refresh"), "ghost-button",
-                () -> ui.versionActions.refreshVersions());
-        refreshButton.setId("instance-bar-refresh");
-
-        HBox actions = new HBox(8, manageButton, refreshButton);
-        actions.setAlignment(Pos.CENTER_RIGHT);
-
         bar.getChildren().addAll(
                 caption,
                 ui.versionCombo,
                 ui.selectedVersionWikiButton,
                 ui.instanceMetaLabel,
-                spacer,
-                actions);
+                spacer);
         return bar;
     }
 
@@ -95,8 +78,6 @@ final class LauncherInstanceBar {
             return;
         }
         caption.setText(Messages.get("instanceBar.current"));
-        manageButton.setText(Messages.get("instanceBar.manage"));
-        refreshButton.setText(Messages.get("instanceBar.refresh"));
         ui.versionCombo.setPromptText(Messages.get("home.selectVersion"));
         if (ui.selectedVersionWikiButton != null) {
             ui.selectedVersionWikiButton.setText(Messages.get("instanceBar.wiki"));

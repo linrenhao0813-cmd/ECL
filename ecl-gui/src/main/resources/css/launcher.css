@@ -3229,3 +3229,39 @@
 .scene-root.theme-dark .radio-button:selected > .radio > .dot {
     -fx-background-color: -ecl-blue;
 }
+
+/* Collapsible global settings keep optional launch and backup controls together. */
+.settings-form {
+    -fx-spacing: 12;
+}
+.settings-general .surface,
+.settings-form .surface {
+    -fx-padding: 16;
+    -fx-spacing: 10;
+}
+.settings-form .info-row {
+    -fx-padding: 2 0;
+}
+.settings-group > .title {
+    -fx-background-color: #18251d;
+    -fx-background-radius: 12;
+    -fx-padding: 14 18;
+}
+.settings-group > .title > .text {
+    -fx-fill: #e3e9e1;
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+}
+.settings-group > .title > .arrow-button > .arrow {
+    -fx-background-color: #afd0ad;
+}
+.settings-group > .content {
+    -fx-background-color: #142019;
+    -fx-border-color: #293a2e;
+    -fx-border-radius: 0 0 12 12;
+    -fx-padding: 18;
+}
+.settings-group:focused > .title {
+    -fx-border-color: #afd0ad;
+    -fx-border-radius: 12;
+}

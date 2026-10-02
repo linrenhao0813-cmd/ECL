@@ -19,13 +19,20 @@ final class SettingsPageGuard {
     private final Set<Tab> dirty = Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<Tab, Runnable> discardActions = new IdentityHashMap<>();
     private final Map<Tab, BooleanSupplier> saveActions = new IdentityHashMap<>();
+    private final Map<Tab, BooleanSupplier> dirtyChecks = new IdentityHashMap<>();
     private boolean reverting;
 
     SettingsPageGuard(TabPane tabs, Function<Tab, Choice> choiceProvider) {
+        this(tabs, choiceProvider, true);
+    }
+
+    SettingsPageGuard(TabPane tabs, Function<Tab, Choice> choiceProvider, boolean guardTabSwitches) {
         this.tabs = tabs;
         this.choiceProvider = choiceProvider;
-        tabs.getSelectionModel().selectedItemProperty().addListener(
-                (observable, previous, selected) -> handleTabChange(previous, selected));
+        if (guardTabSwitches) {
+            tabs.getSelectionModel().selectedItemProperty().addListener(
+                    (observable, previous, selected) -> handleTabChange(previous, selected));
+        }
     }
 
     void markDirty(Tab tab) {
@@ -46,7 +53,15 @@ final class SettingsPageGuard {
         saveActions.put(tab, action);
     }
 
+    void onDirtyCheck(Tab tab, BooleanSupplier check) {
+        dirtyChecks.put(tab, check);
+    }
+
     boolean confirmDeparture() {
+        Tab current = tabs.getSelectionModel().getSelectedItem();
+        if (current != null && !resolveChanges(current)) {
+            return false;
+        }
         for (Tab tab : tabs.getTabs()) {
             if (!resolveChanges(tab)) {
                 select(tab);
@@ -64,7 +79,7 @@ final class SettingsPageGuard {
     }
 
     private boolean resolveChanges(Tab tab) {
-        if (!dirty.contains(tab)) {
+        if (!dirty.contains(tab) && !dirtyChecks.getOrDefault(tab, () -> false).getAsBoolean()) {
             return true;
         }
         Choice choice = choiceProvider.apply(tab);

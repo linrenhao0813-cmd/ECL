@@ -51,7 +51,7 @@ public final class LauncherUiSnapshot {
         scene.getRoot().applyCss();
         scene.getRoot().layout();
         String mode = System.getProperty("ecl.snapshot.mode");
-        if ((mode != null && (mode.startsWith("settings-dialog-bottom") || mode.startsWith("local-versions-config-bottom")))
+        if ((mode != null && mode.startsWith("settings-dialog-bottom"))
                 || "settings".equalsIgnoreCase(mode) || "loader-choice".equalsIgnoreCase(mode)) {
             ScrollPane scrollPane = findScrollPane(scene.getRoot());
             if (scrollPane != null) {
@@ -285,9 +285,7 @@ public final class LauncherUiSnapshot {
                 return primaryStage.getScene();
             }
             if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("settings-page")) {
-                applySnapshotTheme();
-                showAppView("SETTINGS");
-                return primaryStage.getScene();
+                return prepareSettingsPageCapture(primaryStage, mode);
             }
             if ((mode != null && mode.startsWith("settings-dialog")) || "settings".equalsIgnoreCase(mode)) {
                 Method settingsDialog = LauncherUIView.class.getDeclaredMethod("showSettingsDialog");
@@ -373,21 +371,40 @@ public final class LauncherUiSnapshot {
             return stage.getScene();
         }
 
+        private Scene prepareSettingsPageCapture(Stage primaryStage, String mode) throws Exception {
+            applySnapshotTheme();
+            showAppView("SETTINGS");
+            javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
+                    primaryStage.getScene().lookup("#settings-tabs");
+            if (mode.contains("downloads")) tabs.getSelectionModel().select(1);
+            if (mode.contains("defaults")) tabs.getSelectionModel().select(2);
+            if (mode.contains("accounts")) tabs.getSelectionModel().select(3);
+            if (mode.contains("about")) tabs.getSelectionModel().select(4);
+            if (mode.contains("expanded")) {
+                primaryStage.getScene().getRoot().applyCss();
+                for (String id : java.util.List.of("settings-launch-group", "settings-backup-group")) {
+                    javafx.scene.control.TitledPane group = (javafx.scene.control.TitledPane)
+                            primaryStage.getScene().lookup("#" + id);
+                    if (group != null) group.setExpanded(true);
+                }
+            }
+            if (mode.contains("compact")) {
+                primaryStage.setWidth(1180);
+                primaryStage.setHeight(720);
+            }
+            return primaryStage.getScene();
+        }
+
         private Scene prepareLocalVersionsCapture(Stage stage, String mode) throws Exception {
             String vanilla = createVisualProfile("visual-local-vanilla", "", "1.21.8");
             String fabric = createVisualProfile("visual-local-fabric", "fabric", "1.21.7");
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(vanilla));
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(fabric));
+            if (mode.contains("config")) throw new IllegalArgumentException("Instance launch settings were removed");
             showAppView("VERSIONS");
             if (mode.contains("compact")) {
                 stage.setWidth(1180);
                 stage.setHeight(720);
-            }
-            if (mode.contains("config")) {
-                stage.getScene().getRoot().applyCss();
-                javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
-                        stage.getScene().lookup("#instance-detail-tabs");
-                tabs.getSelectionModel().select(1);
             }
             return stage.getScene();
         }

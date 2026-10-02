@@ -26,14 +26,15 @@ final class InstalledInstancesPage extends VBox {
     private final ListView<String> instances = new ListView<>();
     private final Label status = new Label(Messages.get("local.instances.loading"));
     private final Button refreshButton;
-    private final Button installButton;
     private final InstanceDetailsPane details;
     private final VBox rightPane = new VBox(14);
     private final VBox listColumn;
     private final HBox wideLayout = new HBox(18);
     private final VBox narrowLayout = new VBox(14);
-    private InstanceInstallWizard wizard;
     private Boolean compactMode;
+    private java.util.function.BooleanSupplier confirmChange = () -> true;
+    private java.util.function.BooleanSupplier activeCheck = () -> true;
+    private boolean restoringSelection;
 
     InstalledInstancesPage(LauncherUI ui) {
         this.ui = ui;
@@ -61,11 +62,7 @@ final class InstalledInstancesPage extends VBox {
         refreshButton = ui.createActionButton(
                 Messages.get("local.instances.refresh"), "secondary-button", this::refreshInstances);
         refreshButton.setId("instance-list-refresh");
-        installButton = ui.createActionButton(
-                Messages.get("instances.installNew"), "primary-button", this::showInstallWizard);
-        installButton.setId("instance-install-new");
-
-        VBox listActions = new VBox(8, installButton, refreshButton);
+        VBox listActions = new VBox(8, refreshButton);
         listActions.setFillWidth(true);
 
         listColumn = new VBox(10);
@@ -98,6 +95,34 @@ final class InstalledInstancesPage extends VBox {
         refreshInstances();
     }
 
+    void guardChanges(java.util.function.BooleanSupplier confirmation,
+                      java.util.function.BooleanSupplier active) {
+        confirmChange = confirmation;
+        activeCheck = active;
+    }
+
+    SettingsPageGuard createGuard(java.util.function.Function<javafx.scene.control.Tab, SettingsPageGuard.Choice> provider) {
+        SettingsPageGuard guard = new SettingsPageGuard(details.detailTabs(), provider, false);
+        for (javafx.scene.control.Tab tab : details.detailTabs().getTabs()) {
+            guard.onDirtyCheck(tab, this::hasUnsavedChanges);
+            guard.onSave(tab, this::savePendingChanges);
+            guard.onDiscard(tab, this::discardChanges);
+        }
+        return guard;
+    }
+
+    boolean hasUnsavedChanges() {
+        return details.hasUnsavedChanges();
+    }
+
+    boolean savePendingChanges() {
+        return details.savePendingChanges();
+    }
+
+    void discardChanges() {
+        details.refresh();
+    }
+
     /** Stacks the list above the details on narrow windows. */
     void setCompact(boolean compact) {
         applyCompact(compact);
@@ -113,12 +138,16 @@ final class InstalledInstancesPage extends VBox {
         Node workspace;
         if (compact) {
             // Cap the list so the detail workspace stays visible underneath it.
+            listColumn.setMinHeight(260);
             listColumn.setMaxHeight(260);
+            instances.setMinHeight(160);
             instances.setPrefHeight(200);
             narrowLayout.getChildren().addAll(listColumn, rightPane);
             workspace = narrowLayout;
         } else {
+            listColumn.setMinHeight(javafx.scene.layout.Region.USE_COMPUTED_SIZE);
             listColumn.setMaxHeight(Double.MAX_VALUE);
+            instances.setMinHeight(javafx.scene.layout.Region.USE_COMPUTED_SIZE);
             instances.setPrefHeight(420);
             wideLayout.getChildren().addAll(listColumn, rightPane);
             workspace = wideLayout;
@@ -178,6 +207,18 @@ final class InstalledInstancesPage extends VBox {
     }
 
     private void selectInstance(String instanceId) {
+        if (restoringSelection || Objects.equals(instanceId, details.instanceId())) {
+            return;
+        }
+        if (!confirmChange.getAsBoolean()) {
+            restoringSelection = true;
+            try {
+                instances.getSelectionModel().select(details.instanceId());
+            } finally {
+                restoringSelection = false;
+            }
+            return;
+        }
         if (instanceId == null || instanceId.isBlank()) {
             details.setInstance(null);
             return;
@@ -187,28 +228,14 @@ final class InstalledInstancesPage extends VBox {
         details.setInstance(instanceId);
     }
 
-    /** Hosts the inline install wizard in the detail pane instead of navigating away. */
-    private void showInstallWizard() {
-        if (wizard == null) {
-            wizard = new InstanceInstallWizard(ui, this::showDetailsPane, this::onInstanceInstalled);
-        }
-        rightPane.getChildren().setAll(wizard);
-        ui.setStatus(Messages.get("instances.wizard.started"), Messages.get("instances.installNew"));
-    }
-
     private void showDetailsPane() {
         rightPane.getChildren().setAll(details);
     }
 
-    private void onInstanceInstalled(String profileId) {
-        showDetailsPane();
-        refreshInstances();
-        if (profileId != null && !profileId.isBlank()) {
-            ui.instanceSelection.setViewedInstance(profileId);
-        }
-    }
-
     private void refreshInstances() {
+        if (!confirmChange.getAsBoolean()) {
+            return;
+        }
         String preferred = ui.getSelectedVersion();
         String viewed = ui.instanceSelection.viewedInstance();
         setBusy(true);
@@ -221,20 +248,33 @@ final class InstalledInstancesPage extends VBox {
     }
 
     private void applyInstances(List<String> installed, String preferred, String viewed) {
+        if (!activeCheck.getAsBoolean()) {
+            return;
+        }
+        if (!confirmChange.getAsBoolean()) {
+            setBusy(false);
+            return;
+        }
         List<String> ordered = new ArrayList<>(installed);
         // Favourites float to the top, then keep the launcher's own ordering.
         ordered.sort(java.util.Comparator.comparingInt(
                 (String profileId) -> ui.instanceDisplay.get(profileId).favorite() ? 0 : 1));
-        instances.getItems().setAll(ordered);
         String selected = VersionActions.chooseInstalledVersion(installed,
                 viewed != null && installed.contains(viewed) ? viewed : preferred);
-        if (selected != null) {
-            instances.getSelectionModel().select(selected);
-            instances.scrollTo(selected);
-        } else {
-            instances.getSelectionModel().clearSelection();
-            details.setInstance(null);
+        restoringSelection = true;
+        try {
+            instances.getItems().setAll(ordered);
+            if (selected != null) {
+                instances.getSelectionModel().select(selected);
+                instances.scrollTo(selected);
+            } else {
+                instances.getSelectionModel().clearSelection();
+            }
+        } finally {
+            restoringSelection = false;
         }
+        ui.instanceSelection.setViewedInstance(selected);
+        details.setInstance(selected);
         status.setText(installed.isEmpty()
                 ? Messages.get("local.instances.none")
                 : Messages.format("local.instances.ready", installed.size()));
@@ -244,6 +284,5 @@ final class InstalledInstancesPage extends VBox {
     private void setBusy(boolean busy) {
         instances.setDisable(busy);
         refreshButton.setDisable(busy);
-        installButton.setDisable(busy);
     }
 }

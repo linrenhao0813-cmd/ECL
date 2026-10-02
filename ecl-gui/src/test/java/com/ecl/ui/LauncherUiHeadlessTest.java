@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LauncherUiHeadlessTest extends ApplicationTest {
@@ -178,12 +179,17 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     }
 
     @Test
-    void instanceBarAndTaskEntryDriveTheSharedShell() {
+    void removedInstanceActionsStayAbsentAndTaskEntryDrivesTheSharedShell() {
         interact(() -> {
             Scene scene = stage.getScene();
             launcher.setActiveView(AppView.HOME);
-            ((Button) scene.lookup("#instance-bar-manage")).fire();
+            assertNull(scene.lookup("#instance-bar-manage"));
+            assertNull(scene.lookup("#instance-bar-refresh"));
+            launcher.setActiveView(AppView.VERSIONS);
             assertEquals(AppView.VERSIONS, launcher.activeView);
+            assertNull(scene.lookup("#instance-install-new"));
+            assertNotNull(scene.lookup("#installed-instance-list"));
+            assertNotNull(scene.lookup("#instance-list-refresh"));
 
             javafx.scene.layout.VBox detail =
                     (javafx.scene.layout.VBox) scene.lookup("#task-detail-panel");
@@ -356,6 +362,7 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             assertNotNull(tabs);
             assertEquals(5, tabs.getTabs().size(),
                     "settings must separate general, downloads, defaults, account and diagnostics");
+            assertTrue(tabs.getTabs().stream().noneMatch(tab -> "settings-instance-tab".equals(tab.getId())));
             launcher.setActiveView(AppView.HOME);
         });
     }

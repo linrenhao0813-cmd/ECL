@@ -443,14 +443,11 @@ final class LauncherLaunchForm {
         }
     }
 
-    /** Opens the instance manager focused on the current launch target. */
+    /** Opens settings focused on the current launch target. */
     private void openInstanceManager() {
         String target = ui.getSelectedVersion();
-        ui.setActiveView(AppView.VERSIONS);
-        if (target != null && !target.isBlank()) {
-            ui.instanceSelection.setViewedInstance(target);
-        }
-        ui.setStatus(Messages.get("instances.detail.opened"), Messages.get("instances.tab.config"));
+        ui.pageFactory.openInstanceSettings(target);
+        ui.setStatus(Messages.get("instances.detail.opened"), Messages.get("instances.tab.overview"));
     }
 
     void setControlsBusy(boolean busy) {

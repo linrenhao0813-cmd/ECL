@@ -8,6 +8,8 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TitledPane;
+import javafx.scene.control.ComboBox;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -39,6 +41,112 @@ class SettingsNavigationTest extends ApplicationTest {
         if (stage != null) {
             stage.close();
         }
+    }
+
+    @Test
+    void generalSettingsAreInlineAndInvalidEditsBlockDeparture() {
+        interact(() -> {
+            TabPane tabs = openSettings();
+            Tab general = tabs.getTabs().getFirst();
+            assertTrue(general.getContent().lookup("#settings-global-form") != null);
+            assertTrue(general.getContent().lookup("#settings-global-open") == null);
+            TitledPane launch = (TitledPane) general.getContent().lookup("#settings-launch-group");
+            assertFalse(launch.isExpanded());
+            launch.setExpanded(true);
+            stage.getScene().getRoot().applyCss();
+            stage.getScene().getRoot().layout();
+            TextField width = field(general, "settings-global-width");
+            width.setText("invalid");
+            choose(SettingsPageGuard.Choice.CANCEL);
+            @SuppressWarnings("unchecked")
+            ComboBox<String> language = (ComboBox<String>) general.getContent().lookup("#settings-language");
+            String originalLanguage = com.ecl.util.Messages.locale().toLanguageTag();
+            language.setValue(originalLanguage.equals("en") ? "zh-CN" : "en");
+            assertEquals(originalLanguage, language.getValue());
+            assertEquals(originalLanguage, com.ecl.util.Messages.locale().toLanguageTag());
+            choose(SettingsPageGuard.Choice.SAVE);
+            tabs.getSelectionModel().select(1);
+            assertSame(general, tabs.getSelectionModel().getSelectedItem());
+            assertEquals("invalid", width.getText());
+            launcher.setActiveView(AppView.HOME);
+            assertEquals(AppView.SETTINGS, launcher.activeView);
+            choose(SettingsPageGuard.Choice.DISCARD);
+            tabs.getSelectionModel().select(1);
+            assertEquals(1, tabs.getSelectionModel().getSelectedIndex());
+            assertFalse(((GlobalGameSettingsPane) general.getContent().lookup("#settings-global-form")).hasUnsavedChanges());
+        });
+    }
+
+    @Test
+    void isolationBelongsToDefaultsAndDownloadSaveKeepsItsPolicy() {
+        interact(() -> {
+            SettingsManager original = launcher.settingsManager;
+            SettingsManager manager = new SettingsManager() {
+                @Override
+                public synchronized boolean save() { return true; }
+            };
+            try {
+                launcher.settingsManager = manager;
+                manager.set(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE, "NEVER");
+                TabPane tabs = openSettings();
+                Tab downloads = tabs.getTabs().get(1);
+                Tab defaults = tabs.getTabs().get(2);
+                assertTrue(downloads.getContent().lookup("#settings-default-isolation") == null);
+                tabs.getSelectionModel().select(defaults);
+                @SuppressWarnings("unchecked")
+                ComboBox<com.ecl.game.DefaultIsolationType> isolation =
+                        (ComboBox<com.ecl.game.DefaultIsolationType>) defaults.getContent().lookup("#settings-default-isolation");
+                assertEquals(com.ecl.game.DefaultIsolationType.NEVER, isolation.getValue());
+                isolation.setValue(com.ecl.game.DefaultIsolationType.MODDED);
+                stage.getScene().getRoot().applyCss();
+                stage.getScene().getRoot().layout();
+                assertFalse(isolation.getButtonCell().getText().startsWith("settings."));
+                isolation.setValue(com.ecl.game.DefaultIsolationType.ALWAYS);
+                button(defaults, "settings-default-save").fire();
+                assertEquals("ALWAYS", manager.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE));
+                tabs.getSelectionModel().select(downloads);
+                field(downloads, "settings-download-concurrency").setText("3");
+                button(downloads, "settings-download-save").fire();
+                assertEquals("ALWAYS", manager.get(ECLConfig.KEY_DEFAULT_ISOLATION_TYPE));
+            } finally {
+                launcher.settingsManager = original;
+                HttpUtil.setDownloadMaxConcurrent(original.get(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT));
+                HttpUtil.setDownloadRateLimitBytesPerSecond(original.get(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB) * 1024L);
+            }
+        });
+    }
+
+    @Test
+    void failedInlineGlobalSaveKeepsRuntimeValuesAndUnsavedInput() {
+        interact(() -> {
+            SettingsManager original = launcher.settingsManager;
+            int oldWidth = launcher.gameWidth;
+            FailingSettingsManager manager = new FailingSettingsManager();
+            try {
+                launcher.settingsManager = manager;
+                manager.set(ECLConfig.KEY_GAME_WIDTH, oldWidth);
+                TabPane tabs = openSettings();
+                Tab general = tabs.getTabs().getFirst();
+                ((TitledPane) general.getContent().lookup("#settings-launch-group")).setExpanded(true);
+                stage.getScene().getRoot().applyCss();
+                stage.getScene().getRoot().layout();
+                TextField width = field(general, "settings-global-width");
+                width.setText("1234");
+                button(general, "settings-global-save").fire();
+                assertEquals(oldWidth, launcher.gameWidth);
+                assertEquals(oldWidth, manager.get(ECLConfig.KEY_GAME_WIDTH));
+                assertEquals("1234", width.getText());
+                choose(SettingsPageGuard.Choice.CANCEL);
+                launcher.setActiveView(AppView.HOME);
+                assertEquals(AppView.SETTINGS, launcher.activeView);
+                button(general, "settings-global-discard").fire();
+                assertEquals(oldWidth, launcher.gameWidth);
+                launcher.setActiveView(AppView.HOME);
+                assertEquals(AppView.HOME, launcher.activeView);
+            } finally {
+                launcher.settingsManager = original;
+            }
+        });
     }
 
     @Test
