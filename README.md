@@ -4,7 +4,7 @@
 
 ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖版本安装、账户管理、内容下载、整合包维护与服务器浏览等常用流程。界面为固定深色的森林绿主题，支持简体中文、繁体中文和英文。
 
-> 当前版本：`1.0.1` · Windows 平台 · 从源码构建需要 JDK 21
+> 当前版本：`1.0.2beta` · Windows 平台 · 从源码构建需要 JDK 21
 
 ## 功能
 
@@ -178,6 +178,8 @@ UI 布局重构的设计与验收标准见[启动器 UI 布局重构方案](plan
 ```
 
 使用 Windows JDK 21 自带的 `jpackage.exe` 生成包含 Java 运行时的应用镜像，输出位于 `dist/windows/ECL/ECL.exe`。注意：该任务生成的是应用镜像而非单文件安装程序，发布时必须保留整个 `dist/windows/ECL/` 目录，`ECL.exe`、`app/` 和 `runtime/` 需保持原有相对位置。
+
+当前启动器显示版本与 JAR 版本为 `1.0.2beta`；Windows 版本元数据只接受数字，因此 EXE 使用 `1.0.2`。
 
 ### CI
 

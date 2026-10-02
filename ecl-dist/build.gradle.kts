@@ -35,7 +35,8 @@ tasks.register<Exec>("packageWindowsApp") {
             File(System.getProperty("java.home"), "bin/jpackage.exe"),
             "--type", "app-image",
             "--name", "ECL",
-            "--app-version", project.version.toString(),
+            // Windows version metadata accepts numeric components only; keep beta in the app and JAR version.
+            "--app-version", project.version.toString().removeSuffix("beta"),
             "--vendor", "ECL",
             "--dest", outputDir,
             "--input", bootProject.layout.buildDirectory.dir("install/ECL/lib").get().asFile,
