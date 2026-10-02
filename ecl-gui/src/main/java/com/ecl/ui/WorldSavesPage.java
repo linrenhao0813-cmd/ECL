@@ -60,8 +60,10 @@ final class WorldSavesPage extends VBox {
         subtitle.setWrapText(true);
         buildDetails();
         explorer = new WorldSaveExplorer(ui, detail, this::showDetails, this::refresh);
+        VBox heading = new VBox(6, title, subtitle);
+        heading.getStyleClass().add("content-library-heading");
         VBox.setVgrow(explorer, Priority.ALWAYS);
-        getChildren().addAll(new VBox(6, title, subtitle), explorer);
+        getChildren().addAll(heading, explorer);
     }
 
     private void buildDetails() {

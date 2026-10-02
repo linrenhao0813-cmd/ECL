@@ -180,8 +180,6 @@ final class ContentLibraryPageFactory {
     private Node createPackUpdatesContent() {
         VBox page = new VBox(14);
         page.getStyleClass().add("content-library-content");
-        Label title = new Label("整合包更新");
-        title.getStyleClass().add("content-library-section-title");
         Label hint = new Label("只检查已通过 Modrinth 安装并记录来源的整合包，更新会保留存档等实例文件。");
         hint.getStyleClass().add("status-detail");
         hint.setWrapText(true);
@@ -232,8 +230,8 @@ final class ContentLibraryPageFactory {
                         updateSelected.setDisable(list.getSelectionModel().getSelectedItems().isEmpty()));
         HBox actions = new HBox(8, check, updateSelected, updateAll);
         actions.setAlignment(Pos.CENTER_RIGHT);
-        page.getChildren().addAll(ui.createSurface("整合包更新检测", null,
-                title, hint, list, status, actions));
+        page.getChildren().addAll(ui.createSurface(Messages.get("download.packUpdates.title"), null,
+                hint, list, status, actions));
         Platform.runLater(() -> checkPackUpdates(list, status, check, updateSelected, updateAll));
         return page;
     }

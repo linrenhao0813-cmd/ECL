@@ -288,8 +288,8 @@ final class LauncherLaunchForm {
                 Messages.get("home.instanceSettings"), "secondary-button", this::openInstanceManager);
         instanceSettingsButton.setId("home-instance-settings");
 
-        Button switchInstanceButton = ui.createLinkButton(
-                GuiMessages.get("forest.switchInstance"),
+        Button switchInstanceButton = ui.createActionButton(
+                GuiMessages.get("forest.switchInstance"), "secondary-button",
                 () -> ui.setActiveView(AppView.VERSIONS));
         switchInstanceButton.setId("home-switch-instance");
         switchInstanceButton.disableProperty().bind(ui.launchBtn.disabledProperty());

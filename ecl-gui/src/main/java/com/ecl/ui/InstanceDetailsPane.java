@@ -101,7 +101,7 @@ final class InstanceDetailsPane extends VBox {
                 saveDisplayButton);
         displayBox.getStyleClass().add("instance-display-box");
         VBox overviewTab = new VBox(14,
-                ui.createSurface(Messages.get("instances.tab.overview"),
+                ui.createSurface(Messages.get("instances.overview.title"),
                         Messages.get("instances.detail.meta2"), overviewRows, runtimeStatus),
                 ui.createSurface(Messages.get("instances.display.title"),
                         Messages.get("instances.display.subtitle"), displayBox));

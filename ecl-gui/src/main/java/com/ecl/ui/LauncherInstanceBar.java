@@ -63,13 +63,26 @@ final class LauncherInstanceBar {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
+        // Reading order stays "which instance -> what it is"; the rare release-notes action sits at
+        // the far end so it cannot push the launch target and its metadata apart.
         bar.getChildren().addAll(
                 caption,
                 ui.versionCombo,
-                ui.selectedVersionWikiButton,
                 ui.instanceMetaLabel,
-                spacer);
+                spacer,
+                ui.selectedVersionWikiButton);
         return bar;
+    }
+
+    /**
+     * Hides the version/loader badge while the home hero already shows the same metadata, so the
+     * home page states it once instead of three times. Other pages keep the badge as their only
+     * place for it.
+     */
+    void setMetaVisible(boolean visible) {
+        if (ui.instanceMetaLabel != null) {
+            LauncherUiFactory.setVisible(ui.instanceMetaLabel, visible);
+        }
     }
 
     /** Reapplies locale-dependent text without recreating the selector or losing its selection. */

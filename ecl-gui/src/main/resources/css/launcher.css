@@ -443,8 +443,7 @@
 .corner-bracket-amber { -fx-border-color: #fde68a; -fx-effect: dropshadow(gaussian, rgba(253, 230, 138, 0.6), 3, 0.5, 0, 0); }
 
 /* ---------- Field controls ---------- */
-.field-label,
-.info-key {
+.field-label {
     -fx-text-fill: #00ffd5;
     -fx-font-size: 10px;
     -fx-font-weight: 700;
@@ -1467,7 +1466,7 @@
 
 .launch-pane {
     -fx-padding: 0 0 16 0;
-    -fx-spacing: 24;
+    -fx-spacing: 20;
 }
 
 .page-heading {
@@ -1477,7 +1476,7 @@
 
 .page-title {
     -fx-text-fill: -ecl-text;
-    -fx-font-size: 38px;
+    -fx-font-size: 28px;
     -fx-font-weight: 800;
     -fx-letter-spacing: -0.5px;
 }
@@ -1963,7 +1962,7 @@
     -fx-border-color: -ecl-border;
     -fx-border-width: 1;
     -fx-border-radius: 20;
-    -fx-padding: 20 22;
+    -fx-padding: 18 20;
     -fx-effect: none;
 }
 
@@ -2037,7 +2036,7 @@
 
 /* ---------- Content library ---------- */
 .content-library-heading {
-    -fx-padding: 0 0 2 2;
+    -fx-padding: 0 0 2 0;
 }
 
 .content-library-layout {
@@ -2421,7 +2420,6 @@
 /* ---------- Public server browser ---------- */
 .server-browser {
     -fx-padding: 16;
-    -fx-min-height: 610;
 }
 
 .server-browser-layout,
@@ -2717,7 +2715,7 @@
 }
 .window-title, .brand-label { -fx-min-width: 96; -fx-font-size: 25px; }
 .global-nav { -fx-spacing: 0; }
-.main-body { -fx-padding: 24 28 12 28; }
+.main-body { -fx-padding: 24 32 12 32; }
 .forest-home { -fx-spacing: 18; -fx-padding: 0; }
 .forest-icon-path { -fx-fill: transparent; -fx-stroke: -ecl-secondary; -fx-stroke-width: 1.5; }
 .brand-label .forest-icon-path { -fx-stroke: -ecl-blue; -fx-fill: -ecl-blue; }
@@ -2756,7 +2754,7 @@
 }
 .forest-details { -fx-padding: 34 44; }
 .scene-root .forest-home .forest-eyebrow { -fx-text-fill: #b5c7b8; -fx-font-size: 13px; }
-.scene-root .forest-home .forest-title { -fx-text-fill: #f5f8f4; -fx-font-size: 42px; -fx-font-weight: bold; }
+.scene-root .forest-home .forest-title { -fx-text-fill: #f5f8f4; -fx-font-size: 40px; -fx-font-weight: bold; }
 .scene-root .forest-home .forest-meta { -fx-text-fill: #c4cfc7; -fx-font-size: 16px; }
 .scene-root .forest-home .forest-description {
     -fx-text-fill: #adbdb1;
@@ -2780,8 +2778,6 @@
 }
 .forest-home .launch-button:hover { -fx-background-color: #cbe5ca; }
 .scene-root .forest-home .launch-play-icon { -fx-text-fill: #102016; -fx-font-size: 18px; }
-.forest-home .launch-actions .link-button { -fx-text-fill: #cee2cf; -fx-font-size: 14px; }
-.forest-home .launch-actions .link-button:hover { -fx-background-color: rgba(180, 215, 182, 0.12); }
 .scene-root.theme-dark .link-button, .scene-root.theme-dark .wiki-link-button { -fx-text-fill: -ecl-blue; }
 .scene-root.theme-dark .primary-button { -fx-text-fill: #102016; }
 .scene-root.theme-dark .primary-button:hover { -fx-text-fill: #102016; }
@@ -2804,8 +2800,8 @@
     -fx-background-color: -ecl-surface;
     -fx-border-color: transparent -ecl-border transparent transparent;
     -fx-border-width: 0 1 0 0;
-    -fx-padding: 16 10;
-    -fx-spacing: 2;
+    -fx-padding: 16 12;
+    -fx-spacing: 4;
     -fx-min-width: 192;
     -fx-pref-width: 192;
     -fx-max-width: 192;
@@ -2873,8 +2869,8 @@
     -fx-background-color: -ecl-surface;
     -fx-border-color: transparent transparent -ecl-border transparent;
     -fx-border-width: 0 0 1 0;
-    -fx-padding: 12 28;
-    -fx-min-height: 62;
+    -fx-padding: 12 32;
+    -fx-min-height: 64;
 }
 
 .instance-bar-label {
@@ -2942,7 +2938,7 @@
 .window-status-bar {
     -fx-background-color: transparent;
     -fx-border-width: 0;
-    -fx-padding: 6 28;
+    -fx-padding: 6 32;
     -fx-min-height: 36;
     -fx-pref-height: 36;
     -fx-spacing: 10;
@@ -2977,7 +2973,7 @@
     -fx-background-color: -ecl-surface-muted;
     -fx-border-color: transparent transparent -ecl-border transparent;
     -fx-border-width: 0 0 1 0;
-    -fx-padding: 12 28 14 28;
+    -fx-padding: 12 32 14 32;
 }
 
 .task-list {
@@ -3097,7 +3093,7 @@
     -fx-border-color: -ecl-border;
     -fx-border-radius: 16;
     -fx-border-width: 1;
-    -fx-padding: 16 18 18 18;
+    -fx-padding: 18 20;
 }
 
 .instance-target-badge,
@@ -3121,15 +3117,6 @@
 
 .list-cell .instance-target-badge-current {
     -fx-padding: 2 7;
-}
-
-.instance-config-tab,
-.instance-maintenance-tab {
-    -fx-alignment: top-left;
-}
-
-.instance-maintenance-tab .surface {
-    -fx-alignment: top-left;
 }
 
 .instance-favorite {
@@ -3168,9 +3155,9 @@
 }
 
 .content-category-chip {
-    -fx-padding: 7 13;
-    -fx-min-height: 38;
-    -fx-pref-height: 38;
+    -fx-padding: 8 12;
+    -fx-min-height: 36;
+    -fx-pref-height: 36;
     -fx-font-size: 12px;
     -fx-font-weight: 600;
     -fx-text-fill: -ecl-secondary;
@@ -3234,34 +3221,29 @@
 .settings-form {
     -fx-spacing: 12;
 }
-.settings-general .surface,
-.settings-form .surface {
-    -fx-padding: 16;
-    -fx-spacing: 10;
-}
 .settings-form .info-row {
     -fx-padding: 2 0;
 }
 .settings-group > .title {
-    -fx-background-color: #18251d;
+    -fx-background-color: -ecl-surface-muted;
     -fx-background-radius: 12;
-    -fx-padding: 14 18;
+    -fx-padding: 14 20;
 }
 .settings-group > .title > .text {
-    -fx-fill: #e3e9e1;
+    -fx-fill: -ecl-text;
     -fx-font-size: 15px;
     -fx-font-weight: bold;
 }
 .settings-group > .title > .arrow-button > .arrow {
-    -fx-background-color: #afd0ad;
+    -fx-background-color: -ecl-secondary;
 }
 .settings-group > .content {
-    -fx-background-color: #142019;
-    -fx-border-color: #293a2e;
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: -ecl-border;
     -fx-border-radius: 0 0 12 12;
-    -fx-padding: 18;
+    -fx-padding: 18 20;
 }
 .settings-group:focused > .title {
-    -fx-border-color: #afd0ad;
+    -fx-border-color: -ecl-blue;
     -fx-border-radius: 12;
 }

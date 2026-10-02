@@ -99,6 +99,14 @@ final class LauncherPageFactory {
      */
     VBox createSettingsPage() {
         VBox page = ui.createMainPage();
+
+        Label pageTitle = new Label(Messages.get("nav.settings"));
+        pageTitle.getStyleClass().add("page-title");
+        Label pageSubtitle = new Label(Messages.get("settings.subtitle"));
+        pageSubtitle.getStyleClass().add("page-subtitle");
+        VBox pageHeading = new VBox(6, pageTitle, pageSubtitle);
+        pageHeading.getStyleClass().add("content-library-heading");
+
         Tab general = new Tab(Messages.get("settings.tab.general"));
         Tab downloads = new Tab(Messages.get("settings.tab.downloads"));
         Tab defaults = new Tab(Messages.get("settings.tab.defaults"));
@@ -123,7 +131,7 @@ final class LauncherPageFactory {
         tabs.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) -> {
             ui.accountSettingsSelected = tabs.getSelectionModel().getSelectedItem() == accounts;
         });
-        page.getChildren().add(tabs);
+        page.getChildren().addAll(pageHeading, tabs);
         return page;
     }
 
