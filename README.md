@@ -219,6 +219,11 @@ GitHub Actions 在 Windows 上执行 `check`（PR 另有依赖审查），随后
 `DefaultModDependencyResolver` 中分别处理必需与可选依赖。界面启动阶段位于 `LauncherUIView`，
 窗口框架装配位于 `LauncherWindowLayout`，具体页面与交互继续由各自的页面工厂和工作流负责。
 
+实例安装入口使用 `InstanceInstallPage`；Java 探测与选择使用 `JavaRuntimeUtil`，
+诊断直接调用 `CrashAnalyzer`。账户与游戏目录分别由 `DefaultAccountService` 和
+`DefaultGameRepository` 提供，不再保留未使用的服务接口、实例安装向导及管理模型。
+后台线程工厂使用 Java 21 的平台线程 API，统一创建带编号的守护线程。
+
 | 模块 | 职责 |
 | --- | --- |
 | `ecl-boot/` | JavaFX 图形启动入口（`com.ecl.ECL`） |
