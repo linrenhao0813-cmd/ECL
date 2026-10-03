@@ -17,7 +17,7 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖版本安装�
 
 ### 模组加载器
 
-- 安装 Fabric、Quilt、Forge、NeoForge 加载器，选择 Fabric 时自动安装匹配的 Fabric API。
+- 安装 Fabric、Quilt、Forge、NeoForge 加载器；下载非原版实例时，先选择加载器类型，再从当前 Minecraft 版本的兼容列表中自行选择加载器版本，选定后才能开始安装。列表加载失败时可重新加载。选择 Fabric 时还须自行选择兼容的 Fabric API 版本，安装时使用选定版本。
 - 首页“一键升级”将当前实例的加载器和可识别模组升级为当前 Minecraft 版本兼容的最新版本，保留实例目录、存档及启动配置。加载器优先选择稳定版；模组遵循设置中的发布通道，不跨 Minecraft 版本或加载器类型升级。
 
 ### 账户与皮肤
@@ -166,6 +166,7 @@ UI 布局重构的设计与验收标准见[启动器 UI 布局重构方案](plan
 | `-PuiSnapshotMode=settings-dialog` | 深色全局游戏设置弹窗顶部 |
 | `-PuiSnapshotMode=settings-dialog-bottom` | 深色全局游戏设置弹窗底部与保存按钮 |
 | `-PuiSnapshotMode=downloads` | 内容页横向分类与安装目标提示条 |
+| `-PuiSnapshotMode=instance-loader-version` | 实例安装页与 Fabric Loader / Fabric API 版本选择（固定示例列表） |
 
 任意模式可追加语言后缀重拍：`-en` 为英文、`-zh-tw` 为繁体中文（例如 `local-versions-en`、`settings-page-zh-tw`），不带后缀则为简体中文。快照会强制切到对应语言，不受上一次快照残留的语言设置影响。
 

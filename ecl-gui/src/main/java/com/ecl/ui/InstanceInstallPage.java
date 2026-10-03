@@ -1,8 +1,11 @@
 package com.ecl.ui;
 
 import com.ecl.util.Messages;
+import com.ecl.modrinth.model.ContentVersion;
+import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ToggleButton;
@@ -12,22 +15,60 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
+import java.io.UncheckedIOException;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
 /** Loader-choice and progress page shown after selecting a Minecraft version. */
 final class InstanceInstallPage extends VBox {
     private final LauncherUI ui;
     private final String minecraftVersion;
-    private final Runnable backAction;
+    private final Function<LoaderChoice, CompletableFuture<List<String>>> versionLookup;
+    private final Supplier<CompletableFuture<List<ContentVersion>>> fabricApiLookup;
     private final ToggleGroup choices = new ToggleGroup();
     private final Label choiceHint = new Label();
     private final Label status = new Label(Messages.get("instance.install.ready"));
     private final ProgressBar progress = new ProgressBar(0);
     private final Button backButton;
     private final Button installButton;
+    private final ComboBox<String> loaderVersions = new ComboBox<>();
+    private final Label versionStatus = new Label();
+    private final Button refreshVersions;
+    private final VBox versionSection;
+    private final ComboBox<ContentVersion> fabricApiVersions = new ComboBox<>();
+    private final Label fabricApiStatus = new Label();
+    private final Button refreshFabricApi;
+    private final VBox fabricApiSection;
+    private int fabricApiRequest;
+    private int versionRequest;
+    private boolean busy;
 
     InstanceInstallPage(LauncherUI ui, String minecraftVersion, Runnable backAction) {
+        this(ui, minecraftVersion, backAction, choice -> ui.controller.supplyAsync("ecl-loader-versions", () -> {
+            try {
+                return ui.modLoaderInstaller.listVersions(minecraftVersion, choice.loader);
+            } catch (java.io.IOException error) {
+                throw new UncheckedIOException(error);
+            }
+        }), () -> ui.controller.supplyAsync("ecl-fabric-api-versions", () -> {
+            try {
+                return new InstanceInstallWorkflow(ui).listFabricApiVersions(minecraftVersion);
+            } catch (Exception error) {
+                throw new CompletionException(error);
+            }
+        }));
+    }
+
+    InstanceInstallPage(LauncherUI ui, String minecraftVersion, Runnable backAction,
+                        Function<LoaderChoice, CompletableFuture<List<String>>> versionLookup,
+                        Supplier<CompletableFuture<List<ContentVersion>>> fabricApiLookup) {
         this.ui = ui;
         this.minecraftVersion = minecraftVersion;
-        this.backAction = backAction;
+        this.versionLookup = versionLookup;
+        this.fabricApiLookup = fabricApiLookup;
         getStyleClass().add("instance-install-page");
         setSpacing(18);
         setMaxWidth(Double.MAX_VALUE);
@@ -53,8 +94,33 @@ final class InstanceInstallPage extends VBox {
         choices.selectToggle(choices.getToggles().getFirst());
         choiceHint.getStyleClass().add("status-detail");
         choiceHint.setWrapText(true);
-        choices.selectedToggleProperty().addListener((obs, oldValue, newValue) -> updateChoiceHint());
-        updateChoiceHint();
+
+        loaderVersions.setId("instance-loader-version");
+        loaderVersions.setPromptText(Messages.get("instance.install.loaderVersion.choose"));
+        loaderVersions.setAccessibleText(Messages.get("instance.install.loaderVersion.title"));
+        loaderVersions.setMaxWidth(Double.MAX_VALUE);
+        ui.applyFieldStyle(loaderVersions);
+        refreshVersions = ui.createActionButton(Messages.get("instance.install.loaderVersion.refresh"),
+                "ghost-button", this::loadLoaderVersions);
+        versionStatus.getStyleClass().add("status-detail");
+        versionStatus.setWrapText(true);
+        HBox versionRow = new HBox(12, loaderVersions, refreshVersions);
+        HBox.setHgrow(loaderVersions, Priority.ALWAYS);
+        versionSection = new VBox(8, new Label(Messages.get("instance.install.loaderVersion.title")),
+                versionRow, versionStatus);
+
+        fabricApiVersions.setId("instance-fabric-api-version");
+        fabricApiVersions.setPromptText(Messages.get("instance.install.fabricApiVersion.choose"));
+        fabricApiVersions.setAccessibleText(Messages.get("instance.install.fabricApiVersion.title"));
+        fabricApiVersions.setMaxWidth(Double.MAX_VALUE);
+        ui.applyFieldStyle(fabricApiVersions);
+        refreshFabricApi = ui.createActionButton(Messages.get("instance.install.loaderVersion.refresh"),
+                "ghost-button", this::loadFabricApiVersions);
+        fabricApiStatus.getStyleClass().add("status-detail");
+        fabricApiStatus.setWrapText(true);
+        HBox apiRow = new HBox(12, fabricApiVersions, refreshFabricApi);
+        HBox.setHgrow(fabricApiVersions, Priority.ALWAYS);
+        fabricApiSection = new VBox(8, new Label(Messages.get("instance.install.fabricApiVersion.title")), apiRow, fabricApiStatus);
 
         progress.setMaxWidth(Double.MAX_VALUE);
         progress.getStyleClass().add("download-progress");
@@ -62,6 +128,17 @@ final class InstanceInstallPage extends VBox {
         status.setWrapText(true);
         installButton = ui.createActionButton(Messages.get("instance.install.action"),
                 "primary-button", this::startInstall);
+        installButton.setId("instance-install-action");
+        loaderVersions.valueProperty().addListener((obs, oldValue, newValue) -> updateInstallAvailability());
+        fabricApiVersions.valueProperty().addListener((obs, oldValue, newValue) -> updateInstallAvailability());
+        choices.selectedToggleProperty().addListener((obs, oldValue, newValue) -> {
+            updateChoiceHint();
+            loadLoaderVersions();
+            loadFabricApiVersions();
+        });
+        updateChoiceHint();
+        loadLoaderVersions();
+        loadFabricApiVersions();
         Region actionSpacer = new Region();
         HBox.setHgrow(actionSpacer, Priority.ALWAYS);
         HBox actions = new HBox(12, status, actionSpacer, installButton);
@@ -70,7 +147,7 @@ final class InstanceInstallPage extends VBox {
 
         getChildren().addAll(header,
                 ui.createSurface(Messages.get("instance.install.choice.title"),
-                        Messages.get("instance.install.choice.subtitle"), choiceList, choiceHint),
+                        Messages.get("instance.install.choice.subtitle"), choiceList, choiceHint, versionSection, fabricApiSection),
                 ui.createSurface(Messages.get("instance.install.progress.title"), null,
                         progress, actions));
     }
@@ -117,12 +194,79 @@ final class InstanceInstallPage extends VBox {
         return choice;
     }
 
+    private void loadLoaderVersions() {
+        int request = ++versionRequest;
+        LoaderChoice choice = selectedChoice();
+        versionSection.setVisible(!choice.vanilla());
+        versionSection.setManaged(!choice.vanilla());
+        loaderVersions.getItems().clear();
+        loaderVersions.setValue(null);
+        loaderVersions.setDisable(true);
+        refreshVersions.setDisable(true);
+        updateInstallAvailability();
+        if (choice.vanilla()) return;
+        versionStatus.setText(Messages.get("instance.install.loaderVersion.loading"));
+        versionLookup.apply(choice).whenComplete((versions, error) -> Platform.runLater(() -> {
+            if (request != versionRequest) return;
+            refreshVersions.setDisable(busy);
+            if (error != null) {
+                versionStatus.setText(Messages.format("instance.install.loaderVersion.failed", ui.cleanMessage(error)));
+            } else if (versions.isEmpty()) {
+                versionStatus.setText(Messages.get("instance.install.loaderVersion.empty"));
+            } else {
+                loaderVersions.getItems().setAll(versions);
+                loaderVersions.setDisable(busy);
+                versionStatus.setText(Messages.get("instance.install.loaderVersion.choose"));
+            }
+            updateInstallAvailability();
+        }));
+    }
+
+    private void loadFabricApiVersions() {
+        int request = ++fabricApiRequest;
+        boolean fabric = selectedChoice() == LoaderChoice.FABRIC;
+        fabricApiSection.setVisible(fabric);
+        fabricApiSection.setManaged(fabric);
+        fabricApiVersions.getItems().clear();
+        fabricApiVersions.setValue(null);
+        fabricApiVersions.setDisable(true);
+        refreshFabricApi.setDisable(true);
+        updateInstallAvailability();
+        if (!fabric) return;
+        fabricApiStatus.setText(Messages.get("instance.install.fabricApiVersion.loading"));
+        fabricApiLookup.get().whenComplete((versions, error) -> Platform.runLater(() -> {
+            if (request != fabricApiRequest) return;
+            refreshFabricApi.setDisable(busy);
+            if (error != null) {
+                fabricApiStatus.setText(Messages.format("instance.install.fabricApiVersion.failed", ui.cleanMessage(error)));
+            } else if (versions.isEmpty()) {
+                fabricApiStatus.setText(Messages.get("instance.install.fabricApiVersion.empty"));
+            } else {
+                fabricApiVersions.getItems().setAll(versions);
+                fabricApiVersions.setDisable(busy);
+                fabricApiStatus.setText(Messages.get("instance.install.fabricApiVersion.choose"));
+            }
+            updateInstallAvailability();
+        }));
+    }
+
+    private boolean missingVersion() {
+        return (!selectedChoice().vanilla() && loaderVersions.getValue() == null)
+                || (selectedChoice() == LoaderChoice.FABRIC && fabricApiVersions.getValue() == null);
+    }
+
+    private void updateInstallAvailability() {
+        installButton.setDisable(busy || missingVersion());
+    }
+
     private void startInstall() {
         LoaderChoice choice = selectedChoice();
+        String loaderVersion = loaderVersions.getValue();
+        if (busy || missingVersion()) return;
         setBusy(true);
         progress.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
         status.setText(Messages.get("instance.install.starting"));
-        new InstanceInstallWorkflow(ui).install(minecraftVersion, choice,
+        new InstanceInstallWorkflow(ui).install(minecraftVersion, choice, loaderVersion, fabricApiVersions.getValue(),
                 new InstanceInstallWorkflow.Listener() {
                     @Override
                     public void onStatus(String message) {
@@ -153,8 +297,13 @@ final class InstanceInstallPage extends VBox {
     }
 
     private void setBusy(boolean busy) {
+        this.busy = busy;
         backButton.setDisable(busy);
-        installButton.setDisable(busy);
+        updateInstallAvailability();
+        loaderVersions.setDisable(busy || loaderVersions.getItems().isEmpty());
+        refreshVersions.setDisable(busy);
+        fabricApiVersions.setDisable(busy || fabricApiVersions.getItems().isEmpty());
+        refreshFabricApi.setDisable(busy);
         choices.getToggles().forEach(toggle -> ((ToggleButton) toggle).setDisable(busy));
     }
 }

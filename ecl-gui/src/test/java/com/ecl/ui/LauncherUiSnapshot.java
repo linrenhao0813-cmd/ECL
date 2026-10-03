@@ -162,6 +162,9 @@ public final class LauncherUiSnapshot {
             String mode = System.getProperty("ecl.snapshot.mode", "home");
             // Deterministic locale: "-en" for English, "-zh-TW" for Traditional Chinese, else zh-CN.
             applySnapshotLanguage(mode);
+            if (mode.startsWith("instance-loader-version")) {
+                return prepareLoaderVersionCapture(primaryStage);
+            }
             if (mode.startsWith("forest")) return prepareForestCapture(primaryStage, mode);
             if ("initial-dark".equalsIgnoreCase(mode)) {
                 if (!primaryStage.getScene().getRoot().getStyleClass().contains("theme-dark")) {
@@ -498,6 +501,36 @@ public final class LauncherUiSnapshot {
             Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme");
             applyTheme.setAccessible(true);
             applyTheme.invoke(this);
+        }
+
+        private Scene prepareLoaderVersionCapture(Stage stage) {
+            InstanceInstallPage page = new InstanceInstallPage(this, "1.21.1", () -> { },
+                    choice -> java.util.concurrent.CompletableFuture.completedFuture(
+                            java.util.List.of("0.16.10", "0.16.9", "0.16.8")),
+                    () -> java.util.concurrent.CompletableFuture.completedFuture(java.util.List.of(
+                            new com.ecl.modrinth.model.ContentVersion("example-new", "", "0.116.1+1.21.1", "release"),
+                            new com.ecl.modrinth.model.ContentVersion("example-old", "", "0.115.6+1.21.1", "release"))));
+            ScrollPane scroll = new ScrollPane(page);
+            scroll.setFitToWidth(true);
+            scroll.getStyleClass().add("main-scroll");
+            javafx.scene.layout.StackPane root = new javafx.scene.layout.StackPane(scroll);
+            root.getStyleClass().addAll("scene-root", "theme-dark");
+            Scene scene = new Scene(root, 1180, 980);
+            scene.getStylesheets().add(getClass().getResource("/css/launcher.css").toExternalForm());
+            stage.setScene(scene);
+            page.lookupAll(".instance-install-choice").stream().map(ToggleButton.class::cast)
+                    .filter(button -> button.getUserData() == LoaderChoice.FABRIC)
+                    .findFirst().orElseThrow().fire();
+            Platform.runLater(() -> {
+                @SuppressWarnings("unchecked")
+                ComboBox<String> versions = (ComboBox<String>) page.lookup("#instance-loader-version");
+                versions.setValue("0.16.9");
+                @SuppressWarnings("unchecked")
+                ComboBox<com.ecl.modrinth.model.ContentVersion> apiVersions =
+                        (ComboBox<com.ecl.modrinth.model.ContentVersion>) page.lookup("#instance-fabric-api-version");
+                apiVersions.getSelectionModel().select(1);
+            });
+            return scene;
         }
 
         private void scheduleInstallerPreview(Stage stage) {
