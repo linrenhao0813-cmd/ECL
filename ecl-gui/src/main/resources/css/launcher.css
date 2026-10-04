@@ -961,6 +961,53 @@
     -fx-border-color: rgba(0, 255, 213, 0.34);
 }
 
+/* File Explorer navigation uses the existing light/dark surface tokens. */
+.save-explorer {
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+}
+.explorer-navigation, .explorer-toolbar {
+    -fx-padding: 10 14;
+    -fx-border-color: transparent transparent -ecl-border transparent;
+}
+.explorer-nav-button { -fx-min-width: 34; -fx-padding: 6 9; -fx-font-size: 16px; }
+.explorer-address {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 6;
+    -fx-padding: 2 6;
+}
+.explorer-breadcrumb { -fx-padding: 5 8; -fx-background-color: transparent; }
+.explorer-search { -fx-pref-height: 34; }
+.explorer-sidebar {
+    -fx-padding: 16 8 8 8;
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: transparent -ecl-border transparent transparent;
+}
+.explorer-nav-title { -fx-padding: 0 8 6 8; -fx-text-fill: -ecl-secondary; -fx-font-size: 11px; }
+.explorer-tree, .explorer-tree .tree-cell { -fx-background-color: transparent; -fx-text-fill: -ecl-text; }
+.explorer-tree { -fx-padding: 0; -fx-border-width: 0; }
+.explorer-tree .tree-cell { -fx-padding: 8 4; -fx-font-size: 12px; }
+.explorer-tree .tree-cell:selected { -fx-background-color: -ecl-surface; -fx-text-fill: -ecl-blue; }
+.explorer-tree .tree-cell .arrow { -fx-background-color: -ecl-secondary; }
+.explorer-folder-icon { -fx-fill: #eebc52; -fx-stroke: #c7922c; -fx-stroke-width: 0.7; }
+.explorer-table { -fx-background-color: -ecl-surface; -fx-border-width: 0; -fx-padding: 0; }
+.explorer-table .column-header-background, .explorer-table .column-header,
+.explorer-table .filler { -fx-background-color: -ecl-surface; }
+.explorer-table .column-header { -fx-border-color: transparent transparent -ecl-border transparent; -fx-padding: 10 6; }
+.explorer-table .column-header .label { -fx-alignment: center-left; -fx-text-fill: -ecl-secondary; -fx-font-weight: normal; }
+.explorer-table .table-row-cell { -fx-background-color: -ecl-surface; -fx-cell-size: 42; }
+.explorer-table .table-cell { -fx-border-width: 0; -fx-padding: 10 12; -fx-text-fill: -ecl-text; }
+.explorer-table .table-row-cell:filled:hover { -fx-background-color: -ecl-surface-muted; }
+.explorer-table .table-row-cell:filled:selected { -fx-background-color: -ecl-surface-muted; }
+.explorer-table .table-row-cell:filled:selected .table-cell { -fx-text-fill: -ecl-blue; }
+.explorer-status { -fx-padding: 9 16; -fx-text-fill: -ecl-secondary; -fx-font-size: 11px; }
+.explorer-detail-scroll, .explorer-detail-scroll > .viewport { -fx-background-color: -ecl-surface; }
+.explorer-detail-scroll .world-save-detail { -fx-border-width: 0; -fx-background-radius: 0; -fx-padding: 18; }
+.account-management-page { -fx-padding: 4 0 16 0; }
+.account-current { -fx-font-size: 17px; -fx-font-weight: 700; -fx-text-fill: -ecl-text; }
+
 .mod-instance-badge {
     -fx-padding: 6 10;
     -fx-background-color: rgba(0, 255, 213, 0.1);
@@ -1311,7 +1358,6 @@
     -fx-text-fill: -ecl-text;
 }
 
-.scene-root.theme-dark .task-chip,
 .scene-root.theme-dark .account-chip,
 .scene-root.theme-dark .secondary-button,
 .scene-root.theme-dark .ghost-button {
@@ -1375,17 +1421,6 @@
     -fx-text-fill: -ecl-text;
     -fx-font-weight: 700;
     -fx-effect: null;
-}
-
-.task-chip {
-    -fx-background-color: #f5f5f7;
-    -fx-background-radius: 18;
-    -fx-padding: 8 14;
-    -fx-min-width: 108;
-    -fx-alignment: center;
-    -fx-text-fill: #515154;
-    -fx-font-size: 10px;
-    -fx-font-weight: 500;
 }
 
 .account-chip {
@@ -2116,6 +2151,146 @@
 
 .content-library-content {
     -fx-alignment: top-left;
+}
+
+/* ---------- Instance version catalog ---------- */
+.instance-version-catalog,
+.instance-version-groups {
+    -fx-alignment: top-left;
+}
+
+.instance-version-group {
+    -fx-background-color: transparent;
+}
+
+.instance-version-group > .title {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 14;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 14;
+    -fx-border-width: 1;
+    -fx-padding: 11 13;
+}
+
+.instance-version-group:expanded > .title {
+    -fx-background-radius: 14 14 0 0;
+    -fx-border-radius: 14 14 0 0;
+}
+
+.instance-version-group > .title > .arrow-button .arrow {
+    -fx-background-color: -ecl-secondary;
+}
+
+.instance-version-group > .content {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 0 0 14 14;
+    -fx-border-color: transparent -ecl-border -ecl-border -ecl-border;
+    -fx-border-radius: 0 0 14 14;
+    -fx-border-width: 0 1 1 1;
+    -fx-padding: 0;
+}
+
+.instance-version-column-title {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+}
+
+.instance-version-count {
+    -fx-background-color: -ecl-track;
+    -fx-background-radius: 99;
+    -fx-padding: 3 8;
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 10px;
+    -fx-font-weight: 700;
+}
+
+.instance-version-list {
+    -fx-min-width: 0;
+    -fx-pref-height: 220;
+    -fx-control-inner-background: -ecl-surface;
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+}
+
+.instance-version-list .list-cell {
+    -fx-padding: 9 10;
+}
+
+.instance-version-id {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+}
+
+.instance-version-installed,
+.instance-version-available {
+    -fx-font-size: 9px;
+    -fx-font-weight: 700;
+}
+
+.instance-version-installed {
+    -fx-text-fill: -ecl-success-text;
+}
+
+.instance-version-available {
+    -fx-text-fill: -ecl-tertiary;
+}
+
+.scene-root.theme-dark .instance-version-list,
+.scene-root.theme-dark .instance-version-list .virtual-flow,
+.scene-root.theme-dark .instance-version-list .list-cell:empty {
+    -fx-background-color: -ecl-surface;
+    -fx-control-inner-background: -ecl-surface;
+}
+
+/* ---------- Instance install choice ---------- */
+.instance-install-page {
+    -fx-fill-width: true;
+}
+
+.instance-install-choice {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 14;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 14;
+    -fx-border-width: 1;
+    -fx-padding: 12 14;
+    -fx-alignment: center-left;
+    -fx-cursor: hand;
+    -fx-min-height: 64;
+    -fx-pref-height: 64;
+    -fx-max-height: 64;
+}
+
+.instance-install-choice:hover {
+    -fx-border-color: -ecl-blue;
+}
+
+.instance-install-choice:selected {
+    -fx-background-color: #eaf3ff;
+    -fx-border-color: -ecl-blue;
+    -fx-border-width: 2;
+    -fx-padding: 11 13;
+}
+
+.instance-install-choice-title {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+}
+
+.instance-install-choice-detail {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 11px;
+}
+
+.scene-root.theme-dark .instance-install-choice:selected {
+    -fx-background-color: #17314a;
+}
+
+.scene-root.theme-dark .instance-install-choice-detail {
+    -fx-text-fill: -ecl-secondary;
 }
 
 .content-library-browser {

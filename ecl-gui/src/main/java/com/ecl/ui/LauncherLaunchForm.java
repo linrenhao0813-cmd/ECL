@@ -38,11 +38,6 @@ final class LauncherLaunchForm {
 
         String previousVersion = ui.versionCombo == null
                 ? ui.settingsManager.get(ECLConfig.KEY_SELECTED_VERSION) : ui.versionCombo.getValue();
-        VersionManager.VersionCategory previousCategory = ui.versionTypeCombo == null
-                || ui.versionTypeCombo.getValue() == null
-                ? ui.versionActions.parseVersionCategory(
-                        ui.settingsManager.get(ECLConfig.KEY_VERSION_CATEGORY))
-                : ui.versionTypeCombo.getValue();
         String previousAuthType = ui.authTypeCombo == null
                 ? auth.normalizeAuthType(ui.settingsManager.get(ECLConfig.KEY_AUTH_TYPE))
                 : auth.normalizeAuthType(ui.authTypeCombo.getValue());
@@ -70,7 +65,7 @@ final class LauncherLaunchForm {
             }
         });
         ui.authTypeCombo.setValue(previousAuthType);
-        ui.authTypeCombo.setOnAction(e -> auth.updateAuthFields());
+        ui.authTypeCombo.valueProperty().addListener((observable, previous, selected) -> auth.updateAuthFields());
         ui.applyFieldStyle(ui.authTypeCombo);
 
         ui.yggdrasilServerField = new TextField(ui.settingsManager.get(ECLConfig.KEY_YGGDRASIL_SERVER));
@@ -95,7 +90,7 @@ final class LauncherLaunchForm {
         ui.authHintLabel.setWrapText(true);
 
         ui.versionCombo = new ComboBox<>();
-        ui.versionCombo.setPromptText("选择游戏版本");
+        ui.versionCombo.setPromptText("选择已下载实例");
         ui.versionCombo.setVisibleRowCount(14);
         ui.versionCombo.setCellFactory(list -> createVersionCell());
         ui.versionCombo.setButtonCell(createVersionCell());
@@ -114,7 +109,7 @@ final class LauncherLaunchForm {
 
         ui.versionTypeCombo = new ComboBox<>();
         ui.versionTypeCombo.getItems().addAll(VersionManager.VersionCategory.values());
-        ui.versionTypeCombo.setValue(previousCategory);
+        ui.versionTypeCombo.setValue(VersionManager.VersionCategory.FEATURED);
         ui.versionTypeCombo.setPrefWidth(176);
         ui.versionTypeCombo.setTooltip(new Tooltip("默认显示正式版、预览版/快照和愚人节版，也可以只看某一类"));
         ui.versionTypeCombo.setOnAction(e -> {
@@ -214,7 +209,7 @@ final class LauncherLaunchForm {
         HBox.setHgrow(ui.usernameField, Priority.ALWAYS);
         HBox.setHgrow(ui.microsoftAccountCombo, Priority.ALWAYS);
         VBox authHelpBox = new VBox(4, ui.authSummaryLabel, ui.authHintLabel);
-        HBox versionBox = new HBox(10, ui.versionTypeCombo, ui.versionCombo, ui.selectedVersionWikiButton);
+        HBox versionBox = new HBox(10, ui.versionCombo, ui.selectedVersionWikiButton);
         versionBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(ui.versionCombo, Priority.ALWAYS);
         Label loaderHint = new Label("安装后会自动切换到独立模组实例");
@@ -230,7 +225,7 @@ final class LauncherLaunchForm {
         ui.passwordLabel = new Label("密码");
         ui.passwordLabel.getStyleClass().add("field-label");
 
-        Label gameVersionLabel = new Label("游戏版本");
+        Label gameVersionLabel = new Label("游戏实例");
         gameVersionLabel.getStyleClass().add("field-label");
         grid.add(gameVersionLabel, 0, row);
         grid.add(versionBox, 1, row++);
@@ -331,8 +326,8 @@ final class LauncherLaunchForm {
         loader.updateLoaderControls();
 
         Button switchInstanceButton = ui.createLinkButton(
-                "选择版本 / 加载器  ›",
-                () -> ui.expandInstanceSettings(ui.versionCombo));
+                "选择本地实例  ›",
+                () -> ui.setActiveView(AppView.VERSIONS));
 
         ui.refreshBtn = new Button("刷新版本");
         ui.refreshBtn.getStyleClass().addAll("app-button", "secondary-button");
@@ -397,6 +392,10 @@ final class LauncherLaunchForm {
 
     void updateLoaderControls() {
         loader.updateLoaderControls();
+    }
+
+    void syncLoaderChoiceFromProfile(String profileId) {
+        loader.syncLoaderChoiceFromProfile(profileId);
     }
 
     void installSelectedLoader(Runnable afterSuccess) {

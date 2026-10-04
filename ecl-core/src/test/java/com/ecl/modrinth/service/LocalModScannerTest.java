@@ -112,6 +112,44 @@ class LocalModScannerTest {
         }
     }
 
+    @Test
+    void invalidCacheIsRebuiltFromJarMetadata() throws Exception {
+        Path local = instance.modsDirectory().resolve("offline.jar");
+        writeJarEntry(local, "fabric.mod.json", """
+                {"schemaVersion":1,"id":"offline-tools","name":"Offline Tools","version":"2.4.1"}
+                """);
+        Path cache = instance.gameDirectory().resolve("launcher-mod-scan.json");
+        Files.writeString(cache, "{invalid json");
+
+        LocalModScanResult rebuilt = scanner().scan(instance).join();
+        assertEquals("Offline Tools", rebuilt.installedMods().getFirst().displayName());
+        String repairedCache = Files.readString(cache);
+        LocalModScanResult repeated = scanner().scan(instance).join();
+        assertEquals("Offline Tools", repeated.installedMods().getFirst().displayName());
+        assertEquals(repairedCache, Files.readString(cache));
+        try (var files = Files.list(instance.gameDirectory())) {
+            assertFalse(files.anyMatch(path -> path.getFileName().toString().endsWith(".json.tmp")));
+        }
+    }
+
+    @Test
+    void missingAndDamagedFilesRetainTheirInstalledRecords() throws Exception {
+        Path missing = instance.modsDirectory().resolve("missing.jar");
+        Path damaged = instance.modsDirectory().resolve("damaged.jar");
+        TestFixtures.createJar(missing, "missing");
+        TestFixtures.createJar(damaged, "damaged");
+        LocalModScanResult initial = scanner().scan(instance).join();
+        Files.delete(missing);
+        Files.writeString(damaged, "broken jar");
+
+        LocalModScanResult repeated = scanner().scan(instance).join();
+        assertEquals(initial.installedMods(), repeated.installedMods());
+        assertEquals(2, repeated.warnings().size());
+        assertTrue(repeated.items().stream().anyMatch(LocalModScanItem::damaged));
+        assertTrue(repeated.items().stream()
+                .anyMatch(item -> item.message().equals("安装记录对应的文件缺失")));
+    }
+
     private DefaultLocalModScanner scanner() {
         return new DefaultLocalModScanner(api, new FileInstalledModRepository(), hashes,
                 new DefaultModVersionSelector(), new DefaultInstanceOperationLock(),

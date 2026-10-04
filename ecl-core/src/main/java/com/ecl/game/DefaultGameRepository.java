@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /** Filesystem-backed version metadata and instance path policy. */
@@ -122,6 +123,29 @@ public final class DefaultGameRepository implements GameRepository {
                     .toList();
         } catch (IOException failure) {
             LOGGER.debug("Failed to list installed versions under {}", versionsDirectory, failure);
+            return List.of();
+        }
+    }
+
+    /**
+     * Lists launchable instance directories already present below the configured
+     * {@code .minecraft/versions} directory.
+     */
+    public List<String> installedInstanceDirectories() {
+        Path instancesDirectory = sharedGameDirectory.resolve("versions").normalize();
+        if (!Files.isDirectory(instancesDirectory)) return List.of();
+        Set<String> installedProfiles = Set.copyOf(installedVersions());
+        try (Stream<Path> entries = Files.list(instancesDirectory)) {
+            return entries.filter(path -> Files.isDirectory(
+                            path, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                    .filter(path -> !Files.isSymbolicLink(path))
+                    .map(path -> path.getFileName().toString())
+                    .filter(installedProfiles::contains)
+                    .sorted()
+                    .toList();
+        } catch (IOException failure) {
+            LOGGER.debug("Failed to list instance directories under {}",
+                    instancesDirectory, failure);
             return List.of();
         }
     }
