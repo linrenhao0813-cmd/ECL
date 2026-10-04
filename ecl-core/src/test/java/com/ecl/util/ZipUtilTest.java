@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.zip.ZipEntry;
@@ -47,5 +48,18 @@ class ZipUtilTest {
                 () -> ZipUtil.validateArchive(archive,
                         new ZipUtil.ExtractionLimits(100, 100, 2, 100.0)));
         assertTrue(failure.getMessage().contains("entry count"));
+    }
+
+    @Test
+    void rejectsEntriesThatEscapeTheDestination() throws Exception {
+        Path archive = temp.resolve("slip.zip");
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+            zip.putNextEntry(new ZipEntry("../evil.txt"));
+            zip.write("nope".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        Path destination = Files.createDirectories(temp.resolve("output"));
+        assertThrows(IOException.class, () -> ZipUtil.extractSafely(archive, destination, null));
+        assertFalse(Files.exists(temp.resolve("evil.txt")));
     }
 }

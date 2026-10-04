@@ -259,6 +259,16 @@ class LaunchCommandBuilderTest {
     }
 
     @Test
+    void rejectsUserSuppliedJavaAgentsButKeepsLauncherAgents() throws Exception {
+        LaunchOptions unsafe = options()
+                .jvmArguments(List.of("-javaagent:evil.jar"))
+                .build();
+        LaunchException failure = assertThrows(LaunchException.class, () ->
+                new LaunchCommandBuilder().build(unsafe, repository.resolve("1.21"), "java"));
+        assertTrue(failure.getMessage().contains("不允许"));
+    }
+
+    @Test
     void includesExtraJvmArgsInCommandOrder() throws Exception {
         LaunchOptions options = options().build();
         LaunchCommand command = new LaunchCommandBuilder().build(

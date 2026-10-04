@@ -10,12 +10,10 @@ import java.nio.file.StandardOpenOption;
 
 /** An exclusive cross-process lock whose marker file is removed when the lease closes. */
 public final class FileLockLease implements AutoCloseable {
-    private final Path lockFile;
     private final FileChannel channel;
     private final FileLock lock;
 
-    private FileLockLease(Path lockFile, FileChannel channel, FileLock lock) {
-        this.lockFile = lockFile;
+    private FileLockLease(FileChannel channel, FileLock lock) {
         this.channel = channel;
         this.lock = lock;
     }
@@ -32,7 +30,7 @@ public final class FileLockLease implements AutoCloseable {
                 channel.close();
                 return null;
             }
-            return new FileLockLease(absolute, channel, lock);
+            return new FileLockLease(channel, lock);
         } catch (OverlappingFileLockException busy) {
             channel.close();
             return null;
@@ -58,12 +56,9 @@ public final class FileLockLease implements AutoCloseable {
             if (failure == null) failure = error;
             else failure.addSuppressed(error);
         }
-        try {
-            Files.deleteIfExists(lockFile);
-        } catch (IOException ignored) {
-            // Another process may acquire the same marker between release and deletion.
-            // A stale marker is harmless because ownership is determined by the OS lock.
-        }
+        // Keep the marker file in place. It is the stable rendezvous point for other processes;
+        // deleting it after releasing the OS lock permits a concurrent caller to create a new
+        // inode and acquire a second logical lease.
         if (failure != null) {
             throw failure;
         }

@@ -149,7 +149,12 @@ public final class ZipUtil {
                                                    ProgressListener listener,
                                                    ExtractionLimits limits) throws IOException {
         Path targetRoot = destination.toAbsolutePath().normalize();
+        Path parent = targetRoot.getParent();
+        if (parent != null) {
+            FileUtil.validateExistingAncestors(parent, targetRoot);
+        }
         Files.createDirectories(targetRoot);
+        FileUtil.validateExistingAncestors(targetRoot, targetRoot);
         long totalBytes = Files.size(archive);
         long completed = 0L;
         ExtractionLimits safeLimits = limits == null ? DEFAULT_EXTRACTION_LIMITS : limits;
@@ -164,25 +169,20 @@ public final class ZipUtil {
             while (entries.hasMoreElements()) {
                 ZipEntry entry = entries.nextElement();
                 String entryName = entry.getName();
-                if (entryName == null || entryName.isBlank() || entryName.indexOf('\0') >= 0
-                        || entryName.indexOf(':') >= 0) {
-                    throw new IOException("ZIP contains an invalid entry name");
-                }
-                Path target = targetRoot.resolve(entryName).normalize();
-                if (!target.startsWith(targetRoot) || target.equals(targetRoot)) {
-                    throw new IOException("ZIP entry escapes the target directory: " + entryName);
-                }
+                Path target = FileUtil.safeArchiveEntry(targetRoot, entryName);
                 if (!extractedTargets.add(target)) {
                     throw new IOException("ZIP contains duplicate entries: " + entryName);
                 }
-                if (entry.isDirectory() || entryName.endsWith("/")) {
+                if (entry.isDirectory() || entryName.endsWith("/") || entryName.endsWith("\\")) {
                     Files.createDirectories(target);
+                    FileUtil.validateExistingAncestors(targetRoot, target);
                 } else {
-                    Path parent = target.getParent();
-                    if (parent == null || !parent.startsWith(targetRoot)) {
+                    Path fileParent = target.getParent();
+                    if (fileParent == null || !fileParent.startsWith(targetRoot)) {
                         throw new IOException("ZIP entry has an invalid parent: " + entryName);
                     }
-                    Files.createDirectories(parent);
+                    Files.createDirectories(fileParent);
+                    FileUtil.validateExistingAncestors(targetRoot, target);
                     long written = 0L;
                     try {
                         try (InputStream input = new BufferedInputStream(zip.getInputStream(entry));

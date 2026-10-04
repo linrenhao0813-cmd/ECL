@@ -7,6 +7,7 @@ import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.InstalledMod;
 import com.ecl.modrinth.repository.InstalledModRepository;
 import com.ecl.modrinth.transaction.FileModInstallationTransaction;
+import com.ecl.util.FileUtil;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -89,6 +90,11 @@ public final class DefaultModManagementService implements ModManagementService {
                     Path destinationDirectory = enabled
                             ? instance.modsDirectory()
                             : instance.gameDirectory().resolve("disabled-mods");
+                    try {
+                        FileUtil.validateExistingAncestors(instance.gameDirectory(), destinationDirectory);
+                    } catch (IOException error) {
+                        throw new ModInstallationException(error.getMessage(), error);
+                    }
                     Files.createDirectories(destinationDirectory);
                     Path target = destinationDirectory.resolve(record.fileName()).normalize();
                     ensureInside(instance.gameDirectory(), target);
@@ -178,6 +184,11 @@ public final class DefaultModManagementService implements ModManagementService {
              AutoCloseable ignored = operationLock.acquire(instance.instanceId());
              FileModInstallationTransaction transaction =
                      new FileModInstallationTransaction(instance.gameDirectory())) {
+            try {
+                FileUtil.validateExistingAncestors(instance.gameDirectory(), instance.modsDirectory());
+            } catch (IOException error) {
+                throw new ModInstallationException(error.getMessage(), error);
+            }
             Files.createDirectories(instance.modsDirectory());
             Path target = instance.modsDirectory().resolve(source.getFileName().toString()).normalize();
             ensureInside(instance.modsDirectory(), target);

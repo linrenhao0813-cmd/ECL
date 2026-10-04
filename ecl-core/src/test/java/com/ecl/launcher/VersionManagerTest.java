@@ -1,5 +1,7 @@
 package com.ecl.launcher;
 
+import com.ecl.util.FileLockLease;
+import com.ecl.util.ManagedLockPaths;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
@@ -9,6 +11,8 @@ import java.io.File;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 
@@ -52,6 +56,8 @@ class VersionManagerTest {
             Files.createDirectories(child);
             Files.writeString(parent.resolve("base.json"), "{\"id\":\"base\"}");
             Files.write(parent.resolve("base.jar"), new byte[]{1});
+            Files.writeString(parent.resolve(com.ecl.ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER),
+                    "complete");
             Files.writeString(child.resolve("child.json"), "{\"id\":\"child\",\"inheritsFrom\":\"base\"}");
 
             assertEquals(true, new VersionManager().isVersionDownloaded("child"));
@@ -93,6 +99,104 @@ class VersionManagerTest {
     }
 
     @Test
+    void migratesCompleteLegacyInstallationToCompletionMarker(@TempDir Path tempDir) throws Exception {
+        Field baseDir = com.ecl.ECLConfig.class.getDeclaredField("baseDir");
+        baseDir.setAccessible(true);
+        File previous = (File) baseDir.get(null);
+        baseDir.set(null, tempDir.toFile());
+        try {
+            byte[] client = "legacy-client".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            String sha1 = HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-1").digest(client));
+            Path version = tempDir.resolve("versions/legacy");
+            Files.createDirectories(version);
+            Files.write(version.resolve("legacy.jar"), client);
+            Files.writeString(version.resolve("legacy.json"), """
+                    {"id":"legacy","downloads":{"client":{
+                      "sha1":"%s","size":%d
+                    }},"libraries":[]}
+                    """.formatted(sha1, client.length));
+
+            VersionManager manager = new VersionManager();
+            assertFalse(manager.isVersionDownloaded("legacy"));
+            assertTrue(manager.ensureVersionDownloadedAsync("legacy").get());
+            assertTrue(manager.isVersionDownloaded("legacy"));
+            assertEquals("legacy-verified", Files.readString(version.resolve(
+                    com.ecl.ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER)));
+        } finally {
+            baseDir.set(null, previous);
+        }
+    }
+
+    @Test
+    void doesNotMigrateLegacyInstallationWithMissingLibrary(@TempDir Path tempDir) throws Exception {
+        Field baseDir = com.ecl.ECLConfig.class.getDeclaredField("baseDir");
+        baseDir.setAccessible(true);
+        File previous = (File) baseDir.get(null);
+        baseDir.set(null, tempDir.toFile());
+        try {
+            byte[] client = "partial-client".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            String sha1 = HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-1").digest(client));
+            Path version = tempDir.resolve("versions/partial");
+            Files.createDirectories(version);
+            Files.write(version.resolve("partial.jar"), client);
+            Files.writeString(version.resolve("partial.json"), """
+                    {"id":"partial","downloads":{"client":{
+                      "sha1":"%s","size":%d
+                    }},"libraries":[{"downloads":{"artifact":{
+                      "path":"missing/library.jar",
+                      "sha1":"%s","size":1
+                    }}}]}
+                    """.formatted(sha1, client.length, "0".repeat(40)));
+
+            VersionManager manager = new VersionManager();
+            assertFalse(manager.ensureVersionDownloadedAsync("partial").get());
+            assertFalse(manager.isVersionDownloaded("partial"));
+            assertFalse(Files.exists(version.resolve(
+                    com.ecl.ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER)));
+        } finally {
+            baseDir.set(null, previous);
+        }
+    }
+
+    @Test
+    void legacyMigrationDoesNotRaceAnActiveVersionDownload(@TempDir Path tempDir) throws Exception {
+        Field baseDir = com.ecl.ECLConfig.class.getDeclaredField("baseDir");
+        baseDir.setAccessible(true);
+        File previous = (File) baseDir.get(null);
+        baseDir.set(null, tempDir.toFile());
+        try {
+            byte[] client = "locked-client".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            String sha1 = HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-1").digest(client));
+            Path version = tempDir.resolve("versions/locked");
+            Files.createDirectories(version);
+            Files.write(version.resolve("locked.jar"), client);
+            Files.writeString(version.resolve("locked.json"), """
+                    {"id":"locked","downloads":{"client":{
+                      "sha1":"%s","size":%d
+                    }},"libraries":[]}
+                    """.formatted(sha1, client.length));
+            Path versionLock = ManagedLockPaths.versionDownload(
+                    com.ecl.ECLConfig.getVersionsDir().toPath(), "locked");
+            VersionManager manager = new VersionManager();
+
+            try (FileLockLease ignored = FileLockLease.tryAcquire(versionLock)) {
+                assertTrue(ignored != null);
+                assertThrows(java.util.concurrent.ExecutionException.class,
+                        () -> manager.ensureVersionDownloadedAsync("locked").get());
+            }
+
+            assertFalse(Files.exists(version.resolve(
+                    com.ecl.ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER)));
+            assertTrue(manager.ensureVersionDownloadedAsync("locked").get());
+        } finally {
+            baseDir.set(null, previous);
+        }
+    }
+
+    @Test
     void loaderProfileResolvesMissingParentAsDownloadTarget(@TempDir Path tempDir) throws Exception {
         Field baseDir = com.ecl.ECLConfig.class.getDeclaredField("baseDir");
         baseDir.setAccessible(true);
@@ -126,6 +230,8 @@ class VersionManagerTest {
             Files.createDirectories(parent);
             Files.writeString(parent.resolve("1.21.4.json"), "{\"id\":\"1.21.4\"}");
             Files.write(parent.resolve("1.21.4.jar"), new byte[]{1});
+            Files.writeString(parent.resolve(com.ecl.ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER),
+                    "complete");
             assertTrue(manager.isVersionDownloaded("fabric-loader-0.16.14-1.21.4"));
         } finally {
             baseDir.set(null, previous);

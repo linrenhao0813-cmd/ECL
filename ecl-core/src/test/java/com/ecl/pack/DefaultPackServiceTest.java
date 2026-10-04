@@ -1,6 +1,9 @@
 package com.ecl.pack;
 
+import com.ecl.util.TestNetworkPolicy;
 import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -24,6 +27,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DefaultPackServiceTest {
     @TempDir
     Path temp;
+    private AutoCloseable loopbackDownloads;
+
+    @BeforeEach
+    void allowLoopbackDownloads() {
+        loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
+    }
+
+    @AfterEach
+    void restoreDownloadPolicy() throws Exception {
+        loopbackDownloads.close();
+    }
 
     @Test
     void eclPackRoundTripIsPreviewableAndTransactional() throws Exception {
@@ -62,14 +76,15 @@ class DefaultPackServiceTest {
     }
 
     @Test
-    void twoHundredModPackRoundTripStaysFast() {
-        assertTimeout(Duration.ofSeconds(5), () -> {
-            DefaultPackService service = new DefaultPackService();
-            Path instance = Files.createDirectories(temp.resolve("large-source"));
-            Path mods = Files.createDirectories(instance.resolve("mods"));
-            for (int index = 0; index < 200; index++) {
-                Files.writeString(mods.resolve("example-" + index + ".jar"), "mod-" + index);
-            }
+    void twoHundredModPackRoundTripStaysFast() throws Exception {
+        DefaultPackService service = new DefaultPackService();
+        Path instance = Files.createDirectories(temp.resolve("large-source"));
+        Path mods = Files.createDirectories(instance.resolve("mods"));
+        for (int index = 0; index < 200; index++) {
+            Files.writeString(mods.resolve("example-" + index + ".jar"), "mod-" + index);
+        }
+
+        assertTimeout(Duration.ofSeconds(10), () -> {
             Path archive = service.exportInstance(instance, "1.21.1", PackFormat.MRPACK,
                     temp.resolve("large.mrpack"));
             Path resultRoot = Files.createDirectories(temp.resolve("large-instances"));

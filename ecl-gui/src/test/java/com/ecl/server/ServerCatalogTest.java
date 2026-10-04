@@ -89,7 +89,7 @@ class ServerCatalogTest {
     void websiteUriAllowsOnlyNormalWebLinks() {
         assertEquals("https://example.org/details",
                 serverWithWebsite("https://example.org/details").websiteUri().toString());
-        assertEquals("http://example.org", serverWithWebsite("http://example.org").websiteUri().toString());
+        assertNull(serverWithWebsite("http://example.org").websiteUri());
         assertNull(serverWithWebsite("file:///C:/secrets.txt").websiteUri());
         assertNull(serverWithWebsite("javascript:alert(1)").websiteUri());
         assertNull(serverWithWebsite("https://user@example.org").websiteUri());
