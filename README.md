@@ -107,7 +107,7 @@ Microsoft 正版账户的皮肤上传至官方服务；离线账户的皮肤保�
 单元测试中的 Java 运行时元数据使用公共 IP 字面量作为示例 URL，仅验证元数据与地址策略，
 不依赖外部 DNS 或实际下载。HTTP、私有地址、无效校验和及超限大小均须被拒绝。
 
-`gradle/verification-keyring.keys` 保存已信任的 JetBrains、TwelveMonkeys 和 SpotBugs 签名公钥。
+`gradle/verification-keyring.keys` 保存已信任的构建依赖发布者签名公钥。
 公钥指纹与 `verification-metadata.xml` 中的信任范围一致，避免构建依赖密钥服务器的可用性。
 
 ### Windows 打包
