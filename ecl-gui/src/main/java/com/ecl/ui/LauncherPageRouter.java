@@ -55,12 +55,12 @@ final class LauncherPageRouter {
         ui.workspacePane.getChildren().clear();
         switch (ui.activeView) {
             case HOME -> addMainContent(ui.homePageFactory.getOrCreate(), null);
+            case VERSIONS -> addMainContent(new InstalledInstancesPage(ui), null);
             case SAVES -> addMainContent(ui.pageFactory.createWorldSavesPage(), null);
             case DOWNLOADS -> addMainContent(
                     ui.contentLibraryPageFactory.createPage(ui.downloadSection), null);
             case SERVERS -> addMainContent(ui.pageFactory.createServersPage(), null);
             case SETTINGS -> addMainContent(ui.pageFactory.createSettingsPage(), null);
-            case LOGS -> addMainContent(ui.pageFactory.createLogsPage(), null);
         }
         if (slideDirection != 0) {
             playContentTransition(slideDirection);

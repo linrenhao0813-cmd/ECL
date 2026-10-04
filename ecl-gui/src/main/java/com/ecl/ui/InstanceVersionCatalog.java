@@ -54,7 +54,6 @@ final class InstanceVersionCatalog extends VBox {
         installSelection(releases);
         installSelection(snapshots);
         installSelection(aprilFools);
-        ui.versionCombo.valueProperty().addListener((obs, oldValue, newValue) -> selectMatching(newValue));
         load(!Boolean.getBoolean("ecl.snapshot"));
     }
 
@@ -134,7 +133,6 @@ final class InstanceVersionCatalog extends VBox {
                     candidate.getSelectionModel().clearSelection();
                 }
             }
-            ui.versionCombo.setValue(version);
             status.setText(Messages.format("instance.catalog.selected", version));
             synchronizingSelection = false;
             if (versionSelectionHandler != null) {

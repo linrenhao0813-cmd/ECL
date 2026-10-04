@@ -97,27 +97,12 @@ final class ContentLibraryPageFactory {
             content.getChildren().setAll(createPackUpdatesContent());
         });
 
-        Button tasksButton = createDownloadNavButton("T",
-                Messages.get("download.tasks.title"),
-                Messages.get("download.tasks.detail"));
-        categoryButtons.add(tasksButton);
-        navigation.getChildren().add(tasksButton);
-        tasksButton.setOnAction(event -> {
-            selectCategory(categoryButtons, tasksButton);
-            ui.downloadSection = DownloadSection.TASKS;
-            ui.closeActiveModBrowserView();
-            ui.downloadTasksPage = ui.pageFactory.createDownloadTasksPage();
-            content.getChildren().setAll(embedded(ui.downloadTasksPage));
-        });
-
         HBox library = new HBox(18, navigation, content);
         library.getStyleClass().add("content-library-layout");
         library.setAlignment(Pos.TOP_LEFT);
         HBox.setHgrow(content, Priority.ALWAYS);
         page.getChildren().addAll(pageHeading, library);
-        if (initialSection == DownloadSection.TASKS) {
-            tasksButton.fire();
-        } else if (initialSection == DownloadSection.CONTENT && firstContentButton != null) {
+        if (initialSection == DownloadSection.CONTENT && firstContentButton != null) {
             firstContentButton.fire();
         } else {
             instancesButton.fire();

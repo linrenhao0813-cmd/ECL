@@ -27,7 +27,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,16 +49,17 @@ public class GameDownloader implements DownloadService {
     private volatile boolean verifyExistingFiles = true;
 
     public GameDownloader() {
-        this(ECLConfig.DOWNLOAD_THREADS);
+        this(ECLConfig.MAX_DOWNLOAD_CONCURRENT);
     }
 
     public GameDownloader(int downloadThreads) {
+        int workerCount = ECLConfig.clampDownloadConcurrency(downloadThreads);
         versionDownloadExecutor = Executors.newSingleThreadExecutor(
                 ThreadFactories.daemon("ecl-version-download"));
         fileDownloadExecutor = Executors.newFixedThreadPool(
-                Math.max(1, Math.min(8, downloadThreads)),
+                workerCount,
                 ThreadFactories.daemon("ecl-file-download"));
-        batchExecutor = new GameDownloadBatchExecutor(fileDownloadExecutor);
+        batchExecutor = new GameDownloadBatchExecutor(fileDownloadExecutor, workerCount);
         assetVerifier = new GameAssetVerifier(() -> verifyExistingFiles);
     }
 
@@ -150,10 +150,8 @@ public class GameDownloader implements DownloadService {
                             client, "size", "Minecraft client");
                     File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
                     if (assetVerifier.needsDownload(clientJar, clientSha1)) {
-                        File temporaryClient = new File(clientJar.getAbsolutePath()
-                                + ".ecl-download-" + UUID.randomUUID() + ".tmp");
                         try {
-                            HttpUtil.downloadFileWithProgress(clientUrl, temporaryClient,
+                            HttpUtil.downloadFileWithProgress(clientUrl, clientJar,
                                     new HttpUtil.ProgressCallback() {
                                         @Override
                                         public void onStart(long total) {
@@ -172,15 +170,16 @@ public class GameDownloader implements DownloadService {
                                         @Override
                                         public void onComplete(File file) {
                                         }
-                                    }, sourceCallback("游戏主文件", runListener), clientSize);
-                            if (temporaryClient.length() != clientSize) {
+                                    }, batchExecutor.sourceCallback(
+                                            "游戏主文件", runListener), clientSize);
+                            if (clientJar.length() != clientSize) {
                                 throw new IOException(
                                         "Minecraft client size does not match metadata");
                             }
-                            assetVerifier.verifyDownloadedFile(temporaryClient, clientSha1);
-                            atomicReplace(temporaryClient.toPath(), clientJar.toPath());
-                        } finally {
-                            Files.deleteIfExists(temporaryClient.toPath());
+                            assetVerifier.verifyDownloadedFile(clientJar, clientSha1);
+                        } catch (IOException failure) {
+                            Files.deleteIfExists(clientJar.toPath());
+                            throw failure;
                         }
                     }
                 } else if (!GameManifestParser.hasUsableInheritedClient(versionJson)) {
@@ -335,18 +334,16 @@ public class GameDownloader implements DownloadService {
         long indexSize = GameManifestParser.requiredPositiveSize(assetIndex, "size", "asset index " + assetId);
         if (assetVerifier.needsDownload(indexFile, indexSha1)) {
             Files.createDirectories(indexFile.toPath().toAbsolutePath().getParent());
-            File temporaryIndex = new File(indexFile.getAbsolutePath() + ".ecl-download-"
-                    + UUID.randomUUID() + ".tmp");
             try {
-                HttpUtil.downloadFileWithProgress(assetUrl, temporaryIndex, null,
-                        sourceCallback("资源索引", runListener), indexSize);
-                if (temporaryIndex.length() != indexSize) {
+                HttpUtil.downloadFileWithProgress(assetUrl, indexFile, null,
+                        batchExecutor.sourceCallback("资源索引", runListener), indexSize);
+                if (indexFile.length() != indexSize) {
                     throw new IOException("Asset index size does not match metadata: " + assetId);
                 }
-                assetVerifier.verifyDownloadedFile(temporaryIndex, indexSha1);
-                atomicReplace(temporaryIndex.toPath(), indexFile.toPath());
-            } finally {
-                Files.deleteIfExists(temporaryIndex.toPath());
+                assetVerifier.verifyDownloadedFile(indexFile, indexSha1);
+            } catch (IOException failure) {
+                Files.deleteIfExists(indexFile.toPath());
+                throw failure;
             }
         }
         JsonObject objects = HttpUtil.readJson(indexFile).getAsJsonObject("objects");
@@ -367,33 +364,6 @@ public class GameDownloader implements DownloadService {
             }
         }
         batchExecutor.download(tasks, "资源文件", runListener);
-    }
-
-    private HttpUtil.SourceCallback sourceCallback(String label, DownloadListener runListener) {
-        return new HttpUtil.SourceCallback() {
-            @Override
-            public void onSource(String originalUrl, String candidateUrl, boolean mirror, String sourceName) {
-                if (runListener != null && mirror) {
-                    runListener.onStatus(label + "官方源响应较慢，切换到" + sourceName + "...");
-                }
-            }
-            @Override
-            public void onFailure(String candidateUrl, IOException error) {
-                if (runListener != null) {
-                    runListener.onStatus(label + "下载源失败，尝试下一个源: " + error.getMessage());
-                }
-            }
-        };
-    }
-
-    private static void atomicReplace(java.nio.file.Path source, java.nio.file.Path target)
-            throws IOException {
-        try {
-            Files.move(source, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-            Files.move(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        }
     }
 
     public List<String> getMissingLibraries(JsonObject versionJson) {
