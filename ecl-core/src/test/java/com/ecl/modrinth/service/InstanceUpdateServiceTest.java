@@ -4,6 +4,10 @@ import com.ecl.launch.GameProcessMarker;
 import com.ecl.launcher.LoaderUpdateService;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.modrinth.TestFixtures;
+import com.ecl.modrinth.pack.ModpackInstance;
+import com.ecl.modrinth.pack.ModpackUpdate;
+import com.ecl.modrinth.pack.ModpackUpdateService;
+import com.ecl.modrinth.pack.MrpackInstaller;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.InstalledMod;
 import com.ecl.modrinth.model.ModUpdate;
@@ -25,6 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,7 +56,8 @@ class InstanceUpdateServiceTest {
                 ignored -> CompletableFuture.completedFuture(scan), mods, ignored -> false);
 
         CompletableFuture<InstanceUpdateService.Result> work = service.update(instance,
-                ReleaseChannel.RELEASE_ONLY, progress -> stages.add(progress.stage()));
+                ReleaseChannel.RELEASE_ONLY, progress -> stages.add(progress.stage()),
+                temp.resolve("versions"), temp.resolve("game"), new FakePacks());
         assertEquals(List.of("first", "second"), mods.checked);
         assertEquals(List.of("first"), mods.applied);
         assertFalse(work.isDone());
@@ -102,6 +109,118 @@ class InstanceUpdateServiceTest {
         }, updates, ignored -> running.get());
         assertThrows(CompletionException.class, () -> service.update(instance, ReleaseChannel.ALL, null).join());
         assertTrue(updates.applied.isEmpty());
+    }
+
+    @Test
+    void packUpgradeUsesOnlySelectedPackAndKeepsAuthorComponents() throws Exception {
+        ModInstanceContext instance = packInstance(true);
+        FakePacks packs = new FakePacks();
+        List<InstanceUpdateService.Stage> stages = new ArrayList<>();
+        InstanceUpdateService.Result result = packService().update(instance, ReleaseChannel.ALL,
+                update -> stages.add(update.stage()), temp.resolve("versions"), temp.resolve("game"), packs).join();
+        assertEquals(instance.profileId(), packs.checked.profileId());
+        assertEquals(ReleaseChannel.ALL, packs.channel);
+        assertEquals(1, packs.applied);
+        assertEquals("2.0", result.packVersion());
+        assertEquals(List.of(InstanceUpdateService.Stage.PACK_CHECK, InstanceUpdateService.Stage.PACK), stages);
+    }
+
+    @Test
+    void packUpgradePreservesWarningsInProgressAndResult() throws Exception {
+        ModInstanceContext instance = packInstance(true);
+        FakePacks packs = new FakePacks();
+        packs.warnings = List.of("警告：旧版文件已被用户修改，更新时予以保留: mods/removed.jar",
+                "未找到旧整合包文件清单；本次更新不会删除旧版遗留文件");
+        List<String> messages = new ArrayList<>();
+        InstanceUpdateService.Result result = packService().update(instance, ReleaseChannel.ALL,
+                update -> messages.add(update.detail()), temp.resolve("versions"), temp.resolve("game"), packs).join();
+        assertEquals(packs.warnings, result.warnings());
+        assertTrue(messages.containsAll(packs.warnings));
+        assertTrue(messages.contains("正在下载整合包文件"));
+        assertThrows(UnsupportedOperationException.class, () -> result.warnings().add("extra"));
+    }
+
+    @Test
+    void currentPackDoesNotInstallOrUpgradeComponents() throws Exception {
+        ModInstanceContext instance = packInstance(true);
+        FakePacks packs = new FakePacks();
+        packs.current = true;
+        InstanceUpdateService.Result result = packService().update(instance, null, null,
+                temp.resolve("versions"), temp.resolve("game"), packs).join();
+        assertEquals("", result.packVersion());
+        assertEquals(0, packs.applied);
+    }
+
+    @Test
+    void packCheckFailureAndMissingSourceDoNotFallBackToComponentUpgrades() throws Exception {
+        ModInstanceContext instance = packInstance(true);
+        FakePacks packs = new FakePacks();
+        packs.fail = true;
+        assertThrows(CompletionException.class, () -> packService().update(instance, ReleaseChannel.ALL, null,
+                temp.resolve("versions"), temp.resolve("game"), packs).join());
+        assertEquals(0, packs.applied);
+        assertNotNull(packs.checked);
+        ModInstanceContext withoutSource = packInstance(false);
+        FakePacks unused = new FakePacks();
+        assertThrows(CompletionException.class, () -> packService().update(withoutSource, ReleaseChannel.ALL, null,
+                temp.resolve("versions"), temp.resolve("game"), unused).join());
+        assertNull(unused.checked);
+    }
+
+    @Test
+    void runningPackIsRejectedBeforeCheckingUpdates() throws Exception {
+        ModInstanceContext instance = packInstance(true);
+        FakePacks packs = new FakePacks();
+        InstanceUpdateService service = new InstanceUpdateService(loaders(true),
+                ignored -> { throw new AssertionError("scanner must not run"); }, new FakeUpdates(), ignored -> true);
+        assertThrows(CompletionException.class, () -> service.update(instance, ReleaseChannel.ALL, null,
+                temp.resolve("versions"), temp.resolve("game"), packs).join());
+        assertNull(packs.checked);
+        assertEquals(0, packs.applied);
+    }
+
+    private ModInstanceContext packInstance(boolean withSource) throws IOException {
+        ModInstanceContext instance = instance();
+        Path profile = temp.resolve("versions").resolve(instance.profileId()).resolve(instance.profileId() + ".json");
+        Files.writeString(profile, """
+                {"id":"%s","eclModpackName":"Example Pack", "eclModpackSource":"%s",
+                 "eclModpackProjectId":"pack-project", "eclModpackVersionId":"old"}
+                """.formatted(instance.profileId(), withSource ? "modrinth" : ""));
+        return instance;
+    }
+
+    private InstanceUpdateService packService() {
+        return new InstanceUpdateService(loaders(true),
+                ignored -> { throw new AssertionError("pack components must not be scanned"); }, new FakeUpdates(), ignored -> false);
+    }
+
+    private static final class FakePacks implements ModpackUpdateService {
+        private ModpackInstance checked;
+        private ReleaseChannel channel;
+        private int applied;
+        private boolean current;
+        private boolean fail;
+        private List<String> warnings = List.of();
+
+        @Override public CompletableFuture<ModpackUpdate> checkUpdate(ModpackInstance instance, ReleaseChannel releaseChannel) {
+            checked = instance;
+            channel = releaseChannel;
+            if (fail) return CompletableFuture.failedFuture(new IOException("metadata failed"));
+            if (current) return CompletableFuture.completedFuture(null);
+            var version = TestFixtures.fabricVersion("new", instance.projectId(), List.of());
+            return CompletableFuture.completedFuture(new ModpackUpdate(instance, version, version.files().getFirst()));
+        }
+
+        @Override public CompletableFuture<MrpackInstaller.InstallResult> applyUpdate(
+                ModpackUpdate update, Path root, MrpackInstaller.Listener listener) {
+            applied++;
+            if (!warnings.isEmpty()) {
+                listener.onStatus("正在下载整合包文件");
+                warnings.forEach(listener::onWarning);
+            }
+            return CompletableFuture.completedFuture(new MrpackInstaller.InstallResult(
+                    update.instance().profileId(), "Example Pack", "2.0", "1.21.1", "fabric", root, 0));
+        }
     }
 
     private ModInstanceContext instance() throws IOException {

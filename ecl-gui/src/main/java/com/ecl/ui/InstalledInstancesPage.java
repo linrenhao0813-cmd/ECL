@@ -2,6 +2,7 @@ package com.ecl.ui;
 
 import com.ecl.util.Messages;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -18,12 +19,13 @@ import java.util.Objects;
 
 /**
  * Instance manager: a list of launchable instances next to a detail workspace. Selecting a row only
- * changes what is being viewed; the launch target changes only through the explicit
- * "set as launch target" action. Narrow windows stack the two panes instead of shrinking them.
+ * changes what is being viewed; the launch target changes through the top instance selector.
+ * Narrow windows stack the two panes instead of shrinking them.
  */
 final class InstalledInstancesPage extends VBox {
     private final LauncherUI ui;
     private final ListView<String> instances = new ListView<>();
+    private final ChangeListener<String> launchTargetListener = (observable, previous, current) -> instances.refresh();
     private final Label status = new Label(Messages.get("local.instances.loading"));
     private final Button refreshButton;
     private final InstanceDetailsPane details;
@@ -87,6 +89,15 @@ final class InstalledInstancesPage extends VBox {
 
         instances.getSelectionModel().selectedItemProperty().addListener(
                 (ignored, previous, selected) -> selectInstance(selected));
+        sceneProperty().addListener((observable, previous, current) -> {
+            if (previous != null) {
+                ui.instanceSelection.launchTargetProperty().removeListener(launchTargetListener);
+            }
+            if (current != null) {
+                ui.instanceSelection.launchTargetProperty().addListener(launchTargetListener);
+                instances.refresh();
+            }
+        });
 
         VBox heading = new VBox(6, title, subtitle);
         heading.getStyleClass().add("content-library-heading");

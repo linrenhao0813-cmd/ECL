@@ -2,7 +2,6 @@ package com.ecl.ui;
 
 import com.ecl.launcher.VersionManager;
 import com.ecl.util.Messages;
-import javafx.beans.value.ChangeListener;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
@@ -26,8 +25,6 @@ final class InstanceDetailsPane extends VBox {
     private final Runnable onDisplayChanged;
     private String instanceId;
     private List<Object> savedDisplay = List.of();
-    private final ChangeListener<String> launchTargetListener =
-            (observable, previous, current) -> refreshTargetState();
 
     private final TextField displayNameField = new TextField();
     private final CheckBox favoriteBox = new CheckBox(Messages.get("instances.display.favorite"));
@@ -40,8 +37,6 @@ final class InstanceDetailsPane extends VBox {
 
     private final Label title = new Label();
     private final Label meta = new Label();
-    private final Label targetBadge = new Label();
-    private final Button targetButton;
     private final Button openFolderButton;
     private final Label emptyHint = new Label(Messages.get("instances.detail.empty"));
 
@@ -63,16 +58,12 @@ final class InstanceDetailsPane extends VBox {
         title.getStyleClass().add("section-title");
         meta.getStyleClass().add("section-subtitle");
         meta.setWrapText(true);
-        targetBadge.getStyleClass().add("instance-target-badge");
-        targetButton = ui.createActionButton(Messages.get("instances.setTarget"),
-                "primary-button", this::setAsLaunchTarget);
-        targetButton.setId("instance-set-target");
         openFolderButton = ui.createActionButton(Messages.get("local.instances.openFolder"),
                 "ghost-button", this::openInstanceFolder);
         Region headerSpacer = new Region();
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
         HBox header = new HBox(10, new VBox(3, title, meta), headerSpacer,
-                targetBadge, openFolderButton, targetButton);
+                openFolderButton);
         header.setAlignment(Pos.CENTER_LEFT);
 
         ui.applyFieldStyle(displayNameField);
@@ -121,15 +112,6 @@ final class InstanceDetailsPane extends VBox {
         body.setMaxWidth(Double.MAX_VALUE);
         VBox.setVgrow(body, Priority.ALWAYS);
         getChildren().addAll(body, emptyHint);
-        sceneProperty().addListener((observable, previous, current) -> {
-            if (previous != null) {
-                ui.instanceSelection.launchTargetProperty().removeListener(launchTargetListener);
-            }
-            if (current != null) {
-                ui.instanceSelection.launchTargetProperty().addListener(launchTargetListener);
-                refreshTargetState();
-            }
-        });
         setInstance(null);
     }
 
@@ -179,7 +161,6 @@ final class InstanceDetailsPane extends VBox {
 
         title.setText(ui.versionManager.getVersionDisplayName(instanceId));
         meta.setText(Messages.format("instances.detail.meta", minecraftVersion, loader));
-        updateTargetBadge();
         updateOverviewRows(minecraftVersion, loader);
         loadDisplaySettings();
     }
@@ -243,38 +224,6 @@ final class InstanceDetailsPane extends VBox {
         }
     }
 
-    private void updateTargetBadge() {
-        boolean isTarget = instanceId.equals(ui.getSelectedVersion());
-        targetBadge.setText(Messages.get(isTarget
-                ? "instances.target.current" : "instances.target.other"));
-        targetBadge.getStyleClass().removeAll(
-                "instance-target-badge-current", "instance-target-badge-other");
-        targetBadge.getStyleClass().add(isTarget
-                ? "instance-target-badge-current" : "instance-target-badge-other");
-        targetButton.setDisable(isTarget);
-    }
-
-    /** Target changes refresh the overview without discarding unsaved display edits. */
-    private void refreshTargetState() {
-        if (instanceId == null) {
-            return;
-        }
-        updateTargetBadge();
-        VersionManager.LocalVersionProfile profile = localProfile(instanceId);
-        String loader = profile == null || profile.loader().isBlank()
-                ? GuiMessages.get("forest.vanilla") : ui.loaderChoiceForProfile(instanceId).displayName;
-        updateOverviewRows(profile == null ? instanceId : profile.minecraftVersion(), loader);
-        onDisplayChanged.run();
-    }
-
-    private void setAsLaunchTarget() {
-        ui.setLaunchTarget(instanceId);
-        ui.updateRuntimeSummary();
-        updateTargetBadge();
-        ui.setStatus(Messages.get("instances.target.switched"),
-                ui.versionManager.getVersionDisplayName(instanceId));
-    }
-
     private void openInstanceFolder() {
         ui.openLocalFolder(ui.resolveVersionGameDir(instanceId),
                 Messages.get("local.instances.folderTitle"));
@@ -289,11 +238,7 @@ final class InstanceDetailsPane extends VBox {
                 ui.createInfoRow(Messages.get("instances.detail.profileId"),
                         ui.createStaticValueLabel(instanceId)),
                 ui.createInfoRow(Messages.get("instances.detail.loader"),
-                        ui.createStaticValueLabel(loader)),
-                ui.createInfoRow(Messages.get("instances.detail.target"),
-                        ui.createStaticValueLabel(instanceId.equals(ui.getSelectedVersion())
-                                ? Messages.get("instances.target.current")
-                                : Messages.get("instances.target.other"))));
+                        ui.createStaticValueLabel(loader)));
         boolean running = ui.isVersionRunning(instanceId);
         runtimeStatus.setText(Messages.get(running
                 ? "instances.detail.running" : "instances.detail.idle"));

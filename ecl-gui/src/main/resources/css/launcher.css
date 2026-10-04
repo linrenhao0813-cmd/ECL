@@ -2886,15 +2886,6 @@
     -fx-padding: 0 10;
 }
 
-.instance-bar-badge {
-    -fx-background-color: -ecl-surface-muted;
-    -fx-background-radius: 12;
-    -fx-padding: 5 12;
-    -fx-text-fill: -ecl-secondary;
-    -fx-font-size: 11px;
-    -fx-font-weight: 600;
-}
-
 /* ---------- Home quick entries ---------- */
 .quick-entry-row {
     -fx-spacing: 12;
@@ -3096,23 +3087,13 @@
     -fx-padding: 18 20;
 }
 
-.instance-target-badge,
-.instance-target-badge-current,
-.instance-target-badge-other {
+.instance-target-badge-current {
     -fx-background-radius: 10;
     -fx-padding: 5 10;
     -fx-font-size: 10px;
     -fx-font-weight: 700;
-}
-
-.instance-target-badge-current {
     -fx-background-color: -ecl-success-bg;
     -fx-text-fill: -ecl-success-text;
-}
-
-.instance-target-badge-other {
-    -fx-background-color: -ecl-surface-muted;
-    -fx-text-fill: -ecl-tertiary;
 }
 
 .list-cell .instance-target-badge-current {

@@ -117,7 +117,6 @@ class LauncherUIView extends javafx.application.Application {
     Label authHintLabel;
     Label versionSummaryLabel;
     Label topAuthBadgeLabel;
-    Label instanceMetaLabel;
     Label contentTargetLabel;
     /** What the content page's install-target banner describes: instance, instances or server. */
     String contentTargetMode = "instance";

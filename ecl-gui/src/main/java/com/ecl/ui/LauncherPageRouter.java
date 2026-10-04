@@ -53,8 +53,6 @@ final class LauncherPageRouter {
         if (!ui.pageFactory.confirmSettingsDeparture()) {
             return;
         }
-        // The home hero already states the version and loader, so the bar badge is redundant there.
-        ui.instanceBarFactory.setMetaVisible(ui.activeView != AppView.HOME);
         if (ui.mainScrollPane != null) {
             ui.mainScrollPane.setFitToHeight(ui.activeView == AppView.HOME);
         }

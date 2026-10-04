@@ -1,6 +1,8 @@
 package com.ecl.ui;
 
 import com.ecl.ECLConfig;
+import com.ecl.util.FileUtil;
+import com.ecl.util.HttpUtil;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
 import com.ecl.modrinth.service.InstanceUpdateService;
@@ -64,15 +66,25 @@ final class InstanceUpdateWorkflow {
         if (ui.updateInstanceButton == null) return;
         String selected = ui.getSelectedVersion();
         ui.updateInstanceButton.setDisable(updating || ui.launchBtn == null || ui.launchBtn.isDisabled()
-                || selected == null || selected.isBlank() || ui.loaderChoiceForProfile(selected).vanilla()
+                || selected == null || selected.isBlank()
+                || (ui.loaderChoiceForProfile(selected).vanilla() && !isPackProfile(selected))
                 || ui.isVersionRunning(selected));
+    }
+
+    private boolean isPackProfile(String profileId) {
+        try {
+            var profile = HttpUtil.readJson(FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), profileId));
+            return profile.has("eclModpackName") || profile.has("eclModpackSource");
+        } catch (IOException | IllegalArgumentException error) {
+            return false;
+        }
     }
 
     private void start() {
         startFor(ui.getSelectedVersion());
     }
 
-    /** Runs the loader/mod upgrade for one explicit instance, independent of the launch target. */
+    /** Upgrades one explicit instance, independent of the launch target. */
     void startFor(String selected) {
         if (updating || selected == null || selected.isBlank()) return;
         ModInstanceContext instance;
@@ -87,10 +99,11 @@ final class InstanceUpdateWorkflow {
         updating = true;
         ui.setControlsBusy(true);
         progress.setVisible(true);
-        status.setText(GuiMessages.get("instanceUpdate.loader"));
+        status.setText(GuiMessages.get("instanceUpdate.button"));
         ui.controller.instanceUpdateService().update(instance, ui.controller.preferredModReleaseChannel(),
                 update -> Platform.runLater(() -> status.setText(GuiMessages.get(
-                        "instanceUpdate." + update.stage().name().toLowerCase(java.util.Locale.ROOT), update.detail()))))
+                        "instanceUpdate." + update.stage().name().toLowerCase(java.util.Locale.ROOT), update.detail()))),
+                ECLConfig.getVersionsDir().toPath(), ui.getConfiguredGameRootDir().toPath(), ui.controller.modpackUpdateService())
                 .whenComplete((result, error) -> Platform.runLater(() -> finish(selected, result, error)));
     }
 
@@ -104,6 +117,9 @@ final class InstanceUpdateWorkflow {
         String summary;
         if (error != null) {
             summary = GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(error));
+        } else if (result.packVersion() != null) {
+            summary = result.packVersion().isBlank() ? GuiMessages.get("instanceUpdate.packCurrent")
+                    : GuiMessages.get("instanceUpdate.packComplete", result.packVersion());
         } else {
             String loader = GuiMessages.get(result.loader().updated()
                     ? "instanceUpdate.loaderUpdated" : "instanceUpdate.loaderCurrent",
@@ -114,8 +130,8 @@ final class InstanceUpdateWorkflow {
                         + String.join("\n", result.failures().stream()
                                 .map(failure -> failure.name() + ": " + ui.cleanMessage(failure.cause())).toList());
             }
-            if (!result.warnings().isEmpty()) summary += "\n" + String.join("\n", result.warnings());
         }
+        if (result != null && !result.warnings().isEmpty()) summary += "\n" + String.join("\n", result.warnings());
         status.setText(summary);
         ui.setStatus(GuiMessages.get("instanceUpdate.button"), summary);
         updateButton();

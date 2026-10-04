@@ -1,6 +1,13 @@
 package com.ecl.modrinth.service;
 
 import com.ecl.launch.GameProcessMarker;
+import com.ecl.modrinth.pack.ModpackInstance;
+import com.ecl.modrinth.pack.ModpackUpdateService;
+import com.ecl.modrinth.pack.MrpackInstaller;
+import com.ecl.util.FileUtil;
+import com.ecl.util.HttpUtil;
+import com.ecl.util.JsonUtil;
+import com.google.gson.JsonObject;
 import com.ecl.launcher.LoaderUpdateService;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.modrinth.instance.ModInstanceContext;
@@ -10,6 +17,7 @@ import com.ecl.modrinth.model.ReleaseChannel;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -21,7 +29,7 @@ import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-/** One-click loader upgrade followed by compatible updates of enabled, recognized mods. */
+/** One-click pack upgrades or compatible loader and enabled, recognized mod updates. */
 public final class InstanceUpdateService {
     private final LoaderUpdateService loaders;
     private final LocalModScanner scanner;
@@ -34,6 +42,50 @@ public final class InstanceUpdateService {
         this.scanner = Objects.requireNonNull(scanner);
         this.mods = Objects.requireNonNull(mods);
         this.instanceRunning = Objects.requireNonNull(instanceRunning);
+    }
+
+    /** Pack profiles follow their author's versions rather than upgrading individual components. */
+    public CompletableFuture<Result> update(ModInstanceContext instance, ReleaseChannel channel, Consumer<Progress> listener,
+                                            Path metadataRoot, Path gameRoot, ModpackUpdateService packs) {
+        Consumer<Progress> progress = listener == null ? ignored -> { } : listener;
+        try {
+            ensureStopped(instance);
+            JsonObject profile = HttpUtil.readJson(FileUtil.safeVersionJson(metadataRoot.toFile(), instance.profileId()));
+            if (!profile.has("eclModpackSource") && !profile.has("eclModpackName")) {
+                return update(instance, channel, listener);
+            }
+            String project = JsonUtil.getString(profile, "eclModpackProjectId", "");
+            String version = JsonUtil.getString(profile, "eclModpackVersionId", "");
+            if (!"modrinth".equalsIgnoreCase(JsonUtil.getString(profile, "eclModpackSource", ""))
+                    || project.isBlank() || version.isBlank()) {
+                throw new IOException("整合包未记录可更新的 Modrinth 来源，请从下载页重新导入有来源的整合包");
+            }
+            ModpackInstance pack = new ModpackInstance(instance.instanceId(), instance.profileId(),
+                    JsonUtil.getString(profile, "eclModpackName", instance.profileId()),
+                    JsonUtil.getString(profile, "eclModpackVersion", version), instance.minecraftVersion(),
+                    instance.loaderName(), project, version, instance.gameDirectory());
+            progress.accept(new Progress(Stage.PACK_CHECK, pack.name()));
+            return packs.checkUpdate(pack, channel).thenCompose(update -> {
+                ensureStoppedUnchecked(instance);
+                if (update == null) {
+                    return CompletableFuture.completedFuture(new Result(null, 0, 0, List.of(), List.of(), ""));
+                }
+                progress.accept(new Progress(Stage.PACK, pack.name()));
+                List<String> warnings = new ArrayList<>();
+                return packs.applyUpdate(update, gameRoot, new MrpackInstaller.Listener() {
+                    @Override public void onStatus(String message) {
+                        progress.accept(new Progress(Stage.PACK, message));
+                    }
+
+                    @Override public void onWarning(String message) {
+                        warnings.add(message);
+                        onStatus(message);
+                    }
+                }).thenApply(result -> new Result(null, 0, 0, List.of(), List.copyOf(warnings), result.version()));
+            });
+        } catch (IOException | IllegalArgumentException error) {
+            return CompletableFuture.failedFuture(error);
+        }
     }
 
     public CompletableFuture<Result> update(ModInstanceContext instance, ReleaseChannel channel, Consumer<Progress> listener) {
@@ -87,7 +139,7 @@ public final class InstanceUpdateService {
                 });
             }
             return chain.thenApply(succeeded -> new Result(loader, succeeded, skipped,
-                    List.copyOf(failures), scan.warnings()));
+                    List.copyOf(failures), scan.warnings(), null));
         });
     }
 
@@ -110,9 +162,9 @@ public final class InstanceUpdateService {
         return error;
     }
 
-    public enum Stage { LOADER, SCAN, CHECK, MOD }
+    public enum Stage { LOADER, SCAN, CHECK, MOD, PACK_CHECK, PACK }
     public record Progress(Stage stage, String detail) { }
     public record Failure(String name, Throwable cause) { }
     public record Result(LoaderUpdateService.Result loader, int updatedMods, int skippedMods,
-                         List<Failure> failures, List<String> warnings) { }
+                         List<Failure> failures, List<String> warnings, String packVersion) { }
 }

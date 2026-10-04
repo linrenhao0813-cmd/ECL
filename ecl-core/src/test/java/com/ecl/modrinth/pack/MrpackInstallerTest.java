@@ -155,11 +155,38 @@ class MrpackInstallerTest {
         Path updated = tempDir.resolve("modified-updated.mrpack");
         writePack(updated, "Modified Pack", "2", "{\"minecraft\":\"1.21.4\"}", Map.of());
         List<String> statuses = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
         installer.update(updated.toFile(), gameRoot.toFile(), installed.profileId(),
-                "project", "v2", statuses::add);
+                "project", "v2", new MrpackInstaller.Listener() {
+                    @Override public void onStatus(String message) { statuses.add(message); }
+                    @Override public void onWarning(String message) {
+                        warnings.add(message);
+                        MrpackInstaller.Listener.super.onWarning(message);
+                    }
+                });
 
         assertEquals("user changed this", Files.readString(modified));
+        assertTrue(warnings.stream().anyMatch(warning -> warning.contains("mods/removed.jar")));
         assertTrue(statuses.stream().anyMatch(status -> status.contains("mods/removed.jar")));
+    }
+
+    @Test
+    void updateReportsMissingManifestAsWarning() throws Exception {
+        Path initial = tempDir.resolve("missing-manifest-initial.mrpack");
+        writePack(initial, "Missing Manifest", "1", "{\"minecraft\":\"1.21.4\"}", Map.of("mods/old.jar", "old"));
+        Path gameRoot = tempDir.resolve("game-missing-manifest");
+        MrpackInstaller installer = new MrpackInstaller();
+        var installed = installer.install(initial.toFile(), gameRoot.toFile(), "Missing Manifest", "project", "v1", null);
+        Files.delete(installed.instanceDirectory().resolve(PackManifest.FILE_NAME));
+        Path updated = tempDir.resolve("missing-manifest-updated.mrpack");
+        writePack(updated, "Missing Manifest", "2", "{\"minecraft\":\"1.21.4\"}", Map.of());
+        List<String> warnings = new ArrayList<>();
+        installer.update(updated.toFile(), gameRoot.toFile(), installed.profileId(), "project", "v2", new MrpackInstaller.Listener() {
+            @Override public void onStatus(String message) { }
+            @Override public void onWarning(String message) { warnings.add(message); }
+        });
+        assertTrue(warnings.stream().anyMatch(warning -> warning.contains("未找到旧整合包文件清单")));
+        assertTrue(Files.exists(installed.instanceDirectory().resolve("mods/old.jar")));
     }
 
     @Test

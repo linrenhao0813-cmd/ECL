@@ -59,10 +59,6 @@ final class RuntimeSummaryPresenter {
         if (ui.selectedRuntimeMetaLabel != null) {
             ui.selectedRuntimeMetaLabel.setText(metadata);
         }
-        if (ui.instanceMetaLabel != null) {
-            ui.instanceMetaLabel.setText(selectedVersion == null || selectedVersion.isBlank()
-                    ? Messages.get("label.notSelected") : metadata);
-        }
     }
 
     /** "Minecraft &lt;version&gt; · &lt;loader&gt;" for the selected instance, or the choose hint. */

@@ -65,7 +65,7 @@ class InstanceDetailsPaneTest extends ApplicationTest {
     }
 
     @Test
-    void changingTheLaunchTargetPreservesDisplayDraftsAndUpdatesTheTargetButton() {
+    void changingTheLaunchTargetPreservesDisplayDraftsWithoutTargetControls() {
         interact(() -> {
             InstanceDetailsPane pane = showDetails();
             TextField name = (TextField) pane.lookup("#instance-display-name");
@@ -73,11 +73,10 @@ class InstanceDetailsPaneTest extends ApplicationTest {
             launcher.setLaunchTarget("different-target");
             assertEquals("Unsaved display name", name.getText());
             assertTrue(pane.hasUnsavedChanges());
-            Button target = (Button) pane.lookup("#instance-set-target");
-            assertFalse(target.isDisabled());
-            target.fire();
-            assertEquals("details-test-instance", launcher.getSelectedVersion());
-            assertTrue(target.isDisabled());
+            assertNull(pane.lookup("#instance-set-target"));
+            assertNull(pane.lookup(".instance-target-badge"));
+            assertNull(stage.getScene().lookup("#instance-bar-meta"));
+            assertEquals("different-target", launcher.getSelectedVersion());
             assertEquals("Unsaved display name", name.getText());
         });
     }

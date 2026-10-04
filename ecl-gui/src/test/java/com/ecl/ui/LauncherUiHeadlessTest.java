@@ -22,6 +22,27 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     private Stage stage;
 
     @Test
+    void packUpgradeCompletionKeepsWarningsVisible() throws Exception {
+        String warning = "警告：旧版文件已被用户修改，更新时予以保留: mods/removed.jar";
+        var result = new com.ecl.modrinth.service.InstanceUpdateService.Result(
+                null, 0, 0, java.util.List.of(), java.util.List.of(warning), "2.0");
+        var finish = InstanceUpdateWorkflow.class.getDeclaredMethod("finish", String.class,
+                com.ecl.modrinth.service.InstanceUpdateService.Result.class, Throwable.class);
+        finish.setAccessible(true);
+        interact(() -> {
+            try {
+                finish.invoke(launcher.instanceUpdates, "warning-test-pack", result, null);
+            } catch (ReflectiveOperationException error) {
+                throw new AssertionError(error);
+            }
+            var label = (javafx.scene.control.Label) stage.getScene().lookup("#instance-update-status");
+            assertNotNull(label);
+            assertTrue(label.getText().contains("2.0"));
+            assertTrue(label.getText().contains(warning));
+        });
+    }
+
+    @Test
     void wizardListRefreshDoesNotSelectItsFirstInstalledInstance(@org.junit.jupiter.api.io.TempDir java.nio.file.Path root)
             throws Exception {
         String id = "wizard-selection-" + java.util.UUID.randomUUID();

@@ -201,8 +201,8 @@ public final class LauncherUiSnapshot {
             }
             if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("downloads")) {
                 showAppView("DOWNLOADS");
-                // Category 6 is the last entry (modpack updates); the navigation has 7 items.
-                selectDownloadCategory(primaryStage, 6);
+                // Capture the game-instance category in the six-category download workspace.
+                selectDownloadCategory(primaryStage, 0);
                 return primaryStage.getScene();
             }
             if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("local-servers")) {
