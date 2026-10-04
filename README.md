@@ -98,6 +98,18 @@ Microsoft 正版账户的皮肤上传至官方服务；离线账户的皮肤保�
 
 覆盖率校验要求：`ecl-core` 行覆盖率至少 60%、分支覆盖率至少 40%；`ecl-gui` 分别至少为 20% 和 15%。
 
+### 依赖升级
+
+依赖版本由 `gradle/libs.versions.toml` 管理，并由各模块的 `gradle.lockfile` 和
+`gradle/verification-metadata.xml` 固定与校验。升级依赖时须一起更新受影响的锁文件及校验元数据，
+审阅新增校验值，再用默认校验模式执行 `check` 和 `installDist`；不要在 CI 中关闭依赖校验。
+
+单元测试中的 Java 运行时元数据使用公共 IP 字面量作为示例 URL，仅验证元数据与地址策略，
+不依赖外部 DNS 或实际下载。HTTP、私有地址、无效校验和及超限大小均须被拒绝。
+
+`gradle/verification-keyring.keys` 保存已信任的 JetBrains 注解签名公钥，指纹为
+`2E3A1AFFE42B5F53AF19F780BCF4173966770193`，避免构建依赖密钥服务器的可用性。
+
 ### Windows 打包
 
 ```powershell
