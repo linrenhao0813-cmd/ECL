@@ -6,14 +6,16 @@ import javax.management.JMException;
 import javax.management.ObjectName;
 
 import com.ecl.config.SettingKey;
+
 public class ECLConfig {
     public static final String LAUNCHER_NAME = "ECL";
-    public static final String LAUNCHER_VERSION = "1.0.0";
+    public static final String LAUNCHER_VERSION = "1.0.1";
+    public static final String VERSION_DOWNLOAD_COMPLETE_MARKER = ".ecl-download-complete";
     public static final String MC_VERSION_MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
     public static final int OFFICIAL_SOURCE_TIMEOUT_MS = 8000;
     public static final int MIRROR_SOURCE_TIMEOUT_MS = 60000;
+    public static final int MAX_DOWNLOAD_CONCURRENT = 8;
     public static final int DOWNLOAD_THREADS = parseDownloadThreads();
-    public static final int MAX_CAPTURED_GAME_LOG_CHARS = 80_000;
 
     /** A stored value of zero means that the launcher should calculate the heap automatically. */
     public static final int AUTO_MEMORY_MB = 0;
@@ -58,8 +60,6 @@ public class ECLConfig {
             new SettingKey<>("closeAfterLaunch", Boolean.class, false);
     public static final SettingKey<Integer> KEY_PROCESSOR_COUNT =
             new SettingKey<>("processorCount", Integer.class, 0);
-    public static final SettingKey<Boolean> KEY_SHOW_GAME_CONSOLE =
-            new SettingKey<>("showGameConsole", Boolean.class, true);
     public static final SettingKey<Boolean> KEY_BACKUP_ON_LAUNCH =
             new SettingKey<>("backupOnLaunch", Boolean.class, true);
     public static final SettingKey<Integer> KEY_BACKUP_KEEP_COUNT =
@@ -67,7 +67,7 @@ public class ECLConfig {
     public static final SettingKey<Boolean> KEY_BACKUP_INCLUDE_MODS =
             new SettingKey<>("backupIncludeMods", Boolean.class, false);
     public static final SettingKey<Integer> KEY_DOWNLOAD_MAX_CONCURRENT =
-            new SettingKey<>("downloadMaxConcurrent", Integer.class, 2);
+            new SettingKey<>("downloadMaxConcurrent", Integer.class, DOWNLOAD_THREADS);
     /** A value of zero means unlimited download speed. */
     public static final SettingKey<Integer> KEY_DOWNLOAD_RATE_LIMIT_KB =
             new SettingKey<>("downloadRateLimitKb", Integer.class, 0);
@@ -177,13 +177,19 @@ public class ECLConfig {
     }
 
     private static int parseDownloadThreads() {
-        int defaultValue = Math.min(8, Math.max(4, Runtime.getRuntime().availableProcessors()));
+        int defaultValue = clampDownloadConcurrency(
+                Math.max(4, Runtime.getRuntime().availableProcessors()));
         String configured = System.getProperty("ecl.download.threads");
         if (configured == null || configured.isBlank()) return defaultValue;
         try {
-            return Math.max(2, Math.min(16, Integer.parseInt(configured.trim())));
+            return Math.max(2, clampDownloadConcurrency(
+                    Integer.parseInt(configured.trim())));
         } catch (NumberFormatException ignored) {
             return defaultValue;
         }
+    }
+
+    public static int clampDownloadConcurrency(int value) {
+        return Math.max(1, Math.min(MAX_DOWNLOAD_CONCURRENT, value));
     }
 }

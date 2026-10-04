@@ -40,7 +40,8 @@ public final class ServerStatusService {
      * 调用方应沿用现有的 UNKNOWN 状态并跳过网络请求。
      */
     public static boolean shouldProbe(PublicServer server) {
-        if (server == null || server.address() == null || server.address().isBlank()) {
+        if (server == null || server.address() == null || server.address().isBlank()
+                || !PublicServer.isSafeHost(server.ip())) {
             return false;
         }
         Long failedAt = FAILURE_TIMES.get(server.address());
@@ -50,7 +51,12 @@ public final class ServerStatusService {
 
     /** 构造探测地址，默认端口省略端口号。 */
     static String url(PublicServer server) {
-        return ENDPOINT + server.address();
+        if (server == null || !PublicServer.isSafeHost(server.ip())) {
+            throw new IllegalArgumentException("Unsafe Minecraft server host");
+        }
+        String host = java.net.URLEncoder.encode(server.ip(), java.nio.charset.StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        return server.port() == 25565 ? ENDPOINT + host : ENDPOINT + host + ":" + server.port();
     }
 
     static ServerStatus parse(JsonObject json) {

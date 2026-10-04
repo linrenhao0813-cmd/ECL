@@ -12,6 +12,7 @@ import com.ecl.modrinth.repository.InstalledModRepository;
 import com.ecl.modrinth.transaction.FileModInstallationTransaction;
 import com.ecl.modrinth.transaction.ModInstallationPlan;
 import com.ecl.modrinth.transaction.PlannedModFile;
+import com.ecl.util.FileUtil;
 
 import java.io.IOException;
 import java.nio.file.FileStore;
@@ -124,6 +125,7 @@ public final class ModInstallationService {
 
     private void prepareDirectoriesAndSpace(ModInstallationPlan plan) throws IOException {
         Path mods = plan.instance().modsDirectory();
+        FileUtil.validateExistingAncestors(plan.instance().gameDirectory(), mods);
         Files.createDirectories(mods);
         if (!Files.isWritable(mods)) {
             throw new ModInstallationException("实例 mods 目录不可写: " + mods);

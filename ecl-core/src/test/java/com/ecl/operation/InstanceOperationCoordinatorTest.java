@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -100,6 +101,37 @@ class InstanceOperationCoordinatorTest {
         } finally {
             releaseFirst.countDown();
             executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void interruptibleAcquireStopsWaitingWithoutLeakingUsers() throws Exception {
+        InstanceOperationCoordinator coordinator = new InstanceOperationCoordinator();
+        UUID instanceId = UUID.randomUUID();
+        CountDownLatch waiting = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean();
+
+        try (AutoCloseable first = coordinator.acquire(instanceId)) {
+            Thread waiter = Thread.ofPlatform().start(() -> {
+                waiting.countDown();
+                try (AutoCloseable ignored = coordinator.acquireInterruptibly(instanceId)) {
+                    throw new AssertionError("interrupted waiter acquired the lock");
+                } catch (InterruptedException expected) {
+                    interrupted.set(true);
+                } catch (Exception unexpected) {
+                    throw new AssertionError(unexpected);
+                }
+            });
+            assertTrue(waiting.await(1, TimeUnit.SECONDS));
+            waiter.interrupt();
+            waiter.join(2_000);
+            assertFalse(waiter.isAlive());
+            assertTrue(interrupted.get());
+        }
+
+        assertFalse(coordinator.isLocked(instanceId));
+        try (AutoCloseable ignored = coordinator.acquire(instanceId)) {
+            assertTrue(coordinator.isLocked(instanceId));
         }
     }
 

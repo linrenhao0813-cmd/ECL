@@ -12,7 +12,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.zip.ZipFile;
 
@@ -263,6 +262,9 @@ public final class MrpackInstaller {
         }
         Path profileFile = com.ecl.util.FileUtil.safeVersionJson(
                 ECLConfig.getVersionsDir(), safeProfileId).toPath().toAbsolutePath().normalize();
+        // Recover interrupted writes before reading either profile or installed manifest; those
+        // reads must observe the post-recovery state rather than stale half-applied metadata.
+        PackUpdateTransaction.recoverIncompleteTransactions(instanceRoot, profileFile);
         if (!Files.isRegularFile(profileFile)) {
             throw new IOException("Modpack profile metadata does not exist: " + profileFile);
         }
@@ -287,9 +289,8 @@ public final class MrpackInstaller {
         LoaderDependency loaderDependency = MrpackDependencyResolver.findLoader(dependencies);
         String packVersion = JsonUtil.getString(index, "versionId", sourceVersionId);
         JsonObject profile = HttpUtil.readJson(profileFile.toFile());
-        PackManifest oldManifest = readInstalledManifest(instanceRoot, safeListener);
+        PackManifest oldManifest = MrpackInstallSupport.readInstalledManifest(instanceRoot, safeListener);
 
-        PackUpdateTransaction.recoverIncompleteTransactions(instanceRoot, profileFile);
         try (PackUpdateTransaction transaction = transactionFactory.create(instanceRoot, profileFile)) {
             Path staging = transaction.stagingDirectory();
             safeListener.onStatus("正在准备整合包更新文件...");
@@ -301,7 +302,7 @@ public final class MrpackInstaller {
             newManifest.write(stagedManifest);
 
             Path loaderStaging = staging.resolve(".ecl-loader");
-            LoaderState loaderState = prepareLoader(
+            MrpackInstallSupport.LoaderState loaderState = prepareLoader(
                     profile, minecraftVersion, loaderDependency, safeListener,
                     loaderStaging.resolve("versions"), loaderStaging.resolve("libraries"), transaction);
             MrpackProfileWriter.update(
@@ -311,7 +312,7 @@ public final class MrpackInstaller {
             Path stagedProfile = staging.resolve(".ecl-profile-update.json");
             Files.writeString(stagedProfile, profile.toString(), StandardCharsets.UTF_8);
 
-            int warnings = stagePackChanges(transaction, instanceRoot, staging,
+            int warnings = MrpackInstallSupport.stagePackChanges(transaction, instanceRoot, staging,
                     oldManifest, newManifest, safeListener);
             transaction.stageReplacement(stagedManifest,
                     instanceRoot.resolve(PackManifest.FILE_NAME));
@@ -331,13 +332,13 @@ public final class MrpackInstaller {
         }
     }
 
-    private LoaderState prepareLoader(JsonObject profile, String minecraftVersion,
-                                      LoaderDependency requested, Listener listener,
-                                      Path stagedVersions, Path stagedLibraries,
-                                      PackUpdateTransaction transaction)
+    private MrpackInstallSupport.LoaderState prepareLoader(JsonObject profile, String minecraftVersion,
+                                                           LoaderDependency requested, Listener listener,
+                                                           Path stagedVersions, Path stagedLibraries,
+                                                           PackUpdateTransaction transaction)
             throws IOException {
         if (requested == null) {
-            return new LoaderState(minecraftVersion, "", "");
+            return new MrpackInstallSupport.LoaderState(minecraftVersion, "", "");
         }
         String currentMinecraft = JsonUtil.getString(profile, "eclMinecraftVersion", "");
         String currentLoader = JsonUtil.getString(profile, "eclModLoader", "");
@@ -348,7 +349,8 @@ public final class MrpackInstaller {
                 || !requested.version().equals(currentLoaderVersion)
                 || currentParent.isBlank();
         if (!changed) {
-            return new LoaderState(currentParent, requested.loader().id(), requested.version());
+            return new MrpackInstallSupport.LoaderState(
+                    currentParent, requested.loader().id(), requested.version());
         }
         listener.onStatus("正在准备整合包需要的 " + requested.loader().displayName()
                 + " " + requested.version() + "...");
@@ -359,54 +361,7 @@ public final class MrpackInstaller {
                 ECLConfig.getVersionsDir().toPath());
         transaction.stageExternalDirectory(stagedLibraries,
                 ECLConfig.getLibrariesDir().toPath());
-        return new LoaderState(installed.profileId(), installed.loader().id(),
-                installed.loaderVersion());
+        return new MrpackInstallSupport.LoaderState(
+                installed.profileId(), installed.loader().id(), installed.loaderVersion());
     }
-
-    private static int stagePackChanges(PackUpdateTransaction transaction, Path instanceRoot,
-                                        Path staging, PackManifest oldManifest,
-                                        PackManifest newManifest, Listener listener)
-            throws IOException {
-        for (String relative : newManifest.files().keySet()) {
-            transaction.stageReplacement(
-                    PackManifest.resolve(staging, relative),
-                    PackManifest.resolve(instanceRoot, relative));
-        }
-        int warnings = 0;
-        for (Map.Entry<String, String> old : oldManifest.files().entrySet()) {
-            if (newManifest.files().containsKey(old.getKey())) {
-                continue;
-            }
-            Path target = PackManifest.resolve(instanceRoot, old.getKey());
-            if (!Files.exists(target)) {
-                continue;
-            }
-            if (Files.isRegularFile(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                    && PackManifest.sha512(target).equalsIgnoreCase(old.getValue())) {
-                transaction.stageDeletion(target);
-            } else {
-                warnings++;
-                listener.onStatus("警告：旧版文件已被用户修改，更新时予以保留: " + old.getKey());
-            }
-        }
-        return warnings;
-    }
-
-    private static PackManifest readInstalledManifest(Path instanceRoot, Listener listener) {
-        Path manifestFile = instanceRoot.resolve(PackManifest.FILE_NAME);
-        if (!Files.isRegularFile(manifestFile)) {
-            listener.onStatus("未找到旧整合包文件清单；本次更新不会删除旧版遗留文件");
-            return new PackManifest("", Map.of());
-        }
-        try {
-            return PackManifest.read(manifestFile);
-        } catch (IOException error) {
-            listener.onStatus("旧整合包文件清单无效；本次更新不会删除旧版遗留文件");
-            return new PackManifest("", Map.of());
-        }
-    }
-
-    private record LoaderState(String parentProfile, String loaderId, String loaderVersion) {
-    }
-
 }

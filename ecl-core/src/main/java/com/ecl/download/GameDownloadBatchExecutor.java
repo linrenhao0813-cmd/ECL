@@ -1,6 +1,5 @@
 package com.ecl.download;
 
-import com.ecl.ECLConfig;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.NetworkUriPolicy;
 
@@ -8,6 +7,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -19,9 +19,11 @@ import java.util.concurrent.Future;
 final class GameDownloadBatchExecutor {
     private static final long MAX_UNSIZED_LIBRARY_BYTES = 1024L * 1024 * 1024;
     private final ExecutorService executor;
+    private final int maxWorkers;
 
-    GameDownloadBatchExecutor(ExecutorService executor) {
+    GameDownloadBatchExecutor(ExecutorService executor, int maxWorkers) {
         this.executor = executor;
+        this.maxWorkers = maxWorkers;
     }
 
     void download(List<DownloadTask> tasks, String phase,
@@ -33,7 +35,8 @@ final class GameDownloadBatchExecutor {
             return;
         }
 
-        int threadCount = Math.min(ECLConfig.DOWNLOAD_THREADS, tasks.size());
+        int threadCount = Math.min(Math.min(maxWorkers,
+                HttpUtil.getDownloadMaxConcurrent()), tasks.size());
         if (listener != null) {
             listener.onStatus("使用 " + threadCount + " 个线程下载" + phase
                     + "，共 " + tasks.size() + " 个文件...");
@@ -84,21 +87,26 @@ final class GameDownloadBatchExecutor {
 
     private void downloadAndVerify(DownloadTask task,
                                    GameDownloader.DownloadListener listener) throws IOException {
-        NetworkUriPolicy.requireHttpsOrLoopbackHttp(
+        NetworkUriPolicy.requireSecureDownload(
                 URI.create(task.url()), task.sourceLabel() + " URL");
         long maxBytes = task.expectedSize() > 0
                 ? task.expectedSize() : MAX_UNSIZED_LIBRARY_BYTES;
-        HttpUtil.downloadFileWithProgress(task.url(), task.target(), null,
-                sourceCallback(task.sourceLabel(), listener), maxBytes);
-        if (task.expectedSize() > 0 && task.target().length() != task.expectedSize()) {
-            Files.deleteIfExists(task.target().toPath());
-            throw new IOException(task.target().getName() + " size does not match metadata");
+        Path target = task.target().toPath().toAbsolutePath().normalize();
+        try {
+            HttpUtil.downloadFileWithProgress(task.url(), target.toFile(), null,
+                    sourceCallback(task.sourceLabel(), listener), maxBytes);
+            if (task.expectedSize() > 0 && Files.size(target) != task.expectedSize()) {
+                throw new IOException(task.target().getName() + " size does not match metadata");
+            }
+            InstallHelpers.verifyDownloadedFile(target.toFile(), task.sha1());
+        } catch (IOException failure) {
+            Files.deleteIfExists(target);
+            throw failure;
         }
-        InstallHelpers.verifyDownloadedFile(task.target(), task.sha1());
     }
 
-    private HttpUtil.SourceCallback sourceCallback(String label,
-                                                    GameDownloader.DownloadListener listener) {
+    HttpUtil.SourceCallback sourceCallback(String label,
+                                           GameDownloader.DownloadListener listener) {
         return new HttpUtil.SourceCallback() {
             @Override
             public void onSource(String originalUrl, String candidateUrl,

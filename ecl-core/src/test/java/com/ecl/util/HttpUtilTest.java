@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -68,17 +69,23 @@ class HttpUtilTest {
     }
     private HttpServer server;
     private String baseUrl;
+    private AutoCloseable loopbackDownloads;
 
     @BeforeEach
     void startServer() throws IOException {
+        loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
     }
 
     @AfterEach
-    void stopServer() {
-        server.stop(0);
+    void stopServer() throws Exception {
+        try {
+            server.stop(0);
+        } finally {
+            loopbackDownloads.close();
+        }
     }
 
     @Test
@@ -293,6 +300,18 @@ class HttpUtilTest {
         assertEquals("\"version-1\"", ifRange.get());
         assertArrayEquals(complete, Files.readAllBytes(target.toPath()));
         assertFalse(Files.exists(Path.of(target + ".part")));
+    }
+
+    @Test
+    void prioritizesTheSourceThatOwnsAResumablePartial() {
+        String official = "https://piston-data.mojang.com/client.jar";
+        String mirror = "https://bmclapi2.bangbang93.com/client.jar";
+
+        List<String> ordered = ResumableFileDownloader.prioritizeResumeSource(
+                List.of(official, mirror),
+                new PartialDownloadMetadata(mirror, "\"version-1\"", ""));
+
+        assertEquals(List.of(mirror, official), ordered);
     }
 
     @Test

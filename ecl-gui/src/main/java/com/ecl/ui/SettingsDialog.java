@@ -8,6 +8,7 @@ import com.ecl.game.InstanceGameSettingsStore;
 import com.ecl.game.InstanceLaunchProfile;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.util.JavaRuntimeUtil;
+import com.ecl.util.JvmArgumentPolicy;
 import com.ecl.util.TextUtil;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -193,9 +194,7 @@ final class SettingsDialog {
         ui.applyFieldStyle(processorField);
         CheckBox closeAfterLaunchField = new CheckBox("游戏启动后隐藏启动器，退出后恢复");
         closeAfterLaunchField.setSelected(ui.closeAfterLaunch);
-        CheckBox showConsoleField = new CheckBox("启动后自动打开实时控制台");
-        showConsoleField.setSelected(ui.showGameConsole);
-        VBox behaviorBox = new VBox(10, fullscreenField, closeAfterLaunchField, showConsoleField);
+        VBox behaviorBox = new VBox(10, fullscreenField, closeAfterLaunchField);
 
         CheckBox backupOnLaunchField = new CheckBox("每次启动游戏前自动备份存档");
         backupOnLaunchField.setSelected(ui.backupOnLaunch);
@@ -287,7 +286,8 @@ final class SettingsDialog {
             }
             List<String> configuredJvmArguments;
             try {
-                configuredJvmArguments = TextUtil.parseCommandLine(jvmField.getText());
+                configuredJvmArguments = JvmArgumentPolicy.requireSafe(
+                        TextUtil.parseCommandLine(jvmField.getText()));
             } catch (IllegalArgumentException jvmError) {
                 ui.setStatus("JVM 参数无效", jvmError.getMessage());
                 return;
@@ -323,7 +323,6 @@ final class SettingsDialog {
             ui.quickServer = serverField.getText().trim();
             ui.processorCount = configuredProcessors;
             ui.closeAfterLaunch = closeAfterLaunchField.isSelected();
-            ui.showGameConsole = showConsoleField.isSelected();
             ui.backupOnLaunch = backupOnLaunchField.isSelected();
             ui.backupKeepCount = configuredBackupKeepCount;
             ui.backupIncludeMods = backupIncludeModsField.isSelected();
@@ -345,7 +344,6 @@ final class SettingsDialog {
             ui.settingsManager.set(ECLConfig.KEY_QUICK_SERVER, ui.quickServer);
             ui.settingsManager.set(ECLConfig.KEY_PROCESSOR_COUNT, ui.processorCount);
             ui.settingsManager.set(ECLConfig.KEY_CLOSE_AFTER_LAUNCH, ui.closeAfterLaunch);
-            ui.settingsManager.set(ECLConfig.KEY_SHOW_GAME_CONSOLE, ui.showGameConsole);
             ui.settingsManager.set(ECLConfig.KEY_BACKUP_ON_LAUNCH, ui.backupOnLaunch);
             ui.settingsManager.set(ECLConfig.KEY_BACKUP_KEEP_COUNT, ui.backupKeepCount);
             ui.settingsManager.set(ECLConfig.KEY_BACKUP_INCLUDE_MODS, ui.backupIncludeMods);

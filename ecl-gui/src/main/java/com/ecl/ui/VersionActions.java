@@ -3,6 +3,7 @@ package com.ecl.ui;
 import com.ecl.ECLConfig;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.launcher.VersionManager;
+import com.ecl.util.InstanceOperationLease;
 import javafx.application.Platform;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
@@ -16,10 +17,12 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Owns version delete / reinstall / refresh / loader-version restore and Wiki navigation. */
 final class VersionActions {
     private final LauncherUI ui;
+    private final AtomicLong versionListGeneration = new AtomicLong();
 
     VersionActions(LauncherUI ui) {
         this.ui = ui;
@@ -50,8 +53,7 @@ final class VersionActions {
             ui.setStatus("版本 ID 无效", ui.cleanMessage(error));
             return;
         }
-        boolean localInstance = Files.isDirectory(
-                ui.getConfiguredGameRootDir().toPath().resolve("versions").resolve(profileId));
+        boolean localInstance = Files.isDirectory(ui.resolveVersionInstanceRoot(profileId).toPath());
         if (!localMetadata && !localInstance) {
             ui.setStatus("版本尚未安装", profileId + " 没有可删除的本地文件。");
             return;
@@ -215,100 +217,131 @@ final class VersionActions {
         if (profileId.contains("/") || profileId.contains("\\") || profileId.contains("..")) {
             throw new IOException("版本 ID 无效");
         }
-        Path metadataRoot = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
-        deleteTreeWithin(metadataRoot, metadataRoot.resolve(profileId));
-        if (includeInstance) {
-            Path instanceRoot = ui.getConfiguredGameRootDir().toPath().toAbsolutePath()
-                    .normalize().resolve("versions").normalize();
-            deleteTreeWithin(instanceRoot, instanceRoot.resolve(profileId));
+        Path runDirectory = ui.resolveVersionGameDir(profileId).toPath()
+                .toAbsolutePath().normalize();
+        Path operationLock = runDirectory.resolve(".ecl").resolve("operation.lock");
+        try (InstanceOperationLease lease = InstanceOperationLease.tryAcquire(runDirectory)) {
+            if (lease == null) {
+                throw new IOException("Instance is running or busy in another launcher process");
+            }
+            Path metadataRoot = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
+            deleteTreeWithin(metadataRoot, metadataRoot.resolve(profileId), operationLock);
+            if (includeInstance) {
+                Path instanceRoot = ui.getConfiguredGameRootDir().toPath().toAbsolutePath()
+                        .normalize().resolve("versions").normalize();
+                Path instanceTarget = ui.resolveVersionInstanceRoot(profileId).toPath()
+                        .toAbsolutePath().normalize();
+                deleteTreeWithin(instanceRoot, instanceTarget, operationLock);
+                if (operationLock.startsWith(instanceTarget)) {
+                    lease.releaseLegacyLock();
+                    deleteTreeWithin(instanceRoot, instanceTarget, null);
+                }
+            }
         }
     }
 
-    private void deleteTreeWithin(Path root, Path target) throws IOException {
+    static void deleteTreeWithin(Path root, Path target, Path preservedPath) throws IOException {
         Path normalizedRoot = root.toAbsolutePath().normalize();
         Path normalizedTarget = target.toAbsolutePath().normalize();
+        Path normalizedPreserved = preservedPath == null
+                ? null : preservedPath.toAbsolutePath().normalize();
         if (normalizedTarget.equals(normalizedRoot) || !normalizedTarget.startsWith(normalizedRoot)) {
             throw new IOException("拒绝删除越界目录: " + target);
         }
         if (!Files.exists(normalizedTarget)) return;
         try (var stream = Files.walk(normalizedTarget)) {
             for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
+                if (normalizedPreserved != null
+                        && (path.equals(normalizedPreserved) || normalizedPreserved.startsWith(path))) {
+                    continue;
+                }
                 Files.deleteIfExists(path);
             }
         }
     }
 
     void restoreVersionComboItems(String preferredVersion) {
-        if (ui.versionCombo == null || ui.versionTypeCombo == null || ui.versionManager == null) {
+        if (ui.versionCombo == null || ui.versionManager == null) {
             return;
         }
-        VersionManager.VersionCategory category = getSelectedVersionCategory();
-        // 本地版本档案扫描与合并放到后台线程，完成后在 FX 线程回填下拉框，
-        // 避免首页构建时同步扫描解析全部本地版本 JSON 造成卡顿。
+        long generation = versionListGeneration.incrementAndGet();
+        // 首页只列出配置的 .minecraft/versions 下已经存在且具有本地启动配置的实例。
+        // 新实例统一从下载页创建，避免在线版本选择意外替换当前启动目标。
         ui.runAsync("ecl-restore-versions", () -> {
             try {
-                List<String> versions = ui.versionManager.mergeLocalLoaderProfiles(
-                        ui.versionManager.getVersions(category));
+                ui.versionManager.invalidateLocalVersionProfiles();
+                List<String> versions = ui.gameRepository().installedInstanceDirectories();
                 Platform.runLater(() -> {
-                    if (ui.versionCombo == null) {
+                    if (generation != versionListGeneration.get() || ui.versionCombo == null) {
                         return;
                     }
-                    ui.versionCombo.getItems().setAll(versions);
-                    if (preferredVersion != null && versions.contains(preferredVersion)) {
-                        ui.versionCombo.getSelectionModel().select(preferredVersion);
-                    } else if (preferredVersion != null) {
-                        // 与同步旧行为一致：目标版本不在列表时仍直接设置为当前值。
-                        ui.versionCombo.setValue(preferredVersion);
-                    } else if (!versions.isEmpty()) {
-                        ui.versionCombo.getSelectionModel().select(0);
-                    }
+                    applyInstalledVersions(versions, preferredVersion);
                 });
             } catch (Exception e) {
-                LauncherUI.LOGGER.warn("Failed to restore version choices", e);
+                LauncherUI.LOGGER.warn("Failed to restore installed instance choices", e);
             }
         });
     }
 
     void refreshVersions() {
-        VersionManager.VersionCategory category = getSelectedVersionCategory();
-        String categoryLabel = category.getLabel();
+        long generation = versionListGeneration.incrementAndGet();
         ui.refreshBtn.setDisable(true);
         ui.versionCombo.setDisable(true);
-        ui.versionTypeCombo.setDisable(true);
         ui.updateSelectedVersionWikiButton();
-        ui.setStatus("正在获取版本列表...", "正在加载 " + categoryLabel + "，失败时会回退到本地缓存。 ");
+        ui.setStatus("正在读取本地实例...", "正在扫描 .minecraft/versions 中已下载的实例。 ");
 
         ui.runAsync("ecl-refresh-versions", () -> {
             try {
-                ui.versionManager.refresh();
-                List<String> versions = ui.versionManager.mergeLocalLoaderProfiles(
-                        ui.versionManager.getVersions(category));
+                ui.versionManager.invalidateLocalVersionProfiles();
+                List<String> versions = ui.gameRepository().installedInstanceDirectories();
                 Platform.runLater(() -> {
-                    String current = ui.versionCombo.getValue();
-                    ui.versionCombo.getItems().setAll(versions);
-                    if (current != null && versions.contains(current)) {
-                        ui.versionCombo.getSelectionModel().select(current);
-                    } else if (!versions.isEmpty()) {
-                        ui.versionCombo.getSelectionModel().select(0);
+                    if (generation != versionListGeneration.get()) {
+                        return;
                     }
-                    ui.setStatus("版本列表已更新", versions.isEmpty() ? "没有发现可用的" + categoryLabel + "。" : "已载入 " + versions.size() + " 个" + categoryLabel + "。 ");
+                    String current = ui.versionCombo.getValue();
+                    applyInstalledVersions(versions, current);
+                    ui.setStatus("本地实例已更新", versions.isEmpty()
+                            ? "没有发现已下载实例，请先到“下载”页安装。"
+                            : "已载入 " + versions.size() + " 个本地实例。 ");
                     ui.refreshBtn.setDisable(false);
                     ui.versionCombo.setDisable(false);
-                    ui.versionTypeCombo.setDisable(false);
                     ui.updateRuntimeSummary();
                     ui.updateSelectedVersionWikiButton();
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
+                    if (generation != versionListGeneration.get()) {
+                        return;
+                    }
                     ui.setStatus("获取版本列表失败", ui.cleanMessage(e));
                     ui.refreshBtn.setDisable(false);
                     ui.versionCombo.setDisable(false);
-                    ui.versionTypeCombo.setDisable(false);
                     ui.updateRuntimeSummary();
                     ui.updateSelectedVersionWikiButton();
                 });
             }
         });
+    }
+
+    private void applyInstalledVersions(List<String> versions, String preferredVersion) {
+        ui.versionCombo.getItems().setAll(versions);
+        String selected = chooseInstalledVersion(versions, preferredVersion);
+        if (selected == null) {
+            ui.versionCombo.getSelectionModel().clearSelection();
+            ui.versionCombo.setValue(null);
+            return;
+        }
+        ui.versionCombo.getSelectionModel().select(selected);
+    }
+
+    static String chooseInstalledVersion(List<String> versions, String preferredVersion) {
+        if (versions == null || versions.isEmpty()) {
+            return null;
+        }
+        if (preferredVersion != null && versions.contains(preferredVersion)) {
+            return preferredVersion;
+        }
+        return versions.getFirst();
     }
 
     VersionManager.VersionCategory getSelectedVersionCategory() {
