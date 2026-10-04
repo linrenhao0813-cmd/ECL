@@ -82,7 +82,7 @@ Microsoft 正版账户的皮肤上传至官方服务；离线账户的皮肤保�
 | 命令 | 用途 |
 | --- | --- |
 | `.\gradlew.bat run` | 启动图形界面 |
-| `.\gradlew.bat check` | 运行 JUnit 5、Checkstyle、SpotBugs 和 JaCoCo 校验 |
+| `.\gradlew.bat check` | 运行 JUnit 6、Checkstyle、SpotBugs 和 JaCoCo 校验 |
 | `.\gradlew.bat build` | 构建并验证全部模块 |
 | `.\gradlew.bat installDist` | 生成分发目录 `ecl-boot/build/install/ECL/` |
 | `.\gradlew.bat captureLauncherUi` | 生成界面快照 `ecl-gui/build/visual-qa/ecl-home.png` |
@@ -107,8 +107,8 @@ Microsoft 正版账户的皮肤上传至官方服务；离线账户的皮肤保�
 单元测试中的 Java 运行时元数据使用公共 IP 字面量作为示例 URL，仅验证元数据与地址策略，
 不依赖外部 DNS 或实际下载。HTTP、私有地址、无效校验和及超限大小均须被拒绝。
 
-`gradle/verification-keyring.keys` 保存已信任的 JetBrains 注解签名公钥，指纹为
-`2E3A1AFFE42B5F53AF19F780BCF4173966770193`，避免构建依赖密钥服务器的可用性。
+`gradle/verification-keyring.keys` 保存已信任的 JetBrains、TwelveMonkeys 和 SpotBugs 签名公钥。
+公钥指纹与 `verification-metadata.xml` 中的信任范围一致，避免构建依赖密钥服务器的可用性。
 
 ### Windows 打包
 
