@@ -1,8 +1,8 @@
 # This is a Gradle generated file for dependency locking.
 # Manual edits can break the build and are not advised.
 # This file is expected to be part of source control.
-ch.qos.logback:logback-classic:1.5.25=runtimeClasspath,testRuntimeClasspath
-ch.qos.logback:logback-core:1.5.25=runtimeClasspath,testRuntimeClasspath
+ch.qos.logback:logback-classic:1.6.4=runtimeClasspath,testRuntimeClasspath
+ch.qos.logback:logback-core:1.6.4=runtimeClasspath,testRuntimeClasspath
 com.fasterxml.jackson.core:jackson-annotations:2.19.1=runtimeClasspath,testRuntimeClasspath
 com.fasterxml.jackson.core:jackson-core:2.19.1=runtimeClasspath,testRuntimeClasspath
 com.fasterxml.jackson.core:jackson-databind:2.19.1=runtimeClasspath,testRuntimeClasspath
@@ -78,7 +78,8 @@ org.ow2.asm:asm-util:9.9=spotbugs
 org.ow2.asm:asm:9.8=jacocoAnt
 org.ow2.asm:asm:9.9=spotbugs
 org.reflections:reflections:0.10.2=checkstyle
-org.slf4j:slf4j-api:2.0.17=runtimeClasspath,spotbugs,spotbugsSlf4j,testRuntimeClasspath
+org.slf4j:slf4j-api:2.0.17=spotbugs,spotbugsSlf4j
+org.slf4j:slf4j-api:2.0.19=runtimeClasspath,testRuntimeClasspath
 org.slf4j:slf4j-simple:2.0.17=spotbugsSlf4j
 org.xmlresolver:xmlresolver:5.2.2=checkstyle
 org.xmlresolver:xmlresolver:5.3.3=spotbugs
