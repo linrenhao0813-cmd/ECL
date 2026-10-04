@@ -68,6 +68,9 @@
          <trusted-key id="F4DD59C90148BDC52BEB90A4530AA5F25C25011F" group="org.apache.commons" name="commons-text" version="1.15.0"/>
          <trusted-key id="8FCD23073248F3C28EF9F80380EF47E549604C05" group="jaxen" name="jaxen" version="2.0.6"/>
          <trusted-key id="8FCD23073248F3C28EF9F80380EF47E549604C05" group="jaxen" name="jaxen-parent" version="2.0.6"/>
+         <trusted-key id="2B34821418CF19CF1F2A8352953E02E4F573B46F" group="jakarta.platform" name="jakarta.jakartaee-bom" version="9.1.0"/>
+         <trusted-key id="2B34821418CF19CF1F2A8352953E02E4F573B46F" group="jakarta.platform" name="jakartaee-api-parent" version="9.1.0"/>
+         <trusted-key id="AA70C7C433D501636392EC02153E7A3C2B4E5118" group="org.eclipse.ee4j" name="project" version="1.0.7"/>
       </trusted-keys>
    </configuration>
    <components>
