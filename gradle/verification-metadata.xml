@@ -66,6 +66,7 @@
          <trusted-key id="2B34821418CF19CF1F2A8352953E02E4F573B46F" group="jakarta.platform" name="jakarta.jakartaee-bom" version="9.1.0"/>
          <trusted-key id="2B34821418CF19CF1F2A8352953E02E4F573B46F" group="jakarta.platform" name="jakartaee-api-parent" version="9.1.0"/>
          <trusted-key id="AA70C7C433D501636392EC02153E7A3C2B4E5118" group="org.eclipse.ee4j" name="project" version="1.0.7"/>
+         <trusted-key id="0CDE80149711EB46DFF17AE421A24B3F8B0F594A" group="org.apache" name="apache" version="16"/>
       </trusted-keys>
    </configuration>
    <components>
