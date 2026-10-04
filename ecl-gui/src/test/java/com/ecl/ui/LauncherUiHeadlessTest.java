@@ -195,7 +195,7 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             assertNotNull(scene.lookup("#task-entry-button"), "task entry is missing");
             assertNotNull(scene.lookup("#shared-download-progress"), "shared progress bar is missing");
             assertNotNull(scene.lookup("#task-detail-panel"), "task detail panel is missing");
-            assertNotNull(scene.lookup("#home-instance-settings"), "instance settings entry is missing");
+            assertNull(scene.lookup("#home-instance-settings"));
         });
     }
 
@@ -253,15 +253,15 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             assertTrue(launcher.mainScrollPane.isFitToHeight());
             assertTrue(stage.getScene().getRoot().lookupAll(".forest-status-strip").isEmpty());
             assertTrue(stage.getScene().getRoot().lookupAll(".forest-activity").isEmpty());
-            Button switchInstance = (Button) stage.getScene().lookup("#home-switch-instance");
+            assertNull(stage.getScene().lookup("#home-switch-instance"));
+            assertNull(stage.getScene().lookup("#home-quick-entries"));
             Button upgrade = (Button) stage.getScene().lookup("#home-update-instance");
             assertNotNull(upgrade);
             assertNotNull(stage.getScene().lookup("#instance-update-progress"));
             launcher.setControlsBusy(true);
-            assertTrue(switchInstance.isDisabled());
             assertTrue(upgrade.isDisabled());
             launcher.setControlsBusy(false);
-            switchInstance.fire();
+            launcher.setActiveView(AppView.VERSIONS);
             assertEquals(AppView.VERSIONS, launcher.activeView);
             assertFalse(launcher.mainScrollPane.isFitToHeight());
             launcher.setActiveView(AppView.HOME);

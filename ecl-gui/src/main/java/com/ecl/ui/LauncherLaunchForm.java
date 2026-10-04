@@ -284,16 +284,6 @@ final class LauncherLaunchForm {
         updateLaunchButtonLabel();
         loader.updateLoaderControls();
 
-        Button instanceSettingsButton = ui.createActionButton(
-                Messages.get("home.instanceSettings"), "secondary-button", this::openInstanceManager);
-        instanceSettingsButton.setId("home-instance-settings");
-
-        Button switchInstanceButton = ui.createActionButton(
-                GuiMessages.get("forest.switchInstance"), "secondary-button",
-                () -> ui.setActiveView(AppView.VERSIONS));
-        switchInstanceButton.setId("home-switch-instance");
-        switchInstanceButton.disableProperty().bind(ui.launchBtn.disabledProperty());
-
         ui.refreshBtn = new Button("刷新版本");
         ui.refreshBtn.getStyleClass().addAll("app-button", "secondary-button");
         ui.refreshBtn.setOnAction(e -> ui.versionActions.refreshVersions());
@@ -304,9 +294,9 @@ final class LauncherLaunchForm {
         ui.settingsBtn.setOnAction(e -> ui.showSettingsDialog());
         LauncherUiFactory.setVisible(ui.settingsBtn, false);
 
-        HBox buttonBar = new HBox(14, ui.launchBtn, instanceSettingsButton,
+        HBox buttonBar = new HBox(14, ui.launchBtn,
                 ui.instanceUpdates.createButton(),
-                switchInstanceButton, ui.refreshBtn, ui.settingsBtn);
+                ui.refreshBtn, ui.settingsBtn);
         buttonBar.getStyleClass().add("launch-actions");
         buttonBar.setAlignment(Pos.CENTER_LEFT);
 
@@ -441,13 +431,6 @@ final class LauncherLaunchForm {
             }
             default -> LauncherUiFactory.setVisible(launchHintAction, false);
         }
-    }
-
-    /** Opens settings focused on the current launch target. */
-    private void openInstanceManager() {
-        String target = ui.getSelectedVersion();
-        ui.pageFactory.openInstanceSettings(target);
-        ui.setStatus(Messages.get("instances.detail.opened"), Messages.get("instances.tab.overview"));
     }
 
     void setControlsBusy(boolean busy) {

@@ -58,7 +58,7 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
     }
 
     @Test
-    void settingsOmitsInstanceSubmenuAndHomeRoutesToTheInstanceEditor() throws Exception {
+    void settingsOmitsInstanceSubmenuAndInstancesNavigationOpensTheEditor() throws Exception {
         prepareInstances(false);
         interact(() -> {
             launcher.setActiveView(AppView.SETTINGS);
@@ -67,7 +67,8 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
             assertTrue(settingsTabs.getTabs().stream().noneMatch(tab -> "settings-instance-tab".equals(tab.getId())));
             assertNull(stage.getScene().lookup("#installed-instance-list"));
             launcher.setActiveView(AppView.HOME);
-            ((Button) stage.getScene().lookup("#home-instance-settings")).fire();
+            assertNull(stage.getScene().lookup("#home-instance-settings"));
+            launcher.setActiveView(AppView.VERSIONS);
             assertEquals(AppView.VERSIONS, launcher.activeView);
         });
         awaitSelection(first);
