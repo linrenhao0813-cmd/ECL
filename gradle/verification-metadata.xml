@@ -57,6 +57,17 @@
          <trusted-key id="D878D4A823EAE731B729D1A8D2151178A123C97F" group="^com[.]github[.]spotbugs($|([.].*))" regex="true"/>
          <trusted-key id="E5C3B1929191DF06136CCB2B164779204E106A76" group="org.javassist" name="javassist" version="3.28.0-GA"/>
          <trusted-key id="EE0CA873074092F806F59B65D364ABAA39A47320" group="com.google.errorprone"/>
+         <trusted-key id="34441E504A937F43EB0DAEF96A65176A0FB1CD0B" group="org.apache.groovy" name="groovy-bom" version="4.0.27"/>
+         <trusted-key id="71C524683EEC78CCAD6D5554049FE94F2D5DAD9D" group="jakarta.platform" name="jakarta.jakartaee-bom" version="9.1.0"/>
+         <trusted-key id="71C524683EEC78CCAD6D5554049FE94F2D5DAD9D" group="jakarta.platform" name="jakartaee-api-parent" version="9.1.0"/>
+         <trusted-key id="147B691A19097624902F4EA9689CBE64F4BC997F" group="org.mockito" name="mockito-bom" version="4.11.0"/>
+         <trusted-key id="C3F530A8FDE7926E0F6C71475796E91EE6619C69" group="org.eclipse.ee4j" name="project" version="1.0.7"/>
+         <trusted-key id="48B086A7D843CFA258E83286928FBF39003C0425" group="org.springframework" name="spring-framework-bom" version="5.3.39"/>
+         <trusted-key id="F4DD59C90148BDC52BEB90A4530AA5F25C25011F" group="org.apache.bcel" name="bcel" version="6.12.0"/>
+         <trusted-key id="F4DD59C90148BDC52BEB90A4530AA5F25C25011F" group="org.apache.commons" name="commons-parent" version="95"/>
+         <trusted-key id="F4DD59C90148BDC52BEB90A4530AA5F25C25011F" group="org.apache.commons" name="commons-text" version="1.15.0"/>
+         <trusted-key id="8FCD23073248F3C28EF9F80380EF47E549604C05" group="jaxen" name="jaxen" version="2.0.6"/>
+         <trusted-key id="8FCD23073248F3C28EF9F80380EF47E549604C05" group="jaxen" name="jaxen-parent" version="2.0.6"/>
       </trusted-keys>
    </configuration>
    <components>
