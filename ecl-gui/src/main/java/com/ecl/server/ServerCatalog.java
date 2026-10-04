@@ -124,7 +124,7 @@ public final class ServerCatalog {
         JsonObject json = element.getAsJsonObject();
         String name = text(json, "name");
         String ip = text(json, "ip");
-        if (name.isBlank() || ip.isBlank()) {
+        if (name.isBlank() || ip.isBlank() || !PublicServer.isSafeHost(ip)) {
             return null;
         }
         int port = json.has("port") && !json.get("port").isJsonNull()

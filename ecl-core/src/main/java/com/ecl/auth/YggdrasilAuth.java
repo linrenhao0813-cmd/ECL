@@ -166,7 +166,9 @@ public final class YggdrasilAuth implements AuthProvider {
         byte[] payload = null;
         try {
             payload = authenticationPayload(username, password);
-            String response = HttpUtil.postJsonBytes(authServer + "authenticate", payload);
+            final byte[] requestBody = payload;
+            String response = withPrivateNetwork(
+                    () -> HttpUtil.postJsonBytes(authServer + "authenticate", requestBody));
             JsonObject json = parseResponseObject(response, "authenticate");
 
             if (json.has("error")) {
@@ -218,8 +220,8 @@ public final class YggdrasilAuth implements AuthProvider {
             return false;
         }
 
-        HttpUtil.Response response = HttpUtil.postJsonResponse(
-                authServer + "validate", tokenPayload());
+        HttpUtil.Response response = withPrivateNetwork(
+                () -> HttpUtil.postJsonResponse(authServer + "validate", tokenPayload()));
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return true;
         }
@@ -254,7 +256,22 @@ public final class YggdrasilAuth implements AuthProvider {
     }
 
     private String postJson(String urlStr, JsonObject body) throws IOException {
-        return HttpUtil.postJson(urlStr, body);
+        return withPrivateNetwork(() -> HttpUtil.postJson(urlStr, body));
+    }
+
+    private static <T> T withPrivateNetwork(IoAction<T> action) throws IOException {
+        try (AutoCloseable ignored = NetworkUriPolicy.allowPrivateNetworkHttp()) {
+            return action.run();
+        } catch (IOException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IOException(error);
+        }
+    }
+
+    @FunctionalInterface
+    private interface IoAction<T> {
+        T run() throws IOException;
     }
 
     private byte[] authenticationPayload(String username, char[] password) throws IOException {

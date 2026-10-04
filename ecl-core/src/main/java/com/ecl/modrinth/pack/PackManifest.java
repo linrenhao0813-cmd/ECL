@@ -42,10 +42,12 @@ final class PackManifest {
 
     static PackManifest capture(Path root, String packVersion) throws IOException {
         Path normalizedRoot = root.toAbsolutePath().normalize();
+        MrpackPathPolicy.validateExistingAncestors(normalizedRoot, normalizedRoot);
         Map<String, String> entries = new TreeMap<>();
         try (var paths = Files.walk(normalizedRoot)) {
             for (Path file : paths.filter(path -> Files.isRegularFile(
                     path, LinkOption.NOFOLLOW_LINKS)).toList()) {
+                MrpackPathPolicy.validateExistingAncestors(normalizedRoot, file);
                 String relative = portable(normalizedRoot.relativize(file));
                 if (!FILE_NAME.equals(relative)) {
                     entries.put(relative, sha512(file));
@@ -146,6 +148,7 @@ final class PackManifest {
         if (!result.startsWith(normalizedRoot)) {
             throw new IOException("Pack manifest path escapes instance: " + relative);
         }
+        MrpackPathPolicy.validateExistingAncestors(normalizedRoot, result);
         return result;
     }
 

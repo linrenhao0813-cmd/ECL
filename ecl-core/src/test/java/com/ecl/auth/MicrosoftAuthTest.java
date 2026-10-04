@@ -1,5 +1,7 @@
 package com.ecl.auth;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.CountDownLatch;
@@ -19,12 +21,31 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MicrosoftAuthTest {
+    @BeforeEach
+    void configureMicrosoftClientId() {
+        System.setProperty("ecl.microsoft.clientId", "test-client-id");
+    }
+
+    @AfterEach
+    void clearMicrosoftClientId() {
+        System.clearProperty("ecl.microsoft.clientId");
+    }
+
     @Test
     void slowDownPollingIntervalIsCapped() {
         assertEquals(10, MicrosoftAuth.nextDevicePollInterval(5));
         assertEquals(60, MicrosoftAuth.nextDevicePollInterval(58));
         assertEquals(60, MicrosoftAuth.nextDevicePollInterval(60));
         assertEquals(60, MicrosoftAuth.nextDevicePollInterval(Integer.MAX_VALUE));
+    }
+
+    @Test
+    void resolvesMicrosoftClientIdWithOverridesAndBundledDefault() {
+        assertEquals("property-client", MicrosoftOAuthClient.resolveClientId(
+                "  property-client  ", "environment-client"));
+        assertEquals("environment-client", MicrosoftOAuthClient.resolveClientId(
+                " ", "  environment-client  "));
+        assertEquals("00000000402b5328", MicrosoftOAuthClient.resolveClientId(null, null));
     }
 
     @Test
@@ -105,6 +126,7 @@ class MicrosoftAuthTest {
         @Override
         public HttpUtil.Response postForm(String url, Map<String, String> form) {
             requests.add("oauth-refresh");
+            assertEquals("test-client-id", form.get("client_id"));
             assertEquals("saved-refresh", form.get("refresh_token"));
             return response(200, "{\"access_token\":\"microsoft-access\","
                     + "\"refresh_token\":\"rotated-refresh\"}");

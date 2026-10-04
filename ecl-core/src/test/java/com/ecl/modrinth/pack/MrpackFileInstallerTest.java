@@ -1,6 +1,7 @@
 package com.ecl.modrinth.pack;
 
 import com.ecl.ECLConfig;
+import com.ecl.util.TestNetworkPolicy;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpServer;
@@ -34,6 +35,7 @@ class MrpackFileInstallerTest {
 
     private Field baseDirField;
     private File previousBaseDir;
+    private AutoCloseable loopbackDownloads;
 
     @Test
     void defaultPolicyTrustsModrinthAndCurseForgeCdnHosts() {
@@ -47,6 +49,7 @@ class MrpackFileInstallerTest {
 
     @BeforeEach
     void useTemporaryBaseDirectory() throws Exception {
+        loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);
@@ -55,7 +58,11 @@ class MrpackFileInstallerTest {
 
     @AfterEach
     void restoreBaseDirectory() throws Exception {
-        baseDirField.set(null, previousBaseDir);
+        try {
+            baseDirField.set(null, previousBaseDir);
+        } finally {
+            loopbackDownloads.close();
+        }
     }
 
     @Test

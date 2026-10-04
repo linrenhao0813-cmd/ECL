@@ -1,5 +1,7 @@
 package com.ecl.download;
 
+import com.ecl.ECLConfig;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -8,15 +10,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A process-wide download job queue.  Download implementations remain responsible
  * for the actual I/O; this class owns ordering, concurrency, cancellation and retry.
  */
 public final class DownloadTaskCenter implements AutoCloseable {
-    private static final int MIN_CONCURRENCY = 1;
-    private static final int MAX_CONCURRENCY = 8;
-
     /**
      * 保留在任务列表中的最大已结束任务数。排队和进行中的任务不会被丢弃；每次任务
      * 结束时都会裁剪最旧历史，防止长期运行后 entries 与 UI 刷新成本无限增长。
@@ -87,7 +87,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
     }
 
     public DownloadTaskCenter(int maxConcurrent, long bandwidthLimitBytesPerSecond) {
-        this.maxConcurrent = clampConcurrency(maxConcurrent);
+        this.maxConcurrent = ECLConfig.clampDownloadConcurrency(maxConcurrent);
         this.bandwidthLimitBytesPerSecond = Math.max(0, bandwidthLimitBytesPerSecond);
     }
 
@@ -103,6 +103,12 @@ public final class DownloadTaskCenter implements AutoCloseable {
 
     private <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory,
                                      int previousAttempts) {
+        return submit(title, operationFactory, previousAttempts, null);
+    }
+
+    private <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory,
+                                     int previousAttempts,
+                                     AtomicReference<DownloadTaskEntry<?>> familyCurrent) {
         Objects.requireNonNull(operationFactory, "operationFactory");
         DownloadTaskEntry<T> entry;
         synchronized (lock) {
@@ -110,10 +116,14 @@ public final class DownloadTaskCenter implements AutoCloseable {
             Operation<T> operation = Objects.requireNonNull(
                     operationFactory.create(), "operationFactory.create()");
             String id = "download-" + sequence.incrementAndGet();
-            entry = new DownloadTaskEntry<>(id, title == null || title.isBlank() ? "下载任务" : title, operation);
+            AtomicReference<DownloadTaskEntry<?>> family = familyCurrent == null
+                    ? new AtomicReference<>() : familyCurrent;
+            entry = new DownloadTaskEntry<>(id,
+                    title == null || title.isBlank() ? "下载任务" : title, operation, family);
             entry.operationFactory = operationFactory;
             entry.attempts = Math.max(0, previousAttempts);
             entries.put(id, entry);
+            family.set(entry);
             queue.addLast(entry);
         }
         // Always notify: when the concurrency limit is reached the new task remains queued and
@@ -180,7 +190,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
 
     public void setMaxConcurrent(int value) {
         synchronized (lock) {
-            maxConcurrent = clampConcurrency(value);
+            maxConcurrent = ECLConfig.clampDownloadConcurrency(value);
         }
         fireChanged(true);
         pump();
@@ -202,10 +212,11 @@ public final class DownloadTaskCenter implements AutoCloseable {
     public boolean cancel(String taskId) {
         DownloadTaskEntry<?> entry;
         Runnable cancellationHook;
-        boolean changed;
         synchronized (lock) {
-            entry = entries.get(taskId);
-            if (entry == null || DownloadTaskSnapshots.isTerminal(entry.status) || entry.status == Status.CANCELLING) {
+            DownloadTaskEntry<?> requested = entries.get(taskId);
+            entry = requested == null ? null : requested.familyCurrent.get();
+            if (entry == null || DownloadTaskSnapshots.isTerminal(entry.status)
+                    || entry.status == Status.CANCELLING) {
                 return false;
             }
             entry.cancelRequested = true;
@@ -226,24 +237,33 @@ public final class DownloadTaskCenter implements AutoCloseable {
                     && entry.runner != null) {
                 entry.runner.interrupt();
             }
-            changed = true;
         }
         runCancellation(cancellationHook);
-        if (changed) fireChanged(true);
+        fireChanged(true);
         pump();
-        return changed;
+        return true;
     }
 
     public TaskHandle<?> retry(String taskId) {
         DownloadTaskEntry<?> original;
         synchronized (lock) {
             original = entries.get(taskId);
-            if (original == null || !DownloadTaskSnapshots.isTerminal(original.status)
-                    || original.status == Status.COMPLETED) {
+            if (!canRetry(original)) {
                 return null;
             }
         }
-        return submit(original.title, original.operationFactory, original.attempts);
+        return submit(original.title, original.operationFactory, original.attempts,
+                original.familyCurrent);
+    }
+
+    /** Called while holding lock so the task and its retry family are read together. */
+    private boolean canRetry(DownloadTaskEntry<?> entry) {
+        if (entry == null || !DownloadTaskSnapshots.isTerminal(entry.status)
+                || entry.status == Status.COMPLETED) {
+            return false;
+        }
+        DownloadTaskEntry<?> latestAttempt = entry.familyCurrent.get();
+        return latestAttempt == entry || DownloadTaskSnapshots.isTerminal(latestAttempt.status);
     }
 
     public int clearFinished() {
@@ -292,83 +312,49 @@ public final class DownloadTaskCenter implements AutoCloseable {
     }
 
     void finishSuccess(DownloadTaskEntry<?> entry, Object result) {
-        boolean changed;
-        boolean cancelled = false;
-        synchronized (lock) {
-            if (entry.status == Status.CANCELLING || entry.cancelRequested) {
-                changed = entry.status == Status.RUNNING || entry.status == Status.CANCELLING;
-                if (changed) {
-                    entry.status = Status.CANCELLED;
-                    entry.detail = "已取消";
-                    entry.updatedAtMillis = System.currentTimeMillis();
-                    runningCount--;
-                    cancelled = true;
-                }
-            } else {
-                changed = entry.status == Status.RUNNING;
-            }
-            if (changed && !cancelled) {
-                entry.status = Status.COMPLETED;
-                entry.progress = 1;
-                entry.detail = "下载完成";
-                entry.updatedAtMillis = System.currentTimeMillis();
-                runningCount--;
-            }
-            if (changed) pruneRetainedLocked();
-        }
-        if (!changed) return;
-        if (cancelled) entry.completion.cancel(false);
-        else complete(entry, result);
-        fireChanged(true);
-        pump();
+        finish(entry, Status.COMPLETED, result, null);
     }
 
     void finishFailure(DownloadTaskEntry<?> entry, Throwable error) {
-        boolean changed;
-        boolean cancelled = false;
-        synchronized (lock) {
-            if (entry.status == Status.CANCELLING || entry.cancelRequested) {
-                changed = entry.status == Status.RUNNING || entry.status == Status.CANCELLING;
-                if (changed) {
-                    entry.status = Status.CANCELLED;
-                    entry.detail = "已取消";
-                    entry.updatedAtMillis = System.currentTimeMillis();
-                    runningCount--;
-                    cancelled = true;
-                }
-            } else {
-                changed = entry.status == Status.RUNNING;
-            }
-            if (changed && !cancelled) {
-                entry.status = Status.FAILED;
-                entry.errorMessage = DownloadTaskSnapshots.errorMessage(error);
-                entry.detail = "下载失败";
-                entry.updatedAtMillis = System.currentTimeMillis();
-                runningCount--;
-            }
-            if (changed) pruneRetainedLocked();
-        }
-        if (!changed) return;
-        if (cancelled) entry.completion.cancel(false);
-        else entry.completion.completeExceptionally(error);
-        fireChanged(true);
-        pump();
+        finish(entry, Status.FAILED, null, error);
     }
 
     void finishCancelled(DownloadTaskEntry<?> entry) {
-        boolean changed;
+        finish(entry, Status.CANCELLED, null, null);
+    }
+
+    private void finish(DownloadTaskEntry<?> entry, Status outcome, Object result, Throwable error) {
+        Status terminalStatus;
         synchronized (lock) {
-            changed = entry.status == Status.RUNNING || entry.status == Status.CANCELLING;
-            if (changed) {
-                entry.status = Status.CANCELLED;
-                entry.detail = "已取消";
-                entry.updatedAtMillis = System.currentTimeMillis();
-                runningCount--;
-                pruneRetainedLocked();
+            if (entry.status != Status.RUNNING && entry.status != Status.CANCELLING) {
+                return;
             }
+            // Cancellation wins even if the operation returns or fails before it notices the request.
+            terminalStatus = entry.cancelRequested || entry.status == Status.CANCELLING
+                    ? Status.CANCELLED : outcome;
+            entry.status = terminalStatus;
+            entry.detail = switch (terminalStatus) {
+                case COMPLETED -> "下载完成";
+                case FAILED -> "下载失败";
+                case CANCELLED -> "已取消";
+                default -> throw new IllegalArgumentException("Expected a terminal download status");
+            };
+            if (terminalStatus == Status.COMPLETED) {
+                entry.progress = 1;
+            } else if (terminalStatus == Status.FAILED) {
+                entry.errorMessage = DownloadTaskSnapshots.errorMessage(error);
+            }
+            entry.updatedAtMillis = System.currentTimeMillis();
+            runningCount--;
+            pruneRetainedLocked();
         }
-        if (!changed) return;
-        entry.completion.cancel(false);
+        // Completing a future may run user callbacks; keep them outside the queue lock.
+        switch (terminalStatus) {
+            case CANCELLED -> entry.completion.cancel(false);
+            case COMPLETED -> complete(entry, result);
+            case FAILED -> entry.completion.completeExceptionally(error);
+            default -> throw new IllegalStateException("Unexpected download outcome");
+        }
         fireChanged(true);
         pump();
     }
@@ -416,12 +402,8 @@ public final class DownloadTaskCenter implements AutoCloseable {
         notifier.notifyChanged(immediate);
     }
 
-    private static int clampConcurrency(int value) {
-        return Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, value));
-    }
-
     private void ensureOpen() {
-        if (closed) throw new IllegalStateException("下载任务中心已关闭");
+        if (closed) throw new IllegalStateException("下载调度器已关闭");
     }
 
     @Override

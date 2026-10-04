@@ -11,7 +11,12 @@ public interface DownloadService extends AutoCloseable {
 
     void downloadVersion(String versionId, String versionUrl);
 
+    void downloadVersion(String versionId, String versionUrl, String versionSha1);
+
     java.util.concurrent.Future<?> downloadVersionAsync(String versionId, String versionUrl);
+
+    java.util.concurrent.Future<?> downloadVersionAsync(String versionId, String versionUrl,
+                                                        String versionSha1);
 
     boolean cancelDownload();
 

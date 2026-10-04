@@ -87,5 +87,9 @@ class InstanceLaunchProfileStoreTest {
                 1, InstanceLaunchProfile.JavaMode.AUTO, "",
                 PerformancePreset.BALANCED, InstanceLaunchProfile.MemoryMode.CUSTOM, 256,
                 true, List.of(), true, "default"));
+        assertThrows(IllegalArgumentException.class, () -> new InstanceLaunchProfile(
+                1, InstanceLaunchProfile.JavaMode.AUTO, "",
+                PerformancePreset.BALANCED, InstanceLaunchProfile.MemoryMode.AUTO, 0,
+                true, List.of("-javaagent:evil.jar"), true, "default"));
     }
 }

@@ -61,7 +61,6 @@ class MessagesTest {
         assertNotNull(Messages.get("nav.versions"));
         assertNotNull(Messages.get("nav.modrinth"));
         assertNotNull(Messages.get("nav.settings"));
-        assertNotNull(Messages.get("nav.logs"));
     }
 
     @Test

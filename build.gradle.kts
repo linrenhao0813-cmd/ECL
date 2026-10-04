@@ -9,7 +9,7 @@ plugins {
 
 allprojects {
     group = "com.ecl"
-    version = "1.0.0"
+    version = "1.0.1"
 }
 
 subprojects {
@@ -49,8 +49,8 @@ subprojects {
         }
 
         if (project.name == "ecl-core" || project.name == "ecl-gui") {
-            val lineMinimum = if (project.name == "ecl-gui") 0.06 else 0.60
-            val branchMinimum = if (project.name == "ecl-gui") 0.10 else 0.40
+            val lineMinimum = if (project.name == "ecl-gui") 0.20 else 0.60
+            val branchMinimum = if (project.name == "ecl-gui") 0.15 else 0.40
             tasks.withType<JacocoCoverageVerification>().configureEach {
                 violationRules {
                     rule {
