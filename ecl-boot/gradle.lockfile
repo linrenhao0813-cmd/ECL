@@ -3,10 +3,10 @@
 # This file is expected to be part of source control.
 ch.qos.logback:logback-classic:1.5.25=runtimeClasspath,testRuntimeClasspath
 ch.qos.logback:logback-core:1.5.25=runtimeClasspath,testRuntimeClasspath
-com.fasterxml.jackson.core:jackson-annotations:2.19.1=runtimeClasspath,testRuntimeClasspath
-com.fasterxml.jackson.core:jackson-core:2.19.1=runtimeClasspath,testRuntimeClasspath
-com.fasterxml.jackson.core:jackson-databind:2.19.1=runtimeClasspath,testRuntimeClasspath
-com.fasterxml.jackson:jackson-bom:2.19.1=runtimeClasspath,testRuntimeClasspath
+com.fasterxml.jackson.core:jackson-annotations:2.22=runtimeClasspath,testRuntimeClasspath
+com.fasterxml.jackson.core:jackson-core:2.22.3=runtimeClasspath,testRuntimeClasspath
+com.fasterxml.jackson.core:jackson-databind:2.22.3=runtimeClasspath,testRuntimeClasspath
+com.fasterxml.jackson:jackson-bom:2.22.3=runtimeClasspath,testRuntimeClasspath
 com.github.spotbugs:spotbugs-annotations:4.9.8=spotbugs
 com.github.spotbugs:spotbugs:4.9.8=spotbugs
 com.github.stephenc.jcip:jcip-annotations:1.0-1=spotbugs
