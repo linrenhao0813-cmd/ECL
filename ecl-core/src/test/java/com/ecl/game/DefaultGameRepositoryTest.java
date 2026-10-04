@@ -32,6 +32,21 @@ class DefaultGameRepositoryTest {
     }
 
     @Test
+    void listsOnlyLaunchableInstancesPresentInMinecraftVersionsDirectory() throws Exception {
+        Path metadata = Files.createDirectories(temp.resolve("metadata"));
+        Path game = Files.createDirectories(temp.resolve(".minecraft"));
+        writeVersion(metadata, "fabric-instance", "{\"id\":\"fabric-instance\"}");
+        writeVersion(metadata, "metadata-only", "{\"id\":\"metadata-only\"}");
+        Files.createDirectories(game.resolve("versions/fabric-instance"));
+        Files.createDirectories(game.resolve("versions/unmanaged-instance"));
+        Files.createDirectories(game.resolve("versions/.ecl-instance-locks"));
+
+        DefaultGameRepository repository = new DefaultGameRepository(metadata, game);
+
+        assertEquals(List.of("fabric-instance"), repository.installedInstanceDirectories());
+    }
+
+    @Test
     void moddedPolicySharesVanillaAndIsolatesDetectedLoaders() throws Exception {
         Path versions = Files.createDirectories(temp.resolve("metadata"));
         Path game = Files.createDirectories(temp.resolve("game"));

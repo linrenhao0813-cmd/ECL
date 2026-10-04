@@ -1,5 +1,6 @@
 package com.ecl.download;
 
+import com.ecl.ECLConfig;
 import com.ecl.util.ThreadFactories;
 
 import java.util.concurrent.CancellationException;
@@ -9,9 +10,8 @@ import java.util.concurrent.RejectedExecutionException;
 
 /** Runs queued download operations and routes their terminal outcome to the task center. */
 final class DownloadTaskExecutor implements AutoCloseable {
-    private static final int MAX_DOWNLOAD_TASK_THREADS = 8;
     private final ExecutorService executor = Executors.newFixedThreadPool(
-            MAX_DOWNLOAD_TASK_THREADS,
+            ECLConfig.MAX_DOWNLOAD_CONCURRENT,
             ThreadFactories.daemon("ecl-download-task"));
 
     void submit(DownloadTaskEntry<?> entry, DownloadTaskCenter center) {

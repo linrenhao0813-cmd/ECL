@@ -23,6 +23,17 @@ class ECLConfigTest {
     }
 
     @Test
+    void downloadConcurrencyDefaultsToAdaptiveWorkerCount() {
+        assertEquals(ECLConfig.DOWNLOAD_THREADS,
+                ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT.defaultValue());
+        assertTrue(ECLConfig.DOWNLOAD_THREADS >= 4);
+        assertTrue(ECLConfig.DOWNLOAD_THREADS <= ECLConfig.MAX_DOWNLOAD_CONCURRENT);
+        assertEquals(1, ECLConfig.clampDownloadConcurrency(0));
+        assertEquals(ECLConfig.MAX_DOWNLOAD_CONCURRENT,
+                ECLConfig.clampDownloadConcurrency(Integer.MAX_VALUE));
+    }
+
+    @Test
     void curseForgeApiKeyHasATypeSafeSettingKey() {
         assertEquals("curseForgeApiKey", ECLConfig.KEY_CURSEFORGE_API_KEY.key());
         assertEquals("", ECLConfig.KEY_CURSEFORGE_API_KEY.defaultValue());

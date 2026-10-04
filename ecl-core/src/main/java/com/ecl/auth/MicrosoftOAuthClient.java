@@ -21,19 +21,23 @@ final class MicrosoftOAuthClient {
      * Azure public client (device code flow) used for Microsoft account login.
      *
      * <p>Resolution order: system property {@code ecl.microsoft.clientId}, then environment
-     * variable {@code ECL_MICROSOFT_CLIENT_ID}. There is no shared fallback client id.</p>
+     * variable {@code ECL_MICROSOFT_CLIENT_ID}, then ECL's bundled public client id.</p>
      */
+    private static final String DEFAULT_CLIENT_ID = "00000000402b5328";
+
     private static String requireClientId() throws IOException {
-        String fromProperty = System.getProperty("ecl.microsoft.clientId");
-        if (fromProperty != null && !fromProperty.isBlank()) {
-            return fromProperty.trim();
+        return resolveClientId(System.getProperty("ecl.microsoft.clientId"),
+                System.getenv("ECL_MICROSOFT_CLIENT_ID"));
+    }
+
+    static String resolveClientId(String propertyValue, String environmentValue) {
+        if (propertyValue != null && !propertyValue.isBlank()) {
+            return propertyValue.trim();
         }
-        String fromEnv = System.getenv("ECL_MICROSOFT_CLIENT_ID");
-        if (fromEnv != null && !fromEnv.isBlank()) {
-            return fromEnv.trim();
+        if (environmentValue != null && !environmentValue.isBlank()) {
+            return environmentValue.trim();
         }
-        throw new IOException("未配置 Microsoft 客户端 ID。请设置 ecl.microsoft.clientId 或环境变量 "
-                + "ECL_MICROSOFT_CLIENT_ID。");
+        return DEFAULT_CLIENT_ID;
     }
     private static final String MSA_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
     private static final String DEVICE_CODE_URL =

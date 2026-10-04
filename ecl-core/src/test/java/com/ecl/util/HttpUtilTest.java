@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -299,6 +300,18 @@ class HttpUtilTest {
         assertEquals("\"version-1\"", ifRange.get());
         assertArrayEquals(complete, Files.readAllBytes(target.toPath()));
         assertFalse(Files.exists(Path.of(target + ".part")));
+    }
+
+    @Test
+    void prioritizesTheSourceThatOwnsAResumablePartial() {
+        String official = "https://piston-data.mojang.com/client.jar";
+        String mirror = "https://bmclapi2.bangbang93.com/client.jar";
+
+        List<String> ordered = ResumableFileDownloader.prioritizeResumeSource(
+                List.of(official, mirror),
+                new PartialDownloadMetadata(mirror, "\"version-1\"", ""));
+
+        assertEquals(List.of(mirror, official), ordered);
     }
 
     @Test
