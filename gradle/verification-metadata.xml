@@ -63,6 +63,9 @@
          <trusted-key id="147B691A19097624902F4EA9689CBE64F4BC997F" group="org.mockito" name="mockito-bom" version="4.11.0"/>
          <trusted-key id="C3F530A8FDE7926E0F6C71475796E91EE6619C69" group="org.eclipse.ee4j" name="project" version="1.0.7"/>
          <trusted-key id="48B086A7D843CFA258E83286928FBF39003C0425" group="org.springframework" name="spring-framework-bom" version="5.3.39"/>
+         <trusted-key id="2B34821418CF19CF1F2A8352953E02E4F573B46F" group="jakarta.platform" name="jakarta.jakartaee-bom" version="9.1.0"/>
+         <trusted-key id="2B34821418CF19CF1F2A8352953E02E4F573B46F" group="jakarta.platform" name="jakartaee-api-parent" version="9.1.0"/>
+         <trusted-key id="AA70C7C433D501636392EC02153E7A3C2B4E5118" group="org.eclipse.ee4j" name="project" version="1.0.7"/>
       </trusted-keys>
    </configuration>
    <components>
