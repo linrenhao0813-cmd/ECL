@@ -6,8 +6,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VersionActionsTest {
@@ -33,5 +36,20 @@ class VersionActionsTest {
         }
 
         assertFalse(Files.exists(instance));
+    }
+
+    @Test
+    void keepsPreferredVersionOnlyWhenItIsInstalled() {
+        List<String> installed = List.of("1.20.1", "1.21.1-fabric");
+
+        assertEquals("1.21.1-fabric",
+                VersionActions.chooseInstalledVersion(installed, "1.21.1-fabric"));
+        assertEquals("1.20.1",
+                VersionActions.chooseInstalledVersion(installed, "1.21.5"));
+    }
+
+    @Test
+    void leavesSelectionEmptyWhenNoInstanceIsInstalled() {
+        assertNull(VersionActions.chooseInstalledVersion(List.of(), "1.21.5"));
     }
 }

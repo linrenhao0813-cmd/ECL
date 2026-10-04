@@ -20,9 +20,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.Set;
 
 /** Mirror-aware file downloader with resumable partial files and byte limits. */
 final class ResumableFileDownloader {
@@ -57,10 +59,16 @@ final class ResumableFileDownloader {
         File metadataFile = new File(target.getAbsolutePath() + ".part.meta");
 
         IOException lastError = null;
-        for (String candidate : DownloadSourceUtil.candidates(url)) {
+        PartialDownloadMetadata previous = partial.isFile() ? readMetadata(metadataFile) : null;
+        if (previous != null && previous.validator().isBlank()) {
+            previous = null;
+        }
+        List<String> candidates = prioritizeResumeSource(
+                DownloadSourceUtil.candidates(url), previous);
+        for (String candidate : candidates) {
             DownloadRateLimiter.checkInterrupted();
             boolean mirror = DownloadSourceUtil.isMirror(url, candidate);
-                DownloadSourceCallbacks.notifySource(source, url, candidate, mirror);
+            DownloadSourceCallbacks.notifySource(source, url, candidate, mirror);
             try {
                 downloadCandidate(candidate, mirror, target, partial, metadataFile,
                         progress, maxBytes, rateLimiter, allowedHosts);
@@ -84,6 +92,18 @@ final class ResumableFileDownloader {
         throw lastError == null
                 ? new IOException("No download source available: " + url)
                 : lastError;
+    }
+
+    static List<String> prioritizeResumeSource(
+            List<String> candidates, PartialDownloadMetadata metadata) {
+        if (metadata == null || metadata.source() == null) {
+            return candidates;
+        }
+        List<String> ordered = new ArrayList<>(candidates);
+        if (ordered.remove(metadata.source())) {
+            ordered.addFirst(metadata.source());
+        }
+        return List.copyOf(ordered);
     }
 
     private static void downloadCandidate(

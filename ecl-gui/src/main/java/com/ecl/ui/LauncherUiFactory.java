@@ -7,6 +7,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
+import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
@@ -162,7 +163,8 @@ final class LauncherUiFactory {
 
     private static void scrollByWheel(ScrollPane scrollPane, ScrollEvent event) {
         double deltaY = event.getDeltaY();
-        if (deltaY == 0 || scrollPane.getContent() == null) {
+        if (deltaY == 0 || scrollPane.getContent() == null
+                || targetsNestedScroller(event.getTarget(), scrollPane)) {
             return;
         }
         double contentHeight = scrollPane.getContent().getBoundsInLocal().getHeight();
@@ -177,5 +179,18 @@ final class LauncherUiFactory {
             scrollPane.setVvalue(nextValue);
             event.consume();
         }
+    }
+
+    private static boolean targetsNestedScroller(Object target, ScrollPane outerScrollPane) {
+        if (!(target instanceof Node node)) {
+            return false;
+        }
+        for (Node current = node; current != null && current != outerScrollPane;
+             current = current.getParent()) {
+            if (current instanceof ListView<?> || current instanceof ScrollPane) {
+                return true;
+            }
+        }
+        return false;
     }
 }

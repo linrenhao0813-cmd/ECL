@@ -113,12 +113,13 @@ public final class MainController implements AutoCloseable {
         settingsManager.enableAutoSave(); // GUI 设置变更自动落盘（防抖 500ms）
         versionManager = new VersionManager();
         versionRepository = new VersionRepository(ECLConfig.getVersionsDir());
-        int configuredConcurrency = settingsManager.get(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT);
-        configuredConcurrency = Math.max(1, Math.min(8, configuredConcurrency));
+        int configuredConcurrency = ECLConfig.clampDownloadConcurrency(
+                settingsManager.get(ECLConfig.KEY_DOWNLOAD_MAX_CONCURRENT));
         long configuredRate = Math.max(0L, settingsManager.get(ECLConfig.KEY_DOWNLOAD_RATE_LIMIT_KB)) * 1024L;
         HttpUtil.setDownloadMaxConcurrent(configuredConcurrency);
         HttpUtil.setDownloadRateLimitBytesPerSecond(configuredRate);
-        gameDownloader = new GameDownloader(configuredConcurrency);
+        // Keep enough workers for live setting increases; HttpUtil's gate enforces the active limit.
+        gameDownloader = new GameDownloader();
         downloadTaskCenter = new DownloadTaskCenter(configuredConcurrency, configuredRate);
         curseForgeDownloader = new CurseForgeDownloader(this::curseForgeApiKey);
         modrinthApiClient = new DefaultModrinthApiClient();

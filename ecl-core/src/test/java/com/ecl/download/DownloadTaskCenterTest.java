@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -15,6 +16,54 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DownloadTaskCenterTest {
+    @Test
+    void failurePreservesErrorAndStartsNextQueuedTask() throws Exception {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+            CountDownLatch release = new CountDownLatch(1);
+            IOException failure = new IOException("connection lost");
+            var first = center.submit("failing", context -> {
+                release.await(5, TimeUnit.SECONDS);
+                throw failure;
+            });
+            var next = center.submit("next", context -> "downloaded");
+            assertEquals(DownloadTaskCenter.Status.QUEUED, next.snapshot().status());
+
+            release.countDown();
+            ExecutionException actual = assertThrows(ExecutionException.class,
+                    () -> first.completion().get(5, TimeUnit.SECONDS));
+            assertEquals(failure, actual.getCause());
+            assertEquals("downloaded", next.completion().get(5, TimeUnit.SECONDS));
+            assertEquals(DownloadTaskCenter.Status.FAILED, first.snapshot().status());
+            assertEquals("connection lost", first.snapshot().errorMessage());
+        }
+    }
+
+    @Test
+    void failureAfterCancellationRemainsCancelledAndStartsNextTask() throws Exception {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+            CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            var first = center.submit("cancel then fail", context -> {
+                started.countDown();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {
+                    // Some downloaders translate interrupted I/O into a general failure.
+                }
+                throw new IOException("stream closed");
+            });
+            var next = center.submit("next", context -> "finished");
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            assertTrue(first.cancel());
+            release.countDown();
+
+            assertEquals("finished", next.completion().get(5, TimeUnit.SECONDS));
+            assertTrue(first.completion().isCancelled());
+            assertEquals(DownloadTaskCenter.Status.CANCELLED, first.snapshot().status());
+            assertEquals("", first.snapshot().errorMessage());
+        }
+    }
+
     @Test
     void queuesTasksByConfiguredConcurrency() throws Exception {
         try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
