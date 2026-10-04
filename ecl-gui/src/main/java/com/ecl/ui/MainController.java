@@ -23,10 +23,7 @@ import com.ecl.modrinth.download.ModFileDownloadService;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.provider.ModMetadataProvider;
-import com.ecl.modrinth.provider.ModMetadataProviderRegistry;
 import com.ecl.modrinth.provider.ModrinthMetadataProvider;
-import com.ecl.pack.DefaultPackService;
-import com.ecl.pack.PackService;
 import com.ecl.server.LocalServerManager;
 import com.ecl.modrinth.repository.FileInstalledModRepository;
 import com.ecl.modrinth.repository.InstalledModRepository;
@@ -71,7 +68,6 @@ public final class MainController implements AutoCloseable {
     private final DownloadTaskCenter downloadTaskCenter;
     private final ModrinthDownloader modrinthDownloader;
     private final ModrinthApiClient modrinthApiClient;
-    private final ModMetadataProviderRegistry metadataProviders;
     private final ModMetadataProvider metadataProvider;
     private final VersionRepository versionRepository;
     private final LaunchEnvironment launchEnvironment;
@@ -90,7 +86,6 @@ public final class MainController implements AutoCloseable {
     private final InstallationPlanBuilder installationPlanBuilder;
     private final InstanceLaunchProfileStore instanceLaunchProfiles;
     private final InstanceOperationCoordinator instanceOperations;
-    private final PackService packService;
     private final InstanceDisplayMetadataStore instanceDisplayMetadata;
     private final LocalServerManager localServers = new LocalServerManager(ECLConfig.getBaseDir().toPath());
     private final Map<UUID, ModInstanceContext> modInstances = new ConcurrentHashMap<>();
@@ -127,12 +122,10 @@ public final class MainController implements AutoCloseable {
         HttpUtil.setDownloadRateLimitBytesPerSecond(configuredRate);
         // Keep enough workers for live setting increases; HttpUtil's gate enforces the active limit.
         gameDownloader = new GameDownloader();
-        downloadTaskCenter = new DownloadTaskCenter(configuredConcurrency, configuredRate);
+        downloadTaskCenter = new DownloadTaskCenter(configuredConcurrency);
         modrinthApiClient = new DefaultModrinthApiClient();
         modrinthDownloader = new ModrinthDownloader(modrinthApiClient);
-        metadataProviders = new ModMetadataProviderRegistry(
-                new ModrinthMetadataProvider(modrinthApiClient, false));
-        metadataProvider = metadataProviders.require("modrinth");
+        metadataProvider = new ModrinthMetadataProvider(modrinthApiClient, false);
         launchEnvironment = new LaunchEnvironment(
                 ECLConfig.getVersionsDir(), ECLConfig.getLibrariesDir(), ECLConfig.getAssetsDir(),
                 ECLConfig.LAUNCHER_NAME, ECLConfig.LAUNCHER_VERSION);
@@ -188,7 +181,6 @@ public final class MainController implements AutoCloseable {
         modpackUpdateService = new DefaultModpackUpdateService(
                 metadataProvider, backgroundExecutor, instanceOperations,
                 this::isInstanceRunning);
-        packService = new DefaultPackService();
         instanceDisplayMetadata = new InstanceDisplayMetadataStore();
     }
 
@@ -212,7 +204,6 @@ public final class MainController implements AutoCloseable {
     public ModpackUpdateService modpackUpdateService() { return modpackUpdateService; }
     public InstanceLaunchProfileStore instanceLaunchProfiles() { return instanceLaunchProfiles; }
     public InstanceOperationCoordinator instanceOperations() { return instanceOperations; }
-    public PackService packService() { return packService; }
     public InstanceDisplayMetadataStore instanceDisplayMetadata() { return instanceDisplayMetadata; }
     public LocalServerManager localServers() { return localServers; }
     public Launcher gameLauncher() { return gameLauncher; }
@@ -299,7 +290,6 @@ public final class MainController implements AutoCloseable {
         modDownloadExecutor.shutdownNow();
         awaitTermination(backgroundExecutor);
         awaitTermination(modDownloadExecutor);
-        metadataProviders.close();
         modrinthApiClient.close();
         gameDownloader.close();
     }

@@ -1,8 +1,7 @@
 package com.ecl.game;
 
 import com.ecl.ECLConfig;
-import com.ecl.performance.PerformancePreset;
-import com.ecl.util.GsonProvider;
+import com.ecl.util.HttpUtil;
 import com.ecl.util.TextUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -11,12 +10,9 @@ import com.google.gson.JsonParser;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -61,16 +57,7 @@ public final class InstanceLaunchProfileStore {
     public synchronized void save(Path instanceRoot, InstanceLaunchProfile profile) throws IOException {
         Objects.requireNonNull(profile, "profile");
         Path file = profileFile(instanceRoot);
-        Files.createDirectories(file.getParent());
-        Path temporary = Files.createTempFile(file.getParent(), "launch-profile-", ".json.tmp");
-        try {
-            try (Writer writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
-                GsonProvider.pretty().toJson(toJson(profile), writer);
-            }
-            moveAtomically(temporary, file);
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
+        HttpUtil.writeJson(file.toFile(), toJson(profile));
     }
 
     public Path profileFile(Path instanceRoot) {
@@ -98,14 +85,10 @@ public final class InstanceLaunchProfileStore {
                 javaPath.isEmpty() ? InstanceLaunchProfile.JavaMode.AUTO
                         : InstanceLaunchProfile.JavaMode.CUSTOM,
                 javaPath,
-                PerformancePreset.BALANCED,
                 maxMemoryMb == ECLConfig.AUTO_MEMORY_MB ? InstanceLaunchProfile.MemoryMode.AUTO
                         : InstanceLaunchProfile.MemoryMode.CUSTOM,
                 maxMemoryMb,
-                true,
-                arguments,
-                true,
-                "default");
+                arguments);
     }
 
     private static JsonObject toJson(InstanceLaunchProfile profile) {
@@ -113,15 +96,11 @@ public final class InstanceLaunchProfileStore {
         json.addProperty("schemaVersion", profile.schemaVersion());
         json.addProperty("javaMode", profile.javaMode().name());
         json.addProperty("javaPath", profile.javaPath());
-        json.addProperty("performancePreset", profile.performancePreset().name());
         json.addProperty("memoryMode", profile.memoryMode().name());
         json.addProperty("maxMemoryMb", profile.maxMemoryMb());
-        json.addProperty("generatedJvmOptions", profile.generatedJvmOptions());
         JsonArray arguments = new JsonArray();
         profile.customJvmArguments().forEach(arguments::add);
         json.add("customJvmArguments", arguments);
-        json.addProperty("autoRepair", profile.autoRepair());
-        json.addProperty("backupPolicyId", profile.backupPolicyId());
         return json;
     }
 
@@ -133,15 +112,10 @@ public final class InstanceLaunchProfileStore {
                 enumValue(json, "javaMode", InstanceLaunchProfile.JavaMode.class,
                         InstanceLaunchProfile.JavaMode.AUTO),
                 string(json, "javaPath", ""),
-                enumValue(json, "performancePreset", PerformancePreset.class,
-                        PerformancePreset.BALANCED),
                 enumValue(json, "memoryMode", InstanceLaunchProfile.MemoryMode.class,
                         InstanceLaunchProfile.MemoryMode.AUTO),
                 integer(json, "maxMemoryMb", ECLConfig.AUTO_MEMORY_MB),
-                bool(json, "generatedJvmOptions", true),
-                stringList(json, "customJvmArguments"),
-                bool(json, "autoRepair", true),
-                string(json, "backupPolicyId", "default"));
+                stringList(json, "customJvmArguments"));
     }
 
     private static String string(JsonObject json, String name, String fallback) {
@@ -150,10 +124,6 @@ public final class InstanceLaunchProfileStore {
 
     private static int integer(JsonObject json, String name, int fallback) {
         return json.has(name) && !json.get(name).isJsonNull() ? json.get(name).getAsInt() : fallback;
-    }
-
-    private static boolean bool(JsonObject json, String name, boolean fallback) {
-        return json.has(name) && !json.get(name).isJsonNull() ? json.get(name).getAsBoolean() : fallback;
     }
 
     private static <E extends Enum<E>> E enumValue(JsonObject json, String name, Class<E> type, E fallback) {
@@ -171,15 +141,6 @@ public final class InstanceLaunchProfileStore {
             values.add(element.getAsString());
         }
         return values;
-    }
-
-    private static void moveAtomically(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
     }
 
     /** Snapshot of the three global launch values used by pre-profile ECL releases. */

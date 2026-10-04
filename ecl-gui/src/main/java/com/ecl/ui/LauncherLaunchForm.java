@@ -10,13 +10,8 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
-import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
-
-
-import static com.ecl.util.TextUtil.abbreviate;
 
 /** Owns the launcher start form, account controls, and loader-install interaction. */
 final class LauncherLaunchForm {
@@ -33,12 +28,7 @@ final class LauncherLaunchForm {
         this.loader = new LauncherLoaderWorkflow(ui);
     }
 
-    GridPane createForm() {
-        GridPane grid = new GridPane();
-        grid.getStyleClass().add("launch-form");
-        grid.setHgap(10);
-        grid.setVgap(12);
-
+    void initializeControls() {
         // The instance selector now lives in the persistent instance bar; fall back to the saved
         // profile while its item list is still loading.
         String previousVersion = ui.versionCombo == null || ui.versionCombo.getValue() == null
@@ -118,66 +108,10 @@ final class LauncherLaunchForm {
         ui.versionActions.restoreVersionComboItems(previousVersion);
         ui.versionActions.updateSelectedVersionWikiButton();
 
-        TextField gameDirField = new TextField(abbreviate(ui.getActiveGameDir().getAbsolutePath(), 72));
-        gameDirField.setEditable(false);
-        ui.applyFieldStyle(gameDirField);
-
-        TextField jvmField = new TextField(ui.extraJvmArgs == null || ui.extraJvmArgs.isBlank()
-                ? "未设置（内存: " + ui.gameLaunch.getMemoryDisplayText() + "）"
-                : ui.extraJvmArgs);
-        jvmField.setEditable(false);
-        ui.applyFieldStyle(jvmField);
-
-        Button folderButton = LauncherUiFactory.iconActionButton(LauncherUI.class,
-                "/icons/ui/folder.png", "▣", "打开游戏目录",
-                () -> ui.openLocalFolder(ui.getActiveGameDir(), "游戏目录"));
-
-        Button jvmButton = LauncherUiFactory.iconActionButton(LauncherUI.class,
-                "/icons/ui/gear.png", "⚙", "高级设置", ui::showSettingsDialog);
-
-        HBox gameDirBox = new HBox(10, gameDirField, folderButton);
-        HBox.setHgrow(gameDirField, Priority.ALWAYS);
-        HBox jvmBox = new HBox(10, jvmField, jvmButton);
-        HBox.setHgrow(jvmField, Priority.ALWAYS);
-        HBox authBox = createAccountControls();
-        VBox authHelpBox = new VBox(4, ui.authSummaryLabel, ui.authHintLabel);
-        Label loaderHint = new Label("安装后会自动切换到独立模组实例");
-        loaderHint.getStyleClass().add("status-detail");
-        HBox loaderBox = new HBox(10, ui.loaderChoiceCombo, ui.installSelectedLoaderButton, loaderHint);
-        loaderBox.setAlignment(Pos.CENTER_LEFT);
-        ui.versionCombo.valueProperty().addListener((obs, oldValue, newValue) ->
-                gameDirField.setText(abbreviate(ui.getActiveGameDir().getAbsolutePath(), 72)));
-
-        int row = 0;
-        Label modLoaderLabel = new Label("模组加载器");
-        modLoaderLabel.getStyleClass().add("field-label");
-        grid.add(modLoaderLabel, 0, row);
-        grid.add(loaderBox, 1, row++);
-
-        Label accountModeLabel = new Label("账号模式");
-        accountModeLabel.getStyleClass().add("field-label");
-        grid.add(accountModeLabel, 0, row);
-        grid.add(authBox, 1, row++);
-
-        Label loginStatusLabel = new Label("登录状态");
-        loginStatusLabel.getStyleClass().add("field-label");
-        grid.add(loginStatusLabel, 0, row);
-        grid.add(authHelpBox, 1, row++);
-
-        Label gameDirLabel = new Label("游戏目录");
-        gameDirLabel.getStyleClass().add("field-label");
-        grid.add(gameDirLabel, 0, row);
-        grid.add(gameDirBox, 1, row++);
-
-        Label jvmParamsLabel = new Label("JVM 参数");
-        jvmParamsLabel.getStyleClass().add("field-label");
-        grid.add(jvmParamsLabel, 0, row);
-        grid.add(jvmBox, 1, row);
-
-        return grid;
+        initializeAccountControls();
     }
 
-    private HBox createAccountControls() {
+    private void initializeAccountControls() {
         ui.authTypeCombo.setPrefWidth(200);
         ui.microsoftLoginBtn = new Button("正版登录");
         ui.microsoftLoginBtn.getStyleClass().addAll("app-button", "secondary-button", "compact-button");
@@ -220,12 +154,6 @@ final class LauncherLaunchForm {
         });
         ui.selectedMicrosoftAccount = ui.microsoftAccountCombo.getValue();
         ui.applyFieldStyle(ui.microsoftAccountCombo);
-        HBox authBox = new HBox(10, ui.authTypeCombo, ui.usernameField, ui.microsoftAccountCombo,
-                ui.microsoftLoginBtn, ui.microsoftAddAccountBtn, ui.skinUploadBtn, ui.offlineSkinRemoveBtn);
-        authBox.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(ui.usernameField, Priority.ALWAYS);
-        HBox.setHgrow(ui.microsoftAccountCombo, Priority.ALWAYS);
-        return authBox;
     }
 
     VBox createLoaderSelectionPage(String profileId, String minecraftVersion) {
@@ -284,19 +212,7 @@ final class LauncherLaunchForm {
         updateLaunchButtonLabel();
         loader.updateLoaderControls();
 
-        ui.refreshBtn = new Button("刷新版本");
-        ui.refreshBtn.getStyleClass().addAll("app-button", "secondary-button");
-        ui.refreshBtn.setOnAction(e -> ui.versionActions.refreshVersions());
-        LauncherUiFactory.setVisible(ui.refreshBtn, false);
-
-        ui.settingsBtn = new Button("高级设置");
-        ui.settingsBtn.getStyleClass().addAll("app-button", "ghost-button");
-        ui.settingsBtn.setOnAction(e -> ui.showSettingsDialog());
-        LauncherUiFactory.setVisible(ui.settingsBtn, false);
-
-        HBox buttonBar = new HBox(14, ui.launchBtn,
-                ui.instanceUpdates.createButton(),
-                ui.refreshBtn, ui.settingsBtn);
+        HBox buttonBar = new HBox(14, ui.launchBtn, ui.instanceUpdates.createButton());
         buttonBar.getStyleClass().add("launch-actions");
         buttonBar.setAlignment(Pos.CENTER_LEFT);
 
@@ -436,8 +352,6 @@ final class LauncherLaunchForm {
     void setControlsBusy(boolean busy) {
         controlsBusy = busy;
         ui.launchBtn.setDisable(busy);
-        ui.refreshBtn.setDisable(busy);
-        ui.settingsBtn.setDisable(busy);
         if (ui.microsoftLoginBtn != null) {
             ui.microsoftLoginBtn.setDisable(busy);
         }

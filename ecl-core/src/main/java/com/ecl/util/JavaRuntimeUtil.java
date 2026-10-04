@@ -175,34 +175,6 @@ public final class JavaRuntimeUtil {
         return candidate != null && detectJavaFeatureVersion(candidate) > 0;
     }
 
-    /** Returns whether launch preparation would need to download a managed Java runtime. */
-    public static boolean requiresManagedJavaDownload(String configuredPath, int requiredMajorVersion) {
-        if (requiredMajorVersion <= 0) {
-            return false;
-        }
-        File explicitlyConfigured = resolveJavaCandidate(configuredPath);
-        if (explicitlyConfigured != null
-                && detectJavaFeatureVersion(explicitlyConfigured) >= requiredMajorVersion) {
-            return false;
-        }
-        try {
-            resolveExactJavaExecutable(configuredPath, requiredMajorVersion);
-            return false;
-        } catch (IOException missing) {
-            return true;
-        }
-    }
-
-    /** Snapshot all currently discoverable Java executables in priority order. */
-    public static List<String> discoverJavaExecutables(String configuredPath) {
-        Set<File> candidates = new LinkedHashSet<>();
-        addCandidate(candidates, configuredPath);
-        addCandidate(candidates, System.getProperty("java.home"));
-        addCandidate(candidates, System.getenv("JAVA_HOME"));
-        candidates.addAll(findInstalledJavaCandidates());
-        return candidates.stream().map(File::getAbsolutePath).toList();
-    }
-
     private static File resolveJavaCandidate(String path) {
         if (path == null || path.isBlank()) {
             return null;

@@ -32,14 +32,6 @@
     -fx-font-family: "JetBrains Mono", "Cascadia Code", "Consolas", "Courier New", monospace;
 }
 
-/* Subtle grid overlay rendered by .scene-root children */
-.hud-grid {
-    -fx-background-color:
-        linear-gradient(to right, rgba(0, 255, 213, 0.04) 1px, transparent 1px) 0 0 / 40px 40px,
-        linear-gradient(to bottom, rgba(0, 255, 213, 0.04) 1px, transparent 1px) 0 0 / 40px 40px;
-    -fx-opacity: 0.6;
-}
-
 /* ---------- Window titlebar (terminal) ---------- */
 .window-title-bar {
     -fx-background-color: transparent;
@@ -56,20 +48,6 @@
     -fx-letter-spacing: 4px;
     -fx-effect: dropshadow(gaussian, rgba(0, 255, 213, 0.7), 8, 0.6, 0, 0);
 }
-
-.traffic-dot {
-    -fx-min-width: 11;
-    -fx-min-height: 11;
-    -fx-max-width: 11;
-    -fx-max-height: 11;
-    -fx-background-radius: 0;
-    -fx-border-radius: 0;
-    -fx-border-color: rgba(0, 0, 0, 0.4);
-    -fx-border-width: 1;
-}
-.traffic-red    { -fx-background-color: #ff5f57; }
-.traffic-yellow { -fx-background-color: #febc2e; }
-.traffic-green  { -fx-background-color: #28c840; }
 
 .window-button {
     -fx-background-color: transparent;
@@ -662,32 +640,6 @@
     -fx-effect: dropshadow(gaussian, rgba(74, 222, 128, 0.5), 3, 0.5, 0, 0);
 }
 
-.telemetry-canvas {
-    -fx-border-color: rgba(0, 255, 213, 0.3);
-    -fx-border-width: 1;
-    -fx-background-color: rgba(2, 6, 23, 0.6);
-}
-
-.event-stream-row {
-    -fx-padding: 3 0;
-}
-.event-time {
-    -fx-text-fill: #475569;
-    -fx-font-size: 9px;
-    -fx-font-weight: 500;
-    -fx-letter-spacing: 1px;
-    -fx-font-family: "JetBrains Mono", "Consolas", monospace;
-}
-.event-tag-ok { -fx-text-fill: #00ffd5; -fx-font-weight: 700; -fx-effect: dropshadow(gaussian, rgba(0, 255, 213, 0.6), 3, 0.5, 0, 0); }
-.event-tag-warn { -fx-text-fill: #fde68a; -fx-font-weight: 700; }
-.event-tag-err { -fx-text-fill: #f87171; -fx-font-weight: 700; }
-.event-text {
-    -fx-text-fill: #cbd5e1;
-    -fx-font-size: 10px;
-    -fx-font-family: "JetBrains Mono", "Consolas", monospace;
-    -fx-letter-spacing: 1px;
-}
-
 /* Sidebar list (modrinth recs) */
 .sidebar-list {
     -fx-background-color: rgba(2, 6, 23, 0.4);
@@ -1134,10 +1086,7 @@
     -fx-font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
     -fx-text-fill: -ecl-text;
 }
-
-.hud-grid,
 .hero-header,
-.traffic-dot,
 .nav-rail,
 .nav-rail-header,
 .nav-rail-footer,
@@ -1555,66 +1504,6 @@
     -fx-min-height: 280;
     -fx-pref-height: 280;
     -fx-max-height: 280;
-}
-
-.orb-glow {
-    -fx-min-width: 330;
-    -fx-pref-width: 330;
-    -fx-max-width: 330;
-    -fx-min-height: 330;
-    -fx-pref-height: 330;
-    -fx-max-height: 330;
-    -fx-background-color: radial-gradient(center 50% 50%, radius 50%, rgba(98, 132, 255, 0.18) 0%, rgba(98, 132, 255, 0) 72%);
-    -fx-background-radius: 999;
-}
-
-.orb-ring-outer {
-    -fx-min-width: 260;
-    -fx-pref-width: 260;
-    -fx-max-width: 260;
-    -fx-min-height: 260;
-    -fx-pref-height: 260;
-    -fx-max-height: 260;
-    -fx-background-color: transparent;
-    -fx-background-radius: 999;
-    -fx-border-color: rgba(152, 169, 238, 0.35);
-    -fx-border-width: 1;
-    -fx-border-radius: 999;
-}
-
-.orb-ring-inner {
-    -fx-min-width: 208;
-    -fx-pref-width: 208;
-    -fx-max-width: 208;
-    -fx-min-height: 208;
-    -fx-pref-height: 208;
-    -fx-max-height: 208;
-    -fx-background-color: transparent;
-    -fx-background-radius: 999;
-    -fx-border-color: rgba(122, 146, 237, 0.48);
-    -fx-border-width: 1;
-    -fx-border-radius: 999;
-}
-
-.orb-core {
-    -fx-min-width: 154;
-    -fx-pref-width: 154;
-    -fx-max-width: 154;
-    -fx-min-height: 154;
-    -fx-pref-height: 154;
-    -fx-max-height: 154;
-    -fx-background-color:
-        radial-gradient(center 35% 28%, radius 28%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 66%),
-        linear-gradient(to bottom right, #94b2ff 0%, #4f7ff5 52%, #423bd1 100%);
-    -fx-background-radius: 999;
-    -fx-effect: dropshadow(gaussian, rgba(43, 72, 190, 0.30), 28, 0.20, 0, 16);
-}
-
-.orb-play {
-    -fx-text-fill: #ffffff;
-    -fx-font-size: 28px;
-    -fx-font-weight: 700;
-    -fx-translate-x: 3;
 }
 
 /* ---------- Summary cards ---------- */

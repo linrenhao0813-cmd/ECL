@@ -5,7 +5,7 @@ import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.provider.ModrinthMetadataProvider;
-import com.ecl.modrinth.service.DefaultInstanceOperationLock;
+import com.ecl.operation.InstanceOperationCoordinator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -85,7 +85,7 @@ class DefaultModpackUpdateServiceTest {
         TestFixtures.FakeApi api = new TestFixtures.FakeApi();
         DefaultModpackUpdateService service = new DefaultModpackUpdateService(
                 new ModrinthMetadataProvider(api, false), Runnable::run,
-                new DefaultInstanceOperationLock(), instanceId::equals);
+                new InstanceOperationCoordinator(), instanceId::equals);
 
         CompletionException failure = assertThrows(CompletionException.class,
                 () -> service.applyUpdate(new ModpackUpdate(instance, latest, packFile),

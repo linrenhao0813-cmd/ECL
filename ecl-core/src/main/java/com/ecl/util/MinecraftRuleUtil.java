@@ -1,7 +1,5 @@
 package com.ecl.util;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.util.ArrayList;
@@ -9,31 +7,6 @@ import java.util.List;
 
 public final class MinecraftRuleUtil {
     private MinecraftRuleUtil() {
-    }
-
-    public static boolean checkRules(JsonArray rules) {
-        boolean allowed = rules == null || rules.isEmpty();
-        if (rules == null) {
-            return allowed;
-        }
-
-        for (JsonElement ruleEl : rules) {
-            JsonObject rule = ruleEl.getAsJsonObject();
-            String action = rule.get("action").getAsString();
-            boolean osMatch = true;
-
-            if (rule.has("os")) {
-                osMatch = evaluateOsCondition(rule.getAsJsonObject("os"));
-            }
-
-            if ("allow".equals(action) && osMatch) {
-                allowed = true;
-            }
-            if ("disallow".equals(action) && osMatch) {
-                allowed = false;
-            }
-        }
-        return allowed;
     }
 
     public static boolean evaluateOsCondition(JsonObject osCondition) {

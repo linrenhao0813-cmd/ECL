@@ -1,19 +1,16 @@
 package com.ecl.game;
 
 import com.ecl.ECLConfig;
-import com.ecl.util.GsonProvider;
+import com.ecl.util.HttpUtil;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -96,20 +93,7 @@ public final class InstanceDisplayMetadataStore {
         root.addProperty("schemaVersion", CURRENT_SCHEMA_VERSION);
         root.add("instances", instances);
 
-        Path parent = file.getParent();
-        if (parent == null) {
-            throw new IOException("Instance display metadata path has no parent directory: " + file);
-        }
-        Files.createDirectories(parent);
-        Path temporary = Files.createTempFile(parent, "instance-display-", ".json.tmp");
-        try {
-            try (Writer writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
-                GsonProvider.pretty().toJson(root, writer);
-            }
-            moveAtomically(temporary, file);
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
+        HttpUtil.writeJson(file.toFile(), root);
     }
 
     private static String string(JsonObject json, String name) {
@@ -118,14 +102,5 @@ public final class InstanceDisplayMetadataStore {
 
     private static boolean bool(JsonObject json, String name) {
         return json.has(name) && !json.get(name).isJsonNull() && json.get(name).getAsBoolean();
-    }
-
-    private static void moveAtomically(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
     }
 }

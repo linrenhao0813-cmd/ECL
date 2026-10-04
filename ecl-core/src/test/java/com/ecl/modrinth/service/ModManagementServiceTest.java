@@ -1,5 +1,7 @@
 package com.ecl.modrinth.service;
 
+import com.ecl.operation.InstanceOperationCoordinator;
+
 import com.ecl.modrinth.TestFixtures;
 import com.ecl.modrinth.api.ModConflictException;
 import com.ecl.modrinth.download.HashVerifier;
@@ -29,7 +31,7 @@ class ModManagementServiceTest {
     void setUp() {
         instance = TestFixtures.instance(temp);
         repository = new FileInstalledModRepository();
-        service = new DefaultModManagementService(repository, new DefaultInstanceOperationLock(),
+        service = new DefaultModManagementService(repository, new InstanceOperationCoordinator(),
                 Runnable::run, ignored -> false, new HashVerifier());
     }
 

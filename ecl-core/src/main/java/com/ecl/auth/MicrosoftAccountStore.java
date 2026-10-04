@@ -35,7 +35,7 @@ public final class MicrosoftAccountStore {
 
     MicrosoftAccountStore(Path file) {
         this.file = file;
-        this.accounts = new DefaultAccountService(file, new AuthProviderRegistry());
+        this.accounts = new DefaultAccountService(file);
     }
 
     public synchronized List<Account> list() {

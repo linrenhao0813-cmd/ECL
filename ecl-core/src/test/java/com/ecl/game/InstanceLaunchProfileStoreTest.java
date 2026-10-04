@@ -1,6 +1,5 @@
 package com.ecl.game;
 
-import com.ecl.performance.PerformancePreset;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -48,13 +47,9 @@ class InstanceLaunchProfileStoreTest {
                 1,
                 InstanceLaunchProfile.JavaMode.CUSTOM,
                 "C:\\JDK\\bin\\java.exe",
-                PerformancePreset.HIGH,
                 InstanceLaunchProfile.MemoryMode.CUSTOM,
                 8192,
-                false,
-                List.of("-Dfile.encoding=UTF-8", "-XX:+UseG1GC"),
-                false,
-                "before-launch");
+                List.of("-Dfile.encoding=UTF-8", "-XX:+UseG1GC"));
 
         store.save(tempDir, expected);
 
@@ -62,6 +57,27 @@ class InstanceLaunchProfileStoreTest {
         try (var files = Files.list(store.profileFile(tempDir).getParent())) {
             assertFalse(files.anyMatch(path -> path.getFileName().toString().endsWith(".tmp")));
         }
+    }
+
+    @Test
+    void readsLegacyProfileWithRetiredFieldsWithoutRewritingIt() throws Exception {
+        InstanceLaunchProfileStore store = new InstanceLaunchProfileStore();
+        Path file = store.profileFile(tempDir);
+        Files.createDirectories(file.getParent());
+        String legacyProfile = """
+                {"schemaVersion":1,"javaMode":"AUTO","memoryMode":"CUSTOM","maxMemoryMb":4096,
+                 "customJvmArguments":["-Dlegacy=true"],"performancePreset":"HIGH",
+                 "generatedJvmOptions":false,"autoRepair":false,"backupPolicyId":"before-launch"}
+                """;
+        Files.writeString(file, legacyProfile);
+
+        InstanceLaunchProfile loaded = store.load(tempDir);
+
+        assertEquals(4096, loaded.maxMemoryMb());
+        assertEquals(List.of("-Dlegacy=true"), loaded.customJvmArguments());
+        assertEquals(legacyProfile, Files.readString(file));
+        store.save(tempDir, loaded);
+        assertEquals(loaded, store.load(tempDir));
     }
 
     @Test
@@ -81,15 +97,15 @@ class InstanceLaunchProfileStoreTest {
     void validatesModeSpecificValues() {
         assertThrows(IllegalArgumentException.class, () -> new InstanceLaunchProfile(
                 1, InstanceLaunchProfile.JavaMode.AUTO, "C:\\Java\\java.exe",
-                PerformancePreset.BALANCED, InstanceLaunchProfile.MemoryMode.AUTO, 0,
-                true, List.of(), true, "default"));
+                InstanceLaunchProfile.MemoryMode.AUTO, 0,
+                List.of()));
         assertThrows(IllegalArgumentException.class, () -> new InstanceLaunchProfile(
                 1, InstanceLaunchProfile.JavaMode.AUTO, "",
-                PerformancePreset.BALANCED, InstanceLaunchProfile.MemoryMode.CUSTOM, 256,
-                true, List.of(), true, "default"));
+                InstanceLaunchProfile.MemoryMode.CUSTOM, 256,
+                List.of()));
         assertThrows(IllegalArgumentException.class, () -> new InstanceLaunchProfile(
                 1, InstanceLaunchProfile.JavaMode.AUTO, "",
-                PerformancePreset.BALANCED, InstanceLaunchProfile.MemoryMode.AUTO, 0,
-                true, List.of("-javaagent:evil.jar"), true, "default"));
+                InstanceLaunchProfile.MemoryMode.AUTO, 0,
+                List.of("-javaagent:evil.jar")));
     }
 }

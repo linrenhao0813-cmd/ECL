@@ -30,15 +30,13 @@ public final class DefaultAccountService {
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultAccountService.class);
 
     private final Path file;
-    private final AuthProviderRegistry providers;
 
     public DefaultAccountService() {
-        this(ECLConfig.getBaseDir().toPath().resolve("accounts.json"), new AuthProviderRegistry());
+        this(ECLConfig.getBaseDir().toPath().resolve("accounts.json"));
     }
 
-    DefaultAccountService(Path file, AuthProviderRegistry providers) {
+    DefaultAccountService(Path file) {
         this.file = file;
-        this.providers = providers;
     }
 
     public synchronized List<AuthAccount> list() {
@@ -119,10 +117,6 @@ public final class DefaultAccountService {
         if (!found) throw new IllegalArgumentException("Unknown account: " + identity);
         accounts.replaceAll(account -> withDefault(account, account.identity().equalsIgnoreCase(identity)));
         write(accounts, snapshot.unreadable());
-    }
-
-    public AuthProvider createProvider(AuthAccount account) {
-        return providers.create(account);
     }
 
     private JsonArray read() {

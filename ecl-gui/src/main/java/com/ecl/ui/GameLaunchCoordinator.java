@@ -235,9 +235,6 @@ final class GameLaunchCoordinator {
                 jvmArguments);
     }
 
-    int getEffectiveMaxMemoryMb() {
-        return runtimeSummary(ui.getSelectedVersion()).memoryMb();
-    }
 
     private void ensureVersionGameDirs(String gameVersion) throws IOException {
         File instanceDir = ui.resolveVersionGameDir(gameVersion);
@@ -249,9 +246,6 @@ final class GameLaunchCoordinator {
         ui.ensureDirectory(new File(instanceDir, "logs"));
     }
 
-    String getMemoryDisplayText() {
-        return runtimeSummary(ui.getSelectedVersion()).memoryText();
-    }
 
     record RuntimeSummary(String javaText, String javaPath, int memoryMb, boolean autoMemory,
                           String jvmArguments) {

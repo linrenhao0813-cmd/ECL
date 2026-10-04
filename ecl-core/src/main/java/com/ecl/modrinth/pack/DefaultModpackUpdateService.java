@@ -6,7 +6,7 @@ import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.provider.ModMetadataProvider;
-import com.ecl.modrinth.service.DefaultInstanceOperationLock;
+import com.ecl.operation.InstanceOperationCoordinator;
 import com.ecl.modrinth.service.InstanceOperationLock;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.NetworkUriPolicy;
@@ -35,7 +35,7 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
     private final MrpackInstaller installer = new MrpackInstaller();
 
     public DefaultModpackUpdateService(ModMetadataProvider metadataProvider, Executor executor) {
-        this(metadataProvider, executor, new DefaultInstanceOperationLock(), ignored -> false);
+        this(metadataProvider, executor, new InstanceOperationCoordinator(), ignored -> false);
     }
 
     public DefaultModpackUpdateService(ModMetadataProvider metadataProvider, Executor executor,

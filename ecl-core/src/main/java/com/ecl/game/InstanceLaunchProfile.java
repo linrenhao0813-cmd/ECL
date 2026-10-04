@@ -1,7 +1,6 @@
 package com.ecl.game;
 
 import com.ecl.ECLConfig;
-import com.ecl.performance.PerformancePreset;
 import com.ecl.util.JvmArgumentPolicy;
 
 import java.util.List;
@@ -12,13 +11,9 @@ public record InstanceLaunchProfile(
         int schemaVersion,
         JavaMode javaMode,
         String javaPath,
-        PerformancePreset performancePreset,
         MemoryMode memoryMode,
         int maxMemoryMb,
-        boolean generatedJvmOptions,
-        List<String> customJvmArguments,
-        boolean autoRepair,
-        String backupPolicyId
+        List<String> customJvmArguments
 ) {
     public static final int CURRENT_SCHEMA_VERSION = 1;
 
@@ -28,10 +23,8 @@ public record InstanceLaunchProfile(
         }
         javaMode = Objects.requireNonNull(javaMode, "javaMode");
         javaPath = javaPath == null ? "" : javaPath.trim();
-        performancePreset = Objects.requireNonNull(performancePreset, "performancePreset");
         memoryMode = Objects.requireNonNull(memoryMode, "memoryMode");
         customJvmArguments = JvmArgumentPolicy.requireSafe(customJvmArguments);
-        backupPolicyId = backupPolicyId == null ? "" : backupPolicyId.trim();
 
         if (javaMode == JavaMode.CUSTOM && javaPath.isEmpty()) {
             throw new IllegalArgumentException("Custom Java mode requires a Java path");
@@ -47,9 +40,6 @@ public record InstanceLaunchProfile(
                 || maxMemoryMb > ECLConfig.MAX_GAME_MEMORY_MB)) {
             throw new IllegalArgumentException("Custom memory is outside the supported range");
         }
-        if (backupPolicyId.isEmpty()) {
-            throw new IllegalArgumentException("backupPolicyId must not be blank");
-        }
     }
 
     public static InstanceLaunchProfile defaults() {
@@ -57,13 +47,9 @@ public record InstanceLaunchProfile(
                 CURRENT_SCHEMA_VERSION,
                 JavaMode.AUTO,
                 "",
-                PerformancePreset.BALANCED,
                 MemoryMode.AUTO,
                 ECLConfig.AUTO_MEMORY_MB,
-                true,
-                List.of(),
-                true,
-                "default");
+                List.of());
     }
 
     public enum JavaMode {

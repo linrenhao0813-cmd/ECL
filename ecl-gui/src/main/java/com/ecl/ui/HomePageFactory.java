@@ -35,7 +35,7 @@ final class HomePageFactory {
         pane.setMinWidth(0);
         HBox.setHgrow(pane, Priority.ALWAYS);
         // Shared controls continue to own authentication and the selected local instance.
-        ui.createForm();
+        ui.initializeLaunchControls();
         StackPane hero = createLaunchHero();
         VBox.setVgrow(hero, Priority.ALWAYS);
         pane.getChildren().add(hero);

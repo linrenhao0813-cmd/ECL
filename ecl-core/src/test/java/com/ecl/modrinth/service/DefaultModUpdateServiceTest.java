@@ -1,5 +1,7 @@
 package com.ecl.modrinth.service;
 
+import com.ecl.operation.InstanceOperationCoordinator;
+
 import com.ecl.modrinth.TestFixtures;
 import com.ecl.modrinth.api.ModSearchQuery;
 import com.ecl.modrinth.api.ModSearchResult;
@@ -40,7 +42,7 @@ class DefaultModUpdateServiceTest {
         DefaultModVersionSelector selector = new DefaultModVersionSelector();
         ModInstallationService installer = new ModInstallationService(new FileInstalledModRepository(),
                 new ModFileDownloadService(java.util.concurrent.ForkJoinPool.commonPool(), new HashVerifier()),
-                new DefaultInstanceOperationLock(), Runnable::run, ignored -> false);
+                new InstanceOperationCoordinator(), Runnable::run, ignored -> false);
         DefaultModUpdateService service = new DefaultModUpdateService(api, selector,
                 new DefaultModDependencyResolver(api, selector), new InstallationPlanBuilder(), installer, ignored -> instance);
         var update = new com.ecl.modrinth.model.ModUpdate(installed(temp, "hash"), root, root.files().getFirst());
@@ -102,7 +104,7 @@ class DefaultModUpdateServiceTest {
     private static DefaultModUpdateService service(Path temp, ProjectVersionProvider provider) {
         DefaultModVersionSelector selector = new DefaultModVersionSelector();
         ModInstallationService installer = new ModInstallationService(new FileInstalledModRepository(),
-                new ModFileDownloadService(java.util.concurrent.ForkJoinPool.commonPool(), new HashVerifier()), new DefaultInstanceOperationLock(),
+                new ModFileDownloadService(java.util.concurrent.ForkJoinPool.commonPool(), new HashVerifier()), new InstanceOperationCoordinator(),
                 Runnable::run, ignored -> false);
         return new DefaultModUpdateService(provider, selector, new DefaultModDependencyResolver(provider, selector),
                 new InstallationPlanBuilder(), installer, ignored -> TestFixtures.instance(temp));
@@ -119,7 +121,7 @@ class DefaultModUpdateServiceTest {
             FileInstalledModRepository repository = new FileInstalledModRepository();
             ModInstallationService installer = new ModInstallationService(
                     repository, new ModFileDownloadService(executor, new HashVerifier()),
-                    new DefaultInstanceOperationLock(), Runnable::run, ignored -> false);
+                    new InstanceOperationCoordinator(), Runnable::run, ignored -> false);
             DefaultModUpdateService service = new DefaultModUpdateService(
                     provider, selector, new DefaultModDependencyResolver(provider, selector),
                     new InstallationPlanBuilder(), installer, ignored -> instance);

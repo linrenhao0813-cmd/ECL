@@ -32,7 +32,6 @@ import javafx.scene.control.ListCell;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
-import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
@@ -101,8 +100,6 @@ class LauncherUIView extends javafx.application.Application {
     Label detailLabel;
     Button launchBtn;
     Button updateInstanceButton;
-    Button refreshBtn;
-    Button settingsBtn;
     Button microsoftLoginBtn;
     Button microsoftAddAccountBtn;
     Button skinUploadBtn;
@@ -599,9 +596,8 @@ class LauncherUIView extends javafx.application.Application {
         return LauncherUiFactory.bodyText(text);
     }
 
-
-    GridPane createForm() {
-        return launchForm.createForm();
+    void initializeLaunchControls() {
+        launchForm.initializeControls();
     }
 
     private VBox createLoaderSelectionPage(String profileId, String minecraftVersion) {
@@ -752,9 +748,6 @@ class LauncherUIView extends javafx.application.Application {
                 .anyMatch(entry -> version.equals(entry.getValue()) && entry.getKey().isAlive());
     }
 
-
-
-
     private void showContentDownloadDialog(ContentTarget target) {
         contentBrowser.showContentDownloadDialog(target);
     }
@@ -801,7 +794,6 @@ class LauncherUIView extends javafx.application.Application {
     void ensureDirectory(File dir) throws IOException {
         pathService.ensureDirectory(dir);
     }
-
 
     private static String loaderDisplayName(String loader) {
         return LauncherPathService.loaderDisplayName(loader);
