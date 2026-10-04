@@ -8,6 +8,7 @@ import com.ecl.backup.BackupEntry;
 import com.ecl.game.InstanceLaunchProfile;
 import com.ecl.launcher.CrashAnalyzer;
 import com.ecl.launch.GameProcess;
+import com.ecl.launch.GameProcessMarker;
 import com.ecl.launch.LaunchOptions;
 import com.ecl.util.InstanceOperationLease;
 import com.ecl.modrinth.instance.ModInstanceContext;
@@ -23,14 +24,13 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Owns game launch, download-and-launch, process monitoring, console and crash handling. */
+/** Owns game launch, download-and-launch, process monitoring, and crash handling. */
 final class GameLaunchCoordinator {
     private final LauncherUI ui;
     private final LaunchUiFacade facade;
     private final LaunchAuthFactory authFactory;
     private final GameProcessMonitor processMonitor;
     private final GameLaunchPreparation preparation;
-    private final GameConsoleController console;
     private final GamePlaytimeService playtime;
 
     GameLaunchCoordinator(LauncherUI ui) {
@@ -41,10 +41,9 @@ final class GameLaunchCoordinator {
         this.ui = ui;
         this.facade = facade;
         this.authFactory = new LaunchAuthFactory(ui);
-        this.console = new GameConsoleController(ui);
         this.playtime = new GamePlaytimeService(ui);
         this.preparation = new GameLaunchPreparation(ui, facade);
-        this.processMonitor = new GameProcessMonitor(ui, console::appendLine,
+        this.processMonitor = new GameProcessMonitor(ui,
                 this::showGameErrorDialog, playtime::recordSession);
     }
 
@@ -78,6 +77,9 @@ final class GameLaunchCoordinator {
             try {
                 ensureVersionGameDirs(version);
                 createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
+                if (GameProcessMarker.isRunning(launchDir.toPath())) {
+                    throw new IOException("实例中的游戏进程仍在运行: " + version);
+                }
                 gameLock = InstanceOperationLease.tryAcquire(launchDir.toPath());
                 if (gameLock == null) {
                     throw new IOException("实例正在运行或被另一个启动器进程占用: " + version);
@@ -118,6 +120,12 @@ final class GameLaunchCoordinator {
                 ui.controller.invalidateLaunchVersion(version);
                 GameProcess gameProcess = ui.gameLauncher.launch(options);
                 Process process = gameProcess.process();
+                try {
+                    GameProcessMarker.record(launchDir.toPath(), process.toHandle());
+                } catch (IOException markerError) {
+                    gameProcess.close();
+                    throw new IOException("无法建立游戏进程运行标记，已停止本次启动", markerError);
+                }
                 long launchStartedAt = process.info().startInstant()
                         .map(Instant::toEpochMilli)
                         .orElseGet(System::currentTimeMillis);
@@ -131,9 +139,6 @@ final class GameLaunchCoordinator {
                     ui.setStatus("游戏已启动", version + " 正在运行，实例目录: " + launchDir.getAbsolutePath());
                     ui.updateRuntimeSummary();
                     ui.setControlsBusy(false);
-                    if (ui.showGameConsole) {
-                        ui.setActiveView(AppView.LOGS);
-                    }
                     if (minimizeThisLaunch) {
                         ui.primaryStage.setIconified(true);
                     }
