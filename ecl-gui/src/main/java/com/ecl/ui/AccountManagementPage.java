@@ -36,21 +36,45 @@ final class AccountManagementPage extends VBox {
         ui.updateAuthFields();
     }
 
+    /**
+     * Single place showing how many Microsoft accounts are saved and how to recover a stale session,
+     * so an expired sign-in is never a dead end.
+     */
+    private VBox createRecoverySurface() {
+        Label recoveryHint = new Label();
+        recoveryHint.setWrapText(true);
+        recoveryHint.getStyleClass().add("status-detail");
+        recoveryHint.textProperty().bind(Bindings.createStringBinding(() -> {
+            int saved = ui.microsoftAccountCombo.getItems().size();
+            return saved == 0
+                    ? GuiMessages.get("accounts.recovery.none")
+                    : GuiMessages.get("accounts.recovery.saved", saved);
+        }, ui.microsoftAccountCombo.getItems()));
+        Button relogin = ui.createActionButton(GuiMessages.get("accounts.relogin"),
+                "secondary-button", () -> ui.microsoftAccounts.loginMicrosoftAccount());
+        relogin.setId("account-relogin");
+        relogin.setAccessibleText(GuiMessages.get("accounts.relogin"));
+        relogin.disableProperty().bind(ui.microsoftLoginBtn.disableProperty());
+        Button addAnother = ui.createActionButton(GuiMessages.get("accounts.addAnother"),
+                "ghost-button", () -> ui.microsoftAccounts.addMicrosoftAccount());
+        addAnother.setId("account-add-another");
+        addAnother.disableProperty().bind(ui.microsoftAddAccountBtn.disableProperty());
+        FlowPane actions = new FlowPane(10, 8, relogin, addAnother);
+        return ui.createSurface(GuiMessages.get("accounts.recovery"),
+                GuiMessages.get("accounts.recovery.subtitle"),
+                recoveryHint, actions);
+    }
+
     private VBox createEditor() {
         VBox mode = field(GuiMessages.get("accounts.mode"), ui.authTypeCombo);
         VBox username = field(GuiMessages.get("accounts.username"), ui.usernameField);
         followVisibility(username, ui.usernameField);
         VBox saved = field(GuiMessages.get("accounts.saved"), ui.microsoftAccountCombo);
         followVisibility(saved, ui.microsoftAccountCombo);
-        VBox server = field(GuiMessages.get("accounts.server"), ui.yggdrasilServerField);
-        followVisibility(server, ui.yggdrasilServerField);
-        VBox password = field(GuiMessages.get("accounts.password"), ui.passwordField);
-        followVisibility(password, ui.passwordField);
-
         Button remove = ui.createActionButton(GuiMessages.get("accounts.remove"), "ghost-button", this::removeAccount);
         remove.disableProperty().bind(ui.microsoftAccountCombo.valueProperty().isNull()
                 .or(ui.microsoftLoginBtn.disableProperty()));
-        FlowPane microsoftActions = actions(ui.microsoftLoginBtn, ui.microsoftAddAccountBtn, remove);
+        FlowPane microsoftActions = actions(remove);
         followVisibility(microsoftActions, ui.microsoftAccountCombo);
         FlowPane skinActions = actions(ui.skinUploadBtn, ui.offlineSkinRemoveBtn);
         followVisibility(skinActions, ui.skinUploadBtn);
@@ -63,7 +87,7 @@ final class AccountManagementPage extends VBox {
         help.textProperty().bind(ui.authHintLabel.textProperty());
         help.setWrapText(true);
         help.getStyleClass().add("status-detail");
-        return new VBox(16, mode, username, saved, microsoftActions, server, password,
+        return new VBox(16, mode, username, saved, createRecoverySurface(), microsoftActions,
                 skinActions, help, apply, feedback);
     }
 
@@ -107,16 +131,8 @@ final class AccountManagementPage extends VBox {
             ui.usernameField.requestFocus();
             return;
         }
-        if (LauncherUI.AUTH_YGGDRASIL.equals(type) && ui.yggdrasilServerField.getText().isBlank()) {
-            feedback.setText(GuiMessages.get("accounts.serverRequired"));
-            ui.yggdrasilServerField.requestFocus();
-            return;
-        }
         ui.settingsManager.set(ECLConfig.KEY_AUTH_TYPE, type);
         ui.settingsManager.set(ECLConfig.KEY_USERNAME, username);
-        if (LauncherUI.AUTH_YGGDRASIL.equals(type)) {
-            ui.settingsManager.set(ECLConfig.KEY_YGGDRASIL_SERVER, ui.yggdrasilServerField.getText().trim());
-        }
         feedback.setText(GuiMessages.get(ui.settingsManager.save() ? "accounts.savedOk" : "accounts.saveFailed"));
         ui.updateRuntimeSummary();
     }

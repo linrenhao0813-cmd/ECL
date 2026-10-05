@@ -157,7 +157,7 @@ public final class DefaultLocalModScanner implements LocalModScanner {
                 record = recognizedRecord(instance, version, file, relative, enabled, old, matchedFile);
                 projectCounts.merge(record.projectId(), 1, Integer::sum);
                 items.add(new LocalModScanItem(file.path, record, true, false,
-                        metadataProvider.source().displayName() + " 已识别"));
+                        metadataProvider.displayName() + " 已识别"));
             } else {
                 record = unknownRecord(instance, file, relative, enabled, old);
                 String message = file.metadata.modded()

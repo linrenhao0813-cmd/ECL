@@ -3,10 +3,9 @@ package com.ecl.ui;
 import com.ecl.util.Messages;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
-import javafx.scene.control.Label;
-import javafx.scene.control.ProgressBar;
-import javafx.scene.layout.HBox;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
 import java.util.EnumMap;
@@ -17,21 +16,38 @@ import java.util.function.Consumer;
 final class LauncherNavigationRail {
     private final Map<AppView, Button> buttons = new EnumMap<>(AppView.class);
     private final Consumer<AppView> selectionHandler;
+    private VBox rail;
+    private boolean compact;
 
     LauncherNavigationRail(Consumer<AppView> selectionHandler) {
         this.selectionHandler = selectionHandler;
     }
 
-    HBox createTopNavigation(AppView selected) {
-        HBox navigation = new HBox(4);
-        navigation.getStyleClass().add("global-nav");
-        navigation.setAlignment(Pos.CENTER);
+    /** Builds the persistent left navigation column used by the window shell. */
+    VBox createVerticalNavigation(AppView selected) {
+        rail = new VBox(2);
+        rail.getStyleClass().add("nav-rail-vertical");
+        rail.setAlignment(Pos.TOP_LEFT);
+        rail.setMinWidth(Region.USE_PREF_SIZE);
         buttons.clear();
         for (AppView view : AppView.values()) {
-            navigation.getChildren().add(createButton(view));
+            rail.getChildren().add(createButton(view));
         }
+        Region spacer = new Region();
+        VBox.setVgrow(spacer, Priority.ALWAYS);
+        rail.getChildren().add(spacer);
         showSelected(selected);
-        return navigation;
+        applyCompact();
+        return rail;
+    }
+
+    /** Collapses the rail to an icon-only column for narrow windows. */
+    void setCompact(boolean compact) {
+        if (compact == this.compact) {
+            return;
+        }
+        this.compact = compact;
+        applyCompact();
     }
 
     void showSelected(AppView selected) {
@@ -44,12 +60,46 @@ final class LauncherNavigationRail {
     }
 
     void refreshTexts() {
+        if (compact) {
+            buttons.forEach((view, button) ->
+                    button.setTooltip(new Tooltip(titleFor(view))));
+            return;
+        }
         buttons.forEach((view, button) -> button.setText(titleFor(view)));
+    }
+
+    private void applyCompact() {
+        if (rail == null) {
+            return;
+        }
+        if (compact) {
+            if (!rail.getStyleClass().contains("nav-rail-compact")) {
+                rail.getStyleClass().add("nav-rail-compact");
+            }
+        } else {
+            rail.getStyleClass().remove("nav-rail-compact");
+        }
+        buttons.forEach((view, button) -> {
+            String title = titleFor(view);
+            button.setText(compact ? null : title);
+            button.setTooltip(compact ? new Tooltip(title) : null);
+        });
     }
 
     private Button createButton(AppView view) {
         Button button = new Button(titleFor(view));
-        button.getStyleClass().add("nav-button");
+        button.setMinWidth(Region.USE_PREF_SIZE);
+        button.setAccessibleText(titleFor(view));
+        button.setGraphic(ForestIcons.create(switch (view) {
+            case HOME -> "home";
+            case VERSIONS -> "instances";
+            case SAVES -> "saves";
+            case DOWNLOADS -> "download";
+            case SERVERS -> "servers";
+            case SETTINGS -> "settings";
+        }));
+        button.setGraphicTextGap(10);
+        button.getStyleClass().addAll("nav-button", "nav-button-vertical");
         button.setOnAction(event -> selectionHandler.accept(view));
         buttons.put(view, button);
         return button;
@@ -58,7 +108,7 @@ final class LauncherNavigationRail {
     private static String titleFor(AppView view) {
         return switch (view) {
             case HOME -> Messages.get("nav.short.home");
-            case VERSIONS -> Messages.get("nav.short.versions");
+            case VERSIONS -> GuiMessages.get("forest.instances");
             case SAVES -> Messages.get("nav.short.saves");
             case DOWNLOADS -> Messages.get("nav.short.downloads");
             case SERVERS -> Messages.get("nav.short.servers");
@@ -66,24 +116,4 @@ final class LauncherNavigationRail {
         };
     }
 
-    private static VBox createTelemetryFooter() {
-        VBox box = new VBox(8);
-        box.getStyleClass().add("nav-rail-footer");
-        box.getChildren().addAll(telemetryRow("telemetry.cpu", 0.12, "12%"),
-                telemetryRow("telemetry.memory", 0.42, "4.2G"));
-        return box;
-    }
-
-    private static HBox telemetryRow(String labelKey, double progress, String value) {
-        Label label = new Label(Messages.get(labelKey));
-        label.getStyleClass().add("telemetry-label");
-        ProgressBar bar = new ProgressBar(progress);
-        bar.setMaxWidth(Double.MAX_VALUE);
-        Label valueLabel = new Label(value);
-        valueLabel.getStyleClass().add("telemetry-value");
-        HBox.setHgrow(bar, Priority.ALWAYS);
-        HBox row = new HBox(8, label, bar, valueLabel);
-        row.setAlignment(Pos.CENTER_LEFT);
-        return row;
-    }
 }

@@ -67,7 +67,6 @@ class MessagesTest {
     void authLabelsAreAllPresent() {
         assertNotNull(Messages.get("auth.offline"));
         assertNotNull(Messages.get("auth.microsoft"));
-        assertNotNull(Messages.get("auth.yggdrasil"));
     }
 
     @Test

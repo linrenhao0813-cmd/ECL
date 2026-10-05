@@ -3,43 +3,7 @@
    Deep-space black + neon cyan/pink/amber + monospace + cut corners
    ============================================================ */
 
-/* Live theme modes. Dark remains the visual default; light mode keeps the same HUD geometry. */
-.scene-root.theme-light {
-    -fx-background-color:
-        radial-gradient(center 50% 0%, radius 80%, rgba(2, 132, 199, 0.10) 0%, rgba(248, 250, 252, 0) 60%),
-        linear-gradient(to bottom, #f8fafc 0%, #e2e8f0 100%);
-}
-.scene-root.theme-light .root-pane,
-.scene-root.theme-light .launch-pane,
-.scene-root.theme-light .workspace-pane {
-    -fx-background-color: transparent;
-}
-.scene-root.theme-light .surface-card,
-.scene-root.theme-light .stat-card,
-.scene-root.theme-light .content-row,
-.scene-root.theme-light .info-row {
-    -fx-background-color: rgba(255, 255, 255, 0.86);
-    -fx-border-color: rgba(2, 132, 199, 0.35);
-}
-.scene-root.theme-light .section-title,
-.scene-root.theme-light .content-title,
-.scene-root.theme-light .info-value,
-.scene-root.theme-light .label {
-    -fx-text-fill: #0f172a;
-}
-.scene-root.theme-light .section-subtitle,
-.scene-root.theme-light .status-detail,
-.scene-root.theme-light .info-key,
-.scene-root.theme-light .content-subtitle {
-    -fx-text-fill: #475569;
-}
-.scene-root.theme-light .field-control,
-.scene-root.theme-light .text-area,
-.scene-root.theme-light .text-field,
-.scene-root.theme-light .combo-box {
-    -fx-background-color: rgba(255, 255, 255, 0.92);
-    -fx-text-fill: #0f172a;
-}
+/* Fixed dark theme. The launcher only ships a dark visual mode. */
 .wizard-root {
     -fx-font-family: "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
 }
@@ -68,14 +32,6 @@
     -fx-font-family: "JetBrains Mono", "Cascadia Code", "Consolas", "Courier New", monospace;
 }
 
-/* Subtle grid overlay rendered by .scene-root children */
-.hud-grid {
-    -fx-background-color:
-        linear-gradient(to right, rgba(0, 255, 213, 0.04) 1px, transparent 1px) 0 0 / 40px 40px,
-        linear-gradient(to bottom, rgba(0, 255, 213, 0.04) 1px, transparent 1px) 0 0 / 40px 40px;
-    -fx-opacity: 0.6;
-}
-
 /* ---------- Window titlebar (terminal) ---------- */
 .window-title-bar {
     -fx-background-color: transparent;
@@ -92,20 +48,6 @@
     -fx-letter-spacing: 4px;
     -fx-effect: dropshadow(gaussian, rgba(0, 255, 213, 0.7), 8, 0.6, 0, 0);
 }
-
-.traffic-dot {
-    -fx-min-width: 11;
-    -fx-min-height: 11;
-    -fx-max-width: 11;
-    -fx-max-height: 11;
-    -fx-background-radius: 0;
-    -fx-border-radius: 0;
-    -fx-border-color: rgba(0, 0, 0, 0.4);
-    -fx-border-width: 1;
-}
-.traffic-red    { -fx-background-color: #ff5f57; }
-.traffic-yellow { -fx-background-color: #febc2e; }
-.traffic-green  { -fx-background-color: #28c840; }
 
 .window-button {
     -fx-background-color: transparent;
@@ -479,8 +421,7 @@
 .corner-bracket-amber { -fx-border-color: #fde68a; -fx-effect: dropshadow(gaussian, rgba(253, 230, 138, 0.6), 3, 0.5, 0, 0); }
 
 /* ---------- Field controls ---------- */
-.field-label,
-.info-key {
+.field-label {
     -fx-text-fill: #00ffd5;
     -fx-font-size: 10px;
     -fx-font-weight: 700;
@@ -697,32 +638,6 @@
 .telemetry-value-green {
     -fx-text-fill: #4ade80;
     -fx-effect: dropshadow(gaussian, rgba(74, 222, 128, 0.5), 3, 0.5, 0, 0);
-}
-
-.telemetry-canvas {
-    -fx-border-color: rgba(0, 255, 213, 0.3);
-    -fx-border-width: 1;
-    -fx-background-color: rgba(2, 6, 23, 0.6);
-}
-
-.event-stream-row {
-    -fx-padding: 3 0;
-}
-.event-time {
-    -fx-text-fill: #475569;
-    -fx-font-size: 9px;
-    -fx-font-weight: 500;
-    -fx-letter-spacing: 1px;
-    -fx-font-family: "JetBrains Mono", "Consolas", monospace;
-}
-.event-tag-ok { -fx-text-fill: #00ffd5; -fx-font-weight: 700; -fx-effect: dropshadow(gaussian, rgba(0, 255, 213, 0.6), 3, 0.5, 0, 0); }
-.event-tag-warn { -fx-text-fill: #fde68a; -fx-font-weight: 700; }
-.event-tag-err { -fx-text-fill: #f87171; -fx-font-weight: 700; }
-.event-text {
-    -fx-text-fill: #cbd5e1;
-    -fx-font-size: 10px;
-    -fx-font-family: "JetBrains Mono", "Consolas", monospace;
-    -fx-letter-spacing: 1px;
 }
 
 /* Sidebar list (modrinth recs) */
@@ -1171,10 +1086,7 @@
     -fx-font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
     -fx-text-fill: -ecl-text;
 }
-
-.hud-grid,
 .hero-header,
-.traffic-dot,
 .nav-rail,
 .nav-rail-header,
 .nav-rail-footer,
@@ -1300,24 +1212,24 @@
 .scene-root.theme-dark.root-pane > *,
 .scene-root.theme-dark .root-pane,
 .scene-root.theme-dark .root-pane > * {
-    -ecl-canvas: #0b1120;
-    -ecl-surface: #111827;
-    -ecl-surface-muted: #172033;
-    -ecl-text: #f1f5f9;
-    -ecl-secondary: #a8b3c7;
-    -ecl-tertiary: #7f8ca3;
-    -ecl-border: #293548;
-    -ecl-blue: #38bdf8;
-    -ecl-blue-hover: #7dd3fc;
-    -ecl-blue-pressed: #0ea5e9;
-    -ecl-track: #263247;
+    -ecl-canvas: #101915;
+    -ecl-surface: #141f19;
+    -ecl-surface-muted: #1b2922;
+    -ecl-text: #edf3ed;
+    -ecl-secondary: #a9b6ad;
+    -ecl-tertiary: #86978c;
+    -ecl-border: #2a3930;
+    -ecl-blue: #b4d7b6;
+    -ecl-blue-hover: #cbe5ca;
+    -ecl-blue-pressed: #97bd9c;
+    -ecl-track: #2a3930;
     -ecl-success-text: #6ee7a0;
     -ecl-success-bg: #10291d;
     -ecl-danger: #fb7185;
 }
 
 .scene-root.theme-dark {
-    -fx-background-color: linear-gradient(to bottom, #0b1120, #101827);
+    -fx-background-color: linear-gradient(to bottom, #101915, #111b16);
 }
 
 .scene-root.theme-dark .window-title-bar,
@@ -1333,7 +1245,7 @@
 }
 
 .scene-root.theme-dark .launch-surface {
-    -fx-background-color: linear-gradient(to bottom right, #172033 0%, #111827 100%);
+    -fx-background-color: linear-gradient(to bottom right, #1b2922 0%, #141f19 100%);
     -fx-border-color: -ecl-border;
     -fx-border-width: 1;
 }
@@ -1344,7 +1256,7 @@
 }
 
 .scene-root.theme-dark .account-avatar {
-    -fx-background-color: #263247;
+    -fx-background-color: #2a3930;
     -fx-text-fill: -ecl-text;
 }
 
@@ -1367,11 +1279,11 @@
 
 .scene-root.theme-dark .content-library-nav-item-active,
 .scene-root.theme-dark .content-library-nav-item-active:hover {
-    -fx-background-color: #17314a;
+    -fx-background-color: #294332;
 }
 
 .scene-root.theme-dark .content-library-nav-icon {
-    -fx-background-color: #263247;
+    -fx-background-color: #2a3930;
     -fx-text-fill: -ecl-secondary;
 }
 
@@ -1503,7 +1415,7 @@
 
 .launch-pane {
     -fx-padding: 0 0 16 0;
-    -fx-spacing: 24;
+    -fx-spacing: 20;
 }
 
 .page-heading {
@@ -1513,7 +1425,7 @@
 
 .page-title {
     -fx-text-fill: -ecl-text;
-    -fx-font-size: 38px;
+    -fx-font-size: 28px;
     -fx-font-weight: 800;
     -fx-letter-spacing: -0.5px;
 }
@@ -1592,66 +1504,6 @@
     -fx-min-height: 280;
     -fx-pref-height: 280;
     -fx-max-height: 280;
-}
-
-.orb-glow {
-    -fx-min-width: 330;
-    -fx-pref-width: 330;
-    -fx-max-width: 330;
-    -fx-min-height: 330;
-    -fx-pref-height: 330;
-    -fx-max-height: 330;
-    -fx-background-color: radial-gradient(center 50% 50%, radius 50%, rgba(98, 132, 255, 0.18) 0%, rgba(98, 132, 255, 0) 72%);
-    -fx-background-radius: 999;
-}
-
-.orb-ring-outer {
-    -fx-min-width: 260;
-    -fx-pref-width: 260;
-    -fx-max-width: 260;
-    -fx-min-height: 260;
-    -fx-pref-height: 260;
-    -fx-max-height: 260;
-    -fx-background-color: transparent;
-    -fx-background-radius: 999;
-    -fx-border-color: rgba(152, 169, 238, 0.35);
-    -fx-border-width: 1;
-    -fx-border-radius: 999;
-}
-
-.orb-ring-inner {
-    -fx-min-width: 208;
-    -fx-pref-width: 208;
-    -fx-max-width: 208;
-    -fx-min-height: 208;
-    -fx-pref-height: 208;
-    -fx-max-height: 208;
-    -fx-background-color: transparent;
-    -fx-background-radius: 999;
-    -fx-border-color: rgba(122, 146, 237, 0.48);
-    -fx-border-width: 1;
-    -fx-border-radius: 999;
-}
-
-.orb-core {
-    -fx-min-width: 154;
-    -fx-pref-width: 154;
-    -fx-max-width: 154;
-    -fx-min-height: 154;
-    -fx-pref-height: 154;
-    -fx-max-height: 154;
-    -fx-background-color:
-        radial-gradient(center 35% 28%, radius 28%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 66%),
-        linear-gradient(to bottom right, #94b2ff 0%, #4f7ff5 52%, #423bd1 100%);
-    -fx-background-radius: 999;
-    -fx-effect: dropshadow(gaussian, rgba(43, 72, 190, 0.30), 28, 0.20, 0, 16);
-}
-
-.orb-play {
-    -fx-text-fill: #ffffff;
-    -fx-font-size: 28px;
-    -fx-font-weight: 700;
-    -fx-translate-x: 3;
 }
 
 /* ---------- Summary cards ---------- */
@@ -1999,7 +1851,7 @@
     -fx-border-color: -ecl-border;
     -fx-border-width: 1;
     -fx-border-radius: 20;
-    -fx-padding: 20 22;
+    -fx-padding: 18 20;
     -fx-effect: none;
 }
 
@@ -2073,7 +1925,7 @@
 
 /* ---------- Content library ---------- */
 .content-library-heading {
-    -fx-padding: 0 0 2 2;
+    -fx-padding: 0 0 2 0;
 }
 
 .content-library-layout {
@@ -2286,7 +2138,7 @@
 }
 
 .scene-root.theme-dark .instance-install-choice:selected {
-    -fx-background-color: #17314a;
+    -fx-background-color: #294332;
 }
 
 .scene-root.theme-dark .instance-install-choice-detail {
@@ -2457,7 +2309,6 @@
 /* ---------- Public server browser ---------- */
 .server-browser {
     -fx-padding: 16;
-    -fx-min-height: 610;
 }
 
 .server-browser-layout,
@@ -2741,4 +2592,495 @@
     -fx-font-size: 9px;
     -fx-font-weight: 400;
     -fx-letter-spacing: 0;
+}
+
+/* Forest home: native controls over an independently generated landscape. */
+.window-title-bar {
+    -fx-padding: 0 24;
+    -fx-spacing: 12;
+    -fx-min-height: 72;
+    -fx-pref-height: 72;
+    -fx-max-height: 72;
+}
+.window-title, .brand-label { -fx-min-width: 96; -fx-font-size: 25px; }
+.global-nav { -fx-spacing: 0; }
+.main-body { -fx-padding: 24 32 12 32; }
+.forest-home { -fx-spacing: 18; -fx-padding: 0; }
+.forest-icon-path { -fx-fill: transparent; -fx-stroke: -ecl-secondary; -fx-stroke-width: 1.5; }
+.brand-label .forest-icon-path { -fx-stroke: -ecl-blue; -fx-fill: -ecl-blue; }
+.nav-button { -fx-padding: 20 8; -fx-font-size: 13px; -fx-min-height: 71; -fx-pref-height: 71; }
+.nav-button-selected, .nav-button:focused {
+    -fx-border-color: transparent transparent -ecl-blue transparent;
+    -fx-text-fill: -ecl-blue;
+}
+.nav-button-selected .forest-icon-path { -fx-stroke: -ecl-blue; }
+.forest-account-button {
+    -fx-background-color: transparent;
+    -fx-padding: 8;
+    -fx-cursor: hand;
+    -fx-background-radius: 8;
+}
+.forest-account-button:hover { -fx-background-color: -ecl-surface-muted; }
+.scene-root .account-chip, .scene-root.theme-dark .account-chip {
+    -fx-background-color: transparent;
+    -fx-padding: 2 0;
+    -fx-font-size: 13px;
+    -fx-text-fill: -ecl-text;
+    -fx-max-width: 110;
+}
+.forest-hero { -fx-min-height: 320; -fx-pref-height: 420; }
+.forest-landscape {
+    -fx-background-color: #14241b;
+    -fx-background-image: url('../images/forest-hero.png');
+    -fx-background-size: cover;
+    -fx-background-position: center;
+    -fx-background-repeat: no-repeat;
+    -fx-background-radius: 12;
+}
+.forest-shade {
+    -fx-background-color: linear-gradient(to right, rgba(5, 16, 10, 0.88) 0%, rgba(5, 16, 10, 0.65) 34%, rgba(5, 16, 10, 0.06) 80%);
+    -fx-background-radius: 12;
+}
+.forest-details { -fx-padding: 34 44; }
+.scene-root .forest-home .forest-eyebrow { -fx-text-fill: #b5c7b8; -fx-font-size: 13px; }
+.scene-root .forest-home .forest-title { -fx-text-fill: #f5f8f4; -fx-font-size: 40px; -fx-font-weight: bold; }
+.scene-root .forest-home .forest-meta { -fx-text-fill: #c4cfc7; -fx-font-size: 16px; }
+.scene-root .forest-home .forest-description {
+    -fx-text-fill: #adbdb1;
+    -fx-font-size: 13px;
+    -fx-padding: 16 0 0 0;
+    -fx-border-color: #45604a transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+.forest-home .launch-actions { -fx-padding: 8 0; -fx-spacing: 28; }
+.forest-home .launch-button {
+    -fx-background-color: #b4d7b6;
+    -fx-background-radius: 9;
+    -fx-text-fill: #102016;
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+    -fx-min-width: 192;
+    -fx-pref-width: 192;
+    -fx-min-height: 56;
+    -fx-pref-height: 56;
+    -fx-effect: none;
+}
+.forest-home .launch-button:hover { -fx-background-color: #cbe5ca; }
+.scene-root .forest-home .launch-play-icon { -fx-text-fill: #102016; -fx-font-size: 18px; }
+.scene-root.theme-dark .link-button, .scene-root.theme-dark .wiki-link-button { -fx-text-fill: -ecl-blue; }
+.scene-root.theme-dark .primary-button { -fx-text-fill: #102016; }
+.scene-root.theme-dark .primary-button:hover { -fx-text-fill: #102016; }
+.scene-root.theme-dark .download-progress > .track { -fx-background-color: -ecl-track; }
+.scene-root.theme-dark .download-progress > .bar { -fx-background-color: -ecl-blue; }
+.scene-root.theme-dark .list-view, .scene-root.theme-dark .mod-result-list { -fx-background-color: -ecl-surface; }
+.scene-root.theme-dark .list-view .list-cell { -fx-border-color: transparent transparent -ecl-border transparent; }
+.scene-root.theme-dark .list-view .list-cell:filled:selected { -fx-background-color: -ecl-surface-muted; }
+.scene-root.theme-dark .window-button:hover { -fx-background-color: -ecl-surface-muted; -fx-text-fill: -ecl-text; }
+.scene-root.theme-dark .window-close-button:hover { -fx-background-color: #5a2930; }
+.scene-root.theme-dark .main-scroll .scroll-bar:vertical .thumb { -fx-background-color: -ecl-border; }
+.footer-bar { -fx-padding: 4 28 10 28; }
+
+/* ============================================================
+   Window shell: left navigation rail, instance bar, task dock
+   ============================================================ */
+
+/* ---------- Left navigation rail ---------- */
+.nav-rail-vertical {
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: transparent -ecl-border transparent transparent;
+    -fx-border-width: 0 1 0 0;
+    -fx-padding: 16 12;
+    -fx-spacing: 4;
+    -fx-min-width: 192;
+    -fx-pref-width: 192;
+    -fx-max-width: 192;
+    -fx-effect: null;
+}
+
+.nav-rail-vertical.nav-rail-compact {
+    -fx-padding: 16 8;
+    -fx-min-width: 68;
+    -fx-pref-width: 68;
+    -fx-max-width: 68;
+}
+
+.nav-button-vertical {
+    -fx-background-color: transparent;
+    -fx-background-radius: 10;
+    -fx-border-color: transparent;
+    -fx-border-width: 0 0 0 3;
+    -fx-border-insets: 0;
+    -fx-border-radius: 0;
+    -fx-padding: 10 12;
+    -fx-min-height: 44;
+    -fx-pref-height: 44;
+    -fx-alignment: center-left;
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 13px;
+    -fx-font-weight: 500;
+    -fx-graphic-text-gap: 10;
+    -fx-cursor: hand;
+    -fx-effect: null;
+}
+
+.nav-button-vertical:hover {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-text-fill: -ecl-text;
+}
+
+.nav-button-vertical.nav-button-selected,
+.nav-button-vertical.nav-button-selected:hover {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: transparent transparent transparent -ecl-blue;
+    -fx-border-width: 0 0 0 3;
+    -fx-text-fill: -ecl-blue;
+    -fx-font-weight: 700;
+}
+
+.nav-rail-compact .nav-button-vertical {
+    -fx-padding: 10;
+    -fx-alignment: center;
+}
+
+.nav-button-vertical:focused {
+    -fx-border-color: transparent transparent transparent -ecl-blue;
+    -fx-border-width: 0 0 0 3;
+    -fx-border-radius: 0;
+    -fx-effect: none;
+}
+
+/* ---------- Content shell + instance bar ---------- */
+.content-shell {
+    -fx-background-color: transparent;
+}
+
+.instance-bar {
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: transparent transparent -ecl-border transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 12 32;
+    -fx-min-height: 64;
+}
+
+.instance-bar-label {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+}
+
+.instance-bar .instance-bar-selector,
+.instance-bar .instance-bar-selector:focused {
+    -fx-min-height: 36;
+    -fx-pref-height: 36;
+    -fx-padding: 0 10;
+}
+
+/* ---------- Bottom task dock ---------- */
+.task-dock {
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: -ecl-border transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+.window-status-bar {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 6 32;
+    -fx-min-height: 36;
+    -fx-pref-height: 36;
+    -fx-spacing: 10;
+}
+
+.status-version {
+    -fx-text-fill: -ecl-tertiary;
+    -fx-font-size: 11px;
+    -fx-font-weight: 500;
+}
+
+.status-title {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+}
+
+.status-task-button {
+    -fx-padding: 5 12;
+    -fx-min-height: 26;
+    -fx-font-size: 11px;
+}
+
+.status-progress {
+    -fx-pref-width: 180;
+    -fx-max-width: 180;
+    -fx-min-height: 6;
+    -fx-max-height: 6;
+}
+
+.task-detail-panel {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: transparent transparent -ecl-border transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 12 32 14 32;
+}
+
+.task-list {
+    -fx-background-color: -ecl-surface;
+    -fx-background-radius: 10;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 10;
+    -fx-border-width: 1;
+}
+
+.task-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 8 10;
+    -fx-border-color: transparent transparent -ecl-border transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.task-list .list-cell:filled:hover {
+    -fx-background-color: -ecl-surface-muted;
+}
+
+.task-list .list-cell:empty {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.task-item-title {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+}
+
+.task-item-stage {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 11px;
+}
+
+.task-item-state {
+    -fx-background-radius: 8;
+    -fx-padding: 2 8;
+    -fx-font-size: 10px;
+    -fx-font-weight: 700;
+}
+
+.task-state-active {
+    -fx-background-color: rgba(0, 113, 227, 0.16);
+    -fx-text-fill: -ecl-blue;
+}
+
+.task-state-done {
+    -fx-background-color: -ecl-success-bg;
+    -fx-text-fill: -ecl-success-text;
+}
+
+.task-state-failed {
+    -fx-background-color: #3a2126;
+    -fx-text-fill: #ff8a94;
+}
+
+.task-state-idle {
+    -fx-background-color: -ecl-track;
+    -fx-text-fill: -ecl-secondary;
+}
+
+.tiny-button {
+    -fx-padding: 3 10;
+    -fx-min-height: 24;
+    -fx-font-size: 11px;
+}
+
+/* ---------- Home launch state hint ---------- */
+.launch-hint-row {
+    -fx-padding: 0;
+}
+
+.launch-hint {
+    -fx-text-fill: #c4cfc7;
+    -fx-font-size: 12px;
+}
+
+/* ============================================================
+   Instance manager: list column + detail workspace
+   ============================================================ */
+.instance-workspace {
+    -fx-alignment: top-left;
+}
+
+.instance-workspace-narrow {
+    -fx-spacing: 14;
+}
+
+.instance-list-column {
+    -fx-alignment: top-left;
+}
+
+.instance-list-column .instance-version-list {
+    -fx-max-height: Infinity;
+    -fx-max-width: Infinity;
+}
+
+.instance-list-column .instance-version-list .list-cell {
+    -fx-padding: 10 12;
+}
+
+.instance-details,
+.instance-details-body {
+    -fx-alignment: top-left;
+}
+
+.instance-details {
+    -fx-padding: 0;
+}
+
+.instance-details-body {
+    -fx-background-color: -ecl-surface;
+    -fx-background-radius: 16;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 16;
+    -fx-border-width: 1;
+    -fx-padding: 18 20;
+}
+
+.instance-target-badge-current {
+    -fx-background-radius: 10;
+    -fx-padding: 5 10;
+    -fx-font-size: 10px;
+    -fx-font-weight: 700;
+    -fx-background-color: -ecl-success-bg;
+    -fx-text-fill: -ecl-success-text;
+}
+
+.list-cell .instance-target-badge-current {
+    -fx-padding: 2 7;
+}
+
+.instance-favorite {
+    -fx-text-fill: #f0b429;
+    -fx-font-size: 14px;
+}
+
+.instance-cover-thumb,
+.instance-cover-preview {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 8;
+}
+
+.instance-cover-preview {
+    -fx-background-radius: 12;
+}
+
+.instance-display-box .check-box {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 12px;
+}
+
+.danger-button {
+    -fx-text-fill: #e06c75;
+}
+
+.danger-button:hover {
+    -fx-text-fill: #ff8a94;
+}
+
+/* ============================================================
+   Content library: horizontal categories + install target strip
+   ============================================================ */
+.content-library-category-bar {
+    -fx-padding: 0 0 2 0;
+}
+
+.content-category-chip {
+    -fx-padding: 8 12;
+    -fx-min-height: 36;
+    -fx-pref-height: 36;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+    -fx-text-fill: -ecl-secondary;
+}
+
+.content-category-chip .content-library-nav-icon {
+    -fx-min-width: 22;
+    -fx-pref-width: 22;
+    -fx-min-height: 22;
+    -fx-pref-height: 22;
+    -fx-background-radius: 7;
+    -fx-font-size: 10px;
+}
+
+.content-category-chip:hover {
+    -fx-text-fill: -ecl-text;
+}
+
+.content-target-strip {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 12;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 12;
+    -fx-border-width: 1;
+    -fx-padding: 8 14;
+}
+
+.content-target-caption {
+    -fx-text-fill: -ecl-tertiary;
+    -fx-font-size: 11px;
+    -fx-font-weight: 600;
+}
+
+.content-target-value {
+    -fx-text-fill: -ecl-text;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+}
+
+/* Match the global settings frame to the launcher, including its title bar. */
+.settings-dialog-title-bar {
+    -fx-min-height: 48;
+    -fx-pref-height: 48;
+    -fx-max-height: 48;
+    -fx-padding: 0 16;
+}
+
+.scene-root.theme-dark .check-box > .box,
+.scene-root.theme-dark .radio-button > .radio {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-border-color: -ecl-tertiary;
+}
+.scene-root.theme-dark .radio-button > .radio { -fx-border-radius: 100; }
+.scene-root.theme-dark .check-box > .box { -fx-border-radius: 3; }
+.scene-root.theme-dark .check-box:selected > .box > .mark,
+.scene-root.theme-dark .radio-button:selected > .radio > .dot {
+    -fx-background-color: -ecl-blue;
+}
+
+/* Collapsible global settings keep optional launch and backup controls together. */
+.settings-form {
+    -fx-spacing: 12;
+}
+.settings-form .info-row {
+    -fx-padding: 2 0;
+}
+.settings-group > .title {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 12;
+    -fx-padding: 14 20;
+}
+.settings-group > .title > .text {
+    -fx-fill: -ecl-text;
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+}
+.settings-group > .title > .arrow-button > .arrow {
+    -fx-background-color: -ecl-secondary;
+}
+.settings-group > .content {
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 0 0 12 12;
+    -fx-padding: 18 20;
+}
+.settings-group:focused > .title {
+    -fx-border-color: -ecl-blue;
+    -fx-border-radius: 12;
 }

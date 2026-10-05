@@ -6,19 +6,15 @@ import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.provider.ModMetadataProvider;
-import com.ecl.modrinth.service.DefaultInstanceOperationLock;
+import com.ecl.operation.InstanceOperationCoordinator;
 import com.ecl.modrinth.service.InstanceOperationLock;
-import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
-import com.ecl.util.JsonUtil;
 import com.ecl.util.NetworkUriPolicy;
-import com.google.gson.JsonObject;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -27,12 +23,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-/** Detects and downloads compatible Modrinth pack updates from persisted profile metadata. */
+/** Detects and downloads compatible Modrinth pack updates for a selected instance. */
 public final class DefaultModpackUpdateService implements ModpackUpdateService {
-    private static final Logger LOGGER = LoggerFactory.getLogger(DefaultModpackUpdateService.class);
     private static final long MAX_PACK_ARCHIVE_BYTES = 2L * 1024 * 1024 * 1024;
     private final ModMetadataProvider metadataProvider;
     private final Executor executor;
@@ -42,7 +35,7 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
     private final MrpackInstaller installer = new MrpackInstaller();
 
     public DefaultModpackUpdateService(ModMetadataProvider metadataProvider, Executor executor) {
-        this(metadataProvider, executor, new DefaultInstanceOperationLock(), ignored -> false);
+        this(metadataProvider, executor, new InstanceOperationCoordinator(), ignored -> false);
     }
 
     public DefaultModpackUpdateService(ModMetadataProvider metadataProvider, Executor executor,
@@ -55,35 +48,12 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
     }
 
     @Override
-    public CompletableFuture<List<ModpackUpdate>> checkUpdates(Path gameRoot, ReleaseChannel channel) {
-        Path root = normalizeGameRoot(gameRoot);
-        ReleaseChannel effectiveChannel = channel == null ? ReleaseChannel.RELEASE_ONLY : channel;
-        return CompletableFuture.supplyAsync(() -> scanInstalled(root), executor)
-                .thenCompose(instances -> {
-                    List<CompletableFuture<ModpackUpdate>> requests = instances.stream()
-                            .map(instance -> checkOne(instance, effectiveChannel)
-                                    .exceptionally(error -> {
-                                        LOGGER.warn("Failed to check modpack updates for {}",
-                                                instance.profileId(), error);
-                                        return null;
-                                    }))
-                            .toList();
-                    if (requests.isEmpty()) {
-                        return CompletableFuture.completedFuture(List.of());
-                    }
-                    return CompletableFuture.allOf(requests.toArray(CompletableFuture[]::new))
-                            .thenApply(ignored -> requests.stream()
-                                    .map(CompletableFuture::join)
-                                    .filter(Objects::nonNull)
-                                    .toList());
-                });
-    }
-
-    private CompletableFuture<ModpackUpdate> checkOne(ModpackInstance instance,
-                                                       ReleaseChannel channel) {
+    public CompletableFuture<ModpackUpdate> checkUpdate(ModpackInstance instance,
+                                                      ReleaseChannel channel) {
         return metadataProvider.getVersions(instance.projectId(), instance.minecraftVersion(),
                         instance.loader())
-                .thenApply(versions -> selectUpdate(instance, versions, channel));
+                .thenApply(versions -> selectUpdate(instance, versions,
+                        channel == null ? ReleaseChannel.RELEASE_ONLY : channel));
     }
 
     private ModpackUpdate selectUpdate(ModpackInstance instance, List<ModVersion> versions,
@@ -191,50 +161,6 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
                 }
             }
         }, executor);
-    }
-
-    private List<ModpackInstance> scanInstalled(Path gameRoot) {
-        Path versionsRoot = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
-        if (!Files.isDirectory(versionsRoot)) {
-            return List.of();
-        }
-        List<ModpackInstance> result = new ArrayList<>();
-        try (var directories = Files.list(versionsRoot)) {
-            for (Path directory : directories.filter(Files::isDirectory).toList()) {
-                String profileId = directory.getFileName().toString();
-                try {
-                    Path profileFile = FileUtil.safeVersionJson(versionsRoot.toFile(), profileId).toPath();
-                    JsonObject profile = HttpUtil.readJson(profileFile.toFile());
-                    String source = JsonUtil.getString(profile, "eclModpackSource", "");
-                    String projectId = JsonUtil.getString(profile, "eclModpackProjectId", "");
-                    String versionId = JsonUtil.getString(profile, "eclModpackVersionId", "");
-                    if (!"modrinth".equalsIgnoreCase(source)
-                            || projectId.isBlank() || versionId.isBlank()) {
-                        continue;
-                    }
-                    String minecraft = JsonUtil.getString(profile, "eclMinecraftVersion", "");
-                    if (minecraft.isBlank()) minecraft = JsonUtil.getString(profile, "inheritsFrom", "");
-                    Path instanceDirectory = gameRoot.resolve("versions")
-                            .resolve(profileId).normalize();
-                    result.add(new ModpackInstance(
-                            ModpackInstance.instanceIdFor(instanceDirectory),
-                            profileId,
-                            JsonUtil.getString(profile, "eclModpackName", profileId),
-                            JsonUtil.getString(profile, "eclModpackVersion", versionId),
-                            minecraft,
-                            JsonUtil.getString(profile, "eclModLoader", ""),
-                            projectId,
-                            versionId,
-                            instanceDirectory));
-                } catch (IOException | RuntimeException ignored) {
-                    // A damaged unrelated profile must not block updates for healthy packs.
-                }
-            }
-        } catch (IOException failure) {
-            LOGGER.debug("Failed to list modpack profiles under {}", versionsRoot, failure);
-            return List.of();
-        }
-        return List.copyOf(result);
     }
 
     private static Path normalizeGameRoot(Path gameRoot) {

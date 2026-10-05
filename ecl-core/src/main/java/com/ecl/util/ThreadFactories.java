@@ -2,7 +2,6 @@ package com.ecl.util;
 
 import java.util.Objects;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /** Shared thread factories for launcher-owned background executors. */
 public final class ThreadFactories {
@@ -14,12 +13,6 @@ public final class ThreadFactories {
         if (threadPrefix.isBlank()) {
             throw new IllegalArgumentException("prefix must not be blank");
         }
-        AtomicInteger threadNumber = new AtomicInteger();
-        return runnable -> {
-            Thread thread = new Thread(runnable,
-                    threadPrefix + "-" + threadNumber.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        };
+        return Thread.ofPlatform().daemon(true).name(threadPrefix + "-", 1).factory();
     }
 }

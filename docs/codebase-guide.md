@@ -3,7 +3,8 @@
 ## 从入口开始
 
 启动链路是 `ECL.main` → `ECLauncher.main` → `LauncherUI`。`LauncherUI` 继承
-`LauncherUIView`，界面装配位于后者；应用服务与后台执行器由 `MainController` 管理。
+`LauncherUIView`，后者按服务初始化、启动配置加载、窗口展示和初始状态刷新组织启动过程。
+`LauncherWindowLayout` 装配窗口框架、顶栏与页脚；应用服务与后台执行器由 `MainController` 管理。
 
 | 模块 | 职责 | 建议阅读入口 |
 | --- | --- | --- |
@@ -26,6 +27,8 @@ Gradle 依赖方向为 `ecl-boot` → `ecl-gui` → `ecl-core`。定位业务规
 | 游戏版本 | `launcher/VersionManager.java` | 配合版本清单、目录扫描与 profile 解析类 |
 | 下载调度 | `download/DownloadTaskCenter.java` | 排队、并发名额、取消、重试与历史保留 |
 | 下载执行 | `download/DownloadTaskExecutor.java` | 执行具体下载操作，把结果交回调度器 |
+| 游戏版本下载 | `download/GameDownloader.java` | 编排元数据、客户端、依赖库和资源下载，保留取消检查与版本锁 |
+| 模组依赖解析 | `modrinth/service/DefaultModDependencyResolver.java` | 区分必需、可选、冲突与内嵌依赖，按依赖先于引用者的顺序生成安装计划 |
 | 本地 Mod 扫描 | `modrinth/service/DefaultLocalModScanner.java` | 锁定实例、扫描文件、在线识别、整理记录并保存 |
 | 扫描缓存 | `modrinth/service/LocalModScanCache.java` | 读取缓存 JSON，原子替换缓存文件 |
 | 整合包安装与更新 | `modrinth/pack/MrpackInstaller.java` | 编排读取、依赖准备、安装与更新 |
@@ -33,6 +36,25 @@ Gradle 依赖方向为 `ecl-boot` → `ecl-gui` → `ecl-core`。定位业务规
 | 事务目标路径 | `modrinth/pack/PackTransactionPaths.java` | 在实例、profile、版本和依赖库范围内编码、解析目标路径 |
 
 ## 阅读关键流程
+
+### 界面启动与窗口装配
+
+从 `LauncherUIView.start` 阅读服务初始化、启动配置加载和窗口展示的顺序，再到
+`LauncherWindowLayout` 查找窗口框架、顶栏账户入口、导航和页脚。窗口按钮与拖动行为继续由
+`LauncherWindowChrome` 处理；页面切换由 `LauncherPageRouter` 负责，Mod 拖入事件在窗口框架建成后安装。
+
+### 游戏版本下载
+
+`downloadVersionInternal` 在同一版本锁中依次保存元数据、调用 `downloadClient`、下载依赖库和资源，
+各阶段之间检查取消，最后写入下载完成标记。`downloadClient` 处理客户端下载、校验和失败清理，
+没有客户端下载信息时检查可用的继承版本；`addLibraryArtifact` 与 `addNativeArtifact` 分别整理普通库和原生库。
+
+### 模组依赖解析
+
+从 `resolve` 的兼容性检查进入 `visit`：先检查深度、循环、重复版本和数量限制，再顺序解析各个依赖，
+最后将当前版本追加到安装顺序。`handleDependency` 按类型分派，`resolveRequiredDependency` 处理必需依赖，
+`resolveOptionalDependency` 区分已选与未选的可选依赖，并保留对应的失败或警告行为。
+`ResolutionContext` 保存一次解析的选择、路径校验缓存与结果集合，各次解析互不共享这些状态。
 
 ### 下载任务结束
 

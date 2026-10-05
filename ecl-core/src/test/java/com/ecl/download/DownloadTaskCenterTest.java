@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DownloadTaskCenterTest {
     @Test
     void failurePreservesErrorAndStartsNextQueuedTask() throws Exception {
-        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
             CountDownLatch release = new CountDownLatch(1);
             IOException failure = new IOException("connection lost");
             var first = center.submit("failing", context -> {
@@ -40,7 +40,7 @@ class DownloadTaskCenterTest {
 
     @Test
     void failureAfterCancellationRemainsCancelledAndStartsNextTask() throws Exception {
-        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
             CountDownLatch started = new CountDownLatch(1);
             CountDownLatch release = new CountDownLatch(1);
             var first = center.submit("cancel then fail", context -> {
@@ -66,7 +66,7 @@ class DownloadTaskCenterTest {
 
     @Test
     void queuesTasksByConfiguredConcurrency() throws Exception {
-        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
             CountDownLatch firstStarted = new CountDownLatch(1);
             CountDownLatch releaseFirst = new CountDownLatch(1);
             var first = center.submit("first", context -> {
@@ -87,7 +87,7 @@ class DownloadTaskCenterTest {
 
     @Test
     void failedTaskCanBeRetried() throws Exception {
-        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
             AtomicInteger attempts = new AtomicInteger();
             var first = center.submit("retry me", () -> context -> {
                 if (attempts.incrementAndGet() == 1) throw new IOException("temporary failure");
@@ -105,7 +105,7 @@ class DownloadTaskCenterTest {
 
     @Test
     void queuedTaskCanBeCancelled() throws Exception {
-        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
             CountDownLatch release = new CountDownLatch(1);
             var blocker = center.submit("blocker", context -> {
                 release.await(5, TimeUnit.SECONDS);
@@ -121,7 +121,7 @@ class DownloadTaskCenterTest {
 
     @Test
     void runningCancellationKeepsConcurrencySlotUntilOperationStops() throws Exception {
-        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
             CountDownLatch firstStarted = new CountDownLatch(1);
             CountDownLatch allowFirstToStop = new CountDownLatch(1);
             CountDownLatch secondStarted = new CountDownLatch(1);
@@ -156,7 +156,7 @@ class DownloadTaskCenterTest {
 
     @Test
     void notifiesListenersWhenTaskIsQueuedBehindTheConcurrencyLimit() throws Exception {
-        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
             CountDownLatch release = new CountDownLatch(1);
             AtomicBoolean queuedWasPublished = new AtomicBoolean();
             center.submit("blocker", context -> {
@@ -179,7 +179,7 @@ class DownloadTaskCenterTest {
 
     @Test
     void automaticallyPrunesOldFinishedTaskHistory() throws Exception {
-        try (DownloadTaskCenter center = new DownloadTaskCenter(1, 0)) {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
             int submitted = DownloadTaskCenter.MAX_RETAINED_FINISHED_TASKS + 5;
             for (int i = 0; i < submitted; i++) {
                 center.submit("completed-" + i, context -> null)

@@ -33,9 +33,4 @@ class ECLConfigTest {
                 ECLConfig.clampDownloadConcurrency(Integer.MAX_VALUE));
     }
 
-    @Test
-    void curseForgeApiKeyHasATypeSafeSettingKey() {
-        assertEquals("curseForgeApiKey", ECLConfig.KEY_CURSEFORGE_API_KEY.key());
-        assertEquals("", ECLConfig.KEY_CURSEFORGE_API_KEY.defaultValue());
-    }
 }

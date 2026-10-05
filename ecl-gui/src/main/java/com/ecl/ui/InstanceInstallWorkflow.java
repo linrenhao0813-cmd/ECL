@@ -6,11 +6,13 @@ import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.launcher.VersionManager;
 import com.ecl.modrinth.download.ModrinthDownloader;
 import com.ecl.modrinth.model.ContentProject;
+import com.ecl.modrinth.model.ContentVersion;
 import com.ecl.modrinth.model.ModProject;
 import javafx.application.Platform;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.Future;
 
 /** Installs a selected base version, optional loader, and Fabric API as one download task. */
@@ -30,9 +32,18 @@ final class InstanceInstallWorkflow {
         this.ui = ui;
     }
 
-    void install(String minecraftVersion, LoaderChoice choice, Listener listener) {
+    void install(String minecraftVersion, LoaderChoice choice, String loaderVersion,
+                 ContentVersion fabricApiVersion, Listener listener) {
         if (minecraftVersion == null || minecraftVersion.isBlank() || choice == null) {
             listener.onFailure("请选择 Minecraft 版本和实例类型。");
+            return;
+        }
+        if (!choice.vanilla() && (loaderVersion == null || loaderVersion.isBlank())) {
+            listener.onFailure(com.ecl.util.Messages.get("instance.install.loaderVersion.choose"));
+            return;
+        }
+        if (choice == LoaderChoice.FABRIC && fabricApiVersion == null) {
+            listener.onFailure(com.ecl.util.Messages.get("instance.install.fabricApiVersion.choose"));
             return;
         }
         ui.setControlsBusy(true);
@@ -40,7 +51,7 @@ final class InstanceInstallWorkflow {
         ui.startProgressAnimation(ui.downloadProgress);
         String title = "Minecraft " + minecraftVersion + " / " + choice.displayName;
         DownloadTaskCenter.TaskHandle<String> task = ui.downloadTaskCenter.submit(
-                title, () -> context -> install(context, minecraftVersion, choice, listener));
+                title, () -> context -> install(context, minecraftVersion, choice, loaderVersion, fabricApiVersion, listener));
         task.completion().whenComplete((profileId, error) -> Platform.runLater(() -> {
             ui.stopProgressAnimation(ui.downloadProgress, error != null);
             ui.setControlsBusy(false);
@@ -50,8 +61,8 @@ final class InstanceInstallWorkflow {
                 ui.setStatus(ui.isCancellation(error) ? "实例安装已取消" : "实例安装失败", message);
                 return;
             }
-            ui.versionActions.restoreVersionComboItems(profileId);
-            ui.versionCombo.setValue(profileId);
+            ui.versionActions.restoreVersionComboItems(profileId, true);
+            ui.setLaunchTarget(profileId);
             ui.syncLoaderChoiceFromProfile(profileId);
             listener.onComplete(profileId);
             ui.setStatus("实例安装完成", profileId + " 已准备就绪。");
@@ -59,16 +70,17 @@ final class InstanceInstallWorkflow {
     }
 
     private String install(DownloadTaskCenter.TaskContext context, String minecraftVersion,
-                           LoaderChoice choice, Listener listener) throws Exception {
+                           LoaderChoice choice, String loaderVersion, ContentVersion fabricApiVersion,
+                           Listener listener) throws Exception {
         installBaseVersion(context, minecraftVersion, listener);
         requireActive(context);
         String profileId = minecraftVersion;
         if (!choice.vanilla()) {
-            profileId = installLoader(context, minecraftVersion, choice, listener);
+            profileId = installLoader(context, minecraftVersion, choice, loaderVersion, listener);
         }
         ui.gameRepository().applyDefaultIsolationSettingForNewInstance(profileId);
         if (choice == LoaderChoice.FABRIC) {
-            installFabricApi(context, minecraftVersion, profileId, listener);
+            installFabricApi(context, minecraftVersion, profileId, fabricApiVersion, listener);
         }
         requireActive(context);
         return profileId;
@@ -116,10 +128,10 @@ final class InstanceInstallWorkflow {
     }
 
     private String installLoader(DownloadTaskCenter.TaskContext context, String minecraftVersion,
-                                 LoaderChoice choice, Listener listener) throws IOException {
+                                 LoaderChoice choice, String loaderVersion, Listener listener) throws IOException {
         emitStatus(context, listener, "正在安装 " + choice.displayName + "…");
         ModLoaderInstaller.InstallResult result = ui.modLoaderInstaller.install(
-                minecraftVersion, choice.loader, "", new ModLoaderInstaller.Listener() {
+                minecraftVersion, choice.loader, loaderVersion, new ModLoaderInstaller.Listener() {
                     @Override
                     public void onStatus(String message) {
                         emitStatus(context, listener, message);
@@ -133,19 +145,26 @@ final class InstanceInstallWorkflow {
         return result.profileId();
     }
 
-    private void installFabricApi(DownloadTaskCenter.TaskContext context, String minecraftVersion,
-                                  String profileId, Listener listener) throws Exception {
-        requireActive(context);
-        emitStatus(context, listener, "正在查找与 Minecraft " + minecraftVersion
-                + " 匹配的 Fabric API…");
+    List<ContentVersion> listFabricApiVersions(String minecraftVersion) throws Exception {
+        return ui.controller.modrinthDownloader().listProjectVersions(fabricApiProject(), minecraftVersion, "fabric");
+    }
+
+    private ContentProject fabricApiProject() throws Exception {
         ModProject project = ui.controller.modrinthApi().getProject(FABRIC_API_SLUG).get();
-        ContentProject contentProject = new ContentProject(
+        return new ContentProject(
                 project.projectId(), project.slug(), project.title(), project.author(),
                 project.description(), project.iconUrl() == null ? null : project.iconUrl().toString(),
                 project.downloads(), project.follows(), "mod");
+    }
+
+    private void installFabricApi(DownloadTaskCenter.TaskContext context, String minecraftVersion,
+                                  String profileId, ContentVersion selectedVersion, Listener listener) throws Exception {
+        requireActive(context);
+        emitStatus(context, listener, "正在安装 Fabric API " + selectedVersion.versionNumber() + "…");
+        ContentProject contentProject = fabricApiProject();
         File modsDirectory = ui.resolveModsDir(profileId);
-        ui.controller.modrinthDownloader().downloadLatest(
-                contentProject, minecraftVersion, "fabric", modsDirectory, true,
+        ui.controller.modrinthDownloader().downloadVersion(
+                contentProject, selectedVersion, minecraftVersion, "fabric", modsDirectory, true,
                 new ModrinthDownloader.DownloadListener() {
                     @Override
                     public void onStatus(String message) {
@@ -157,7 +176,7 @@ final class InstanceInstallWorkflow {
                         emitProgress(context, listener, downloaded, total);
                     }
                 }, ".jar");
-        emitStatus(context, listener, "Fabric API 已自动安装到当前实例。");
+        emitStatus(context, listener, "Fabric API " + selectedVersion.versionNumber() + " 已安装到当前实例。");
     }
 
     private void emitStatus(DownloadTaskCenter.TaskContext context,

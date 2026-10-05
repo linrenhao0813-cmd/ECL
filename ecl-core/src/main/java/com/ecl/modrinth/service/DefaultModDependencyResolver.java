@@ -118,19 +118,20 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         ModFile rootFile = versionSelector.selectInstallFile(rootVersion)
                 .orElseThrow(() -> new NoCompatibleVersionException("目标模组版本没有可安装文件"));
 
-        State state = new State(instance, compatibility, installedModsProvider.apply(instance),
+        ResolutionContext context = new ResolutionContext(instance, compatibility, installedModsProvider.apply(instance),
                 selectedOptionalProjectIds == null ? Set.of() : Set.copyOf(selectedOptionalProjectIds),
                 effectiveChannel);
-        return visit(state, rootVersion, rootFile, false, "", new ArrayDeque<>(), 0)
+        return visit(context, rootVersion, rootFile, false, "", new ArrayDeque<>(), 0)
                 .thenApply(ignored -> new DependencyResolutionResult(
-                        state.installOrder,
-                        state.optionalDependencies,
-                        state.conflicts,
-                        state.warnings));
+                        context.installOrder,
+                        context.optionalDependencies,
+                        context.conflicts,
+                        context.warnings));
     }
 
-    private CompletableFuture<Void> visit(State state, ModVersion version, ModFile file, boolean dependency,
-                                          String requiredBy, Deque<String> path, int depth) {
+    private CompletableFuture<Void> visit(
+            ResolutionContext context, ModVersion version, ModFile file, boolean dependency,
+            String requiredBy, Deque<String> path, int depth) {
         if (depth > maxDepth) {
             return CompletableFuture.failedFuture(new DependencyResolutionException(
                     "依赖深度超过限制 " + maxDepth + ": " + String.join(" -> ", path)));
@@ -142,82 +143,93 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
             return CompletableFuture.failedFuture(new DependencyResolutionException(
                     "检测到循环依赖: " + String.join(" -> ", cycle)));
         }
-        ModVersion selected = state.selectedVersions.get(projectId);
+        ModVersion selected = context.selectedVersions.get(projectId);
         if (selected != null) {
             if (!selected.id().equals(version.id())) {
-                state.conflicts.add(new ModConflict(projectId, projectId,
+                context.conflicts.add(new ModConflict(projectId, projectId,
                         "同一项目要求不同版本: " + selected.id() + " / " + version.id(),
                         appendPath(path, projectId)));
             }
             return CompletableFuture.completedFuture(null);
         }
-        if (++state.dependencyCount > maxDependencies) {
+        if (++context.dependencyCount > maxDependencies) {
             return CompletableFuture.failedFuture(new DependencyResolutionException(
                     "依赖数量超过限制 " + maxDependencies));
         }
 
-        state.selectedVersions.put(projectId, version);
+        context.selectedVersions.put(projectId, version);
         path.addLast(projectId);
+        // Resolve siblings sequentially: each traversal shares the active path and selected versions.
         CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
         for (ModDependency modDependency : version.dependencies()) {
             chain = chain.thenCompose(ignored ->
-                    handleDependency(state, version, modDependency, path, depth + 1));
+                    handleDependency(context, version, modDependency, path, depth + 1));
         }
-        return chain.thenRun(() -> state.installOrder.add(new ResolvedMod(
+        // Postorder ensures dependencies are installed before the version that requires them.
+        return chain.thenRun(() -> context.installOrder.add(new ResolvedMod(
                         version, file, dependency, requiredBy, List.copyOf(path))))
                 .whenComplete((ignored, error) -> path.removeLast());
     }
 
-    private CompletableFuture<Void> handleDependency(State state, ModVersion owner, ModDependency dependency,
-                                                     Deque<String> path, int depth) {
+    private CompletableFuture<Void> handleDependency(
+            ResolutionContext context, ModVersion owner, ModDependency dependency, Deque<String> path, int depth) {
         if (dependency == null || dependency.type() == DependencyType.UNKNOWN) {
-            state.warnings.add("忽略未知依赖类型: " + owner.projectId());
+            context.warnings.add("忽略未知依赖类型: " + owner.projectId());
             return CompletableFuture.completedFuture(null);
         }
         return switch (dependency.type()) {
-            case REQUIRED -> {
-                if (hasInstalledDependencyFile(state, dependency)) {
-                    yield CompletableFuture.completedFuture(null);
-                }
-                yield resolveDependencyVersion(state, dependency, path)
-                        .thenCompose(version -> {
-                            ModFile file = versionSelector.selectInstallFile(version)
-                                    .orElseThrow(() -> missingDependency(path, dependency, "没有可安装文件"));
-                            return visit(state, version, file, true, projectIdentity(owner), path, depth);
-                        });
-            }
-            case OPTIONAL -> resolveDependencyVersion(state, dependency, path)
-                    .thenCompose(version -> {
-                        ModFile file = versionSelector.selectInstallFile(version)
-                                .orElseThrow(() -> missingDependency(path, dependency, "没有可安装文件"));
-                        if (state.selectedOptionalProjects.contains(projectIdentity(version))) {
-                            return visit(state, version, file, true, projectIdentity(owner), path, depth);
-                        }
-                        state.optionalDependencies.add(new ResolvedMod(
-                                version, file, true, projectIdentity(owner),
-                                appendPath(path, projectIdentity(version))));
-                        return CompletableFuture.completedFuture(null);
-                    }).exceptionally(error -> {
-                        if (state.selectedOptionalProjects.contains(dependencyIdentity(dependency))) {
-                            throw new DependencyResolutionException(
-                                    "所选可选依赖无法解析: " + dependencyIdentity(dependency), unwrap(error));
-                        }
-                        state.warnings.add("可选依赖不可用，已跳过: " + dependencyIdentity(dependency));
-                        return null;
-                    });
+            case REQUIRED -> resolveRequiredDependency(context, owner, dependency, path, depth);
+            case OPTIONAL -> resolveOptionalDependency(context, owner, dependency, path, depth);
             case INCOMPATIBLE -> {
-                detectIncompatible(state, owner, dependency, path);
+                detectIncompatible(context, owner, dependency, path);
                 yield CompletableFuture.completedFuture(null);
             }
             case EMBEDDED -> {
-                state.warnings.add("内嵌依赖无需单独下载: " + dependencyIdentity(dependency));
+                context.warnings.add("内嵌依赖无需单独下载: " + dependencyIdentity(dependency));
                 yield CompletableFuture.completedFuture(null);
             }
             case UNKNOWN -> CompletableFuture.completedFuture(null);
         };
     }
 
-    private static boolean hasInstalledDependencyFile(State state, ModDependency dependency) {
+    private CompletableFuture<Void> resolveRequiredDependency(
+            ResolutionContext context, ModVersion owner, ModDependency dependency, Deque<String> path, int depth) {
+        if (hasInstalledDependencyFile(context, dependency)) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return resolveDependencyVersion(context, dependency, path)
+                .thenCompose(version -> {
+                    ModFile file = versionSelector.selectInstallFile(version)
+                            .orElseThrow(() -> missingDependency(path, dependency, "没有可安装文件"));
+                    return visit(context, version, file, true, projectIdentity(owner), path, depth);
+                });
+    }
+
+    private CompletableFuture<Void> resolveOptionalDependency(
+            ResolutionContext context, ModVersion owner, ModDependency dependency, Deque<String> path, int depth) {
+        return resolveDependencyVersion(context, dependency, path)
+                .thenCompose(version -> {
+                    ModFile file = versionSelector.selectInstallFile(version)
+                            .orElseThrow(() -> missingDependency(path, dependency, "没有可安装文件"));
+                    if (context.selectedOptionalProjects.contains(projectIdentity(version))) {
+                        return visit(context, version, file, true, projectIdentity(owner), path, depth);
+                    }
+                    context.optionalDependencies.add(new ResolvedMod(
+                            version, file, true, projectIdentity(owner),
+                            appendPath(path, projectIdentity(version))));
+                    return CompletableFuture.completedFuture(null);
+                }).exceptionally(error -> {
+                    // This also handles failures in the selected optional dependency's own dependency tree.
+                    if (context.selectedOptionalProjects.contains(dependencyIdentity(dependency))) {
+                        throw new DependencyResolutionException(
+                                "所选可选依赖无法解析: " + dependencyIdentity(dependency), unwrap(error));
+                    }
+                    context.warnings.add("可选依赖不可用，已跳过: " + dependencyIdentity(dependency));
+                    return null;
+                });
+    }
+
+    private static boolean hasInstalledDependencyFile(ResolutionContext context, ModDependency dependency) {
         String requiredVersionId = text(dependency.versionId());
         String requiredProjectId = text(dependency.projectId());
         if (requiredVersionId.isBlank() && requiredProjectId.isBlank()) {
@@ -225,9 +237,9 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         }
 
         Collection<InstalledMod> candidates = requiredVersionId.isBlank()
-                ? state.installedByProjectId.getOrDefault(requiredProjectId, List.of())
-                : state.installedByVersionId.getOrDefault(requiredVersionId, List.of());
-        return candidates.stream().anyMatch(state::isUsableInstalledFile);
+                ? context.installedByProjectId.getOrDefault(requiredProjectId, List.of())
+                : context.installedByVersionId.getOrDefault(requiredVersionId, List.of());
+        return candidates.stream().anyMatch(context::isUsableInstalledFile);
     }
 
     private static boolean isUsableInstalledFile(
@@ -253,12 +265,12 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         return value == null ? "" : value.trim();
     }
 
-    private CompletableFuture<ModVersion> resolveDependencyVersion(State state, ModDependency dependency,
-                                                                   Deque<String> path) {
+    private CompletableFuture<ModVersion> resolveDependencyVersion(
+            ResolutionContext context, ModDependency dependency, Deque<String> path) {
         if (dependency.versionId() != null && !dependency.versionId().isBlank()) {
             return metadataProvider.getVersion(dependency.versionId()).thenApply(version -> {
                 if (versionSelector.selectBestVersion(
-                        List.of(version), state.compatibility, state.releaseChannel).isEmpty()) {
+                        List.of(version), context.compatibility, context.releaseChannel).isEmpty()) {
                     throw missingDependency(path, dependency,
                             "指定版本与当前实例或发布通道不兼容");
                 }
@@ -270,27 +282,27 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         }
         return metadataProvider.getVersions(
                         dependency.projectId(),
-                        state.compatibility.minecraftVersion(),
-                        state.compatibility.loader().apiName())
+                        context.compatibility.minecraftVersion(),
+                        context.compatibility.loader().apiName())
                 .thenApply(versions -> versionSelector.selectBestVersion(
-                                versions, state.compatibility, state.releaseChannel)
+                                versions, context.compatibility, context.releaseChannel)
                         .orElseThrow(() -> missingDependency(path, dependency,
-                                "没有兼容 " + state.compatibility.minecraftVersion() + " / "
-                                        + state.compatibility.loader().apiName() + " / "
-                                        + state.releaseChannel + " 的版本")));
+                                "没有兼容 " + context.compatibility.minecraftVersion() + " / "
+                                        + context.compatibility.loader().apiName() + " / "
+                                        + context.releaseChannel + " 的版本")));
     }
 
-    private void detectIncompatible(State state, ModVersion owner, ModDependency dependency,
-                                    Deque<String> path) {
+    private void detectIncompatible(
+            ResolutionContext context, ModVersion owner, ModDependency dependency, Deque<String> path) {
         String targetProject = dependency.projectId();
         String targetVersion = dependency.versionId();
         boolean planned = targetProject != null && !targetProject.isBlank()
-                && state.selectedVersions.containsKey(targetProject);
-        boolean installed = state.installedMods.stream().anyMatch(mod ->
+                && context.selectedVersions.containsKey(targetProject);
+        boolean installed = context.installedMods.stream().anyMatch(mod ->
                 (targetProject != null && !targetProject.isBlank() && targetProject.equals(mod.projectId()))
                         || (targetVersion != null && !targetVersion.isBlank() && targetVersion.equals(mod.versionId())));
         if (planned || installed) {
-            state.conflicts.add(new ModConflict(
+            context.conflicts.add(new ModConflict(
                     projectIdentity(owner),
                     dependencyIdentity(dependency),
                     "存在 incompatible 冲突",
@@ -336,7 +348,7 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         return current;
     }
 
-    private final class State {
+    private final class ResolutionContext {
         private final ModInstanceContext instance;
         private final ModCompatibility compatibility;
         private final Collection<InstalledMod> installedMods;
@@ -350,11 +362,12 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         private final List<ResolvedMod> optionalDependencies = new ArrayList<>();
         private final List<ModConflict> conflicts = new ArrayList<>();
         private final List<String> warnings = new ArrayList<>();
+        // Counts distinct visited projects, including the root; repeated versions do not consume the limit.
         private int dependencyCount;
 
-        private State(ModInstanceContext instance, ModCompatibility compatibility,
-                      Collection<InstalledMod> installedMods,
-                      Set<String> selectedOptionalProjects, ReleaseChannel releaseChannel) {
+        private ResolutionContext(
+                ModInstanceContext instance, ModCompatibility compatibility, Collection<InstalledMod> installedMods,
+                Set<String> selectedOptionalProjects, ReleaseChannel releaseChannel) {
             this.instance = instance;
             this.compatibility = compatibility;
             this.installedMods = installedMods == null ? List.of() : List.copyOf(installedMods);
@@ -367,6 +380,7 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         private boolean isUsableInstalledFile(InstalledMod mod) {
             Path path = instance.gameDirectory().toAbsolutePath().normalize()
                     .resolve(mod.relativePath()).normalize();
+            // Repeated references to the same path reuse its first validation result within this resolution.
             return installedFileValidity.computeIfAbsent(path, ignored ->
                     DefaultModDependencyResolver.isUsableInstalledFile(
                             mod, instance.gameDirectory().toAbsolutePath().normalize(),

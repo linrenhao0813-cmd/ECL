@@ -26,8 +26,8 @@ public final class ModrinthMetadataProvider implements ModMetadataProvider {
     }
 
     @Override
-    public ContentSource source() {
-        return ContentSource.MODRINTH;
+    public String id() {
+        return "modrinth";
     }
 
     @Override

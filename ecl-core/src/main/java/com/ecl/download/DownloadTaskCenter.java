@@ -70,7 +70,6 @@ public final class DownloadTaskCenter implements AutoCloseable {
         }
     }
 
-
     private final Object lock = new Object();
     private final LinkedHashMap<String, DownloadTaskEntry<?>> entries = new LinkedHashMap<>();
     private final ArrayDeque<DownloadTaskEntry<?>> queue = new ArrayDeque<>();
@@ -79,16 +78,14 @@ public final class DownloadTaskCenter implements AutoCloseable {
     private final AtomicLong sequence = new AtomicLong();
     private int maxConcurrent;
     private int runningCount;
-    private long bandwidthLimitBytesPerSecond;
     private boolean closed;
 
     public DownloadTaskCenter() {
-        this(2, 0);
+        this(2);
     }
 
-    public DownloadTaskCenter(int maxConcurrent, long bandwidthLimitBytesPerSecond) {
+    public DownloadTaskCenter(int maxConcurrent) {
         this.maxConcurrent = ECLConfig.clampDownloadConcurrency(maxConcurrent);
-        this.bandwidthLimitBytesPerSecond = Math.max(0, bandwidthLimitBytesPerSecond);
     }
 
     public <T> TaskHandle<T> submit(String title, Operation<T> operation) {
@@ -194,19 +191,6 @@ public final class DownloadTaskCenter implements AutoCloseable {
         }
         fireChanged(true);
         pump();
-    }
-
-    public long bandwidthLimitBytesPerSecond() {
-        synchronized (lock) {
-            return bandwidthLimitBytesPerSecond;
-        }
-    }
-
-    public void setBandwidthLimitBytesPerSecond(long value) {
-        long normalized = Math.max(0, value);
-        synchronized (lock) {
-            bandwidthLimitBytesPerSecond = normalized;
-        }
     }
 
     public boolean cancel(String taskId) {

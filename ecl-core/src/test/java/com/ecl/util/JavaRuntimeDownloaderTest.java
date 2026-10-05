@@ -36,14 +36,15 @@ class JavaRuntimeDownloaderTest {
     @Test
     void packageMetadataRequiresHttpsChecksumAndBoundedSize() throws Exception {
         String checksum = "a".repeat(64);
+        // A public numeric address exercises URI validation without relying on DNS or downloading a file.
         var assets = JsonParser.parseString("[{\"binary\":{\"package\":{"
-                + "\"link\":\"https://93.184.216.34/runtime.zip\","
+                + "\"link\":\"https://1.1.1.1/runtime.zip\","
                 + "\"checksum\":\"" + checksum + "\",\"size\":1024}}}]")
                 .getAsJsonArray();
 
         JavaRuntimeDownloader.PackageInfo selected = JavaRuntimeDownloader.resolvePackage(assets);
 
-        assertEquals("https://93.184.216.34/runtime.zip", selected.url());
+        assertEquals("https://1.1.1.1/runtime.zip", selected.url());
         assertEquals(checksum, selected.sha256());
         assertEquals(1024, selected.size());
     }

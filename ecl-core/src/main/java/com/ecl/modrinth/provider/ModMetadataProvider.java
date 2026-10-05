@@ -2,7 +2,6 @@ package com.ecl.modrinth.provider;
 
 import com.ecl.modrinth.api.ModSearchQuery;
 import com.ecl.modrinth.api.ModSearchResult;
-import com.ecl.modrinth.model.ModDependency;
 import com.ecl.modrinth.model.InstalledMod;
 import com.ecl.modrinth.model.ModProject;
 import com.ecl.modrinth.model.ModVersion;
@@ -14,15 +13,18 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 /** Online mod metadata extension point independent from the UI. */
 public interface ModMetadataProvider extends AutoCloseable {
-    ContentSource source();
+    /** Normalized, lowercase source identity exposed to the UI, for example {@code modrinth}. */
+    String id();
 
-    default String id() {
-        return source().id();
+    /** Human-readable source name shown to the user. */
+    default String displayName() {
+        String value = id() == null ? "" : id();
+        return value.isEmpty() ? value
+                : Character.toUpperCase(value.charAt(0)) + value.substring(1);
     }
 
     CompletableFuture<ModSearchResult> search(ModSearchQuery query);
@@ -77,33 +79,6 @@ public interface ModMetadataProvider extends AutoCloseable {
                     });
                     return Map.copyOf(result);
                 }));
-    }
-
-    default CompletableFuture<List<ModProject>> resolveDependencies(ModVersion version) {
-        if (version == null || version.dependencies().isEmpty()) {
-            return CompletableFuture.completedFuture(List.of());
-        }
-        LinkedHashSet<String> projectIds = new LinkedHashSet<>();
-        for (ModDependency dependency : version.dependencies()) {
-            if (dependency.projectId() != null && !dependency.projectId().isBlank()) {
-                projectIds.add(dependency.projectId());
-            }
-        }
-        CompletableFuture<?>[] requests = projectIds.stream()
-                .map(this::getProject).toArray(CompletableFuture[]::new);
-        return CompletableFuture.allOf(requests).thenApply(ignored ->
-                java.util.Arrays.stream(requests)
-                        .map(request -> (ModProject) request.join()).toList());
-    }
-
-    default CompletableFuture<String> getChangelog(String projectId, String versionId) {
-        return getVersion(versionId).thenApply(version -> version.changelog() == null
-                ? "" : version.changelog());
-    }
-
-    default CompletableFuture<Optional<ModVersion>> getVersionByFile(Path file) {
-        return getVersionsByFiles(List.of(file))
-                .thenApply(versions -> Optional.ofNullable(versions.get(file)));
     }
 
     @Override

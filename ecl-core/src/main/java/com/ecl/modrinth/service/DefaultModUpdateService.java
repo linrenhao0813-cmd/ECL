@@ -1,6 +1,7 @@
 package com.ecl.modrinth.service;
 
 import com.ecl.modrinth.api.ModInstallationException;
+import com.ecl.modrinth.api.ModConflictException;
 import com.ecl.modrinth.api.ModrinthApiClient;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.InstalledMod;
@@ -18,8 +19,11 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import java.time.Instant;
+import java.util.Comparator;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
@@ -81,13 +85,25 @@ public final class DefaultModUpdateService implements ModUpdateService {
                 .filter(mod -> mod.sha1() != null && !mod.sha1().isBlank())
                 .toList();
         if (hashedCandidates.isEmpty()) {
-            return CompletableFuture.completedFuture(List.of());
+            return checkUpdatesByProject(instance, candidates, channel);
         }
         List<String> hashes = hashedCandidates.stream().map(InstalledMod::sha1).distinct().toList();
         return metadataProvider.getLatestVersionsFromHashes(
                         hashes, "sha1", List.of(instance.loaderName()),
                         List.of(instance.minecraftVersion()))
-                .thenApply(latest -> buildUpdatesByHash(hashedCandidates, latest, channel));
+                .thenCompose(latest -> {
+                    List<ModUpdate> updates = buildUpdatesByHash(hashedCandidates, latest, channel);
+                    ReleaseChannel effectiveChannel = channel == null ? ReleaseChannel.RELEASE_ONLY : channel;
+                    List<InstalledMod> fallback = candidates.stream().filter(mod -> {
+                        ModVersion version = latest.get(mod.sha1());
+                        return version == null || !effectiveChannel.allows(version.versionType());
+                    }).toList();
+                    return checkUpdatesByProject(instance, fallback, effectiveChannel).thenApply(additional -> {
+                        List<ModUpdate> combined = new ArrayList<>(updates);
+                        combined.addAll(additional);
+                        return List.copyOf(combined);
+                    });
+                });
     }
 
     private CompletableFuture<List<ModUpdate>> checkUpdatesByProject(
@@ -104,8 +120,12 @@ public final class DefaultModUpdateService implements ModUpdateService {
         return CompletableFuture.allOf(requests.values().toArray(CompletableFuture[]::new))
                 .thenApply(ignored -> {
                     Map<String, ModVersion> latest = new LinkedHashMap<>();
-                    requests.forEach((projectId, request) -> selector.selectBestVersion(
-                                    request.join(), compatibility, effectiveChannel)
+                    requests.forEach((projectId, request) -> request.join().stream()
+                            .filter(Objects::nonNull)
+                            .filter(version -> selector.selectBestVersion(
+                                    List.of(version), compatibility, effectiveChannel).isPresent())
+                            .max(Comparator.comparing(version -> version.publishedAt() == null
+                                    ? Instant.EPOCH : version.publishedAt()))
                             .ifPresent(version -> latest.put(projectId, version)));
                     return buildUpdatesByProject(candidates, latest, effectiveChannel);
                 });
@@ -151,7 +171,13 @@ public final class DefaultModUpdateService implements ModUpdateService {
 
     @Override
     public CompletableFuture<ModInstallationResult> applyUpdate(ModUpdate update) {
+        return applyUpdate(update, Set.of());
+    }
+
+    @Override
+    public CompletableFuture<ModInstallationResult> applyUpdate(ModUpdate update, Set<String> protectedProjects) {
         Objects.requireNonNull(update, "update");
+        Set<String> protectedIds = Set.copyOf(protectedProjects);
         ModInstanceContext instance = instanceResolver.apply(update.installedMod().instanceId());
         if (instance == null) {
             return CompletableFuture.failedFuture(
@@ -159,7 +185,14 @@ public final class DefaultModUpdateService implements ModUpdateService {
         }
         return dependencyResolver.resolve(
                         instance, update.availableVersion(), java.util.Set.of(), update.releaseChannel())
-                .thenApply(resolution -> planBuilder.build(instance, update.availableVersion(), resolution))
+                .thenApply(resolution -> {
+                    for (ResolvedMod resolved : resolution.installOrder()) {
+                        if (protectedIds.contains(resolved.version().projectId())) {
+                            throw new ModConflictException("依赖更新需要修改已跳过或禁用的模组: " + resolved.version().projectId());
+                        }
+                    }
+                    return planBuilder.build(instance, update.availableVersion(), resolution);
+                })
                 .thenCompose(plan -> installationService.install(plan, null));
     }
 }

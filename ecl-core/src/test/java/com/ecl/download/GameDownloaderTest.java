@@ -17,11 +17,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -171,6 +174,117 @@ class GameDownloaderTest {
                     .isVersionDownloaded("incomplete-version"));
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void clientSizeMismatchRemovesJarAndStopsBeforeDependencies() throws Exception {
+        byte[] client = "short-client".getBytes(StandardCharsets.UTF_8);
+        String sha1 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(client));
+        Set<String> requests = ConcurrentHashMap.newKeySet();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/client.jar", exchange -> {
+            requests.add(exchange.getRequestURI().getPath());
+            exchange.sendResponseHeaders(200, client.length);
+            exchange.getResponseBody().write(client);
+            exchange.close();
+        });
+        server.createContext("/version.json", exchange -> {
+            String root = "http://127.0.0.1:" + server.getAddress().getPort();
+            byte[] metadata = ("""
+                    {"downloads":{"client":{"url":"%s/client.jar","sha1":"%s","size":%d}},
+                     "libraries":[{"downloads":{"artifact":{"path":"unused.jar",
+                         "url":"%s/unused.jar","sha1":"%s","size":%d}}}]}
+                    """).formatted(root, sha1, client.length + 1, root, sha1, client.length)
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, metadata.length);
+            exchange.getResponseBody().write(metadata);
+            exchange.close();
+        });
+        server.createContext("/unused.jar", exchange -> {
+            requests.add(exchange.getRequestURI().getPath());
+            exchange.sendResponseHeaders(200, client.length);
+            exchange.getResponseBody().write(client);
+            exchange.close();
+        });
+        server.start();
+        AtomicBoolean completed = new AtomicBoolean();
+        try (GameDownloader downloader = new GameDownloader(1)) {
+            downloader.setListener(new DownloadListenerAdapter() {
+                @Override
+                public void onComplete() {
+                    completed.set(true);
+                }
+            });
+            String versionUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/version.json";
+
+            ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> downloader.downloadVersionAsync("short-client", versionUrl).get());
+
+            assertTrue(failure.getCause() instanceof IOException);
+            assertEquals("Minecraft client size does not match metadata", failure.getCause().getMessage());
+            Path versionDirectory = ECLConfig.getVersionsDir().toPath().resolve("short-client");
+            assertFalse(Files.exists(versionDirectory.resolve("short-client.jar")));
+            assertFalse(Files.exists(versionDirectory.resolve(ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER)));
+            assertEquals(Set.of("/client.jar"), requests);
+            assertFalse(completed.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void reusesVerifiedArtifactsAndNativesWhileRespectingLibraryRules() throws Exception {
+        byte[] library = "verified-library".getBytes(StandardCharsets.UTF_8);
+        String sha1 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(library));
+        Path librariesDirectory = ECLConfig.getLibrariesDir().toPath();
+        Files.createDirectories(librariesDirectory.resolve("example"));
+        Files.write(librariesDirectory.resolve("example/artifact.jar"), library);
+        Files.write(librariesDirectory.resolve("example/native.jar"), library);
+        try (GameDownloader downloader = new GameDownloader(2)) {
+            String root = "http://127.0.0.1:1";
+            String metadata = ("""
+                    {"libraries":[
+                      {"name":"example:artifact:1","downloads":{
+                        "artifact":{"path":"example/artifact.jar","url":"%s/artifact.jar","sha1":"%s","size":%d},
+                        "classifiers":{"natives-windows":{
+                          "path":"example/native.jar","url":"%s/native.jar","sha1":"%s","size":%d}}}},
+                      {"name":"example:skipped:1","rules":[{"action":"disallow"}],
+                        "downloads":{"artifact":{}}},
+                      {"name":"example:explicit-empty:1","url":"%s/repo/","downloads":{}}
+                    ]}
+                    """).formatted(root, sha1, library.length, root, sha1, library.length, root);
+            Path versionDirectory = ECLConfig.getVersionsDir().toPath().resolve("libraries-only");
+            Files.createDirectories(versionDirectory);
+            Files.writeString(versionDirectory.resolve("libraries-only.json"), metadata);
+
+            downloader.downloadLibrariesForVersion("libraries-only", null);
+
+            assertArrayEquals(library, Files.readAllBytes(librariesDirectory.resolve("example/artifact.jar")));
+            assertArrayEquals(library, Files.readAllBytes(librariesDirectory.resolve("example/native.jar")));
+            assertFalse(Files.exists(librariesDirectory.resolve("example/explicit-empty")));
+        }
+    }
+
+    @Test
+    void rejectsHttpMavenFallbackOnlyWhenDownloadsAreAbsent() throws Exception {
+        Path versionDirectory = ECLConfig.getVersionsDir().toPath().resolve("maven-library");
+        Files.createDirectories(versionDirectory);
+        Path metadataFile = versionDirectory.resolve("maven-library.json");
+        Files.writeString(metadataFile, """
+                {"libraries":[{"name":"example:maven:1","url":"http://127.0.0.1:1/repo/","downloads":{}}]}
+                """);
+        try (GameDownloader downloader = new GameDownloader(1)) {
+            downloader.downloadLibrariesForVersion("maven-library", null);
+
+            Files.writeString(metadataFile, """
+                    {"libraries":[{"name":"example:maven:1","url":"http://127.0.0.1:1/repo/"}]}
+                    """);
+            IOException failure = assertThrows(IOException.class,
+                    () -> downloader.downloadLibrariesForVersion("maven-library", null));
+
+            assertEquals("Maven library example:maven:1 URL must use HTTPS", failure.getMessage());
+            assertFalse(Files.exists(ECLConfig.getLibrariesDir().toPath().resolve("example/maven/1/maven-1.jar")));
         }
     }
 

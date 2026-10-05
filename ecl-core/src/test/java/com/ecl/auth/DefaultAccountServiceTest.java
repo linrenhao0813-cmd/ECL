@@ -11,7 +11,6 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DefaultAccountServiceTest {
@@ -29,7 +28,7 @@ class DefaultAccountServiceTest {
         System.setProperty("ecl.crypto.keyFile", temp.resolve("secret.key").toString());
         com.ecl.util.CryptoUtil.resetKeyCache();
         Path file = temp.resolve("accounts.json");
-        DefaultAccountService service = new DefaultAccountService(file, new AuthProviderRegistry());
+        DefaultAccountService service = new DefaultAccountService(file);
         AuthAccount offline = service.addOffline("Steve");
         AuthAccount microsoft = new AuthAccount(AuthType.MICROSOFT, "uuid", "Alex", "Alex",
                 "access-secret", "refresh-secret", 1234, "", false);
@@ -40,8 +39,6 @@ class DefaultAccountServiceTest {
         assertFalse(raw.contains("refresh-secret"));
         assertEquals(2, service.list().size());
         assertEquals(offline.identity(), service.defaultAccount().orElseThrow().identity());
-        assertInstanceOf(OfflineAuth.class, service.createProvider(offline));
-        assertInstanceOf(MicrosoftAuth.class, service.createProvider(service.list().get(1)));
 
         service.setDefault(microsoft.identity());
         assertTrue(service.defaultAccount().orElseThrow().defaultAccount());
@@ -56,7 +53,7 @@ class DefaultAccountServiceTest {
         String original = "[{\"type\":\"MICROSOFT\",\"uuid\":\"id\","
                 + "\"username\":\"Alex\",\"accessToken\":\"not-ciphertext\"}]";
         Files.writeString(file, original, StandardCharsets.UTF_8);
-        DefaultAccountService service = new DefaultAccountService(file, new AuthProviderRegistry());
+        DefaultAccountService service = new DefaultAccountService(file);
 
         AuthAccount saved = service.addOffline("Steve");
 
@@ -68,10 +65,23 @@ class DefaultAccountServiceTest {
     }
 
     @Test
+    void legacyYggdrasilAccountRemainsReadable() {
+        System.setProperty("ecl.crypto.keyFile", temp.resolve("secret.key").toString());
+        com.ecl.util.CryptoUtil.resetKeyCache();
+        DefaultAccountService service = new DefaultAccountService(
+                temp.resolve("accounts.json"));
+        AuthAccount legacy = new AuthAccount(AuthType.YGGDRASIL, "legacy-id", "OldPlayer", "OldPlayer",
+                "", "", 0, "https://auth.example.invalid/", false);
+        service.save(legacy);
+
+        assertEquals(AuthType.YGGDRASIL, service.list().getFirst().type());
+    }
+
+    @Test
     void malformedIdentityHintCannotAbortAccountListing() throws Exception {
         Path file = temp.resolve("accounts.json");
         Files.writeString(file, "[{\"type\":{},\"uuid\":[],\"username\":\"Broken\"}]");
-        DefaultAccountService service = new DefaultAccountService(file, new AuthProviderRegistry());
+        DefaultAccountService service = new DefaultAccountService(file);
 
         assertTrue(service.list().isEmpty());
         service.addOffline("Steve");

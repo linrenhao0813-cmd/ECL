@@ -34,7 +34,7 @@ final class MrpackInstallSupport {
                 transaction.stageDeletion(target);
             } else {
                 warnings++;
-                listener.onStatus("警告：旧版文件已被用户修改，更新时予以保留: " + old.getKey());
+                listener.onWarning("警告：旧版文件已被用户修改，更新时予以保留: " + old.getKey());
             }
         }
         return warnings;
@@ -45,17 +45,17 @@ final class MrpackInstallSupport {
         try {
             manifestFile = PackManifest.resolve(instanceRoot, PackManifest.FILE_NAME);
         } catch (IOException unsafePath) {
-            listener.onStatus("旧整合包文件清单路径不安全；本次更新不会删除旧版遗留文件");
+            listener.onWarning("旧整合包文件清单路径不安全；本次更新不会删除旧版遗留文件");
             return new PackManifest("", Map.of());
         }
         if (!Files.isRegularFile(manifestFile, LinkOption.NOFOLLOW_LINKS)) {
-            listener.onStatus("未找到旧整合包文件清单；本次更新不会删除旧版遗留文件");
+            listener.onWarning("未找到旧整合包文件清单；本次更新不会删除旧版遗留文件");
             return new PackManifest("", Map.of());
         }
         try {
             return PackManifest.read(manifestFile);
         } catch (IOException error) {
-            listener.onStatus("旧整合包文件清单无效；本次更新不会删除旧版遗留文件");
+            listener.onWarning("旧整合包文件清单无效；本次更新不会删除旧版遗留文件");
             return new PackManifest("", Map.of());
         }
     }

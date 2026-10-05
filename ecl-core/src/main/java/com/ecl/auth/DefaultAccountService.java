@@ -26,22 +26,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** JSON account repository with AES-GCM encrypted credentials and atomic writes. */
-public final class DefaultAccountService implements AccountService {
+public final class DefaultAccountService {
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultAccountService.class);
 
     private final Path file;
-    private final AuthProviderRegistry providers;
 
     public DefaultAccountService() {
-        this(ECLConfig.getBaseDir().toPath().resolve("accounts.json"), new AuthProviderRegistry());
+        this(ECLConfig.getBaseDir().toPath().resolve("accounts.json"));
     }
 
-    DefaultAccountService(Path file, AuthProviderRegistry providers) {
+    DefaultAccountService(Path file) {
         this.file = file;
-        this.providers = providers;
     }
 
-    @Override
     public synchronized List<AuthAccount> list() {
         return snapshot().accounts();
     }
@@ -68,7 +65,6 @@ public final class DefaultAccountService implements AccountService {
         return new AccountSnapshot(List.copyOf(accounts), List.copyOf(unreadable));
     }
 
-    @Override
     public synchronized AuthAccount save(AuthAccount account) {
         if (account == null || account.username().isBlank()) {
             throw new IllegalArgumentException("Account username is required");
@@ -86,7 +82,6 @@ public final class DefaultAccountService implements AccountService {
         return account;
     }
 
-    @Override
     public synchronized AuthAccount addOffline(String username) {
         OfflineAuth provider = new OfflineAuth(username);
         AuthAccount account = new AuthAccount(AuthType.OFFLINE, provider.getUUID(), provider.getUsername(),
@@ -94,7 +89,6 @@ public final class DefaultAccountService implements AccountService {
         return save(account);
     }
 
-    @Override
     public synchronized boolean remove(String identity) {
         AccountSnapshot snapshot = snapshot();
         List<AuthAccount> accounts = new ArrayList<>(snapshot.accounts());
@@ -110,14 +104,12 @@ public final class DefaultAccountService implements AccountService {
         return changed;
     }
 
-    @Override
     public Optional<AuthAccount> defaultAccount() {
         List<AuthAccount> accounts = list();
         return accounts.stream().filter(AuthAccount::defaultAccount).findFirst()
                 .or(() -> accounts.stream().findFirst());
     }
 
-    @Override
     public synchronized void setDefault(String identity) {
         AccountSnapshot snapshot = snapshot();
         List<AuthAccount> accounts = new ArrayList<>(snapshot.accounts());
@@ -125,11 +117,6 @@ public final class DefaultAccountService implements AccountService {
         if (!found) throw new IllegalArgumentException("Unknown account: " + identity);
         accounts.replaceAll(account -> withDefault(account, account.identity().equalsIgnoreCase(identity)));
         write(accounts, snapshot.unreadable());
-    }
-
-    @Override
-    public AuthProvider createProvider(AuthAccount account) {
-        return providers.create(account);
     }
 
     private JsonArray read() {

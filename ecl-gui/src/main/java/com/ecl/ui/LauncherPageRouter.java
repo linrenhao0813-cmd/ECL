@@ -24,10 +24,10 @@ final class LauncherPageRouter {
         if (view == ui.activeView) {
             return;
         }
-        int slideDirection = Integer.compare(view.ordinal(), ui.activeView.ordinal());
-        if (view != AppView.HOME && ui.passwordField != null) {
-            ui.passwordField.clear();
+        if (!ui.pageFactory.confirmSettingsDeparture()) {
+            return;
         }
+        int slideDirection = Integer.compare(view.ordinal(), ui.activeView.ordinal());
         ui.activeView = view;
         renderActiveView(slideDirection);
         ui.navigationRail.showSelected(view);
@@ -50,18 +50,33 @@ final class LauncherPageRouter {
         if (ui.workspacePane == null) {
             return;
         }
+        if (!ui.pageFactory.confirmSettingsDeparture()) {
+            return;
+        }
+        if (ui.mainScrollPane != null) {
+            ui.mainScrollPane.setFitToHeight(ui.activeView == AppView.HOME);
+        }
         ui.closeActiveModBrowserView();
         ui.closeActiveServerBrowserView();
+        // Drop references to page-scoped controls so a discarded page can be collected.
+        ui.contentTargetLabel = null;
+        ui.contentTargetMode = "instance";
+        ui.compactLayoutConsumer = null;
         ui.workspacePane.getChildren().clear();
         switch (ui.activeView) {
             case HOME -> addMainContent(ui.homePageFactory.getOrCreate(), null);
-            case VERSIONS -> addMainContent(new InstalledInstancesPage(ui), null);
+            case VERSIONS -> {
+                InstalledInstancesPage page = ui.pageFactory.createInstalledInstancesPage();
+                ui.compactLayoutConsumer = page::setCompact;
+                addMainContent(page, null);
+            }
             case SAVES -> addMainContent(ui.pageFactory.createWorldSavesPage(), null);
             case DOWNLOADS -> addMainContent(
                     ui.contentLibraryPageFactory.createPage(ui.downloadSection), null);
             case SERVERS -> addMainContent(ui.pageFactory.createServersPage(), null);
             case SETTINGS -> addMainContent(ui.pageFactory.createSettingsPage(), null);
         }
+        ui.applyCompactLayout();
         if (slideDirection != 0) {
             playContentTransition(slideDirection);
         }

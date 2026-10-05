@@ -1,7 +1,5 @@
 package com.ecl.i18n;
 
-import com.ecl.event.EventBus;
-import com.ecl.event.LocaleChangedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,17 +23,11 @@ public final class ResourceBundleI18n implements I18n {
     private static final List<Locale> AVAILABLE = List.of(SIMPLIFIED_CHINESE, TRADITIONAL_CHINESE, ENGLISH);
 
     private final CopyOnWriteArrayList<Consumer<Locale>> listeners = new CopyOnWriteArrayList<>();
-    private final EventBus eventBus;
     private volatile Locale locale;
     private volatile Properties selected;
     private final Properties english;
 
     public ResourceBundleI18n(Locale initialLocale) {
-        this(initialLocale, null);
-    }
-
-    public ResourceBundleI18n(Locale initialLocale, EventBus eventBus) {
-        this.eventBus = eventBus;
         this.english = load("i18n/messages_en.properties");
         setInitialLocale(initialLocale);
     }
@@ -72,7 +64,6 @@ public final class ResourceBundleI18n implements I18n {
         locale = normalized;
         selected = load(resourceFor(normalized));
         listeners.forEach(listener -> listener.accept(normalized));
-        if (eventBus != null) eventBus.post(new LocaleChangedEvent(previous, normalized));
     }
 
     @Override

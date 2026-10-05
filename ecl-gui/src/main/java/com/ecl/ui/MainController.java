@@ -5,26 +5,26 @@ import com.ecl.config.SettingsManager;
 import com.ecl.download.DownloadService;
 import com.ecl.download.GameDownloader;
 import com.ecl.download.ContentDownloader;
-import com.ecl.download.CurseForgeDownloader;
 import com.ecl.download.DownloadTaskCenter;
 import com.ecl.modrinth.download.ModrinthDownloader;
 import com.ecl.launch.DefaultLauncher;
 import com.ecl.launch.LaunchEnvironment;
 import com.ecl.launch.Launcher;
+import com.ecl.game.InstanceDisplayMetadataStore;
 import com.ecl.game.InstanceLaunchProfileStore;
 import com.ecl.game.VersionRepository;
 import com.ecl.launcher.VersionManager;
+import com.ecl.launcher.LoaderUpdateService;
+import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.modrinth.api.DefaultModrinthApiClient;
 import com.ecl.modrinth.api.ModrinthApiClient;
 import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.download.ModFileDownloadService;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.ReleaseChannel;
-import com.ecl.modrinth.provider.ContentSource;
-import com.ecl.modrinth.provider.CurseForgeMetadataProvider;
 import com.ecl.modrinth.provider.ModMetadataProvider;
-import com.ecl.modrinth.provider.ModMetadataProviderRegistry;
 import com.ecl.modrinth.provider.ModrinthMetadataProvider;
+import com.ecl.server.LocalServerManager;
 import com.ecl.modrinth.repository.FileInstalledModRepository;
 import com.ecl.modrinth.repository.InstalledModRepository;
 import com.ecl.modrinth.service.DefaultLocalModScanner;
@@ -37,6 +37,7 @@ import com.ecl.modrinth.service.ModDependencyResolver;
 import com.ecl.modrinth.service.ModInstallationService;
 import com.ecl.modrinth.service.ModManagementService;
 import com.ecl.modrinth.service.ModUpdateService;
+import com.ecl.modrinth.service.InstanceUpdateService;
 import com.ecl.modrinth.service.ModVersionSelector;
 import com.ecl.modrinth.pack.DefaultModpackUpdateService;
 import com.ecl.modrinth.pack.ModpackUpdateService;
@@ -63,12 +64,11 @@ import java.util.function.Supplier;
 public final class MainController implements AutoCloseable {
     private final SettingsManager settingsManager;
     private final VersionManager versionManager;
-    private final DownloadService gameDownloader;
+    private final GameDownloader gameDownloader;
     private final DownloadTaskCenter downloadTaskCenter;
     private final ModrinthDownloader modrinthDownloader;
-    private final CurseForgeDownloader curseForgeDownloader;
     private final ModrinthApiClient modrinthApiClient;
-    private final ModMetadataProviderRegistry metadataProviders;
+    private final ModMetadataProvider metadataProvider;
     private final VersionRepository versionRepository;
     private final LaunchEnvironment launchEnvironment;
     private final Launcher gameLauncher;
@@ -81,11 +81,13 @@ public final class MainController implements AutoCloseable {
     private final ModManagementService modManagementService;
     private final LocalModScanner localModScanner;
     private final ModUpdateService modUpdateService;
+    private final InstanceUpdateService instanceUpdateService;
     private final ModpackUpdateService modpackUpdateService;
     private final InstallationPlanBuilder installationPlanBuilder;
     private final InstanceLaunchProfileStore instanceLaunchProfiles;
     private final InstanceOperationCoordinator instanceOperations;
-    private final Map<ContentSource, ModSourceServices> sourceServices = new ConcurrentHashMap<>();
+    private final InstanceDisplayMetadataStore instanceDisplayMetadata;
+    private final LocalServerManager localServers = new LocalServerManager(ECLConfig.getBaseDir().toPath());
     private final Map<UUID, ModInstanceContext> modInstances = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicInteger> runningInstances = new ConcurrentHashMap<>();
 
@@ -120,14 +122,10 @@ public final class MainController implements AutoCloseable {
         HttpUtil.setDownloadRateLimitBytesPerSecond(configuredRate);
         // Keep enough workers for live setting increases; HttpUtil's gate enforces the active limit.
         gameDownloader = new GameDownloader();
-        downloadTaskCenter = new DownloadTaskCenter(configuredConcurrency, configuredRate);
-        curseForgeDownloader = new CurseForgeDownloader(this::curseForgeApiKey);
+        downloadTaskCenter = new DownloadTaskCenter(configuredConcurrency);
         modrinthApiClient = new DefaultModrinthApiClient();
         modrinthDownloader = new ModrinthDownloader(modrinthApiClient);
-        metadataProviders = new ModMetadataProviderRegistry(
-                new ModrinthMetadataProvider(modrinthApiClient, false),
-                new CurseForgeMetadataProvider(curseForgeDownloader.api()));
-        ModMetadataProvider metadataProvider = metadataProviders.require(ContentSource.MODRINTH);
+        metadataProvider = new ModrinthMetadataProvider(modrinthApiClient, false);
         launchEnvironment = new LaunchEnvironment(
                 ECLConfig.getVersionsDir(), ECLConfig.getLibrariesDir(), ECLConfig.getAssetsDir(),
                 ECLConfig.LAUNCHER_NAME, ECLConfig.LAUNCHER_VERSION);
@@ -154,16 +152,7 @@ public final class MainController implements AutoCloseable {
         installationPlanBuilder = new InstallationPlanBuilder();
         HashVerifier hashVerifier = new HashVerifier();
         ModFileDownloadService fileDownloadService =
-                new ModFileDownloadService(modDownloadExecutor, hashVerifier, uri -> {
-                    if (!"curseforge".equalsIgnoreCase(uri.getScheme())) {
-                        return uri;
-                    }
-                    String projectId = uri.getHost();
-                    String path = uri.getPath();
-                    String fileId = path == null ? "" : path.replaceFirst("^/", "");
-                    return java.net.URI.create(curseForgeDownloader.api()
-                            .getDownloadUrl(projectId, fileId));
-                });
+                new ModFileDownloadService(modDownloadExecutor, hashVerifier);
         modInstallationService = new ModInstallationService(
                 installedModRepository, fileDownloadService, instanceOperations,
                 backgroundExecutor, this::isInstanceRunning);
@@ -176,11 +165,23 @@ public final class MainController implements AutoCloseable {
         modUpdateService = new DefaultModUpdateService(
                 metadataProvider, modVersionSelector, modDependencyResolver,
                 installationPlanBuilder, modInstallationService, modInstances::get);
+        instanceUpdateService = new InstanceUpdateService(
+                new LoaderUpdateService(ECLConfig.getVersionsDir().toPath(), new ModLoaderInstaller(),
+                        instanceOperations, backgroundExecutor, this::isInstanceRunning,
+                        (profileId, listener) -> gameDownloader.downloadLibrariesForVersion(
+                                profileId, new GameDownloader.DownloadListener() {
+                                    @Override public void onStatus(String message) { listener.onStatus(message); }
+                                    @Override public void onProgress(long downloaded, long total) {
+                                        listener.onProgress(downloaded, total);
+                                    }
+                                    @Override public void onError(String message) { }
+                                    @Override public void onComplete() { }
+                                })),
+                localModScanner, modUpdateService, this::isInstanceRunning);
         modpackUpdateService = new DefaultModpackUpdateService(
                 metadataProvider, backgroundExecutor, instanceOperations,
                 this::isInstanceRunning);
-        sourceServices.put(ContentSource.MODRINTH,
-                new ModSourceServices(modDependencyResolver, localModScanner, modUpdateService));
+        instanceDisplayMetadata = new InstanceDisplayMetadataStore();
     }
 
     public SettingsManager settings() { return settingsManager; }
@@ -188,36 +189,9 @@ public final class MainController implements AutoCloseable {
     public DownloadService gameDownloader() { return gameDownloader; }
     public DownloadTaskCenter downloadTasks() { return downloadTaskCenter; }
     public ModrinthDownloader modrinthDownloader() { return modrinthDownloader; }
-    public CurseForgeDownloader curseForgeDownloader() { return curseForgeDownloader; }
-    public ContentDownloader contentDownloader(ContentSource source) {
-        return source == ContentSource.CURSEFORGE ? curseForgeDownloader : modrinthDownloader;
-    }
+    public ContentDownloader contentDownloader() { return modrinthDownloader; }
     public ModrinthApiClient modrinthApi() { return modrinthApiClient; }
-    public ModMetadataProvider metadataProvider(ContentSource source) {
-        return metadataProviders.require(source);
-    }
-    public java.util.List<ModMetadataProvider> metadataProviders() {
-        return metadataProviders.providers();
-    }
-    public ModSourceServices modSourceServices(ModMetadataProvider provider) {
-        return sourceServices.computeIfAbsent(provider.source(), ignored -> {
-            ModDependencyResolver resolver = new DefaultModDependencyResolver(
-                    provider, modVersionSelector, instance -> {
-                        try {
-                            return installedModRepository.findAll(instance);
-                        } catch (IOException error) {
-                            throw new IllegalStateException("无法读取实例模组索引", error);
-                        }
-                    }, 32, 256);
-            LocalModScanner scanner = new DefaultLocalModScanner(
-                    provider, installedModRepository, new HashVerifier(), modVersionSelector,
-                    instanceOperations, backgroundExecutor, this::isInstanceRunning);
-            ModUpdateService updater = new DefaultModUpdateService(
-                    provider, modVersionSelector, resolver, installationPlanBuilder,
-                    modInstallationService, modInstances::get);
-            return new ModSourceServices(resolver, scanner, updater);
-        });
-    }
+    public ModMetadataProvider metadataProvider() { return metadataProvider; }
     public InstalledModRepository installedMods() { return installedModRepository; }
     public ModVersionSelector modVersionSelector() { return modVersionSelector; }
     public ModDependencyResolver modDependencyResolver() { return modDependencyResolver; }
@@ -226,9 +200,12 @@ public final class MainController implements AutoCloseable {
     public ModManagementService modManagementService() { return modManagementService; }
     public LocalModScanner localModScanner() { return localModScanner; }
     public ModUpdateService modUpdateService() { return modUpdateService; }
+    public InstanceUpdateService instanceUpdateService() { return instanceUpdateService; }
     public ModpackUpdateService modpackUpdateService() { return modpackUpdateService; }
     public InstanceLaunchProfileStore instanceLaunchProfiles() { return instanceLaunchProfiles; }
     public InstanceOperationCoordinator instanceOperations() { return instanceOperations; }
+    public InstanceDisplayMetadataStore instanceDisplayMetadata() { return instanceDisplayMetadata; }
+    public LocalServerManager localServers() { return localServers; }
     public Launcher gameLauncher() { return gameLauncher; }
     public LaunchEnvironment launchEnvironment() { return launchEnvironment; }
 
@@ -250,19 +227,9 @@ public final class MainController implements AutoCloseable {
         }
     }
 
-    private String curseForgeApiKey() {
-        String stored = settingsManager.getEncrypted(ECLConfig.KEY_CURSEFORGE_API_KEY);
-        if (stored != null && !stored.isBlank()) return stored;
-        String property = System.getProperty("ecl.curseforge.apiKey", "");
-        if (!property.isBlank()) return property;
-        String environment = System.getenv("CURSEFORGE_API_KEY");
-        return environment == null ? "" : environment;
-    }
-
     private void migrateLegacySecrets() {
         boolean migrated = settingsManager.migrateToEncrypted("microsoftRefreshToken");
         migrated |= settingsManager.migrateToEncrypted("microsoftAccessToken");
-        migrated |= settingsManager.migrateToEncrypted(ECLConfig.KEY_CURSEFORGE_API_KEY.key());
         migrated |= settingsManager.removeEncryptedByPrefix("yggdrasilPassword");
         if (migrated) {
             settingsManager.save();
@@ -323,7 +290,6 @@ public final class MainController implements AutoCloseable {
         modDownloadExecutor.shutdownNow();
         awaitTermination(backgroundExecutor);
         awaitTermination(modDownloadExecutor);
-        metadataProviders.close();
         modrinthApiClient.close();
         gameDownloader.close();
     }
@@ -353,10 +319,5 @@ public final class MainController implements AutoCloseable {
             SettingsManager settingsManager,
             InstanceLaunchProfileStore instanceLaunchProfiles,
             InstanceOperationCoordinator instanceOperations) {
-    }
-
-    public record ModSourceServices(ModDependencyResolver dependencyResolver,
-                                    LocalModScanner localScanner,
-                                    ModUpdateService updateService) {
     }
 }

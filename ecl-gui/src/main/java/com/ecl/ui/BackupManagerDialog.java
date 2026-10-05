@@ -162,7 +162,7 @@ final class BackupManagerDialog {
             scene.getStylesheets().add(stylesheet.toExternalForm());
         }
         dialog.setScene(scene);
-        ui.applyThemeToScene(scene, ui.settingsManager.get(com.ecl.ECLConfig.KEY_THEME));
+        ui.applyThemeToScene(scene);
         refreshList.run();
         dialog.show();
     }

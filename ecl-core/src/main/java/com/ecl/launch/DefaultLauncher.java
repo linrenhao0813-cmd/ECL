@@ -1,8 +1,6 @@
 package com.ecl.launch;
 
 import com.ecl.auth.offline.OfflineSkinInjector;
-import com.ecl.event.EventBus;
-import com.ecl.event.GameLifecycleEvent;
 import com.ecl.game.VersionChainException;
 import com.ecl.game.VersionMetadata;
 import com.ecl.game.VersionRepository;
@@ -31,22 +29,11 @@ public final class DefaultLauncher implements Launcher {
     private final VersionRepository repository;
     private final LaunchEnvironment environment;
     private final LaunchCommandBuilder commandBuilder;
-    private final EventBus eventBus;
 
     public DefaultLauncher(VersionRepository repository, LaunchEnvironment environment) {
-        this(repository, environment, null);
-    }
-
-    public DefaultLauncher(VersionRepository repository, LaunchEnvironment environment, EventBus eventBus) {
-        this(repository, environment, new LaunchCommandBuilder(), eventBus);
-    }
-
-    DefaultLauncher(VersionRepository repository, LaunchEnvironment environment,
-                    LaunchCommandBuilder commandBuilder, EventBus eventBus) {
         this.repository = repository;
         this.environment = environment;
-        this.commandBuilder = commandBuilder;
-        this.eventBus = eventBus;
+        this.commandBuilder = new LaunchCommandBuilder();
     }
 
     @Override
@@ -157,15 +144,6 @@ public final class DefaultLauncher implements Launcher {
             throw new LaunchException(LaunchException.Kind.PROCESS_CREATION,
                     "无法打开游戏日志文件: " + outputFailure.getMessage(), outputFailure);
         }
-        publish(GameLifecycleEvent.Phase.STARTED, versionId, 0, workingDirectory);
-        gameProcess.whenExited().thenAccept(exited -> publish(
-                GameLifecycleEvent.Phase.EXITED, versionId, exited.exitCode(), workingDirectory));
         return gameProcess;
-    }
-
-    private void publish(GameLifecycleEvent.Phase phase, String versionId, int exitCode, Path directory) {
-        if (eventBus != null) {
-            eventBus.post(new GameLifecycleEvent(phase, versionId, exitCode, directory));
-        }
     }
 }

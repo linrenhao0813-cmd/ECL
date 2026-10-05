@@ -72,6 +72,22 @@ class ModDependencyResolverTest {
     }
 
     @Test
+    void selectedOptionalFailureIncludesItsRequiredDependencyCause() {
+        ModVersion optional = version("optional-v1", "optional", depProject("missing", DependencyType.REQUIRED));
+        ModVersion root = version("root-v1", "root", depProject("optional", DependencyType.OPTIONAL));
+        api.projectVersions.put("optional", List.of(optional));
+
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> resolver().resolve(instance, root, Set.of("optional")).join());
+
+        DependencyResolutionException selectedFailure = assertInstanceOf(
+                DependencyResolutionException.class, failure.getCause());
+        assertEquals("所选可选依赖无法解析: optional", selectedFailure.getMessage());
+        assertInstanceOf(NoCompatibleVersionException.class, selectedFailure.getCause());
+        assertTrue(selectedFailure.getCause().getMessage().contains("root -> optional -> missing"));
+    }
+
+    @Test
     void detectsIncompatibleInstalledModAndRecordsEmbeddedDependency() {
         ModVersion root = version("root-v1", "root",
                 depProject("bad", DependencyType.INCOMPATIBLE),
@@ -123,6 +139,62 @@ class ModDependencyResolverTest {
     }
 
     @Test
+    void sharedDependencyKeepsFirstOwnerPathAndSiblingInstallOrder() {
+        ModVersion shared = version("shared-v1", "shared");
+        ModVersion first = version("first-v1", "first", depProject("shared", DependencyType.REQUIRED));
+        ModVersion second = version("second-v1", "second", depProject("shared", DependencyType.REQUIRED));
+        ModVersion root = version("root-v1", "root",
+                depProject("first", DependencyType.REQUIRED), depProject("second", DependencyType.REQUIRED));
+        api.projectVersions.put("shared", List.of(shared));
+        api.projectVersions.put("first", List.of(first));
+        api.projectVersions.put("second", List.of(second));
+
+        DependencyResolutionResult result = resolver().resolve(instance, root).join();
+
+        assertEquals(List.of("shared", "first", "second", "root"),
+                result.installOrder().stream().map(mod -> mod.version().projectId()).toList());
+        assertEquals("first", result.installOrder().getFirst().requiredByProjectId());
+        assertEquals(List.of("root", "first", "shared"), result.installOrder().getFirst().dependencyPath());
+        assertEquals(List.of("root", "second"), result.installOrder().get(2).dependencyPath());
+        assertEquals(List.of("root"), result.installOrder().getLast().dependencyPath());
+    }
+
+    @Test
+    void dependencyDepthAllowsBoundaryButRejectsNextLevel() {
+        ModVersion leaf = version("leaf-v1", "leaf");
+        ModVersion middle = version("middle-v1", "middle", depProject("leaf", DependencyType.REQUIRED));
+        ModVersion root = version("root-v1", "root", depProject("middle", DependencyType.REQUIRED));
+        api.projectVersions.put("leaf", List.of(leaf));
+        api.projectVersions.put("middle", List.of(middle));
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(), 1, 32);
+
+        assertEquals(2, resolver.resolve(instance, middle).join().installOrder().size());
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> resolver.resolve(instance, root).join());
+        assertInstanceOf(DependencyResolutionException.class, rootCause(failure));
+        assertEquals("依赖深度超过限制 1: root -> middle", rootCause(failure).getMessage());
+    }
+
+    @Test
+    void dependencyCountIncludesRootAndDeduplicatesRepeatedVersions() {
+        ModVersion shared = version("shared-v1", "shared");
+        ModVersion root = version("root-v1", "root",
+                depProject("shared", DependencyType.REQUIRED), depProject("shared", DependencyType.REQUIRED));
+        api.projectVersions.put("shared", List.of(shared));
+        DefaultModDependencyResolver atLimit = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(), 16, 2);
+        DefaultModDependencyResolver belowLimit = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(), 16, 1);
+
+        assertEquals(2, atLimit.resolve(instance, root).join().installOrder().size());
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> belowLimit.resolve(instance, root).join());
+        assertInstanceOf(DependencyResolutionException.class, rootCause(failure));
+        assertEquals("依赖数量超过限制 1", rootCause(failure).getMessage());
+    }
+
+    @Test
     void dependencyChannelDoesNotExceedSelectedRootVersion() {
         ModVersion alphaDependency = versionOfType("dependency-alpha", "dependency", "alpha");
         ModVersion root = version("root-v1", "root",
@@ -171,6 +243,23 @@ class ModDependencyResolverTest {
 
         assertEquals(List.of("root"),
                 result.installOrder().stream().map(mod -> mod.version().projectId()).toList());
+    }
+
+    @Test
+    void pinnedRequiredDependencyDoesNotUseInstalledDifferentVersion() throws Exception {
+        Files.createDirectories(instance.modsDirectory());
+        Files.writeString(instance.modsDirectory().resolve("dependency.jar"), "x");
+        ModVersion dependency = version("dependency-v2", "dependency");
+        ModVersion root = version("root-v1", "root",
+                depVersion("dependency-v2", "dependency", DependencyType.REQUIRED));
+        api.versions.put("dependency-v2", dependency);
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(installed("dependency", "root", true)), 16, 32);
+
+        DependencyResolutionResult result = resolver.resolve(instance, root).join();
+
+        assertEquals(List.of("dependency-v2", "root-v1"),
+                result.installOrder().stream().map(mod -> mod.version().id()).toList());
     }
 
     private DefaultModDependencyResolver resolver() {

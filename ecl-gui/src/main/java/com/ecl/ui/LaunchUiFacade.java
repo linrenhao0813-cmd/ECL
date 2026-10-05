@@ -7,8 +7,6 @@ interface LaunchUiFacade {
     LoaderChoice loaderForProfile(String version);
     String authType();
     String username();
-    String yggdrasilServer();
-    String password();
     String lastContentVersion();
     boolean isVersionDownloaded(String version);
     void setStatus(String title, String detail);

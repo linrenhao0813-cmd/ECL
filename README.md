@@ -2,48 +2,77 @@
 
 [![CI](https://github.com/linrenhao0813-cmd/ECL/actions/workflows/ci.yml/badge.svg)](https://github.com/linrenhao0813-cmd/ECL/actions/workflows/ci.yml)
 
-ECL 是一个基于 Java 21 和 JavaFX 的 Minecraft Java 版启动器，提供游戏安装、账户管理、模组与整合包管理、存档备份和游戏启动功能。
+ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖版本安装、账户管理、内容下载、整合包维护与服务器浏览等常用流程。界面为固定深色的森林绿主题，支持简体中文、繁体中文和英文。
 
-当前版本为 **1.0.1**。本文以 Windows 环境为例介绍使用、构建与开发流程。
+> 当前版本：`1.0.2beta` · Windows 平台 · 从源码构建需要 JDK 21
 
 ## 界面预览
 
-以下为当前源码在 Windows 上实际运行的界面截图，使用独立的初始配置和默认离线账户，尚未安装游戏实例。下载页展示运行时获取的版本列表，内容会随上游更新。
+以下为使用隔离数据目录生成的当前启动器界面快照。
 
 ### 启动首页
 
-![ECL 启动首页：实例选择、账户、运行环境与游戏统计](docs/images/launcher-home.png)
+![ECL 启动首页](docs/images/launcher-home.png)
 
-### 游戏下载
+### 内容下载
 
-![ECL 下载页：内容分类与 Minecraft 版本列表](docs/images/launcher-downloads.png)
+![ECL 下载页](docs/images/launcher-downloads.png)
 
-### 常规设置
+### 通用设置
 
-![ECL 设置页：语言、主题与高级设置入口](docs/images/launcher-settings.png)
+![ECL 通用设置页](docs/images/launcher-settings.png)
 
-## 主要功能
+## 功能
 
-| 功能 | 说明 |
-| --- | --- |
-| 游戏与实例 | 安装、重装和删除游戏版本，识别已有实例，记录游玩时长与启动次数 |
-| 模组加载器 | 支持 Fabric、Quilt、Forge 和 NeoForge，为模组实例提供隔离运行目录 |
-| 账户与皮肤 | 支持 Microsoft、离线和 Yggdrasil 外置登录；支持正版账户上传皮肤、离线账户导入本地皮肤 |
-| 内容下载 | 从 Modrinth、CurseForge 搜索模组、资源包、光影包和整合包，按实例版本与加载器筛选 |
-| 模组管理 | 解析依赖，批量更新、启用、禁用和卸载模组，拖入本地 `.jar` 文件导入 |
-| 整合包 | 导入 Modrinth、CurseForge 整合包，导出 ECL、MultiMC、CurseForge 和 MRPACK 格式 |
-| 运行环境 | 自动选择 Java，按需下载 Eclipse Temurin JRE，按实例保存内存和 JVM 参数 |
-| 存档与诊断 | 管理世界存档、备份与恢复，提供中文崩溃诊断 |
-| 服务器 | 浏览公开服务器目录、查询状态、复制地址和设置直连目标 |
-| 界面 | 支持浅色与深色主题，以及简体中文、繁体中文和英文 |
+### 游戏版本与实例
 
-在线整合包更新目前仅支持已记录 Modrinth 来源的实例。CurseForge 整合包支持导入和导出，暂不支持在线版本更新。
+- 安装 Minecraft 正式版、快照和愚人节版本，下载时校验客户端、资源和依赖文件。
+- “实例”菜单从用户配置的 `.minecraft/versions` 中检测已有实例，直接切换启动目标；不会默认选中在线版本从零下载。
+- 带加载器的实例使用隔离运行目录，原版实例共享游戏根目录。
+- 打包版可为所选实例创建桌面或开始菜单快捷方式。
 
-## 从源码运行
+### 模组加载器
 
-准备 **JDK 21** 和 Git，确认 `JAVA_HOME` 指向 JDK 21，且 `java` 可在终端中执行。仓库自带 Gradle Wrapper，无需单独安装 Gradle。
+- 安装 Fabric、Quilt、Forge、NeoForge 加载器；下载非原版实例时，先选择加载器类型，再从当前 Minecraft 版本的兼容列表中自行选择加载器版本，选定后才能开始安装。列表加载失败时可重新加载。选择 Fabric 时还须自行选择兼容的 Fabric API 版本，安装时使用选定版本。
+- 首页“一键升级”包含整合包更新；普通实例将加载器和可识别模组升级为当前 Minecraft 版本兼容的最新版本，保留实例目录、存档及启动配置。加载器优先选择稳定版；模组遵循设置中的发布通道，不跨 Minecraft 版本或加载器类型升级。
 
-在 PowerShell 中执行：
+### 账户与皮肤
+
+- 支持离线账户和 Microsoft 设备码登录，保存的凭据采用加密存储。旧版 Yggdrasil 账号记录保留，但不再提供外置登录。
+- Microsoft 登录默认使用内置公共客户端 ID，可通过 `ecl.microsoft.clientId` 或环境变量 `ECL_MICROSOFT_CLIENT_ID` 覆盖。
+- Microsoft 正版账户可上传官方皮肤；离线账户可导入本地皮肤，并在启动游戏时自动注入。两种方式均支持 64×64 或 64×32 的 PNG（最大 1 MiB），可选经典（宽手臂）或纤细（细手臂）模型。
+- 窗口右上角的玩家头像显示 Microsoft 账号或已导入离线皮肤的头部；没有可用皮肤时显示史蒂夫头部。
+
+### 内容下载与 Mod 管理
+
+- 按 Minecraft 版本和加载器筛选 Modrinth 的模组、光影包、资源包和整合包，支持依赖解析与事务式安装。
+- Mod 管理支持多选顺序更新、批量启用、禁用和卸载，本地 `.jar` 文件可拖入启动器导入当前实例。
+- 下载默认并行数按处理器数量在 4–8 之间调整，支持断点续传与失败换源；用户取消显示为“已取消”而非“下载失败”。
+
+### 整合包
+
+- 导入 Modrinth `.mrpack` 整合包。
+- 已记录 Modrinth 来源的整合包可通过首页“一键升级”检查并更新当前实例。
+- 整合包更新时保留用户修改的旧文件、或无法读取旧文件清单的警告，会显示在进度提示及完成摘要中。
+
+### 服务器
+
+- 浏览公开 Minecraft 服务器目录，搜索、查看在线状态、复制地址或作为下次启动的直连地址。
+- “服务器”页的“本地服务端”标签可导入服务端 JAR，为每个服务端保存独立目录、Java 路径和最大内存配置，启动、正常停止、查看日志并发送控制台命令。
+- 导入服务端时会探测可用 Java；打包运行时没有 `java.exe` 且未找到其他 Java 时，会先提示选择 Java 可执行文件，取消则不导入。
+- 首次启动前需要用户明确接受 [Minecraft EULA](https://www.minecraft.net/eula)。下载服务端 JAR 后，在本地服务端标签导入；导入会复制文件，原下载文件保留。
+- 服务端运行期间禁止改写启动配置或 EULA、重复启动。切页不会终止服务端。建议关闭启动器前先正常停止服务端；关闭后重开仍能识别运行状态和查看日志，但无法重新连接旧进程的控制台输入。
+
+### Java 与启动配置
+
+- 自动选择合适的 Java，本机缺少匹配运行时时可下载 Eclipse Temurin JRE（下载后校验 SHA-256）。
+- 启动时按实例读取已保存的 Java、内存和 JVM 配置；“设置 → 新实例默认值”提供尚未建立独立配置时的初始值。实例页不再提供单独的启动配置编辑入口。
+
+### 其他
+
+- 崩溃报告中文诊断、世界备份。
+
+## 快速开始
 
 ```powershell
 git clone https://github.com/linrenhao0813-cmd/ECL.git
@@ -51,52 +80,77 @@ cd ECL
 .\gradlew.bat run
 ```
 
-首次构建会下载 Gradle 9.8.0 和项目依赖。账户在线登录、下载游戏和检索在线内容也需要网络连接。
+首次构建会通过 Gradle Wrapper 自动下载 Gradle 9.8.0 与项目依赖，无需另行安装 Gradle。运行启动器、登录、下载游戏或在线内容时需要网络连接。
 
-## 开始使用
+### 环境要求
 
-1. **添加账户**：在首页或账户设置中选择 Microsoft 登录、离线账户或 Yggdrasil 外置登录。
-2. **选择游戏目录**：在设置中指定 `.minecraft` 目录；已有实例可通过“版本”菜单选择。
-3. **安装游戏**：打开“下载”中的“游戏实例”，选择 Minecraft 版本及需要的加载器。
-4. **安装内容**：选中目标实例后，搜索并安装模组、资源包、光影包或整合包。
-5. **调整并启动**：按需设置 Java、内存、JVM 参数和分辨率，回到首页启动游戏。
+- Windows
+- JDK 21
 
-下载和启动进度显示在操作页面及首页的“当前活动”卡片中。选中实例后编辑高级启动设置，Java 路径、内存和 JVM 参数会保存到该实例。
+若 `java` 不在 `PATH` 中，请在同一 PowerShell 会话里配置 JDK 21 的 `JAVA_HOME` 和 `PATH`。
 
-### 在线服务配置
+## 图形界面使用
 
-**CurseForge** 需要 API Key，可在高级设置中填写，也可通过环境变量 `CURSEFORGE_API_KEY` 或 JVM 系统属性 `ecl.curseforge.apiKey` 提供。未配置时仍可使用 Modrinth。
+UI 布局重构的设计与验收标准见[启动器 UI 布局重构方案](plan.md)；四个阶段均已实施，窗口框架、实例选择状态与全局任务反馈为第一阶段成果。
 
-**Microsoft 登录** 默认使用内置公共客户端 ID。如需覆盖，可设置环境变量 `ECL_MICROSOFT_CLIENT_ID` 或 JVM 系统属性 `ecl.microsoft.clientId`。
+窗口使用固定五区结构：顶部标题栏（ECL 标识、账户入口、窗口控制）、左侧导航栏（启动、实例、下载、存档、服务器、设置）、工作区顶部的实例栏、页面工作区，以及底部状态栏与任务入口。实例栏显示当前启动实例，可直接切换实例；不再显示重复的 Minecraft 版本与加载器徽章，“更新说明”入口固定在最右侧。实例管理从左侧“实例”导航进入，实例列表可在实例页刷新。窗口宽度不足时左侧导航自动收成图标栏，实例页改为上下单栏，页面按可用空间布局。窗口初始与最小尺寸按屏幕可用逻辑区域计算，适配 Windows 100%、125% 和 150% 缩放。
 
-### 皮肤
+页面统一使用 4/8/12/16/24/32 的间距梯度和固定字号层级：页面标题 28 px、区块标题 16 px、正文 13 px、辅助信息 11–12 px，内容卡片统一内边距 18×20 与 12 px 行间距。设置页与实例、下载、存档、服务器页一样带页面标题与用途副标题；实例概览卡片标题为“实例信息”，不与“概览”标签重复；首页“一键升级”使用次按钮样式。
 
-Microsoft 正版账户的皮肤上传至官方服务；离线账户的皮肤保存在本机，并在启动时注入。支持 64×64 或 64×32 的 PNG 图片，大小不超过 1 MiB，可选择经典或纤细模型。
+**启动目标与查看目标相互独立。** 实例栏、首页和“一键升级”操作的是启动目标；实例页列表里选中的行只是“正在查看的实例”，通过顶部实例下拉框切换下一次启动的实例；实例详情不再提供“设为启动目标”按钮或启动目标徽章、信息行。启动目标由独立的实例选择状态维护并持久化到 `settings.json` 的 `selectedVersion`，不依赖任何控件的存在。
 
-离线皮肤与玩家名绑定，区分大小写；修改玩家名后需要重新导入。
+1. **实例页**：左侧列出 `.minecraft/versions` 中可启动的实例（收藏的排在前面），右侧只保留“概览”标签和打开目录；“启动配置”“组件与维护”子菜单已移除。实例详情从左侧“实例”导航进入，设置菜单不再提供“实例设置”子菜单。
+   - 概览卡片标题为“实例信息”，显示 Minecraft 版本、加载器、实际运行目录、实例 ID 与运行状态，并提供**显示设置**：自定义名称、收藏、封面图片。这些只写入 `<数据目录>/instances/display.json`，不会修改实例文件。
+   - 顶部切换启动目标后，概览仍保留正在查看的实例及未保存的显示设置。
+   - 安装新实例请进入“下载 → 游戏实例”；实例页不再显示“安装新实例”按钮。
+2. **下载页**：顶部为横向分类（游戏实例、模组、光影包、材质包、整合包、服务端），分类下方常驻“安装到”提示条：模组等内容显示当前目标实例，“游戏实例”显示版本目录与安装页，**“服务端”显示服务端文件下载目录**，不会套用实例文案。离开内容页后再返回时会**回到上次的分类并恢复模组搜索词**；切换实例会重新筛选兼容性并丢弃旧上下文返回的过期结果。
+3. **设置**：保留“通用”“下载”“新实例默认值”“账号管理”“关于与诊断”五个标签，按使用场景分组。通用页直接编辑游戏根目录，窗口、直连、处理器与启动行为集中在可折叠的“窗口与启动”区域，自动备份集中在可折叠的“存档自动备份”区域；低频选项默认收起，语言选择即时生效；通用页不再提供“目录快捷入口”区域。下载页分“下载速度”和“内容更新”；新实例默认值分“运行参数默认值”和“实例目录默认策略”，默认隔离不再放在下载页。账号页集中展示登录、已保存账号与皮肤操作，移除重复的登录按钮。关于页展示实际启动器 Java 运行时版本，日志、崩溃报告与欢迎向导集中在“诊断与帮助”。通用、下载与默认值均支持显式保存、放弃修改；切换标签、左侧导航、语言或重建页面前会检查未保存修改，失败保留输入并回滚内存设置。实例页保留概览与显示设置；切换实例、刷新列表或离开实例页时检查未保存的显示修改。兼容的全局设置弹窗复用通用页的表单与保存逻辑，不改写实例启动配置或新实例默认值。
+4. **服务器页**：分为公开目录和本地服务端两个标签。公开目录可复制地址或设置下次直连，直连地址跟随启动目标，未选择实例时会先提示选择。本地服务端提供 JAR 导入、Java/内存配置、EULA 确认、进程控制和日志控制台。
+5. **皮肤**：通过窗口右上角账户入口进入账号设置，正版账户选择“上传皮肤”，离线账户选择“导入皮肤”；离线皮肤仅保存在本机 ECL 数据目录，可随时“清除皮肤”。账号页顶部集中显示已保存的 Microsoft 账号数量，并提供“重新登录 Microsoft”入口，登录失效时不会成为死路。
+6. **无障碍**：图标按钮均带提示与无障碍名称；关闭弹窗（如高级设置）后键盘焦点返回打开它的控件；页面切换动画支持现有的减少动画选项。
 
-## 构建与检查
+首页主区域显示当前实例，仅提供启动和“一键升级”操作；切换实例使用顶部实例栏，实例、模组与存档管理从对应导航入口进入。**主按钮始终反映真实状态**：
 
-在仓库根目录使用 JDK 21 执行：
-
-| 命令 | 用途 |
+| 状态 | 按钮 / 提示 |
 | --- | --- |
-| `.\gradlew.bat run` | 启动图形界面 |
-| `.\gradlew.bat check` | 运行 JUnit 6、Checkstyle、SpotBugs 和 JaCoCo 校验 |
-| `.\gradlew.bat build` | 构建并验证全部模块 |
-| `.\gradlew.bat installDist` | 生成分发目录 `ecl-boot/build/install/ECL/` |
-| `.\gradlew.bat captureLauncherUi` | 生成界面快照 `ecl-gui/build/visual-qa/ecl-home.png` |
-| `.\gradlew.bat packageWindowsApp` | 生成 Windows 应用镜像 `dist/windows/ECL/` |
+| 没有本地实例 | “安装游戏”，跳转下载页的“游戏实例”分类 |
+| 有实例但未选择 | “选择实例”，跳转实例页 |
+| 已就绪 | “启动游戏” |
+| 正在准备或补齐依赖 | 按钮禁用并显示当前阶段，防止重复启动 |
+| 当前实例正在运行 | “游戏运行中”（禁用），提示行提供“查看任务” |
+| 微软登录失效 | “重新登录”，跳转账号设置 |
+| 上次启动失败 | “重新启动”，提示行显示失败摘要并提供“打开日志目录” |
 
-界面快照任务使用隔离的数据目录。CI 在 Windows 上执行检查，通过后生成名为 `windows-app` 的应用镜像产物。
+背景区域随窗口高度伸展，图片按比例铺满。
 
-运行单个测试的示例：
+底部状态栏显示启动器版本与当前任务摘要，右侧“任务详情”按钮按需展开面板。面板列出每个下载、安装与升级任务的**目标、当前阶段、进度、状态、错误摘要**；仅在任务可取消时显示“取消”，仅在已失败或被取消时显示“重试”。共享下载进度条也显示在这里，因此切换页面不会丢失任务反馈。任务数量由下载任务中心实时上报，与首页控件是否可见无关。
+
+选择带 Fabric、Quilt、Forge 或 NeoForge 的实例后，点击首页“一键升级”，启动器会升级加载器、补齐当前加载器缺失的依赖库、识别本地模组并顺序安装兼容更新，进度和结果显示在按钮下方。未选择实例时按钮不可用，普通原版实例不支持组件升级，运行中的实例拒绝升级。禁用、未知来源、损坏或重复项目的模组会跳过；单个模组失败会保留旧文件并继续其他更新，已成功的更新保留，可再次点击重试。整合包实例会检查并事务式安装作者发布的最新兼容整包版本，不再单独升级包内加载器和模组；遵循发布通道且不跨 Minecraft 版本或加载器类型。未记录有效 Modrinth 来源的整合包会提示重新导入，不会改动组件。
+
+离线皮肤与玩家名（含大小写）绑定，更改玩家名后需要重新导入。
+
+### 公开服务器目录说明
+
+公开服务器目录来自第三方服务。目录收录不表示 ECL、Mojang 或 Microsoft 对服务器内容、安全性或运营方式的认可，请自行判断后再连接。
+
+## 构建与验证
+
+以下命令均在仓库根目录执行。
+
+### 测试与静态检查
 
 ```powershell
-.\gradlew.bat :ecl-core:test --tests com.ecl.game.InstanceLaunchProfileStoreTest
+.\gradlew.bat check
 ```
 
-覆盖率校验要求：`ecl-core` 行覆盖率至少 60%、分支覆盖率至少 40%；`ecl-gui` 分别至少为 20% 和 15%。
+`check` 会运行 JUnit、Checkstyle、SpotBugs 和 JaCoCo 报告任务，并对核心模块和 GUI 模块执行覆盖率下限校验：
+
+| 模块 | 行覆盖率 | 分支覆盖率 |
+| --- | --- | --- |
+| `ecl-core` | 60% | 40% |
+| `ecl-gui` | 20% | 15% |
+
+运行单个测试示例：`.\gradlew.bat :ecl-core:test --tests com.ecl.package.ClassTest`。Gradle 依赖使用锁定和校验元数据。
 
 ### 依赖升级
 
@@ -110,54 +164,124 @@ Microsoft 正版账户的皮肤上传至官方服务；离线账户的皮肤保�
 `gradle/verification-keyring.keys` 保存已信任的构建依赖发布者签名公钥。
 公钥指纹与 `verification-metadata.xml` 中的信任范围一致，避免构建依赖密钥服务器的可用性。
 
-### Windows 打包
+CI 在 Windows 上执行检查，通过后生成名为 `windows-app` 的应用镜像产物。
+
+### 构建与分发
+
+```powershell
+.\gradlew.bat build          # 编译并验证全部模块
+.\gradlew.bat installDist   # 生成分发目录：ecl-boot/build/install/ECL/
+```
+
+### 界面快照
+
+```powershell
+.\gradlew.bat captureLauncherUi
+```
+
+默认输出 `ecl-gui/build/visual-qa/ecl-home.png`，使用隔离的数据目录，不会读写当前用户的 ECL 配置。可选模式：
+
+| 模式 | 说明 |
+| --- | --- |
+| `-PuiSnapshotMode=forest` | 带固定实例的森林首页 |
+| `-PuiSnapshotMode=forest-compact` | 1180×720 紧凑窗口 |
+| `-PuiSnapshotMode=forest-en` | 英文界面 |
+| `-PuiSnapshotMode=forest-empty` | 无本地实例 |
+| `-PuiSnapshotMode=local-versions` | 实例页列表 + 详情工作区 |
+| `-PuiSnapshotMode=local-versions-compact` | 1180×720 单栏实例页 |
+| `-PuiSnapshotMode=settings-page-dark` | 通用设置（低频选项折叠） |
+| `-PuiSnapshotMode=settings-page-expanded-compact` | 紧凑窗口中展开全局设置 |
+| `-PuiSnapshotMode=settings-page-downloads` | 下载速度与内容更新 |
+| `-PuiSnapshotMode=settings-page-defaults` | 运行参数与实例目录默认策略 |
+| `-PuiSnapshotMode=settings-page-about` | 版本信息与诊断入口 |
+| `-PuiSnapshotMode=settings-dialog` | 深色全局游戏设置弹窗顶部 |
+| `-PuiSnapshotMode=settings-dialog-bottom` | 深色全局游戏设置弹窗底部与保存按钮 |
+| `-PuiSnapshotMode=downloads` | 内容页横向分类与安装目标提示条 |
+| `-PuiSnapshotMode=instance-loader-version` | 实例安装页与 Fabric Loader / Fabric API 版本选择（固定示例列表） |
+
+任意模式可追加语言后缀重拍：`-en` 为英文、`-zh-tw` 为繁体中文（例如 `local-versions-en`、`settings-page-zh-tw`），不带后缀则为简体中文。快照会强制切到对应语言，不受上一次快照残留的语言设置影响。
+
+背景素材及生成说明位于 `ecl-gui/src/main/resources/images/`；背景中不含按钮或文字，交互均由 JavaFX 控件提供。
+
+### Windows 应用镜像
 
 ```powershell
 .\gradlew.bat packageWindowsApp
 ```
 
-该任务调用 Windows JDK 中的 `jpackage.exe`，生成包含 Java 运行时的应用镜像。构建完成后运行：
+使用 Windows JDK 21 自带的 `jpackage.exe` 生成包含 Java 运行时的应用镜像，输出位于 `dist/windows/ECL/ECL.exe`。注意：该任务生成的是应用镜像而非单文件安装程序，发布时必须保留整个 `dist/windows/ECL/` 目录，`ECL.exe`、`app/` 和 `runtime/` 需保持原有相对位置。
 
-```powershell
-.\dist\windows\ECL\ECL.exe
-```
+当前启动器显示版本与 JAR 版本为 `1.0.2beta`；Windows 版本元数据只接受数字，因此 EXE 使用 `1.0.2`。
 
-分发时请保留整个 `dist/windows/ECL/` 目录，包括 `ECL.exe`、`app/` 和 `runtime/`。该产物不是单文件安装程序，仅复制 EXE 无法正常使用。
+### CI
 
-## 数据与实例
+GitHub Actions 在 Windows 上执行 `check`（PR 另有依赖审查），随后生成 Windows 应用镜像作为工作流产物。
 
-| 位置 | 内容 |
-| --- | --- |
-| `%APPDATA%\.ecl` | 启动器配置、缓存、运行时、备份等数据 |
-| `%APPDATA%\.minecraft` | 默认游戏目录，可在设置中修改 |
-| `<实例目录>/.ecl/config/launch-profile.json` | 实例的 Java、内存与 JVM 参数 |
-| `<实例目录>/.ecl/config/playtime.json` | 游玩时长、启动次数和最近启动记录 |
-| `<实例目录>/.ecl/operations/` | 通过实例操作协调器执行的操作记录 |
+## 数据目录与实例配置
 
-默认情况下，模组实例使用隔离运行目录，原版实例共享游戏根目录。实例首次读取启动配置时，会以现有全局设置作为初始值。
+启动器数据默认保存于：
 
-同一实例的模组变更和整合包更新会串行执行，运行中的实例会拒绝整合包更新。关闭启动器不会终止已启动的游戏；重新打开后会通过进程记录识别仍在运行的实例。
+| 系统 | ECL 数据目录 | 默认游戏目录 |
+| --- | --- | --- |
+| Windows | `%APPDATA%\.ecl` | `%APPDATA%\.minecraft` |
+
+数据目录保存版本元数据、库、资源、运行时、配置、备份和运行日志；游戏目录可在设置中覆盖。实例目录内部：
+
+- `.ecl/config/launch-profile.json` — 实例启动配置，带 `schemaVersion` 的 UTF-8 JSON，临时文件 + 原子替换写入。实例首次读取时迁移现有全局 `javaPath`、`maxMemoryMb` 和 `jvmArgs`，旧全局设置保留为未迁移实例的默认值。
+- `.ecl/operations/` — 操作协调器持久化的操作日志（`operationId` 及运行中、成功、失败状态）。Mod 安装、启用、禁用、卸载、索引修复和整合包更新共享同一协调器：同一实例的文件变更串行执行，不同实例互不阻塞。
+- `.ecl/game-process.json` — 运行中游戏的 PID 与启动时间。
+
+本地服务端保存在 `<ECL 数据目录>/servers/<服务端 ID>/`，其中 `server.jar` 是导入副本，`profile.json` 保存启动配置，`console.log` 保存控制台输出；服务端自己的配置与世界也在此目录。服务端使用独立的进程标记识别运行状态，不依赖当前客户端实例。
+
+实例启动配置只保存实际使用的 Java、内存和自定义 JVM 参数；含有性能预设、自动修复、自动生成 JVM 选项与备份策略字段的旧配置仍可读取；这些未接入运行流程的字段不再写入新配置。
+
+## 安全与可靠性
+
+- **来源校验**：版本清单和启动元数据只从 Mojang 权威地址读取，镜像仅用于下载带官方摘要的二进制文件；网络内容缺少有效摘要或大小时拒绝安装，HTTP 仅允许显式环回地址。
+- **路径防护**：对版本 ID、继承版本和客户端 JAR 标识统一校验，通过规范路径检查将版本元数据和客户端文件限制在 `versions` 目录内；依赖库与资源路径同样检查目录边界。
+- **运行时安全**：Java 运行时下载后校验 SHA-256；解压 Windows ZIP 时限制条目数、单文件大小、总大小和压缩比，拒绝越出运行时目录的条目。内容库图标仅从 Modrinth 的 HTTPS CDN 加载。
+- **游戏进程管理**：监控使用守护线程，关闭启动器不会等待或终止运行中的游戏；`game-process.json` 使重新打开的 ECL 仍能阻止运行时配置覆盖和重复启动。
+- **整合包事务**：Modrinth 整合包通过 `.ecl-pack-manifest.json` 记录受管理文件及 SHA-512。更新在同一 journal 事务中提交实例内容、`.mrpack` 和 profile 元数据；新版移除的文件仅在仍匹配旧哈希时删除，用户修改过的文件保留并警告，失败时全部回滚。加载器依赖变化时会先准备对应加载器版本，再提交整合包事务。整合包更新与 Mod 文件操作共用实例锁，运行中的实例拒绝更新，下载完成后、提交文件前会再次检查运行状态。
 
 ## 项目结构
 
-```text
-ecl-boot/    应用入口 com.ecl.ECL
-ecl-core/    认证、下载、游戏启动、实例与整合包等核心服务
-ecl-gui/     JavaFX 界面、控制器、样式、图标与语言资源
-ecl-dist/    Windows jpackage 打包任务
-config/      Checkstyle 与 SpotBugs 配置
-docs/        项目文档
-gradle/      Gradle Wrapper、依赖版本及校验配置
-```
+源码入口、业务职责与关键流程见[源码阅读指南](docs/codebase-guide.md)。
 
-各模块的生产代码位于 `src/main/java/`，测试位于 `src/test/java/`，资源位于 `src/main/resources/`。进一步了解入口和关键流程，请阅读[源码阅读指南](docs/codebase-guide.md)。
+游戏下载由 `GameDownloader` 按元数据、客户端、依赖库、资源文件的顺序编排；模组依赖解析在
+`DefaultModDependencyResolver` 中分别处理必需与可选依赖。界面启动阶段位于 `LauncherUIView`，
+窗口框架装配位于 `LauncherWindowLayout`，具体页面与交互继续由各自的页面工厂和工作流负责。
 
-## 参与开发
+实例安装入口使用 `InstanceInstallPage`；Java 探测与选择使用 `JavaRuntimeUtil`，
+诊断直接调用 `CrashAnalyzer`。账户与游戏目录分别由 `DefaultAccountService` 和
+`DefaultGameRepository` 提供，不再保留未使用的服务接口、实例安装向导及管理模型。
+后台线程工厂使用 Java 21 的平台线程 API，统一创建带编号的守护线程。
 
-请先阅读[仓库指南](AGENTS.md)。业务逻辑放在 `ecl-core`，JavaFX 相关逻辑放在 `ecl-gui`；使用 UTF-8 和四空格缩进，新增界面文案时同步更新语言资源。
+整合包更新通过 `ModpackUpdateService.checkUpdate` 检查选中的实例，不再保留全目录批量扫描入口。
+实例安装完成后统一将新实例设为启动目标。
 
-修复缺陷时补充回归测试，界面变更使用 `captureLauncherUi` 检查快照。提交前运行相关检查并审阅差异，避免提交账户数据、API Key 或 `build/`、`dist/` 中的生成文件。
+启动器仅保留已接入界面的 Modrinth 整合包安装与更新流程；未使用的通用整合包导入／导出服务、事件总线、认证工厂注册表、内容源注册表与事务包装接口已移除。账户存储继续兼容旧账号记录，内容元数据直接使用 Modrinth 提供者。实例启动、运行目录与显示设置共用现有的原子 JSON 写入逻辑。首页直接初始化共享控件，不再构建未显示的旧表单或隐藏操作按钮。
+
+| 模块 | 职责 |
+| --- | --- |
+| `ecl-boot/` | JavaFX 图形启动入口（`com.ecl.ECL`） |
+| `ecl-core/` | 认证、下载、游戏启动、实例、整合包等平台无关服务 |
+| `ecl-gui/` | JavaFX 界面、控制器、样式与资源 |
+| `ecl-dist/` | Windows `jpackage` 打包任务 |
+| `config/` | Checkstyle 与 SpotBugs 配置 |
+
+依赖方向为 `ecl-boot` → `ecl-gui` → `ecl-core`。生产代码位于 `src/main/java`，测试位于 `src/test/java`，运行时资源位于 `src/main/resources`。
+
+## 技术栈
+
+- Java 21 · JavaFX 21 · Gradle 9.8.0
+- Gson · Jackson · JNA · TwelveMonkeys ImageIO
+- SLF4J · Logback
+- JUnit 6 · TestFX · Checkstyle · SpotBugs · JaCoCo
 
 ## 许可证
 
-本项目采用 [GNU General Public License v3.0](LICENSE)。
+本项目基于 [GNU General Public License v3.0](LICENSE) 开源。
+
+## 贡献指南
+
+贡献前请先阅读 [AGENTS.md](AGENTS.md)，了解项目结构、开发命令、编码风格、测试要求与提交规范。

@@ -1,6 +1,5 @@
 package com.ecl.ui;
 
-import com.ecl.ECLConfig;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.util.Messages;
 import javafx.application.Platform;
@@ -141,7 +140,7 @@ final class LoaderInstallDialog {
         var stylesheet = LoaderInstallDialog.class.getResource("/css/launcher.css");
         if (stylesheet != null) scene.getStylesheets().add(stylesheet.toExternalForm());
         dialog.setScene(scene);
-        ui.applyThemeToScene(scene, ui.settingsManager.get(ECLConfig.KEY_THEME));
+        ui.applyThemeToScene(scene);
         dialog.show();
     }
 }

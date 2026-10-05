@@ -1,5 +1,7 @@
 package com.ecl.modrinth.service;
 
+import com.ecl.operation.InstanceOperationCoordinator;
+
 import com.ecl.modrinth.TestFixtures;
 import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.instance.ModInstanceContext;
@@ -152,7 +154,7 @@ class LocalModScannerTest {
 
     private DefaultLocalModScanner scanner() {
         return new DefaultLocalModScanner(api, new FileInstalledModRepository(), hashes,
-                new DefaultModVersionSelector(), new DefaultInstanceOperationLock(),
+                new DefaultModVersionSelector(), new InstanceOperationCoordinator(),
                 Runnable::run, ignored -> false);
     }
 }

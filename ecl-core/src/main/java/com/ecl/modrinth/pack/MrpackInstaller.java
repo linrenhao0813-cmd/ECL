@@ -18,6 +18,9 @@ import java.util.zip.ZipFile;
 /** Installs a Modrinth .mrpack as an isolated, launchable ECL profile. */
 public final class MrpackInstaller {
     public interface Listener extends ModLoaderInstaller.Listener {
+        default void onWarning(String message) {
+            onStatus(message);
+        }
     }
 
     public record InstallResult(String profileId, String name, String version,

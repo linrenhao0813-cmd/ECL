@@ -190,9 +190,7 @@ public final class RemoteImageLoader {
     public static boolean isTrustedIconUri(URI uri) {
         try {
             URI checked = NetworkUriPolicy.requireHttps(uri, "project icon URL");
-            String host = checked.getHost().toLowerCase(Locale.ROOT);
-            return MODRINTH_ICON_HOSTS.contains(host)
-                    || host.equals("forgecdn.net") || host.endsWith(".forgecdn.net");
+            return MODRINTH_ICON_HOSTS.contains(checked.getHost().toLowerCase(Locale.ROOT));
         } catch (IOException | RuntimeException invalid) {
             return false;
         }

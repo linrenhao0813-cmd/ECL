@@ -13,7 +13,7 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 /** Filesystem-backed version metadata and instance path policy. */
-public final class DefaultGameRepository implements GameRepository {
+public final class DefaultGameRepository {
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultGameRepository.class);
     private final Path versionsDirectory;
     private final Path sharedGameDirectory;
@@ -37,7 +37,6 @@ public final class DefaultGameRepository implements GameRepository {
         this.instanceSettings = new InstanceGameSettingsStore();
     }
 
-    @Override
     public Path instanceRoot(String versionId) {
         return sharedGameDirectory.resolve("versions").resolve(requireSafeVersionId(versionId)).normalize();
     }
@@ -47,7 +46,6 @@ public final class DefaultGameRepository implements GameRepository {
         return sharedGameDirectory;
     }
 
-    @Override
     public Path runDirectory(String versionId) throws IOException {
         Path root = instanceRoot(versionId);
         VersionMetadata metadata = resolve(versionId);
@@ -107,12 +105,10 @@ public final class DefaultGameRepository implements GameRepository {
         return false;
     }
 
-    @Override
     public VersionMetadata resolve(String versionId) throws IOException {
         return versions.resolve(versionId);
     }
 
-    @Override
     public List<String> installedVersions() {
         if (!Files.isDirectory(versionsDirectory)) return List.of();
         try (Stream<Path> entries = Files.list(versionsDirectory)) {
@@ -150,7 +146,6 @@ public final class DefaultGameRepository implements GameRepository {
         }
     }
 
-    @Override
     public Path instanceDirectory(String versionId, InstanceIsolation isolation, Path customDirectory) {
         String safeVersion = requireSafeVersionId(versionId);
         InstanceIsolation effective = isolation == null ? InstanceIsolation.VERSION_ISOLATED : isolation;

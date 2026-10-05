@@ -24,7 +24,7 @@ class RemoteImageLoaderTest {
     void acceptsOnlyProviderOwnedHttpsIconHosts() {
         assertTrue(RemoteImageLoader.isTrustedIconUri(
                 URI.create("https://cdn.modrinth.com/data/project/icon.png")));
-        assertTrue(RemoteImageLoader.isTrustedIconUri(
+        assertFalse(RemoteImageLoader.isTrustedIconUri(
                 URI.create("https://media.forgecdn.net/avatars/icon.png")));
         assertFalse(RemoteImageLoader.isTrustedIconUri(
                 URI.create("http://cdn.modrinth.com/data/project/icon.png")));

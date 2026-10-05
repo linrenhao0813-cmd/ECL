@@ -49,12 +49,8 @@ class NetworkUriPolicyTest {
     }
 
     @Test
-    void privateNetworkModeSkipsPublicAddressEnforcement() throws Exception {
+    void rejectsPrivateNetworkAddresses() {
         URI lan = URI.create("https://192.168.1.10/auth");
-        assertThrows(IOException.class, () -> NetworkUriPolicy.requireHttpRequest(lan, "auth"));
-        try (AutoCloseable ignored = NetworkUriPolicy.allowPrivateNetworkHttp()) {
-            assertEquals(lan, NetworkUriPolicy.requireHttpRequest(lan, "auth"));
-        }
         assertThrows(IOException.class, () -> NetworkUriPolicy.requireHttpRequest(lan, "auth"));
     }
 

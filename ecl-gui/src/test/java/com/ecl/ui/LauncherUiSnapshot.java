@@ -3,7 +3,6 @@ package com.ecl.ui;
 import com.ecl.ECLConfig;
 import com.ecl.backup.BackupEntry;
 import com.ecl.backup.WorldBackupService;
-import com.ecl.config.SettingsManager;
 import javafx.animation.PauseTransition;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -52,7 +51,8 @@ public final class LauncherUiSnapshot {
         scene.getRoot().applyCss();
         scene.getRoot().layout();
         String mode = System.getProperty("ecl.snapshot.mode");
-        if ("settings".equalsIgnoreCase(mode) || "loader-choice".equalsIgnoreCase(mode)) {
+        if ((mode != null && mode.startsWith("settings-dialog-bottom"))
+                || "settings".equalsIgnoreCase(mode) || "loader-choice".equalsIgnoreCase(mode)) {
             ScrollPane scrollPane = findScrollPane(scene.getRoot());
             if (scrollPane != null) {
                 scrollPane.setVvalue(1.0);
@@ -62,6 +62,12 @@ public final class LauncherUiSnapshot {
 
         int width = Math.max(1, (int) Math.ceil(scene.getWidth()));
         int height = Math.max(1, (int) Math.ceil(scene.getHeight()));
+        if (mode != null && mode.startsWith("forest")) {
+            Node controls = scene.lookup(".window-controls");
+            if (controls == null || controls.localToScene(controls.getBoundsInLocal()).getMaxX() > width) {
+                throw new IllegalStateException("Window controls overflow the forest layout");
+            }
+        }
         WritableImage snapshot = new WritableImage(width, height);
         scene.snapshot(snapshot);
 
@@ -108,12 +114,6 @@ public final class LauncherUiSnapshot {
     public static final class SnapshotApplication extends LauncherUI {
         @Override
         public void start(Stage stage) {
-            if ("initial-dark".equalsIgnoreCase(System.getProperty("ecl.snapshot.mode"))) {
-                SettingsManager settings = new SettingsManager();
-                settings.load();
-                settings.set(ECLConfig.KEY_THEME, "DARK");
-                settings.save();
-            }
             super.start(stage);
             stage.setIconified(false);
 
@@ -147,8 +147,25 @@ public final class LauncherUiSnapshot {
             settle.play();
         }
 
+        private void applySnapshotLanguage(String mode) throws Exception {
+            String normalized = mode.toLowerCase(java.util.Locale.ROOT);
+            String language = normalized.endsWith("-en") ? "en"
+                    : normalized.endsWith("-zh-tw") || normalized.endsWith("-zhtw")
+                    ? "zh-TW" : "zh-CN";
+            Method switchLanguage = LauncherUIView.class.getDeclaredMethod(
+                    "switchLanguage", String.class);
+            switchLanguage.setAccessible(true);
+            switchLanguage.invoke(this, language);
+        }
+
         private Scene prepareCaptureScene(Stage primaryStage) throws Exception {
             String mode = System.getProperty("ecl.snapshot.mode", "home");
+            // Deterministic locale: "-en" for English, "-zh-TW" for Traditional Chinese, else zh-CN.
+            applySnapshotLanguage(mode);
+            if (mode.startsWith("instance-loader-version")) {
+                return prepareLoaderVersionCapture(primaryStage);
+            }
+            if (mode.startsWith("forest")) return prepareForestCapture(primaryStage, mode);
             if ("initial-dark".equalsIgnoreCase(mode)) {
                 if (!primaryStage.getScene().getRoot().getStyleClass().contains("theme-dark")) {
                     throw new IllegalStateException("Initial launcher scene did not apply the dark theme");
@@ -163,9 +180,7 @@ public final class LauncherUiSnapshot {
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
                 createVisualVersionManifest();
-                if (mode.toLowerCase(java.util.Locale.ROOT).endsWith("-dark")) {
-                    applySnapshotTheme("DARK");
-                }
+                applySnapshotTheme();
                 showAppView("DOWNLOADS");
                 if ("instance-install-dark".equalsIgnoreCase(mode)) {
                     scheduleInstallerPreview(primaryStage);
@@ -176,32 +191,33 @@ public final class LauncherUiSnapshot {
                 return prepareSavesCapture(primaryStage, mode);
             }
             if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("accounts")) {
-                applySnapshotTheme(mode.endsWith("-dark") ? "DARK" : "LIGHT");
+                applySnapshotTheme();
                 openAccountSettings();
                 if (mode.contains("microsoft")) authTypeCombo.setValue(LauncherUI.AUTH_MICROSOFT);
-                if (mode.contains("external")) authTypeCombo.setValue(LauncherUI.AUTH_YGGDRASIL);
                 return primaryStage.getScene();
             }
-            if ("local-versions".equalsIgnoreCase(mode)) {
-                return prepareLocalVersionsCapture(primaryStage);
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("local-versions")) {
+                return prepareLocalVersionsCapture(primaryStage, mode);
             }
-            if ("downloads".equalsIgnoreCase(mode)) {
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("downloads")) {
                 showAppView("DOWNLOADS");
-                selectDownloadCategory(primaryStage, 7);
+                // Capture the game-instance category in the six-category download workspace.
+                selectDownloadCategory(primaryStage, 0);
+                return primaryStage.getScene();
+            }
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("local-servers")) {
+                prepareLocalServer();
+                showAppView("SERVERS");
+                javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
+                        primaryStage.getScene().lookup("#servers-tabs");
+                if (tabs == null) throw new IllegalStateException("Missing server tabs");
+                tabs.getSelectionModel().select(1);
+                if (mode.contains("compact")) primaryStage.setWidth(1180);
                 return primaryStage.getScene();
             }
             if ("servers".equalsIgnoreCase(mode)
                     || "servers-dark".equalsIgnoreCase(mode)
                     || "servers-en".equalsIgnoreCase(mode)) {
-                if ("servers-dark".equalsIgnoreCase(mode)) {
-                    applySnapshotTheme("DARK");
-                }
-                if ("servers-en".equalsIgnoreCase(mode)) {
-                    Method switchLanguage = LauncherUIView.class.getDeclaredMethod(
-                            "switchLanguage", String.class);
-                    switchLanguage.setAccessible(true);
-                    switchLanguage.invoke(this, "en");
-                }
                 showAppView("SERVERS");
                 return primaryStage.getScene();
             }
@@ -271,22 +287,17 @@ public final class LauncherUiSnapshot {
                 selectDownloadCategory(primaryStage, categoryIndex);
                 return primaryStage.getScene();
             }
-            if ("settings-page".equalsIgnoreCase(mode)) {
-                showAppView("SETTINGS");
-                return primaryStage.getScene();
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("settings-page")) {
+                return prepareSettingsPageCapture(primaryStage, mode);
             }
-            if ("settings-page-dark".equalsIgnoreCase(mode)) {
-                applySnapshotTheme("DARK");
-                showAppView("SETTINGS");
-                return primaryStage.getScene();
-            }
-            if ("settings".equalsIgnoreCase(mode)) {
+            if ((mode != null && mode.startsWith("settings-dialog")) || "settings".equalsIgnoreCase(mode)) {
                 Method settingsDialog = LauncherUIView.class.getDeclaredMethod("showSettingsDialog");
                 settingsDialog.setAccessible(true);
                 settingsDialog.invoke(this);
                 Scene scene = findSecondaryScene(primaryStage, "Settings dialog did not open");
-                if (scene.getRoot() instanceof ScrollPane scrollPane) {
-                    scrollPane.setVvalue(1.0);
+                if (mode.contains("bottom")) {
+                    ScrollPane scrollPane = findScrollPane(scene.getRoot());
+                    if (scrollPane != null) scrollPane.setVvalue(1.0);
                 }
                 return scene;
             }
@@ -320,17 +331,89 @@ public final class LauncherUiSnapshot {
             return primaryStage.getScene();
         }
 
-        private Scene prepareLocalVersionsCapture(Stage stage) throws Exception {
+        private void prepareLocalServer() throws Exception {
+            com.ecl.server.LocalServerManager manager = new com.ecl.server.LocalServerManager(
+                    ECLConfig.getBaseDir().toPath());
+            if (!manager.list().isEmpty()) return;
+            Path jar = ECLConfig.getBaseDir().toPath().resolve("snapshot-server.jar");
+            java.util.jar.Manifest manifest = new java.util.jar.Manifest();
+            manifest.getMainAttributes().put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0");
+            manifest.getMainAttributes().put(java.util.jar.Attributes.Name.MAIN_CLASS, "SnapshotOnly");
+            try (java.util.jar.JarOutputStream archive = new java.util.jar.JarOutputStream(
+                    Files.newOutputStream(jar), manifest)) {
+                archive.putNextEntry(new java.util.jar.JarEntry("snapshot-only.txt"));
+                archive.write("Visual fixture; never execute".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                archive.closeEntry();
+            }
+            manager.importJar("Minecraft 1.21.1 · ECL QA", jar,
+                    Path.of(System.getProperty("java.home"), "bin", "java.exe"), 2048);
+        }
+
+        private Scene prepareForestCapture(Stage stage, String mode) throws Exception {
+            applySnapshotTheme();
+            // The locale was already applied from the mode suffix in prepareCaptureScene.
+            if (mode.endsWith("empty")) {
+                gameDir = Files.createTempDirectory(Path.of(System.getProperty("user.home")), "forest-empty-").toFile();
+                versionActions.restoreVersionComboItems(null);
+                homePageFactory.getOrCreate();
+                return stage.getScene();
+            }
+            String selected = createVisualProfile("生存世界", "fabric", "1.21.1");
+            String second = createVisualProfile("原版探索", "", "1.21.1");
+            versionManager.invalidateLocalVersionProfiles();
+            maxMemoryMb = 4096;
+            versionCombo.getItems().setAll(selected, second);
+            versionCombo.setValue(selected);
+            versionActions.restoreVersionComboItems(selected);
+            updateRuntimeSummary();
+            homePageFactory.getOrCreate();
+            if (mode.contains("compact")) {
+                stage.setWidth(1180);
+                stage.setHeight(720);
+            }
+            return stage.getScene();
+        }
+
+        private Scene prepareSettingsPageCapture(Stage primaryStage, String mode) throws Exception {
+            applySnapshotTheme();
+            showAppView("SETTINGS");
+            javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
+                    primaryStage.getScene().lookup("#settings-tabs");
+            if (mode.contains("downloads")) tabs.getSelectionModel().select(1);
+            if (mode.contains("defaults")) tabs.getSelectionModel().select(2);
+            if (mode.contains("accounts")) tabs.getSelectionModel().select(3);
+            if (mode.contains("about")) tabs.getSelectionModel().select(4);
+            if (mode.contains("expanded")) {
+                primaryStage.getScene().getRoot().applyCss();
+                for (String id : java.util.List.of("settings-launch-group", "settings-backup-group")) {
+                    javafx.scene.control.TitledPane group = (javafx.scene.control.TitledPane)
+                            primaryStage.getScene().lookup("#" + id);
+                    if (group != null) group.setExpanded(true);
+                }
+            }
+            if (mode.contains("compact")) {
+                primaryStage.setWidth(1180);
+                primaryStage.setHeight(720);
+            }
+            return primaryStage.getScene();
+        }
+
+        private Scene prepareLocalVersionsCapture(Stage stage, String mode) throws Exception {
             String vanilla = createVisualProfile("visual-local-vanilla", "", "1.21.8");
             String fabric = createVisualProfile("visual-local-fabric", "fabric", "1.21.7");
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(vanilla));
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(fabric));
+            if (mode.contains("config")) throw new IllegalArgumentException("Instance launch settings were removed");
             showAppView("VERSIONS");
+            if (mode.contains("compact")) {
+                stage.setWidth(1180);
+                stage.setHeight(720);
+            }
             return stage.getScene();
         }
 
         private Scene prepareSavesCapture(Stage stage, String mode) throws Exception {
-            applySnapshotTheme(mode.endsWith("-dark") ? "DARK" : "LIGHT");
+            applySnapshotTheme();
             createVisualProfile("visual-save-vanilla", "", "1.20.1");
             createVisualProfile("visual-save-fabric", "fabric", "1.20.1");
             for (String name : java.util.List.of("Alpine Base", "Creative Coast", "Redstone Lab")) {
@@ -414,14 +497,40 @@ public final class LauncherUiSnapshot {
                     .orElseThrow(() -> new IllegalStateException(failureMessage));
         }
 
-        private void applySnapshotTheme(String theme) throws Exception {
-            Field settingsField = LauncherUIView.class.getDeclaredField("settingsManager");
-            settingsField.setAccessible(true);
-            SettingsManager settings = (SettingsManager) settingsField.get(this);
-            settings.set(ECLConfig.KEY_THEME, theme);
-            Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme", String.class);
+        private void applySnapshotTheme() throws Exception {
+            Method applyTheme = LauncherUIView.class.getDeclaredMethod("applyTheme");
             applyTheme.setAccessible(true);
-            applyTheme.invoke(this, theme);
+            applyTheme.invoke(this);
+        }
+
+        private Scene prepareLoaderVersionCapture(Stage stage) {
+            InstanceInstallPage page = new InstanceInstallPage(this, "1.21.1", () -> { },
+                    choice -> java.util.concurrent.CompletableFuture.completedFuture(
+                            java.util.List.of("0.16.10", "0.16.9", "0.16.8")),
+                    () -> java.util.concurrent.CompletableFuture.completedFuture(java.util.List.of(
+                            new com.ecl.modrinth.model.ContentVersion("example-new", "", "0.116.1+1.21.1", "release"),
+                            new com.ecl.modrinth.model.ContentVersion("example-old", "", "0.115.6+1.21.1", "release"))));
+            ScrollPane scroll = new ScrollPane(page);
+            scroll.setFitToWidth(true);
+            scroll.getStyleClass().add("main-scroll");
+            javafx.scene.layout.StackPane root = new javafx.scene.layout.StackPane(scroll);
+            root.getStyleClass().addAll("scene-root", "theme-dark");
+            Scene scene = new Scene(root, 1180, 980);
+            scene.getStylesheets().add(getClass().getResource("/css/launcher.css").toExternalForm());
+            stage.setScene(scene);
+            page.lookupAll(".instance-install-choice").stream().map(ToggleButton.class::cast)
+                    .filter(button -> button.getUserData() == LoaderChoice.FABRIC)
+                    .findFirst().orElseThrow().fire();
+            Platform.runLater(() -> {
+                @SuppressWarnings("unchecked")
+                ComboBox<String> versions = (ComboBox<String>) page.lookup("#instance-loader-version");
+                versions.setValue("0.16.9");
+                @SuppressWarnings("unchecked")
+                ComboBox<com.ecl.modrinth.model.ContentVersion> apiVersions =
+                        (ComboBox<com.ecl.modrinth.model.ContentVersion>) page.lookup("#instance-fabric-api-version");
+                apiVersions.getSelectionModel().select(1);
+            });
+            return scene;
         }
 
         private void scheduleInstallerPreview(Stage stage) {

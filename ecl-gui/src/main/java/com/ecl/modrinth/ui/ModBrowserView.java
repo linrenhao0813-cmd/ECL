@@ -7,8 +7,6 @@ import com.ecl.modrinth.model.ModProject;
 import com.ecl.modrinth.model.ModUpdate;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.model.ReleaseChannel;
-import com.ecl.modrinth.provider.ContentSource;
-import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.service.SequentialBatchRunner;
 import com.ecl.modrinth.ui.viewmodel.ModBrowserViewModel;
 import com.ecl.ui.MainController;
@@ -73,7 +71,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         this.statusConsumer = statusConsumer == null ? ignored -> { } : statusConsumer;
         this.externalActions = new ModExternalActions(this.statusConsumer);
         this.viewModel = new ModBrowserViewModel(
-                controller.metadataProvider(ContentSource.MODRINTH),
+                controller.metadataProvider(),
                 controller.modDependencyResolver(),
                 controller.installationPlanBuilder(),
                 controller.modInstallationService(),
@@ -99,7 +97,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         setPadding(new Insets(16));
         setFillWidth(true);
 
-        Label eyebrow = new Label("MODRINTH + CURSEFORGE / MODS");
+        Label eyebrow = new Label("MODRINTH / MODS");
         eyebrow.getStyleClass().add("eyebrow");
         instanceLabel.setText(ModUiFormatter.instanceText(context));
         instanceLabel.getStyleClass().add("mod-instance-badge");
@@ -181,28 +179,12 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             viewModel.search(false);
         });
 
-        ComboBox<ModMetadataProvider> source = new ComboBox<>();
-        source.getItems().setAll(controller.metadataProviders());
-        source.setCellFactory(list -> new ModProviderCell());
-        source.setButtonCell(new ModProviderCell());
-        source.getSelectionModel().select(controller.metadataProvider(viewModel.contentSource()));
-        source.setPrefWidth(112);
-        source.setOnAction(event -> {
-            ModMetadataProvider selected = source.getValue();
-            if (selected != null) {
-                MainController.ModSourceServices services = controller.modSourceServices(selected);
-                viewModel.setMetadataProvider(selected, services.dependencyResolver(),
-                        services.localScanner(), services.updateService());
-                viewModel.search(false);
-            }
-        });
-
         Button searchButton = ModUiControls.button("搜索", "primary-button");
         searchButton.setMinWidth(64);
         searchButton.setOnAction(event -> viewModel.search(false));
         HBox searchBar = new HBox(8, search, searchButton);
         searchBar.setAlignment(Pos.CENTER_LEFT);
-        HBox filterBar = new HBox(8, category, sort, source);
+        HBox filterBar = new HBox(8, category, sort);
         filterBar.setAlignment(Pos.CENTER_LEFT);
 
         searchDebounce.setOnFinished(event -> viewModel.search(false));
@@ -446,6 +428,23 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     /** Refreshes the installed list after a file is dropped on the launcher window. */
     public void refreshInstalledMods() {
         viewModel.refreshInstalled();
+    }
+
+    /** Current search text, so the hosting page can restore it when the browser is rebuilt. */
+    public String searchQuery() {
+        String text = viewModel.searchTextProperty().get();
+        return text == null ? "" : text;
+    }
+
+    /**
+     * Restores a previous search. Writing the bound property updates the field, whose listener
+     * debounces and runs the search, so no extra search call is needed here.
+     */
+    public void restoreSearch(String query) {
+        if (query == null || query.isBlank()) {
+            return;
+        }
+        viewModel.searchTextProperty().set(query);
     }
 
     @Override

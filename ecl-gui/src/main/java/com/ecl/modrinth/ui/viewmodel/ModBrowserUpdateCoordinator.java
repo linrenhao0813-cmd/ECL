@@ -40,7 +40,7 @@ final class ModBrowserUpdateCoordinator {
     private final Consumer<DownloadTaskCenter.TaskHandle<?>> setActiveDownload;
     private final Function<Throwable, String> errorFormatter;
     private final Map<String, ModUpdate> updates = new LinkedHashMap<>();
-    private ModUpdateService updateService;
+    private final ModUpdateService updateService;
     private CompletableFuture<?> updateRequest;
     private long lastUpdateCheckNanos;
 
@@ -82,14 +82,6 @@ final class ModBrowserUpdateCoordinator {
     }
 
     void reset() {
-        updateRequest = null;
-        lastUpdateCheckNanos = 0;
-        updates.clear();
-        setUpdateCount.accept(0);
-    }
-
-    void setUpdateService(ModUpdateService service) {
-        updateService = service;
         updateRequest = null;
         lastUpdateCheckNanos = 0;
         updates.clear();

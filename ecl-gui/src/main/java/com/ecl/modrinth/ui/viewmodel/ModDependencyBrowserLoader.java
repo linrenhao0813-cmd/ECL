@@ -19,17 +19,12 @@ import java.util.function.Function;
 final class ModDependencyBrowserLoader {
     private final Function<Throwable, String> errorFormatter;
     private final Map<String, CompletableFuture<ModProject>> projectRequests = new ConcurrentHashMap<>();
-    private ModMetadataProvider metadataProvider;
+    private final ModMetadataProvider metadataProvider;
 
     ModDependencyBrowserLoader(ModMetadataProvider metadataProvider,
                                Function<Throwable, String> errorFormatter) {
         this.metadataProvider = Objects.requireNonNull(metadataProvider, "metadataProvider");
         this.errorFormatter = Objects.requireNonNull(errorFormatter, "errorFormatter");
-    }
-
-    void setMetadataProvider(ModMetadataProvider provider) {
-        metadataProvider = Objects.requireNonNull(provider, "provider");
-        projectRequests.clear();
     }
 
     CompletableFuture<ModProject> loadProject(String projectId) {

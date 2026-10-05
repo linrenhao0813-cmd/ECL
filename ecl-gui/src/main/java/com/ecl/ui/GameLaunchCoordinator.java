@@ -18,11 +18,9 @@ import javafx.application.Platform;
 import java.io.File;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 /** Owns game launch, download-and-launch, process monitoring, and crash handling. */
 final class GameLaunchCoordinator {
@@ -31,7 +29,6 @@ final class GameLaunchCoordinator {
     private final LaunchAuthFactory authFactory;
     private final GameProcessMonitor processMonitor;
     private final GameLaunchPreparation preparation;
-    private final GamePlaytimeService playtime;
 
     GameLaunchCoordinator(LauncherUI ui) {
         this(ui, new LauncherUiFacadeAdapter(ui));
@@ -41,10 +38,8 @@ final class GameLaunchCoordinator {
         this.ui = ui;
         this.facade = facade;
         this.authFactory = new LaunchAuthFactory(ui);
-        this.playtime = new GamePlaytimeService(ui);
         this.preparation = new GameLaunchPreparation(ui, facade);
-        this.processMonitor = new GameProcessMonitor(ui,
-                this::showGameErrorDialog, playtime::recordSession);
+        this.processMonitor = new GameProcessMonitor(ui, this::showGameErrorDialog);
     }
 
     void launchGame() {
@@ -58,20 +53,16 @@ final class GameLaunchCoordinator {
 
     private void startGame(String version) {
         String authType = ui.authTypeCombo.getValue();
-        String server = ui.yggdrasilServerField.getText().trim();
         String username = ui.usernameField.getText().trim();
-        AtomicReference<char[]> passwordRef = new AtomicReference<>(
-                ui.passwordField.getText().toCharArray());
-        ui.passwordField.clear(); // 尽快清除 UI 中的密码，减少敏感数据驻留时间
 
         ui.setControlsBusy(true);
         ui.stopProgressAnimation(ui.downloadProgress, true);
+        ui.clearLaunchFailure();
         ui.setStatus("正在启动游戏...", "准备认证、拼接类路径并拉起客户端进程。 ");
 
         ui.runAsync("ecl-launch-game", () -> {
             File launchDir = ui.resolveVersionGameDir(version);
             File instanceRoot = ui.resolveVersionInstanceRoot(version);
-            char[] password = passwordRef.getAndSet(null);
             InstanceOperationLease gameLock = null;
             boolean monitorOwnsGameLock = false;
             try {
@@ -94,9 +85,7 @@ final class GameLaunchCoordinator {
                 }
                 int instanceMemoryMb = launchProfile.memoryMode() == InstanceLaunchProfile.MemoryMode.AUTO
                         ? ECLConfig.calculateAutoMemoryMb() : launchProfile.maxMemoryMb();
-                AuthProvider auth = authFactory.create(authType, server, username, password);
-                Arrays.fill(password, '\0');
-                password = null;
+                AuthProvider auth = authFactory.create(authType, username);
                 OfflineSkin offlineSkin = auth.getType() == com.ecl.auth.AuthType.OFFLINE
                         ? new OfflineSkinStore()
                                 .find(OfflineSkinStore.identityForOffline(auth.getUsername()))
@@ -129,8 +118,6 @@ final class GameLaunchCoordinator {
                 long launchStartedAt = process.info().startInstant()
                         .map(Instant::toEpochMilli)
                         .orElseGet(System::currentTimeMillis);
-                long launchStartedNanos = System.nanoTime();
-                playtime.recordLaunch(version, launchStartedAt);
                 ui.registerActiveGameProcess(process, version);
                 UUID runningInstanceId = registerRunningModInstance(version);
                 boolean minimizeThisLaunch = ui.closeAfterLaunch;
@@ -144,24 +131,17 @@ final class GameLaunchCoordinator {
                     }
                 });
                 processMonitor.monitor(gameProcess, version, launchDir, launchStartedAt,
-                        launchStartedNanos,
                         runningInstanceId, minimizeThisLaunch, gameLock);
                 monitorOwnsGameLock = true;
             } catch (Exception e) {
                 CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
                 runOnUiIfActive(() -> {
                     ui.setStatus("启动失败", report.getTitle());
+                    ui.markLaunchFailure(report.getTitle());
                     showGameErrorDialog(report, launchDir);
                     ui.setControlsBusy(false);
                 });
             } finally {
-                if (password != null) {
-                    Arrays.fill(password, '\0');
-                }
-                char[] queuedPassword = passwordRef.getAndSet(null);
-                if (queuedPassword != null) {
-                    Arrays.fill(queuedPassword, '\0');
-                }
                 if (!monitorOwnsGameLock && gameLock != null) {
                     try {
                         gameLock.close();
@@ -248,20 +228,13 @@ final class GameLaunchCoordinator {
             }
         }
         return new RuntimeSummary(
-                customJava ? "实例 Java 自定义" : "实例 Java 自动",
+                GuiMessages.get(customJava ? "forest.javaCustom" : "forest.javaAuto"),
                 customJava ? javaPath : "",
                 memoryMb,
                 autoMemory,
                 jvmArguments);
     }
 
-    void updatePlaytimeSummary() {
-        playtime.updateSummary();
-    }
-
-    int getEffectiveMaxMemoryMb() {
-        return runtimeSummary(ui.getSelectedVersion()).memoryMb();
-    }
 
     private void ensureVersionGameDirs(String gameVersion) throws IOException {
         File instanceDir = ui.resolveVersionGameDir(gameVersion);
@@ -273,17 +246,11 @@ final class GameLaunchCoordinator {
         ui.ensureDirectory(new File(instanceDir, "logs"));
     }
 
-    String getMemoryDisplayText() {
-        RuntimeSummary summary = runtimeSummary(ui.getSelectedVersion());
-        return summary.autoMemory()
-                ? "自动 " + summary.memoryMb() + " MB"
-                : summary.memoryMb() + " MB";
-    }
 
     record RuntimeSummary(String javaText, String javaPath, int memoryMb, boolean autoMemory,
                           String jvmArguments) {
         String memoryText() {
-            return autoMemory ? "自动 " + memoryMb + " MB" : memoryMb + " MB";
+            return autoMemory ? GuiMessages.get("forest.memoryAuto", String.valueOf(memoryMb)) : memoryMb + " MB";
         }
     }
 }

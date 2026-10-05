@@ -28,7 +28,7 @@ final class ModBrowserSearchController {
     private final Consumer<String> setOperation;
     private final java.util.function.Function<Throwable, String> errorFormatter;
     private final AtomicLong generation = new AtomicLong();
-    private ModMetadataProvider provider;
+    private final ModMetadataProvider provider;
     private final AtomicInteger offset = new AtomicInteger();
     private String category = "";
 
@@ -48,11 +48,6 @@ final class ModBrowserSearchController {
         this.setError = setError;
         this.setOperation = setOperation;
         this.errorFormatter = errorFormatter;
-    }
-
-    void setProvider(ModMetadataProvider value) {
-        provider = Objects.requireNonNull(value, "provider");
-        reset();
     }
 
     void setCategory(String value) {

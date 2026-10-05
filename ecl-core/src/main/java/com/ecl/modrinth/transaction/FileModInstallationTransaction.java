@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-public final class FileModInstallationTransaction implements ModInstallationTransaction {
+public final class FileModInstallationTransaction implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(FileModInstallationTransaction.class);
     private static final String TRANSACTIONS_DIRECTORY = ".ecl-mod-transactions";
     private static final String JOURNAL_FILE = "journal.json";
@@ -86,22 +86,18 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         }
     }
 
-    @Override
     public Path temporaryDirectory() {
         return temporaryDirectory;
     }
 
-    @Override
     public void stageDownloadedFile(Path temporaryFile, Path finalFile) {
         addStage(null, temporaryFile, finalFile);
     }
 
-    @Override
     public void stageReplacement(Path oldFile, Path newFile) {
         addStage(oldFile, newFile, oldFile);
     }
 
-    @Override
     public void stageReplacement(Path oldFile, Path temporaryFile, Path finalFile) {
         addStage(oldFile, temporaryFile, finalFile);
     }
@@ -133,7 +129,6 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         stages.add(new Stage(old, staged, target));
     }
 
-    @Override
     public synchronized void commit() throws IOException {
         ensureOpen();
         if (stages.isEmpty()) {
@@ -204,7 +199,6 @@ public final class FileModInstallationTransaction implements ModInstallationTran
         move(staged, target);
     }
 
-    @Override
     public synchronized void rollback() {
         if (committed || closed) {
             return;
