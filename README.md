@@ -82,7 +82,7 @@ Microsoft 正版账户的皮肤上传至官方服务；离线账户的皮肤保�
 | 命令 | 用途 |
 | --- | --- |
 | `.\gradlew.bat run` | 启动图形界面 |
-| `.\gradlew.bat check` | 运行 JUnit 5、Checkstyle、SpotBugs 和 JaCoCo 校验 |
+| `.\gradlew.bat check` | 运行 JUnit 6、Checkstyle、SpotBugs 和 JaCoCo 校验 |
 | `.\gradlew.bat build` | 构建并验证全部模块 |
 | `.\gradlew.bat installDist` | 生成分发目录 `ecl-boot/build/install/ECL/` |
 | `.\gradlew.bat captureLauncherUi` | 生成界面快照 `ecl-gui/build/visual-qa/ecl-home.png` |
