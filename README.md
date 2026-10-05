@@ -6,6 +6,22 @@ ECL 是一个基于 JavaFX 的 Minecraft Java 版启动器，覆盖版本安装�
 
 > 当前版本：`1.0.2beta` · Windows 平台 · 从源码构建需要 JDK 21
 
+## 界面预览
+
+以下为使用隔离数据目录生成的当前启动器界面快照。
+
+### 启动首页
+
+![ECL 启动首页](docs/images/launcher-home.png)
+
+### 内容下载
+
+![ECL 下载页](docs/images/launcher-downloads.png)
+
+### 通用设置
+
+![ECL 通用设置页](docs/images/launcher-settings.png)
+
 ## 功能
 
 ### 游戏版本与实例
@@ -64,7 +80,7 @@ cd ECL
 .\gradlew.bat run
 ```
 
-首次构建会通过 Gradle Wrapper 自动下载 Gradle 8.14.4 与项目依赖，无需另行安装 Gradle。运行启动器、登录、下载游戏或在线内容时需要网络连接。
+首次构建会通过 Gradle Wrapper 自动下载 Gradle 9.8.0 与项目依赖，无需另行安装 Gradle。运行启动器、登录、下载游戏或在线内容时需要网络连接。
 
 ### 环境要求
 
@@ -135,6 +151,20 @@ UI 布局重构的设计与验收标准见[启动器 UI 布局重构方案](plan
 | `ecl-gui` | 20% | 15% |
 
 运行单个测试示例：`.\gradlew.bat :ecl-core:test --tests com.ecl.package.ClassTest`。Gradle 依赖使用锁定和校验元数据。
+
+### 依赖升级
+
+依赖版本由 `gradle/libs.versions.toml` 管理，并由各模块的 `gradle.lockfile` 和
+`gradle/verification-metadata.xml` 固定与校验。升级依赖时须一起更新受影响的锁文件及校验元数据，
+审阅新增校验值，再用默认校验模式执行 `check` 和 `installDist`；不要在 CI 中关闭依赖校验。
+
+单元测试中的 Java 运行时元数据使用公共 IP 字面量作为示例 URL，仅验证元数据与地址策略，
+不依赖外部 DNS 或实际下载。HTTP、私有地址、无效校验和及超限大小均须被拒绝。
+
+`gradle/verification-keyring.keys` 保存已信任的构建依赖发布者签名公钥。
+公钥指纹与 `verification-metadata.xml` 中的信任范围一致，避免构建依赖密钥服务器的可用性。
+
+CI 在 Windows 上执行检查，通过后生成名为 `windows-app` 的应用镜像产物。
 
 ### 构建与分发
 
@@ -243,10 +273,10 @@ GitHub Actions 在 Windows 上执行 `check`（PR 另有依赖审查），随后
 
 ## 技术栈
 
-- Java 21 · JavaFX 21 · Gradle 8.14.4
+- Java 21 · JavaFX 21 · Gradle 9.8.0
 - Gson · Jackson · JNA · TwelveMonkeys ImageIO
 - SLF4J · Logback
-- JUnit 5 · TestFX · Checkstyle · SpotBugs · JaCoCo
+- JUnit 6 · TestFX · Checkstyle · SpotBugs · JaCoCo
 
 ## 许可证
 

@@ -50,6 +50,32 @@ class JavaRuntimeDownloaderTest {
     }
 
     @Test
+    void packageMetadataRejectsInsecureAndPrivateUrls() {
+        for (String url : new String[] {"http://93.184.216.34/runtime.zip",
+                "https://127.0.0.1/runtime.zip", "https://192.168.1.10/runtime.zip",
+                "https://user:password@93.184.216.34/runtime.zip"}) {
+            assertThrows(IOException.class, () -> JavaRuntimeDownloader.resolvePackage(
+                    packageAssets(url, "a".repeat(64), 1024)));
+        }
+    }
+
+    @Test
+    void packageMetadataRejectsInvalidChecksumAndSize() {
+        String url = "https://93.184.216.34/runtime.zip";
+        assertThrows(IOException.class, () -> JavaRuntimeDownloader.resolvePackage(
+                packageAssets(url, "invalid-checksum", 1024)));
+        for (long size : new long[] {0, -1, 2L * 1024 * 1024 * 1024 + 1}) {
+            assertThrows(IOException.class, () -> JavaRuntimeDownloader.resolvePackage(
+                    packageAssets(url, "a".repeat(64), size)));
+        }
+    }
+
+    private static com.google.gson.JsonArray packageAssets(String url, String checksum, long size) {
+        return JsonParser.parseString("[{\"binary\":{\"package\":{\"link\":\"" + url
+                + "\",\"checksum\":\"" + checksum + "\",\"size\":" + size + "}}}]").getAsJsonArray();
+    }
+
+    @Test
     void sha256VerificationAcceptsMatchingArchiveAndRejectsMismatch() throws Exception {
         Path archive = temporaryDirectory.resolve("runtime.zip");
         Files.writeString(archive, "runtime-content");
