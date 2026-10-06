@@ -50,8 +50,9 @@
 | Mod、任务与服务端 | 共享依赖、覆盖冲突、取消/重试、升级、备份与真实子 JVM 的正常停止回归通过 | HTTP 内容和服务端 JAR 是受控测试夹具，不是真实 Modrinth/游戏服务端验收 |
 | 静态检查与分发目录 | 核心主代码/测试和 GUI 测试的 Checkstyle、SpotBugs，以及 `installDist` 通过 | Linux 分发目录不能当成 Windows 应用镜像 |
 | 完整 `check` | 已尝试，Linux 下未通过；发现的下载元数据验证顺序问题和新增测试的静态告警已修复并复验 | Windows 可执行路径和非 Windows 密钥保护提供者的环境差异仍需 Windows 完整检查确认 |
-| 镜像检查器 | PowerShell 语法与合成镜像正/反例通过 | 不执行合成 EXE；真实镜像检查等待新版 Windows CI |
-| Windows CI | 原提交 #157 成功 | 尚不能覆盖本次未提交改动 |
+| 镜像检查器 | PowerShell 语法、合成镜像正/反例及真实 Windows 镜像检查通过 | 不执行合成 EXE；结构检查独立于启动检查 |
+| Windows CI | [#160](https://github.com/linrenhao0813-cmd/ECL/actions/runs/37466351456) 的 verify、dependency-review、package 全部通过 | 验证代码提交 `04bb628255f49409920f43ad21f9b2543e6da236`，后续提交仅补充本记录 |
+| Windows EXE 自动启动 | #160 确认真实窗口及包内 JVM，`exe-startup-result.json` 为 PASS | 检查同时观察 jpackage 启动父进程与其同 EXE 子进程；不验证交互或游戏 |
 
 新增 CI 步骤检查 EXE、配置、运行时、类路径、模块版本和入口类；拒绝测试类及测试依赖混入应用。
 `windows-image-evidence` 保存 `image-result.json`，包含候选文件 SHA-256，检查范围明确为结构与哈希。
@@ -91,7 +92,7 @@
 
 | 项目 | 操作与通过条件 | 状态 |
 | --- | --- | --- |
-| Windows EXE | CI 检查窗口和包内 JVM；仍需在用户 Windows 会话检查主要页面与交互 | 待执行 |
+| Windows EXE | CI #160 已验证窗口和包内 JVM；仍需在用户 Windows 会话检查主要页面与交互 | 自动启动已通过，人工交互待执行 |
 | Microsoft 与游戏世界 | 运行上述脚本；所有里程碑与最终结果 PASS，升级后进入原世界 | 待执行 |
 | 重开保护 | 游戏运行时关闭并重开 ECL，拒绝重复启动、升级、修改存档；游戏退出后恢复操作 | 待执行 |
 | Modrinth | 真实安装两个共享依赖项目，更新后依赖者完整；禁用/卸载受关系保护；取消和重试后无卡住状态 | 待执行 |
@@ -116,3 +117,8 @@
 ZIP 保留整个 `ECL/` 目录，包括 `ECL.exe`、`app/`、`runtime/`。
 最后在已验收提交建立 `V1.0.2` 标签并发布正式 Release，附 ZIP、SHA-256 和上述发布说明。
 当前未修改正式版本号、建立标签或发布 Release。
+
+候选包证据：CI #160 的 `windows-app` 为 75,314,086 字节，GitHub artifact ZIP SHA-256 为
+`dd28aed9e0b2a9885568f0177a610788bfe178183042fc2f0a52ba1459569a8f`。
+这是 CI artifact ZIP 的摘要，不是将来正式 Release ZIP 的摘要；实际应用文件哈希见同 run 的
+`windows-image-evidence/image-result.json`。
