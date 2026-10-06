@@ -36,6 +36,17 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 class HttpUtilTest {
 
     @Test
+    void proxyKeepsLauncherLocalServicesLocalAndRemoteRequestsProxied() {
+        ProxySelector selector = HttpUtil.proxySelectorFor("http://proxy.example.invalid:8080", null, null).orElseThrow();
+        for (String local : List.of("http://127.0.0.1:1234/", "http://localhost:1234/", "http://[::1]:1234/")) {
+            assertEquals(List.of(Proxy.NO_PROXY), selector.select(URI.create(local)));
+        }
+        for (String remote : List.of("https://example.com/", "https://127.example.com/", "https://192.168.1.1/")) {
+            assertEquals(Proxy.Type.HTTP, selector.select(URI.create(remote)).getFirst().type());
+        }
+    }
+
+    @Test
     void timesOutAStalledBodyAfterReceivingHeaders() {
         CountDownLatch release = new CountDownLatch(1);
         server.createContext("/stalled", exchange -> {
