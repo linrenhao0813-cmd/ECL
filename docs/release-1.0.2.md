@@ -56,6 +56,8 @@
 新增 CI 步骤检查 EXE、配置、运行时、类路径、模块版本和入口类；拒绝测试类及测试依赖混入应用。
 `windows-image-evidence` 保存 `image-result.json`，包含候选文件 SHA-256，检查范围明确为结构与哈希。
 此步骤不证明 EXE 可以启动或游戏流程成功。
+随后 `smoke-windows-app.ps1` 使用隔离 APPDATA 启动真实 EXE，等待窗口并核对加载的是候选包内 `jvm.dll`，
+最后关闭该测试进程；`exe-startup-result.json` 记录结果。它不验证页面交互、登录或游戏流程。
 
 ## Windows 候选包验收入口
 
@@ -66,6 +68,7 @@
 .\gradlew.bat packageWindowsApp --no-daemon
 .\scripts\test-windows-app-validator.ps1
 .\scripts\verify-windows-app.ps1
+.\scripts\smoke-windows-app.ps1
 .\scripts\verify-runtime.ps1 -AppImagePath .\dist\windows\ECL -CandidateRevision (git rev-parse HEAD)
 ```
 
@@ -88,7 +91,7 @@
 
 | 项目 | 操作与通过条件 | 状态 |
 | --- | --- | --- |
-| Windows EXE | 在无外部 JDK 的 Windows 会话启动完整应用镜像，窗口及主要页面正常 | 待执行 |
+| Windows EXE | CI 检查窗口和包内 JVM；仍需在用户 Windows 会话检查主要页面与交互 | 待执行 |
 | Microsoft 与游戏世界 | 运行上述脚本；所有里程碑与最终结果 PASS，升级后进入原世界 | 待执行 |
 | 重开保护 | 游戏运行时关闭并重开 ECL，拒绝重复启动、升级、修改存档；游戏退出后恢复操作 | 待执行 |
 | Modrinth | 真实安装两个共享依赖项目，更新后依赖者完整；禁用/卸载受关系保护；取消和重试后无卡住状态 | 待执行 |
