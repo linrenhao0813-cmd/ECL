@@ -2,24 +2,89 @@ package com.ecl.download;
 
 import com.ecl.game.DownloadObject;
 import com.ecl.launcher.VersionManager;
+import com.ecl.launch.JavaVersionRequirement;
 import com.ecl.util.DownloadSourceUtil;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.NetworkUriPolicy;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 /** Resolves and downloads the official dedicated-server JAR declared by Minecraft metadata. */
 public final class ServerJarDownloader {
     private final VersionManager versionManager;
+    private final MetadataDownloader metadataDownloader;
 
     public ServerJarDownloader(VersionManager versionManager) {
+        this(versionManager, (url, target) -> HttpUtil.downloadFileWithProgress(url, target.toFile(), null, null,
+                4 * 1024 * 1024, Set.of("piston-meta.mojang.com", "launchermeta.mojang.com")));
+    }
+
+    ServerJarDownloader(VersionManager versionManager, MetadataDownloader metadataDownloader) {
         this.versionManager = versionManager;
+        this.metadataDownloader = metadataDownloader;
+    }
+
+    @FunctionalInterface
+    interface MetadataDownloader {
+        void download(String url, Path target) throws IOException;
+    }
+
+    /** Reads the Java requirement from authoritative Mojang metadata, not a local client profile. */
+    public int requiredJavaVersion(String versionId) throws IOException {
+        return javaRequirement(officialMetadata(versionId), versionId);
+    }
+
+    /** Resolves only manifest-hash-bound official metadata; never trusts local client downloads. */
+    public ServerArtifact resolveOfficial(String versionId, Listener listener) throws IOException {
+        return artifact(versionId, officialMetadata(versionId));
+    }
+
+    private JsonObject officialMetadata(String versionId) throws IOException {
+        FileUtil.requireSafeVersionId(versionId);
+        var source = versionManager.resolveDownloadTarget(versionId);
+        if (!versionId.equals(source.downloadVersionId()) || source.versionUrl() == null || source.versionUrl().isBlank()) {
+            throw new IOException("No official metadata for " + versionId);
+        }
+        if (source.versionSha1() == null || !source.versionSha1().matches("(?i)[0-9a-f]{40}")) {
+            throw new IOException("Official Minecraft metadata is missing its manifest SHA-1");
+        }
+        Path temporary = Files.createTempFile("ecl-server-metadata-", ".json");
+        try {
+            metadataDownloader.download(source.versionUrl(), temporary);
+            if (!FileUtil.verifySha1(temporary.toFile(), source.versionSha1())) {
+                throw new IOException("Official Minecraft metadata failed manifest SHA-1 verification");
+            }
+            JsonObject metadata = JsonParser.parseString(Files.readString(temporary)).getAsJsonObject();
+            if (!versionId.equals(metadata.get("id").getAsString())) throw new IOException("Minecraft metadata version mismatch");
+            return metadata;
+        } catch (RuntimeException invalid) {
+            throw new IOException("Invalid Minecraft metadata", invalid);
+        } finally {
+            Files.deleteIfExists(temporary);
+            Files.deleteIfExists(temporary.resolveSibling(temporary.getFileName() + ".part"));
+            Files.deleteIfExists(temporary.resolveSibling(temporary.getFileName() + ".part.meta"));
+        }
+    }
+
+    static int javaRequirement(JsonObject metadata, String versionId) throws IOException {
+        try {
+            if (!versionId.equals(metadata.get("id").getAsString())) throw new IOException("Minecraft metadata version mismatch");
+            JsonObject javaVersion = metadata.getAsJsonObject("javaVersion");
+            int major = javaVersion == null ? JavaVersionRequirement.inferFromVersionId(versionId)
+                    : javaVersion.get("majorVersion").getAsInt();
+            if (major < 8 || major > 100) throw new IOException("Invalid Minecraft Java requirement");
+            return major;
+        } catch (RuntimeException invalid) {
+            throw new IOException("Invalid Minecraft Java metadata", invalid);
+        }
     }
 
     public ServerArtifact resolve(String versionId, Listener listener) throws IOException {
@@ -36,6 +101,10 @@ public final class ServerJarDownloader {
             metadata = HttpUtil.getJson(metadataUrl);
         }
 
+        return artifact(versionId, metadata);
+    }
+
+    private static ServerArtifact artifact(String versionId, JsonObject metadata) throws IOException {
         JsonObject downloads = metadata.getAsJsonObject("downloads");
         JsonObject serverJson = downloads == null ? null : downloads.getAsJsonObject("server");
         DownloadObject server = DownloadObject.parse(serverJson);

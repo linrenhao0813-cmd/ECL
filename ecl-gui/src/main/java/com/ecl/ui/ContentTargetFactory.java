@@ -5,7 +5,6 @@ import com.ecl.util.Messages;
 import java.io.File;
 import java.util.List;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 /** Builds localized content-library descriptors and destination resolvers. */
 final class ContentTargetFactory {
@@ -14,8 +13,7 @@ final class ContentTargetFactory {
 
     static List<ContentTarget> create(
             Function<String, File> modsDirectory,
-            Function<String, File> versionGameDirectory,
-            Supplier<File> configuredGameRoot) {
+            Function<String, File> versionGameDirectory) {
         return List.of(
                 new ContentTarget(
                         Messages.get("content.mods.title"),
@@ -40,12 +38,6 @@ final class ContentTargetFactory {
                         Messages.get("content.modpacks.subtitle"), "P", "modpack",
                         new String[0], new String[]{".mrpack"}, false,
                         Messages.get("content.modpacks.searchHint"),
-                        version -> new File(versionGameDirectory.apply(version), "modpacks")),
-                new ContentTarget(
-                        Messages.get("content.server.title"),
-                        Messages.get("content.server.subtitle"), "V", "server",
-                        new String[0], new String[]{".jar"}, false,
-                        Messages.get("content.server.searchHint"),
-                        version -> new File(configuredGameRoot.get(), "server-downloads")));
+                        version -> new File(versionGameDirectory.apply(version), "modpacks")));
     }
 }

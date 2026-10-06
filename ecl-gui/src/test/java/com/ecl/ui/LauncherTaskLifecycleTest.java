@@ -236,6 +236,266 @@ class LauncherTaskLifecycleTest extends ApplicationTest {
         }
     }
 
+    @Test
+    void cancellationAfterServerPublicationCleansBeforeRetryAndReusesDestination(@TempDir Path root) throws Exception {
+        java.io.File previousRoot = launcher.gameDir;
+        String previousTarget = launcher.getSelectedVersion();
+        AtomicInteger attempts = new AtomicInteger();
+        AtomicInteger failed = new AtomicInteger();
+        AtomicReference<Path> destination = new AtomicReference<>();
+        AtomicReference<String> completed = new AtomicReference<>();
+        AtomicReference<String> taskId = new AtomicReference<>();
+        try {
+            interact(() -> {
+                launcher.gameDir = root.toFile();
+                new ServerInstallWorkflow(launcher) {
+                    @Override
+                    Path installServer(String mc, LoaderChoice choice, String version, Path target,
+                                       com.ecl.launcher.ModLoaderInstaller.Listener listener) throws IOException {
+                        assertFalse(javafx.application.Platform.isFxApplicationThread());
+                        assertFalse(Files.exists(target));
+                        Files.createDirectory(target);
+                        Files.writeString(target.resolve("server.jar"), "test installation");
+                        if (attempts.incrementAndGet() == 1) {
+                            destination.set(target);
+                            String id = launcher.downloadTaskCenter.snapshots().getLast().id();
+                            taskId.set(id);
+                            assertTrue(launcher.downloadTaskCenter.cancel(id));
+                        } else {
+                            assertEquals(destination.get(), target);
+                        }
+                        return target;
+                    }
+                }.install("1.21.1", LoaderChoice.VANILLA, null, List.of(), new InstanceInstallWorkflow.Listener() {
+                    @Override public void onStatus(String message) { }
+                    @Override public void onProgress(long downloaded, long total) { }
+                    @Override public void onComplete(String directory) { completed.set(directory); }
+                    @Override public void onFailure(String message) { failed.incrementAndGet(); }
+                });
+            });
+            WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> failed.get() == 1
+                    && launcher.downloadTaskCenter.canRetry(taskId.get()));
+            assertFalse(Files.exists(destination.get()));
+            interact(() -> assertNotNull(launcher.downloadTaskCenter.retry(taskId.get())));
+            WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> completed.get() != null);
+            assertEquals(destination.get().toString(), completed.get());
+            assertTrue(Files.exists(destination.get().resolve("server.jar")));
+            interact(() -> {
+                assertEquals(2, attempts.get());
+                assertEquals(previousTarget, launcher.getSelectedVersion());
+                assertFalse(launcher.versionCombo.isDisabled());
+            });
+            assertFalse(Files.exists(root.resolve("versions")));
+        } finally {
+            interact(() -> launcher.gameDir = previousRoot);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void cancelledServerCleanupFailureIsVisibleAndDoesNotReportSuccess(@TempDir Path root) throws Exception {
+        java.io.File previousRoot = launcher.gameDir;
+        AtomicReference<Path> destination = new AtomicReference<>();
+        AtomicReference<java.nio.channels.FileChannel> locked = new AtomicReference<>();
+        AtomicReference<String> failure = new AtomicReference<>();
+        try {
+            interact(() -> {
+                launcher.gameDir = root.toFile();
+                new ServerInstallWorkflow(launcher) {
+                    @Override
+                    Path installServer(String mc, LoaderChoice choice, String version, Path target,
+                                       com.ecl.launcher.ModLoaderInstaller.Listener listener) throws IOException {
+                        Files.createDirectory(target);
+                        Path jar = Files.writeString(target.resolve("server.jar"), "locked installation");
+                        locked.set(java.nio.channels.FileChannel.open(jar, java.nio.file.StandardOpenOption.WRITE,
+                                com.sun.nio.file.ExtendedOpenOption.NOSHARE_DELETE));
+                        destination.set(target);
+                        assertTrue(launcher.downloadTaskCenter.cancel(launcher.downloadTaskCenter.snapshots().getLast().id()));
+                        return target;
+                    }
+                }.install("1.21.1", LoaderChoice.VANILLA, null, List.of(), new InstanceInstallWorkflow.Listener() {
+                    @Override public void onStatus(String message) { }
+                    @Override public void onProgress(long downloaded, long total) { }
+                    @Override public void onComplete(String directory) { throw new AssertionError("Unexpected success"); }
+                    @Override public void onFailure(String message) { failure.set(message); }
+                });
+            });
+            WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> failure.get() != null);
+            assertEquals(GuiMessages.get("instance.install.server.cleanupFailed", destination.get()), failure.get());
+            assertTrue(Files.exists(destination.get().resolve("server.jar")));
+            interact(() -> assertFalse(launcher.versionCombo.isDisabled()));
+        } finally {
+            if (locked.get() != null) locked.get().close();
+            interact(() -> launcher.gameDir = previousRoot);
+        }
+    }
+
+    @Test
+    void failedServerInstallNeverDeletesDirectoryItDidNotReturn(@TempDir Path root) throws Exception {
+        java.io.File previousRoot = launcher.gameDir;
+        AtomicReference<Path> destination = new AtomicReference<>();
+        AtomicInteger failed = new AtomicInteger();
+        try {
+            interact(() -> {
+                launcher.gameDir = root.toFile();
+                new ServerInstallWorkflow(launcher) {
+                    @Override
+                    Path installServer(String mc, LoaderChoice choice, String version, Path target,
+                                       com.ecl.launcher.ModLoaderInstaller.Listener listener) throws IOException {
+                        Files.createDirectory(target);
+                        Files.writeString(target.resolve("keep.txt"), "another owner");
+                        destination.set(target);
+                        throw new IOException("Target occupied before installation returned");
+                    }
+                }.install("1.21.1", LoaderChoice.VANILLA, null, List.of(), new InstanceInstallWorkflow.Listener() {
+                    @Override public void onStatus(String message) { }
+                    @Override public void onProgress(long downloaded, long total) { }
+                    @Override public void onComplete(String directory) { throw new AssertionError("Unexpected success"); }
+                    @Override public void onFailure(String message) { failed.incrementAndGet(); }
+                });
+            });
+            WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> failed.get() == 1);
+            assertEquals("another owner", Files.readString(destination.get().resolve("keep.txt")));
+        } finally {
+            interact(() -> launcher.gameDir = previousRoot);
+        }
+    }
+
+    @Test
+    void serverParentCreationFailureRestoresControlsBeforeAnyDownload(@TempDir Path root) throws Exception {
+        java.io.File previousRoot = launcher.gameDir;
+        String previousTarget = launcher.getSelectedVersion();
+        AtomicInteger failed = new AtomicInteger();
+        Files.writeString(root.resolve("server-downloads"), "not a directory");
+        try {
+            interact(() -> {
+                launcher.gameDir = root.toFile();
+                new ServerInstallWorkflow(launcher).install("1.21.1", LoaderChoice.VANILLA, null, List.of(),
+                        new InstanceInstallWorkflow.Listener() {
+                            @Override public void onStatus(String message) { }
+                            @Override public void onProgress(long downloaded, long total) { }
+                            @Override public void onComplete(String directory) { throw new AssertionError("Installation succeeded"); }
+                            @Override public void onFailure(String message) { failed.incrementAndGet(); }
+                        });
+            });
+            WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> failed.get() == 1);
+            interact(() -> {
+                assertFalse(launcher.versionCombo.isDisabled());
+                assertEquals(previousTarget, launcher.getSelectedVersion());
+                assertEquals(DownloadTaskCenter.Status.FAILED, launcher.downloadTaskCenter.snapshots().getLast().status());
+            });
+            assertFalse(Files.exists(root.resolve("versions")));
+        } finally {
+            interact(() -> launcher.gameDir = previousRoot);
+        }
+    }
+
+    @Test
+    void serverRetryCreatesMissingParentAndKeepsDestinationAndClientTarget(@TempDir Path root) throws Exception {
+        java.io.File previousRoot = launcher.gameDir;
+        ServerJarDownloader previousDownloader = launcher.serverJarDownloader;
+        String previousTarget = launcher.getSelectedVersion();
+        AtomicInteger attempts = new AtomicInteger();
+        AtomicInteger started = new AtomicInteger();
+        AtomicInteger failed = new AtomicInteger();
+        List<String> destinations = new java.util.concurrent.CopyOnWriteArrayList<>();
+        AtomicReference<String> failure = new AtomicReference<>();
+        try {
+            interact(() -> {
+                launcher.gameDir = root.toFile();
+                launcher.serverJarDownloader = new ServerJarDownloader(new VersionManager() {
+                    @Override
+                    public VersionDownloadTarget resolveDownloadTarget(String version) {
+                        assertTrue(Files.isDirectory(root.resolve("server-downloads")));
+                        attempts.incrementAndGet();
+                        return new VersionDownloadTarget(version, version, "", "");
+                    }
+                });
+                assertFalse(Files.exists(root.resolve("server-downloads")));
+                new ServerInstallWorkflow(launcher).install("1.21.1", LoaderChoice.VANILLA, null, List.of(),
+                        new InstanceInstallWorkflow.Listener() {
+                            @Override public void onStarted() { started.incrementAndGet(); }
+                            @Override public void onStatus(String message) {
+                                if (message.contains("server-downloads")) destinations.add(message);
+                            }
+                            @Override public void onProgress(long downloaded, long total) { }
+                            @Override public void onComplete(String directory) { throw new AssertionError("Installation succeeded"); }
+                            @Override public void onFailure(String message) {
+                                failure.set(message);
+                                failed.incrementAndGet();
+                            }
+                        });
+            });
+            WaitForAsyncUtils.waitFor(10, TimeUnit.SECONDS, () -> failed.get() == 1);
+            interact(() -> assertNotNull(launcher.downloadTaskCenter.retry(launcher.downloadTaskCenter.snapshots().getLast().id())));
+            WaitForAsyncUtils.waitFor(10, TimeUnit.SECONDS, () -> failed.get() == 2);
+            interact(() -> {
+                assertEquals(2, attempts.get(), failure.get());
+                assertEquals(2, started.get());
+                assertEquals(2, destinations.size());
+                assertEquals(destinations.getFirst(), destinations.getLast());
+                assertEquals(previousTarget, launcher.getSelectedVersion());
+                assertFalse(launcher.versionCombo.isDisabled());
+            });
+            assertTrue(Files.isDirectory(root.resolve("server-downloads")));
+            try (var children = Files.list(root.resolve("server-downloads"))) {
+                assertEquals(0, children.count());
+            }
+            assertFalse(Files.exists(root.resolve("versions")));
+        } finally {
+            interact(() -> {
+                launcher.gameDir = previousRoot;
+                launcher.serverJarDownloader = previousDownloader;
+            });
+        }
+    }
+
+    @Test
+    void queuedServerInstallCancellationAndRetryInitializeAndRestoreSharedControls() throws Exception {
+        DownloadTaskCenter previousCenter = launcher.downloadTaskCenter;
+        String previousTarget = launcher.getSelectedVersion();
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger started = new AtomicInteger();
+        AtomicInteger failed = new AtomicInteger();
+        try (DownloadTaskCenter center = blockedCenter(release)) {
+            interact(() -> {
+                launcher.downloadTaskCenter = center;
+                new ServerInstallWorkflow(launcher).install("1.21.1", LoaderChoice.FABRIC, "0.16.9", List.of("0.16.9"),
+                        new InstanceInstallWorkflow.Listener() {
+                            @Override public void onStarted() { started.incrementAndGet(); }
+                            @Override public void onStatus(String message) { }
+                            @Override public void onProgress(long downloaded, long total) { }
+                            @Override public void onComplete(String directory) { throw new AssertionError("Queued task ran"); }
+                            @Override public void onFailure(String message) { failed.incrementAndGet(); }
+                        });
+                assertTrue(launcher.versionCombo.isDisabled());
+                var task = center.snapshots().getLast();
+                assertEquals(DownloadTaskCenter.Status.QUEUED, task.status());
+                assertTrue(center.cancel(task.id()));
+            });
+            WaitForAsyncUtils.waitForFxEvents();
+            interact(() -> {
+                assertEquals(1, started.get());
+                assertEquals(1, failed.get());
+                assertFalse(launcher.versionCombo.isDisabled());
+                var retry = center.retry(center.snapshots().getLast().id());
+                assertNotNull(retry);
+                assertEquals(2, started.get());
+                assertTrue(launcher.versionCombo.isDisabled());
+                retry.cancel();
+            });
+            WaitForAsyncUtils.waitForFxEvents();
+            interact(() -> {
+                assertEquals(2, failed.get());
+                assertFalse(launcher.versionCombo.isDisabled());
+                assertEquals(previousTarget, launcher.getSelectedVersion());
+            });
+        } finally {
+            release.countDown();
+            interact(() -> launcher.downloadTaskCenter = previousCenter);
+        }
+    }
+
     private static DownloadTaskCenter blockedCenter(CountDownLatch release) throws Exception {
         DownloadTaskCenter center = new DownloadTaskCenter(1);
         CountDownLatch started = new CountDownLatch(1);

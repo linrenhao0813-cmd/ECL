@@ -162,8 +162,8 @@ public final class LauncherUiSnapshot {
             String mode = System.getProperty("ecl.snapshot.mode", "home");
             // Deterministic locale: "-en" for English, "-zh-TW" for Traditional Chinese, else zh-CN.
             applySnapshotLanguage(mode);
-            if (mode.startsWith("instance-loader-version")) {
-                return prepareLoaderVersionCapture(primaryStage);
+            if (mode.startsWith("instance-loader-version") || mode.startsWith("instance-server-install")) {
+                return prepareLoaderVersionCapture(primaryStage, mode.startsWith("instance-server-install"));
             }
             if (mode.startsWith("forest")) return prepareForestCapture(primaryStage, mode);
             if ("initial-dark".equalsIgnoreCase(mode)) {
@@ -503,7 +503,7 @@ public final class LauncherUiSnapshot {
             applyTheme.invoke(this);
         }
 
-        private Scene prepareLoaderVersionCapture(Stage stage) {
+        private Scene prepareLoaderVersionCapture(Stage stage, boolean server) {
             InstanceInstallPage page = new InstanceInstallPage(this, "1.21.1", () -> { },
                     choice -> java.util.concurrent.CompletableFuture.completedFuture(
                             java.util.List.of("0.16.10", "0.16.9", "0.16.8")),
@@ -518,6 +518,7 @@ public final class LauncherUiSnapshot {
             Scene scene = new Scene(root, 1180, 980);
             scene.getStylesheets().add(getClass().getResource("/css/launcher.css").toExternalForm());
             stage.setScene(scene);
+            if (server) ((ToggleButton) page.lookup("#instance-install-server")).fire();
             page.lookupAll(".instance-install-choice").stream().map(ToggleButton.class::cast)
                     .filter(button -> button.getUserData() == LoaderChoice.FABRIC)
                     .findFirst().orElseThrow().fire();

@@ -50,6 +50,28 @@ class InstanceInstallPageTest extends ApplicationTest {
     }
 
     @Test
+    void installActionSharesTheChoiceCardWithoutASeparateProgressCard() {
+        interact(() -> {
+            for (String mode : List.of("#instance-install-client", "#instance-install-server")) {
+                ToggleButton selection = (ToggleButton) page.lookup(mode);
+                if (!selection.isSelected()) selection.fire();
+                var cards = page.lookupAll(".surface");
+                assertEquals(1, cards.size());
+                assertTrue(cards.iterator().next().lookupAll(".instance-install-choice").size() >= LoaderChoice.values().length);
+                assertEquals(install, cards.iterator().next().lookup("#instance-install-action"));
+                assertEquals(selection.getParent(), install.getParent());
+                assertEquals(install, install.getParent().getChildrenUnmodifiable().getLast());
+                page.layout();
+                assertTrue(install.getBoundsInParent().getMinX() > selection.getBoundsInParent().getMaxX());
+                assertTrue(install.isVisible());
+                assertTrue(install.isManaged());
+                assertFalse(install.isDisabled());
+                assertTrue(page.lookupAll(".progress-bar").isEmpty());
+            }
+        });
+    }
+
+    @Test
     void everyLoaderRequiresAnExplicitVersionWhileVanillaNeedsNone() {
         interact(() -> assertFalse(install.isDisabled()));
         for (LoaderChoice choice : List.of(LoaderChoice.FABRIC, LoaderChoice.QUILT,
@@ -155,6 +177,15 @@ class InstanceInstallPageTest extends ApplicationTest {
             workflow.install("1.21.1", LoaderChoice.FORGE, " ", null, listener);
             workflow.install("1.21.1", LoaderChoice.FABRIC, "0.16.9", null, listener);
             assertEquals(3, failures.size());
+            ServerInstallWorkflow servers = new ServerInstallWorkflow(new LauncherUI());
+            servers.install(null, LoaderChoice.VANILLA, null, List.of(), listener);
+            servers.install(" ", LoaderChoice.VANILLA, null, List.of(), listener);
+            servers.install("1.21.1", null, null, List.of(), listener);
+            servers.install("1.21.1", LoaderChoice.FABRIC, null, List.of("compatible"), listener);
+            servers.install("1.21.1", LoaderChoice.FORGE, " ", List.of("compatible"), listener);
+            servers.install("1.21.1", LoaderChoice.FABRIC, "incompatible", List.of("compatible"), listener);
+            servers.install("../escape", LoaderChoice.VANILLA, null, List.of(), listener);
+            assertEquals(10, failures.size());
         });
     }
 
@@ -190,6 +221,90 @@ class InstanceInstallPageTest extends ApplicationTest {
             assertTrue(install.isDisabled());
             choose(LoaderChoice.VANILLA);
             assertFalse(apiVersions.getParent().getParent().isManaged());
+            assertFalse(install.isDisabled());
+        });
+    }
+
+    @Test
+    void serverSelectionRequiresCompatibleLoaderButNeverFabricApi() {
+        interact(() -> {
+            ToggleButton client = (ToggleButton) page.lookup("#instance-install-client");
+            ToggleButton server = (ToggleButton) page.lookup("#instance-install-server");
+            assertTrue(client.isSelected());
+            assertEquals(GuiMessages.get("instance.install.mode.client"), client.getText());
+            assertEquals(GuiMessages.get("instance.install.mode.server"), server.getText());
+            assertFalse(client.getText().startsWith("instance.install."));
+            assertFalse(server.getText().startsWith("instance.install."));
+            server.fire();
+            javafx.scene.control.Label destination = (javafx.scene.control.Label) page.lookup("#instance-server-destination");
+            assertEquals(GuiMessages.get("instance.install.server.destination", new LauncherUI().getServerDownloadDir().getAbsolutePath()),
+                    destination.getText());
+            assertTrue(destination.getParent().isManaged());
+            assertTrue(server.isSelected());
+            assertFalse(install.isDisabled());
+            choose(LoaderChoice.FABRIC);
+            assertTrue(apiRequests.isEmpty());
+            assertTrue(install.isDisabled());
+            requests.getLast().complete(List.of("compatible"));
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        interact(() -> {
+            versions.setValue("not-compatible");
+            assertTrue(install.isDisabled());
+            versions.setValue("compatible");
+            assertFalse(install.isDisabled());
+            assertFalse(apiVersions.getParent().getParent().isManaged());
+        });
+    }
+
+    @Test
+    void everyServerLoaderRequiresExplicitCompatibleSelectionWithoutApiQueries() {
+        interact(() -> ((ToggleButton) page.lookup("#instance-install-server")).fire());
+        for (LoaderChoice choice : List.of(LoaderChoice.FABRIC, LoaderChoice.QUILT,
+                LoaderChoice.FORGE, LoaderChoice.NEOFORGE)) {
+            interact(() -> {
+                choose(choice);
+                assertTrue(install.isDisabled());
+                assertNull(versions.getValue());
+                assertTrue(apiRequests.isEmpty());
+                requests.getLast().complete(List.of("compatible", "older"));
+            });
+            WaitForAsyncUtils.waitForFxEvents();
+            interact(() -> {
+                assertTrue(install.isDisabled());
+                versions.setValue("older");
+                assertFalse(install.isDisabled());
+            });
+        }
+        interact(() -> {
+            choose(LoaderChoice.VANILLA);
+            assertFalse(install.isDisabled());
+        });
+    }
+
+    @Test
+    void switchingBackToClientRefreshesApiAndIgnoresStaleResponse() {
+        interact(() -> {
+            choose(LoaderChoice.FABRIC);
+            requests.getLast().complete(List.of("compatible"));
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        interact(() -> {
+            versions.setValue("compatible");
+            ((ToggleButton) page.lookup("#instance-install-server")).fire();
+            assertEquals("compatible", versions.getValue());
+            assertFalse(install.isDisabled());
+            ((ToggleButton) page.lookup("#instance-install-client")).fire();
+            assertEquals(2, apiRequests.size());
+            assertTrue(install.isDisabled());
+            apiRequests.get(1).complete(List.of(OLDER_API));
+            apiRequests.get(0).complete(List.of(NEWER_API));
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        interact(() -> {
+            assertEquals(List.of(OLDER_API), apiVersions.getItems());
+            assertTrue(install.isDisabled());
+            apiVersions.setValue(OLDER_API);
             assertFalse(install.isDisabled());
         });
     }

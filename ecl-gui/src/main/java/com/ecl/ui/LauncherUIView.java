@@ -404,9 +404,7 @@ class LauncherUIView extends javafx.application.Application {
     }
 
     private List<ContentTarget> createContentTargets() {
-        return ContentTargetFactory.create(
-                this::resolveModsDir, this::resolveVersionGameDir,
-                this::getConfiguredGameRootDir);
+        return ContentTargetFactory.create(this::resolveModsDir, this::resolveVersionGameDir);
     }
 
     void createInstanceShortcut(boolean startMenu) {

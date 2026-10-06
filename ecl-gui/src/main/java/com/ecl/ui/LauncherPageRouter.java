@@ -76,6 +76,7 @@ final class LauncherPageRouter {
             case SERVERS -> addMainContent(ui.pageFactory.createServersPage(), null);
             case SETTINGS -> addMainContent(ui.pageFactory.createSettingsPage(), null);
         }
+        LauncherUiFactory.setVisible(ui.taskToggleButton, ui.activeView == AppView.DOWNLOADS);
         ui.applyCompactLayout();
         if (slideDirection != 0) {
             playContentTransition(slideDirection);

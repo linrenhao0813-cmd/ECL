@@ -212,6 +212,7 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             assertNotNull(scene.lookup("#installed-instance-list"));
             assertNotNull(scene.lookup("#instance-list-refresh"));
 
+            launcher.setActiveView(AppView.DOWNLOADS);
             javafx.scene.layout.VBox detail =
                     (javafx.scene.layout.VBox) scene.lookup("#task-detail-panel");
             assertNotNull(detail);
@@ -223,6 +224,23 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             assertFalse(detail.isVisible());
 
             launcher.setActiveView(AppView.HOME);
+        });
+    }
+
+    @Test
+    void taskEntryIsVisibleAndManagedOnlyInDownloads() {
+        interact(() -> {
+            Button entry = launcher.taskToggleButton;
+            assertFalse(entry.isVisible(), "task entry must be hidden on the initial home page");
+            assertFalse(entry.isManaged(), "hidden task entry must not reserve space");
+            for (AppView view : AppView.values()) {
+                launcher.setActiveView(view);
+                assertEquals(view == AppView.DOWNLOADS, entry.isVisible(), view.name());
+                assertEquals(view == AppView.DOWNLOADS, entry.isManaged(), view.name());
+            }
+            launcher.setActiveView(AppView.DOWNLOADS);
+            assertTrue(entry.isVisible(), "task entry must return when revisiting downloads");
+            assertTrue(entry.isManaged());
         });
     }
 
@@ -330,11 +348,11 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             String previousKey = launcher.contentCategoryKey;
             try {
                 launcher.setActiveView(AppView.DOWNLOADS);
-                launcher.contentCategoryKey = "server";
+                launcher.contentCategoryKey = "resourcepack";
                 launcher.setActiveView(AppView.HOME);
                 launcher.setActiveView(AppView.DOWNLOADS);
 
-                assertEquals("server", launcher.contentCategoryKey,
+                assertEquals("resourcepack", launcher.contentCategoryKey,
                         "returning to the content page must reopen the remembered category");
                 assertFalse(stage.getScene().getRoot()
                                 .lookupAll(".content-library-nav-item-active").isEmpty(),
@@ -343,6 +361,20 @@ class LauncherUiHeadlessTest extends ApplicationTest {
                 launcher.contentCategoryKey = previousKey;
                 launcher.setActiveView(AppView.HOME);
             }
+        });
+    }
+
+    @Test
+    void downloadsExposeFiveCategoriesWithoutStandaloneServerEntry() {
+        interact(() -> {
+            launcher.setActiveView(AppView.DOWNLOADS);
+            var categories = stage.getScene().getRoot().lookupAll(".content-category-chip").stream()
+                    .map(Button.class::cast).map(Button::getText).collect(java.util.stream.Collectors.toSet());
+            assertEquals(java.util.Set.of(Messages.get("download.instances.title"), Messages.get("content.mods.title"),
+                    Messages.get("content.shaders.title"), Messages.get("content.resourcepacks.title"),
+                    Messages.get("content.modpacks.title")), categories);
+            assertEquals(AppView.values().length, stage.getScene().getRoot().lookupAll(".nav-button-vertical").size());
+            launcher.setActiveView(AppView.HOME);
         });
     }
 

@@ -19,6 +19,7 @@ final class LoaderArtifactVerifier {
                 byte[] buffer = new byte[64 * 1024];
                 int read;
                 while ((read = input.read(buffer)) >= 0) {
+                    ServerInstaller.checkCancelled();
                     if (read > 0) {
                         digest.update(buffer, 0, read);
                     }

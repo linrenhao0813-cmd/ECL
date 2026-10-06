@@ -2,7 +2,10 @@ package com.ecl.download;
 
 import com.ecl.ECLConfig;
 import com.ecl.launcher.VersionManager;
+import com.ecl.launcher.VersionManager.VersionDownloadTarget;
+import com.ecl.util.FileUtil;
 import com.ecl.util.TestNetworkPolicy;
+import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,6 +70,48 @@ class ServerJarDownloaderTest {
         } finally {
             baseDir.set(null, previous);
         }
+    }
+
+    @Test
+    void serverJavaRequirementUsesExplicitMetadataIncludingYearBasedVersions() throws Exception {
+        assertEquals(25, ServerJarDownloader.javaRequirement(JsonParser.parseString(
+                "{\"id\":\"26.1\",\"javaVersion\":{\"majorVersion\":25}}").getAsJsonObject(), "26.1"));
+        assertEquals(25, ServerJarDownloader.javaRequirement(JsonParser.parseString(
+                "{\"id\":\"1.21.1\",\"javaVersion\":{\"majorVersion\":25}}").getAsJsonObject(), "1.21.1"));
+        assertEquals(8, ServerJarDownloader.javaRequirement(JsonParser.parseString(
+                "{\"id\":\"1.12.2\"}").getAsJsonObject(), "1.12.2"));
+        assertThrows(java.io.IOException.class, () -> ServerJarDownloader.javaRequirement(JsonParser.parseString(
+                "{\"id\":\"wrong\",\"javaVersion\":{\"majorVersion\":25}}").getAsJsonObject(), "26.1"));
+        assertThrows(java.io.IOException.class, () -> ServerJarDownloader.javaRequirement(JsonParser.parseString(
+                "{\"id\":\"26.1\",\"javaVersion\":{\"majorVersion\":0}}").getAsJsonObject(), "26.1"));
+    }
+
+    @Test
+    void officialResolutionIgnoresAlteredLocalDownloadsAndPinsMetadataHash(@TempDir Path root) throws Exception {
+        String official = "{\"id\":\"1.16.5\",\"javaVersion\":{\"majorVersion\":8},\"downloads\":{\"server\":{"
+                + "\"url\":\"https://93.184.216.34/official.jar\",\"sha1\":\"" + "1".repeat(40) + "\",\"size\":123}}}";
+        String modified = official.replace("93.184.216.34/official", "8.8.8.8/modified").replace("1".repeat(40), "2".repeat(40));
+        Path local = root.resolve("1.16.5.json");
+        Files.writeString(local, modified);
+        String expectedMetadataSha1 = FileUtil.sha1(official.getBytes(StandardCharsets.UTF_8));
+        VersionManager versions = new VersionManager() {
+            @Override public VersionDownloadTarget resolveDownloadTarget(String id) {
+                return new VersionDownloadTarget(id, id, "https://piston-meta.mojang.com/official.json", expectedMetadataSha1);
+            }
+            @Override public com.google.gson.JsonObject loadVersionJson(String id) throws java.io.IOException {
+                return JsonParser.parseString(Files.readString(local)).getAsJsonObject();
+            }
+        };
+        ServerJarDownloader downloader = new ServerJarDownloader(versions, (url, target) -> {
+            assertEquals("https://piston-meta.mojang.com/official.json", url);
+            Files.writeString(target, official);
+        });
+        assertEquals("https://93.184.216.34/official.jar", downloader.resolveOfficial("1.16.5", null).url());
+        assertEquals("1".repeat(40), downloader.resolveOfficial("1.16.5", null).sha1());
+        assertEquals(8, downloader.requiredJavaVersion("1.16.5"));
+        ServerJarDownloader corrupt = new ServerJarDownloader(versions, (url, target) -> Files.writeString(target, modified));
+        assertThrows(java.io.IOException.class, () -> corrupt.resolveOfficial("1.16.5", null));
+        assertThrows(java.io.IOException.class, () -> corrupt.requiredJavaVersion("1.16.5"));
     }
 
     @Test
