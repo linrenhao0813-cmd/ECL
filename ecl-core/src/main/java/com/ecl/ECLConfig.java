@@ -9,7 +9,7 @@ import com.ecl.config.SettingKey;
 
 public class ECLConfig {
     public static final String LAUNCHER_NAME = "ECL";
-    public static final String LAUNCHER_VERSION = "1.0.2beta";
+    public static final String LAUNCHER_VERSION = "1.0.2";
     public static final String VERSION_DOWNLOAD_COMPLETE_MARKER = ".ecl-download-complete";
     public static final String MC_VERSION_MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
     public static final int OFFICIAL_SOURCE_TIMEOUT_MS = 8000;

@@ -9,7 +9,7 @@ plugins {
 
 allprojects {
     group = "com.ecl"
-    version = "1.0.2beta"
+    version = "1.0.2"
 }
 
 subprojects {
