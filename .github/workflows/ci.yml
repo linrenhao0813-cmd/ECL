@@ -49,7 +49,76 @@ jobs:
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
       - name: Package
         run: .\gradlew.bat packageWindowsApp --no-daemon
+      - name: Validate application image
+        run: |
+          .\scripts\test-windows-app-validator.ps1
+          .\scripts\verify-windows-app.ps1
+      - name: Validate native EXE startup
+        run: .\scripts\smoke-windows-app.ps1
+      - name: Prepare stable release ZIP
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: publish 1.0.2')
+        run: |
+          .\scripts\verify-windows-app.ps1 -ExpectedVersion 1.0.2 -ZipPath .\dist\releases\ECL-1.0.2-windows.zip
+          $zip = 'dist/releases/ECL-1.0.2-windows.zip'
+          $digest = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  ECL-1.0.2-windows.zip" | Set-Content -LiteralPath "$zip.sha256" -Encoding ascii
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: publish 1.0.2')
+        with:
+          name: release-assets-1.0.2
+          path: dist/releases
+          if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-app
           path: dist/windows
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: windows-image-evidence
+          path: |
+            build/release-validation/image-result.json
+            build/release-validation/exe-startup-result.json
+
+
+  release:
+    needs: package
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: publish 1.0.2')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download verified release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh run download "$GITHUB_RUN_ID" --name release-assets-1.0.2 --dir release-assets
+      - name: Verify archive and publish V1.0.2
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum --check ECL-1.0.2-windows.zip.sha256
+          python3 - <<'PY_CHECK'
+          import zipfile
+          with zipfile.ZipFile('ECL-1.0.2-windows.zip') as archive:
+              names = {name.replace('\\', '/') for name in archive.namelist()}
+              required = {'ECL/ECL.exe', 'ECL/app/ECL.cfg', 'ECL/runtime/release', 'ECL/runtime/bin/server/jvm.dll'}
+              assert required <= names, 'Incomplete release archive'
+              assert all(name.startswith('ECL/') for name in names), 'Unexpected archive root'
+          PY_CHECK
+          cd ..
+          gh release create V1.0.2 \
+            release-assets/ECL-1.0.2-windows.zip \
+            release-assets/ECL-1.0.2-windows.zip.sha256 \
+            --target "$GITHUB_SHA" --title 'ECL 1.0.2' \
+            --notes-file docs/release-notes-1.0.2.md --draft
+          gh release edit V1.0.2 --draft=false --latest
