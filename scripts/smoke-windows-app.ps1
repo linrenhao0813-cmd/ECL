@@ -18,19 +18,49 @@ $start.UseShellExecute = $false
 $start.Environment['APPDATA'] = $isolated
 $start.Environment.Remove('JAVA_HOME') | Out-Null
 $process = $null
+$application = $null
 $result = [ordered]@{ result = 'FAIL'; scope = 'native-exe-window-and-bundled-jvm-only' }
+
+function Find-ApplicationProcesses([System.Diagnostics.Process]$Launcher, [string]$Executable) {
+    # jpackage's Windows bootstrap can keep a parent process while the child owns the JVM/window.
+    $found = @($Launcher)
+    $pending = @($Launcher.Id)
+    while ($pending.Count -gt 0) {
+        $next = @()
+        foreach ($parent in $pending) {
+            foreach ($child in @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $parent")) {
+                if ($child.ExecutablePath -ieq $Executable -and $child.ProcessId -notin $found.Id) {
+                    $candidate = Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue
+                    if ($candidate) { $found += $candidate; $next += $child.ProcessId }
+                }
+            }
+        }
+        $pending = $next
+    }
+    return $found
+}
+
 try {
     $process = [System.Diagnostics.Process]::Start($start)
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {
         $process.Refresh()
         if ($process.HasExited) { throw "ECL.exe exited before showing a window (code $($process.ExitCode))." }
-        if ($process.MainWindowHandle -ne [IntPtr]::Zero) { break }
+        $candidates = @(Find-ApplicationProcesses $process $start.FileName)
+        $result['launcherProcessCount'] = $candidates.Count
+        foreach ($candidate in $candidates) {
+            $candidate.Refresh()
+            if (-not $candidate.HasExited -and $candidate.MainWindowHandle -ne [IntPtr]::Zero) {
+                $application = $candidate
+                break
+            }
+        }
+        if ($application) { break }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
-    if ($process.MainWindowHandle -eq [IntPtr]::Zero) { throw 'ECL.exe did not show a window within 30 seconds.' }
+    if (-not $application) { throw 'ECL.exe and its bootstrap children did not show a window within 30 seconds.' }
     $expectedJvm = [System.IO.Path]::GetFullPath((Join-Path $image 'runtime/bin/server/jvm.dll'))
-    $loadedJvm = @($process.Modules | Where-Object { $_.ModuleName -ieq 'jvm.dll' })
+    $loadedJvm = @($application.Modules | Where-Object { $_.ModuleName -ieq 'jvm.dll' })
     if ($loadedJvm.Count -ne 1 -or $loadedJvm[0].FileName -ine $expectedJvm) {
         throw 'EXE did not load the candidate bundled JVM.'
     }
@@ -40,10 +70,14 @@ try {
     Write-Output 'WINDOWS_NATIVE_EXE_STARTUP_PASS'
 } finally {
     if ($process) {
+        if ($application -and -not $application.HasExited) {
+            $application.CloseMainWindow() | Out-Null
+            if (-not $application.WaitForExit(5000)) { $application.Kill(); $application.WaitForExit() }
+        }
         if (-not $process.HasExited) {
             $process.CloseMainWindow() | Out-Null
             if (-not $process.WaitForExit(5000)) {
-                $process.Kill()
+                $process.Kill($true)
                 $process.WaitForExit()
             }
         }
