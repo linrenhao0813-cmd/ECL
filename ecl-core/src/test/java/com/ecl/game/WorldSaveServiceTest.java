@@ -1,17 +1,68 @@
 package com.ecl.game;
 
+import com.ecl.launch.GameProcessMarker;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.io.DataOutputStream;
+import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorldSaveServiceTest {
+    @Test
+    void preservesMinecraftModifiedUtfStrings(@TempDir Path world) throws Exception {
+        Path levelDat = world.resolve("level.dat");
+        String name = "世界 \uD83D\uDE00\u0000";
+        try (DataOutputStream data = new DataOutputStream(new GZIPOutputStream(Files.newOutputStream(levelDat)))) {
+            data.writeByte(10);
+            data.writeUTF("");
+            data.writeByte(8);
+            data.writeUTF("LevelName");
+            data.writeUTF(name);
+            data.writeByte(0);
+        }
+
+        WorldSaveService.NbtIo.Compound root = WorldSaveService.NbtIo.read(levelDat);
+        assertEquals(name, root.stringValue("LevelName", ""));
+        WorldSaveService.NbtIo.write(levelDat, root);
+
+        try (DataInputStream data = new DataInputStream(new GZIPInputStream(Files.newInputStream(levelDat)))) {
+            assertEquals(10, data.readUnsignedByte());
+            assertEquals("", data.readUTF());
+            assertEquals(8, data.readUnsignedByte());
+            assertEquals("LevelName", data.readUTF());
+            assertEquals(name, data.readUTF());
+            assertEquals(0, data.readUnsignedByte());
+        }
+    }
+
+    @Test
+    void refusesWorldChangesWhenDurableGameMarkerIsRunning(@TempDir Path game) throws Exception {
+        Path world = Files.createDirectories(game.resolve("saves/Running World"));
+        Path levelDat = world.resolve("level.dat");
+        WorldSaveService.NbtIo.write(levelDat, new WorldSaveService.NbtIo.Compound());
+        byte[] original = Files.readAllBytes(levelDat);
+        WorldSave save = new WorldSave("Running World", world, "profile", "1.21.1", "vanilla", "",
+                0L, WorldSaveSettings.defaults());
+        GameProcessMarker.record(game, ProcessHandle.current());
+        try {
+            assertThrows(java.io.IOException.class, () -> new WorldSaveService(ignored -> false)
+                    .update(save, new WorldSaveSettings(WorldSaveSettings.Difficulty.HARD,
+                            WorldSaveSettings.GameMode.CREATIVE, true)));
+            assertArrayEquals(original, Files.readAllBytes(levelDat));
+        } finally {
+            GameProcessMarker.clear(game, ProcessHandle.current());
+        }
+    }
+
     @Test
     void scansByInstanceMetadataAndUpdatesLevelDatAndLanPreference() throws Exception {
         Path root = Files.createTempDirectory("ecl-world-saves-");

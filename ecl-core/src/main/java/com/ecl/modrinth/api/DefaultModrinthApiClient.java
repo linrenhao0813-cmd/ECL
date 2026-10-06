@@ -21,7 +21,6 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -381,46 +380,12 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
         return value.trim();
     }
 
-    private static <T> List<T> safeList(List<T> values) {
-        return values == null ? List.of() : values;
-    }
-
     private static String encodePathSegment(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     private static String encodeQuery(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
-    }
-
-    private static URI parseUri(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return URI.create(value);
-        } catch (IllegalArgumentException ignored) {
-            return null;
-        }
-    }
-
-    private static Instant parseInstant(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return Instant.parse(value);
-        } catch (DateTimeParseException ignored) {
-            return null;
-        }
-    }
-
-    private static String firstNonBlank(String first, String second) {
-        return first != null && !first.isBlank() ? first : nullToEmpty(second);
-    }
-
-    private static String nullToEmpty(String value) {
-        return value == null ? "" : value;
     }
 
     private static Throwable unwrap(Throwable error) {

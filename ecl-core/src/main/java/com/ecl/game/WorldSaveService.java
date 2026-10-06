@@ -2,14 +2,14 @@ package com.ecl.game;
 
 import com.ecl.util.FileUtil;
 import com.ecl.util.InstanceOperationLease;
+import com.ecl.launch.GameProcessMarker;
 
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -102,7 +102,7 @@ public final class WorldSaveService {
     }
 
     private void ensureNotRunning(WorldSave save) throws IOException {
-        if (instanceRunning.test(save.instanceId())) {
+        if (instanceRunning.test(save.instanceId()) || GameProcessMarker.isRunning(gameDirectory(save))) {
             throw new IOException("实例正在运行，不能修改世界存档: " + save.instanceId());
         }
     }
@@ -315,14 +315,13 @@ public final class WorldSaveService {
 
         private static String readString(DataInputStream data, ReadBudget budget) throws IOException {
             int length = data.readUnsignedShort();
-            byte[] bytes = new byte[length];
-            try {
-                data.readFully(bytes);
-            } catch (EOFException truncated) {
-                throw new IOException("Truncated NBT string", truncated);
-            }
             budget.consume(length);
-            return new String(bytes, StandardCharsets.UTF_8);
+            // Keep the encoded-byte budget while delegating modified UTF-8 decoding to the JDK.
+            byte[] encoded = new byte[length + Short.BYTES];
+            encoded[0] = (byte) (length >>> Byte.SIZE);
+            encoded[1] = (byte) length;
+            data.readFully(encoded, Short.BYTES, length);
+            return new DataInputStream(new ByteArrayInputStream(encoded)).readUTF();
         }
 
         private static final class ReadBudget {
@@ -337,12 +336,7 @@ public final class WorldSaveService {
         }
 
         private static void writeString(DataOutputStream data, String value) throws IOException {
-            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            if (bytes.length > 65535) {
-                throw new IOException("NBT string exceeds 65535 bytes");
-            }
-            data.writeShort(bytes.length);
-            data.write(bytes);
+            data.writeUTF(value);
         }
 
         sealed interface Value permits ByteValue, ShortValue, IntValue, LongValue, FloatValue,

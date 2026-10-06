@@ -2,6 +2,7 @@ package com.ecl.download;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 
 /** Mutable state owned by one queued download task. Access is guarded by the task center lock. */
 final class DownloadTaskEntry<T> {
@@ -10,6 +11,7 @@ final class DownloadTaskEntry<T> {
     final DownloadTaskCenter.Operation<T> operation;
     final AtomicReference<DownloadTaskEntry<?>> familyCurrent;
     DownloadTaskCenter.OperationFactory<T> operationFactory;
+    BiConsumer<T, Throwable> completionHandler;
     final CompletableFuture<T> completion = new CompletableFuture<>();
     final long createdAtMillis = System.currentTimeMillis();
     volatile Thread runner;

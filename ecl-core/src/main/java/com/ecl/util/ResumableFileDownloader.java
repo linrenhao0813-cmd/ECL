@@ -169,7 +169,7 @@ final class ResumableFileDownloader {
             }
         }
         return HttpClientProvider.defaultClient().send(
-                builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+                builder.build(), HttpRequestExecutor.bodyHandler(timeoutFor(mirror)));
     }
 
     private static URI parseDownloadUri(String value, Set<String> allowedHosts, String description)

@@ -32,6 +32,8 @@ final class ModBrowserUpdateCoordinator {
     private final Consumer<Boolean> installedLoadedConsumer;
     private final BiConsumer<String, Boolean> setBusy;
     private final Runnable finishBusy;
+    private final Consumer<String> beginDownload;
+    private final Runnable finishDownload;
     private final Consumer<String> setError;
     private final Consumer<String> setOperation;
     private final Consumer<Integer> setUpdateCount;
@@ -55,6 +57,8 @@ final class ModBrowserUpdateCoordinator {
             Consumer<Boolean> installedLoadedConsumer,
             BiConsumer<String, Boolean> setBusy,
             Runnable finishBusy,
+            Consumer<String> beginDownload,
+            Runnable finishDownload,
             Consumer<String> setError,
             Consumer<String> setOperation,
             Consumer<Integer> setUpdateCount,
@@ -72,6 +76,8 @@ final class ModBrowserUpdateCoordinator {
         this.installedLoadedConsumer = installedLoadedConsumer;
         this.setBusy = setBusy;
         this.finishBusy = finishBusy;
+        this.beginDownload = beginDownload;
+        this.finishDownload = finishDownload;
         this.setError = setError;
         this.setOperation = setOperation;
         this.setUpdateCount = setUpdateCount;
@@ -121,19 +127,7 @@ final class ModBrowserUpdateCoordinator {
         if (update == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("该模组没有可用更新"));
         }
-        setBusy.accept("正在更新 " + update.installedMod().displayName() + "…", true);
-        CompletableFuture<?> request = queueUpdate(update)
-                .whenComplete((result, error) -> Platform.runLater(() -> {
-                    finishBusy.run();
-                    if (error != null) {
-                        setError.accept(errorFormatter.apply(error));
-                    } else {
-                        updates.remove(projectId);
-                        setUpdateCount.accept(updates.size());
-                        refreshInstalled.run();
-                        setOperation.accept("模组更新完成");
-                    }
-                }));
+        CompletableFuture<?> request = queueUpdate(update);
         setActiveRequest.accept(request);
         return request;
     }
@@ -178,15 +172,33 @@ final class ModBrowserUpdateCoordinator {
 
     private CompletableFuture<?> queueUpdate(ModUpdate update) {
         if (downloadTaskCenter == null) {
-            return updateService.applyUpdate(update);
+            beginDownload.accept("正在更新 " + update.installedMod().displayName() + "…");
+            return updateService.applyUpdate(update).whenComplete((result, error) -> completeUpdate(update, error));
         }
         DownloadTaskCenter.TaskHandle<Object> task = downloadTaskCenter.submit(
-                "Mod update", () -> context -> {
-                    CompletableFuture<?> inner = updateService.applyUpdate(update);
-                    context.registerCancellation(() -> inner.cancel(true));
-                    return inner.join();
-                });
+                "Mod update", () -> {
+                    beginDownload.accept("正在更新 " + update.installedMod().displayName() + "…");
+                    return context -> {
+                        CompletableFuture<?> inner = updateService.applyUpdate(update);
+                        context.registerCancellation(() -> inner.cancel(true));
+                        return inner.join();
+                    };
+                }, (result, error) -> completeUpdate(update, error));
         setActiveDownload.accept(task);
         return task.completion();
+    }
+
+    private void completeUpdate(ModUpdate update, Throwable error) {
+        Platform.runLater(() -> {
+            finishDownload.run();
+            if (error != null) {
+                setError.accept(errorFormatter.apply(error));
+            } else {
+                updates.remove(update.installedMod().projectId());
+                setUpdateCount.accept(updates.size());
+                refreshInstalled.run();
+                setOperation.accept("模组更新完成");
+            }
+        });
     }
 }

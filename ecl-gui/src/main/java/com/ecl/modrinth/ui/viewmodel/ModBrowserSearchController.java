@@ -31,6 +31,7 @@ final class ModBrowserSearchController {
     private final ModMetadataProvider provider;
     private final AtomicInteger offset = new AtomicInteger();
     private String category = "";
+    private java.util.concurrent.CompletableFuture<?> activeSearch;
 
     ModBrowserSearchController(ModMetadataProvider provider, StringProperty searchText,
                                ObjectProperty<ModSearchIndex> sortIndex,
@@ -61,6 +62,7 @@ final class ModBrowserSearchController {
     }
 
     void search(boolean append) {
+        if (operations.hasActiveDownload()) return;
         ModInstanceContext context = instanceSupplier.get();
         if (!context.loader().supportsMods()) {
             setError.accept("当前是原版实例，请先选择 Fabric、Quilt、Forge 或 NeoForge 实例。");
@@ -72,13 +74,13 @@ final class ModBrowserSearchController {
             results.clear();
         }
         long requestGeneration = generation.incrementAndGet();
-        operations.cancel();
+        if (activeSearch != null && !activeSearch.isDone()) activeSearch.cancel(true);
         operations.begin("正在搜索兼容模组…", true);
         Set<String> categories = category.isBlank() ? Set.of() : Set.of(category);
         ModSearchQuery query = new ModSearchQuery(searchText.get(), context.minecraftVersion(),
                 context.loaderName(), categories, sortIndex.get(), offset.get(), 20);
         var request = provider.search(query).whenComplete((result, error) -> Platform.runLater(() -> {
-            if (requestGeneration != generation.get()) {
+            if (requestGeneration != generation.get() || operations.hasActiveDownload()) {
                 return;
             }
             operations.finish();
@@ -96,5 +98,6 @@ final class ModBrowserSearchController {
                     ? "没有找到兼容结果" : "已加载 " + results.size() + " 个结果");
         }));
         operations.track(request);
+        activeSearch = request;
     }
 }

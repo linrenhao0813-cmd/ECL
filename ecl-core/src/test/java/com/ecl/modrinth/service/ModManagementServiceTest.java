@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -71,6 +72,35 @@ class ModManagementServiceTest {
         assertConflict(() -> service.setEnabled(instance, List.of("api"), false).join());
         assertConflict(() -> service.uninstall(instance, List.of("api")).join());
         assertTrue(Files.exists(instance.modsDirectory().resolve("api.jar")));
+    }
+
+    @Test
+    void sharedDependencyCannotBeRemovedWithOnlyOneOwner() throws Exception {
+        createModFile("first.jar", true);
+        createModFile("second.jar", true);
+        createModFile("api.jar", true);
+        repository.saveAll(instance, List.of(record("first", true, false, ""), record("second", true, false, ""),
+                record("api", true, true, "first").withRequiredByProjectIds(Set.of("first", "second"))));
+
+        assertConflict(() -> service.uninstall(instance, List.of("first", "api")).join());
+        assertConflict(() -> service.setEnabled(instance, List.of("first", "api"), false).join());
+        service.setEnabled(instance, List.of("first", "second", "api"), false).join();
+        assertConflict(() -> service.setEnabled(instance, List.of("second"), true).join());
+        assertEquals(Set.of("first", "second"), repository.findByProjectId(instance, "api").orElseThrow().requiredByProjectIds());
+    }
+
+    @Test
+    void legacyUnknownDependenciesRequireScanOrStoppingAllUnknownOwners() throws Exception {
+        createModFile("root.jar", true);
+        createModFile("api.jar", true);
+        repository.saveAll(instance, List.of(record("root", true, false, "").withDependencyMetadataKnown(false),
+                record("api", true, false, "")));
+
+        assertConflict(() -> service.uninstall(instance, List.of("api")).join());
+        assertConflict(() -> service.setEnabled(instance, List.of("api"), false).join());
+        service.setEnabled(instance, List.of("root"), false).join();
+        service.uninstall(instance, List.of("api")).join();
+        assertFalse(Files.exists(instance.modsDirectory().resolve("api.jar")));
     }
 
     @Test

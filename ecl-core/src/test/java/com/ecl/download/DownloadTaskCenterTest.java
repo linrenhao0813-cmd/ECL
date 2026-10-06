@@ -8,14 +8,97 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class DownloadTaskCenterTest {
+    @Test
+    void completionHandlerFollowsRetriesAndBlocksOldAttempts() throws Exception {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
+            AtomicInteger attempts = new AtomicInteger();
+            AtomicInteger notifications = new AtomicInteger();
+            var initial = center.submit("retry", () -> context -> {
+                if (attempts.incrementAndGet() == 1) throw new IOException("temporary");
+                return "done";
+            }, (result, error) -> notifications.incrementAndGet());
+            assertThrows(ExecutionException.class, () -> initial.completion().get(5, TimeUnit.SECONDS));
+            assertTrue(center.canRetry(initial.id()));
+            var retry = initial.retry();
+            assertNotNull(retry);
+            assertEquals("done", retry.completion().get(5, TimeUnit.SECONDS));
+            assertEquals(2, notifications.get());
+            assertFalse(center.canRetry(initial.id()));
+            assertNull(initial.retry());
+            assertEquals(2, attempts.get());
+        }
+    }
+
+    @Test
+    void queuedCancellationNotifiesCompletionOutsideTheQueueLock() throws Exception {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1);
+             var observer = Executors.newSingleThreadExecutor()) {
+            CountDownLatch release = new CountDownLatch(1);
+            var first = center.submit("running", context -> {
+                release.await(5, TimeUnit.SECONDS);
+                return null;
+            });
+            AtomicBoolean notified = new AtomicBoolean();
+            AtomicBoolean queueReadable = new AtomicBoolean();
+            var queued = center.submit("queued", () -> context -> {
+                throw new AssertionError("Cancelled queued operation must not run");
+            }, (result, error) -> {
+                notified.set(true);
+                try {
+                    queueReadable.set(observer.submit(() -> !center.snapshots().isEmpty())
+                            .get(1, TimeUnit.SECONDS));
+                } catch (Exception ignored) {
+                    queueReadable.set(false);
+                }
+            });
+            try {
+                assertTrue(queued.cancel());
+                assertTrue(queued.completion().isCancelled());
+                assertTrue(notified.get());
+                assertTrue(queueReadable.get());
+            } finally {
+                release.countDown();
+            }
+            first.completion().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void concurrentRetriesCreateOnlyOneNewAttempt() throws Exception {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1);
+             var callers = Executors.newFixedThreadPool(2)) {
+            CountDownLatch release = new CountDownLatch(1);
+            AtomicInteger attempts = new AtomicInteger();
+            var initial = center.submit("retry", () -> context -> {
+                if (attempts.incrementAndGet() == 1) throw new IOException("temporary");
+                release.await(5, TimeUnit.SECONDS);
+                return null;
+            });
+            assertThrows(ExecutionException.class, () -> initial.completion().get(5, TimeUnit.SECONDS));
+            var first = callers.submit(initial::retry);
+            var second = callers.submit(initial::retry);
+            try {
+                var a = first.get(5, TimeUnit.SECONDS);
+                var b = second.get(5, TimeUnit.SECONDS);
+                assertEquals(1, (a == null ? 0 : 1) + (b == null ? 0 : 1));
+                release.countDown();
+                (a == null ? b : a).completion().get(5, TimeUnit.SECONDS);
+                assertEquals(2, attempts.get());
+            } finally {
+                release.countDown();
+            }
+        }
+    }
     @Test
     void failurePreservesErrorAndStartsNextQueuedTask() throws Exception {
         try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {

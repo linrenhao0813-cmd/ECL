@@ -7,7 +7,10 @@ import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModVersion;
+import com.ecl.modrinth.model.ModDependency;
+import com.ecl.modrinth.model.DependencyType;
 import com.ecl.modrinth.repository.FileInstalledModRepository;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -15,6 +18,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -53,6 +57,47 @@ class LocalModScannerTest {
         assertTrue(result.installedMods().stream()
                 .anyMatch(mod -> mod.projectId().startsWith("local:") && mod.fileName().equals("unknown.jar")));
         assertTrue(Files.exists(instance.gameDirectory().resolve("launcher-mods.json")));
+    }
+
+    @Test
+    void scanningRebuildsLegacySharedDependenciesFromAlreadyFetchedVersionMetadata() throws Exception {
+        for (String project : List.of("first", "second", "shared")) {
+            Path file = instance.modsDirectory().resolve(project + ".jar");
+            TestFixtures.createJar(file, project);
+            var dependencies = project.equals("shared") ? List.<ModDependency>of()
+                    : List.of(new ModDependency("", "shared", "", DependencyType.REQUIRED));
+            api.hashes.put(hashes.calculate(file).sha1(), TestFixtures.fabricVersion(project + "-v1", project, dependencies));
+        }
+        scanner().scan(instance).join();
+        removeDependencyFieldsFromLegacyIndex();
+
+        LocalModScanResult migrated = scanner().scan(instance).join();
+
+        var shared = migrated.installedMods().stream().filter(mod -> mod.projectId().equals("shared")).findFirst().orElseThrow();
+        assertEquals(Set.of("first", "second"), shared.requiredByProjectIds());
+        assertTrue(migrated.installedMods().stream().allMatch(mod -> mod.dependencyMetadataKnown()));
+        assertTrue(migrated.items().stream().allMatch(item -> migrated.installedMods().contains(item.installedMod())));
+        assertEquals(2, api.hashLookups);
+    }
+
+    @Test
+    void offlineScanDoesNotClaimToRecoverMissingLegacyDependencyMetadata() throws Exception {
+        Path file = instance.modsDirectory().resolve("unknown.jar");
+        TestFixtures.createJar(file, "unknown");
+        scanner().scan(instance).join();
+        removeDependencyFieldsFromLegacyIndex();
+
+        assertFalse(scanner().scan(instance).join().installedMods().getFirst().dependencyMetadataKnown());
+    }
+
+    private void removeDependencyFieldsFromLegacyIndex() throws Exception {
+        Path index = instance.gameDirectory().resolve("launcher-mods.json");
+        var json = JsonParser.parseString(Files.readString(index)).getAsJsonObject();
+        json.getAsJsonArray("mods").forEach(entry -> {
+            entry.getAsJsonObject().remove("requiredByProjectIds");
+            entry.getAsJsonObject().remove("dependencyMetadataKnown");
+        });
+        Files.writeString(index, json.toString());
     }
 
     @Test
@@ -154,7 +199,7 @@ class LocalModScannerTest {
 
     private DefaultLocalModScanner scanner() {
         return new DefaultLocalModScanner(api, new FileInstalledModRepository(), hashes,
-                new DefaultModVersionSelector(), new InstanceOperationCoordinator(),
+                new InstanceOperationCoordinator(),
                 Runnable::run, ignored -> false);
     }
 }

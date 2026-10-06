@@ -70,8 +70,48 @@ class LaunchCommandBuilderTest {
         Files.write(file, new byte[]{4, 5, 6});
     }
 
-    private LaunchCommand build(LaunchOptions.Builder optionsBuilder) throws IOException {
-        throw new UnsupportedOperationException("use LaunchCommandBuilder directly in tests");
+    @Test
+    void legacyMinecraftArgumentsReceiveNativePathAndUserProperties() throws Exception {
+        writeVersion("1.7.10", """
+                {"mainClass":"net.minecraft.client.main.Main",
+                 "minecraftArguments":"%s"}
+                """.formatted("--username ${auth_player_name} --version ${version_name} "
+                        + "--gameDir ${game_directory} --assetsDir ${assets_root} "
+                        + "--assetIndex ${assets_index_name} --uuid ${auth_uuid} "
+                        + "--accessToken ${auth_access_token} --userProperties ${user_properties} --userType ${user_type}"));
+        writeClientJar("1.7.10");
+        LaunchOptions options = options().versionId("1.7.10").build();
+
+        LaunchCommand command = new LaunchCommandBuilder().build(options, repository.resolve("1.7.10"), "java");
+
+        assertTrue(command.arguments().contains("-Djava.library.path=" + options.nativesDirectory().getAbsolutePath()));
+        assertEquals("{}", command.arguments().get(command.arguments().indexOf("--userProperties") + 1));
+        assertTrue(command.arguments().stream().noneMatch(argument -> argument.contains("${")));
+    }
+
+    @Test
+    void userNativePathIsNotOverwrittenByTheDefault() throws Exception {
+        String nativeArgument = "-Djava.library.path=C:\\Custom Native Libraries";
+        LaunchOptions options = options().jvmArguments(List.of(nativeArgument)).build();
+
+        LaunchCommand command = new LaunchCommandBuilder().build(options, repository.resolve("1.21"), "java");
+
+        assertEquals(List.of(nativeArgument), command.arguments().stream()
+                .filter(argument -> argument.startsWith("-Djava.library.path=")).toList());
+    }
+
+    @Test
+    void metadataNativePathIsNotDuplicated() throws Exception {
+        writeVersion("modern", """
+                {"mainClass":"net.minecraft.client.main.Main",
+                 "arguments":{"jvm":["-Djava.library.path=${natives_directory}"]}}
+                """);
+        writeClientJar("modern");
+        LaunchOptions options = options().versionId("modern").build();
+
+        LaunchCommand command = new LaunchCommandBuilder().build(options, repository.resolve("modern"), "java");
+
+        assertEquals(1, command.arguments().stream().filter(argument -> argument.startsWith("-Djava.library.path=")).count());
     }
 
     @Test

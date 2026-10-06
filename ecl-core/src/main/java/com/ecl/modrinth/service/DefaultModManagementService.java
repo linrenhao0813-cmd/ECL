@@ -229,11 +229,17 @@ public final class DefaultModManagementService implements ModManagementService {
     }
 
     private static void verifyNotRequired(List<InstalledMod> records, Set<String> selected, String operation) {
+        List<String> unknownOwners = records.stream().filter(InstalledMod::enabled)
+                .filter(mod -> !mod.dependencyMetadataKnown() && !selected.contains(mod.projectId()))
+                .map(InstalledMod::displayName).toList();
+        if (!unknownOwners.isEmpty()) {
+            throw new ModConflictException("无法" + operation + "：旧模组依赖信息尚未确认，请先联网扫描模组或一并停用这些模组: "
+                    + String.join("、", unknownOwners));
+        }
         for (String projectId : selected) {
             List<String> ownerIds = records.stream()
                     .filter(mod -> projectId.equals(mod.projectId()))
-                    .filter(InstalledMod::dependency)
-                    .map(InstalledMod::requiredByProjectId)
+                    .flatMap(mod -> mod.requiredByProjectIds().stream())
                     .filter(owner -> owner != null && !owner.isBlank())
                     .distinct()
                     .toList();
@@ -263,8 +269,7 @@ public final class DefaultModManagementService implements ModManagementService {
                         + "：模组记录与当前 Minecraft 版本或加载器不兼容");
             }
             List<String> missingDependencies = records.stream()
-                    .filter(InstalledMod::dependency)
-                    .filter(dependency -> mod.projectId().equals(dependency.requiredByProjectId()))
+                    .filter(dependency -> dependency.requiredByProjectIds().contains(mod.projectId()))
                     .filter(dependency -> !dependency.enabled()
                             && !selected.contains(dependency.projectId()))
                     .map(dependency -> dependency.displayName() == null
@@ -286,7 +291,8 @@ public final class DefaultModManagementService implements ModManagementService {
                 instance.gameDirectory().relativize(newPath.toAbsolutePath().normalize()),
                 source.sha1(), source.sha512(), source.fileSize(), source.minecraftVersion(),
                 source.loader(), source.versionType(), enabled, source.dependency(),
-                source.requiredByProjectId(), source.installedAt(), Instant.now());
+                source.requiredByProjectId(), source.installedAt(), Instant.now(),
+                source.requiredByProjectIds(), source.dependencyMetadataKnown());
     }
 
     private static Path resolveRecordPath(ModInstanceContext instance, InstalledMod record) {

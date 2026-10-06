@@ -748,10 +748,6 @@ class LauncherUIView extends javafx.application.Application {
                 .anyMatch(entry -> version.equals(entry.getValue()) && entry.getKey().isAlive());
     }
 
-    private void showContentDownloadDialog(ContentTarget target) {
-        contentBrowser.showContentDownloadDialog(target);
-    }
-
     /** The launch target profile id. Business code reads this instead of the selector control. */
     String getSelectedVersion() {
         return instanceSelection.launchTarget();

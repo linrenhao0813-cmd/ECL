@@ -20,6 +20,7 @@ final class MrpackOverrideExtractor {
     static int extract(ZipFile zip, String prefix, Path instanceRoot, ExtractionBudget budget)
             throws IOException {
         int extracted = 0;
+        java.util.Set<Path> targets = new java.util.HashSet<>();
         var entries = zip.entries();
         while (entries.hasMoreElements()) {
             ZipEntry entry = entries.nextElement();
@@ -34,9 +35,7 @@ final class MrpackOverrideExtractor {
             if (++budget.entries > MAX_ENTRIES) {
                 throw new IOException("MRPACK override entry count exceeds the safety limit");
             }
-            String normalizedTarget = instanceRoot.toAbsolutePath().normalize()
-                    .relativize(destination.toAbsolutePath().normalize()).toString();
-            if (!budget.targets.add(normalizedTarget)) {
+            if (!targets.add(destination)) {
                 throw new IOException("Duplicate MRPACK override target: " + relative);
             }
             if (entry.isDirectory()) {
@@ -84,6 +83,5 @@ final class MrpackOverrideExtractor {
     static final class ExtractionBudget {
         private long total;
         private int entries;
-        private final java.util.Set<String> targets = new java.util.HashSet<>();
     }
 }

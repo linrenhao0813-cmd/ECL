@@ -52,6 +52,7 @@ final class LauncherInstanceBar {
                 ui.versionCombo.setValue(target);
             }
         });
+        ui.versionCombo.setValue(ui.getSelectedVersion());
 
         ui.selectedVersionWikiButton = ui.createSelectedVersionWikiButton();
 

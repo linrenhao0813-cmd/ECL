@@ -192,11 +192,6 @@ final class LauncherStatusBar {
                 || status == DownloadTaskCenter.Status.RUNNING;
     }
 
-    private static boolean canRetry(DownloadTaskCenter.Status status) {
-        return status == DownloadTaskCenter.Status.FAILED
-                || status == DownloadTaskCenter.Status.CANCELLED;
-    }
-
     private static String statusText(DownloadTaskCenter.Status status) {
         return Messages.get("tasks.status." + status.name().toLowerCase(java.util.Locale.ROOT));
     }
@@ -263,8 +258,9 @@ final class LauncherStatusBar {
             boolean cancellable = canCancel(task.status());
             cancelButton.setManaged(cancellable);
             cancelButton.setVisible(cancellable);
-            retryButton.setManaged(canRetry(task.status()));
-            retryButton.setVisible(canRetry(task.status()));
+            boolean retryable = ui.downloadTaskCenter != null && ui.downloadTaskCenter.canRetry(task.id());
+            retryButton.setManaged(retryable);
+            retryButton.setVisible(retryable);
             cancelButton.setAccessibleText(Messages.get("tasks.action.cancel") + " " + task.title());
             retryButton.setAccessibleText(Messages.get("tasks.action.retry") + " " + task.title());
             setText(null);

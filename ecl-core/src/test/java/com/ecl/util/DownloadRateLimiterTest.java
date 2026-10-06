@@ -1,13 +1,22 @@
 package com.ecl.util;
 
 import org.junit.jupiter.api.Test;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 /** Verifies that the download limiter is instance-scoped and resettable for tests. */
 class DownloadRateLimiterTest {
+
+    @Test
+    void transfersChunksLargerThanTheBucketCapacity() {
+        DownloadRateLimiter limiter = new DownloadRateLimiter();
+        limiter.setBytesPerSecond(4096);
+        assertTimeoutPreemptively(Duration.ofSeconds(3), () -> limiter.acquire(8192));
+    }
 
     @Test
     void isolatedInstanceDoesNotShareStateWithDefault() throws Exception {

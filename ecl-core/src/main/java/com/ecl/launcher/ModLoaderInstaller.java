@@ -1,6 +1,7 @@
 package com.ecl.launcher;
 
 import com.ecl.ECLConfig;
+import com.ecl.game.VersionRepository;
 import com.ecl.launch.JavaVersionRequirement;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.FileUtil;
@@ -291,8 +292,11 @@ public final class ModLoaderInstaller {
         }
     }
 
-    private static int requiredJavaForMinecraft(String version) {
-        return JavaVersionRequirement.inferFromVersionId(version);
+    int requiredJavaForMinecraft(String version) throws IOException {
+        VersionRepository versions = new VersionRepository(versionsDirectory.toFile());
+        return versions.contains(version)
+                ? JavaVersionRequirement.forMetadata(versions.resolve(version))
+                : JavaVersionRequirement.inferFromVersionId(version);
     }
 
 }

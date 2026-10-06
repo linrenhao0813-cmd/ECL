@@ -23,6 +23,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -32,6 +34,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 class HttpUtilTest {
+
+    @Test
+    void timesOutAStalledBodyAfterReceivingHeaders() {
+        CountDownLatch release = new CountDownLatch(1);
+        server.createContext("/stalled", exchange -> {
+            exchange.sendResponseHeaders(200, 2);
+            try (var output = exchange.getResponseBody()) {
+                output.write('a');
+                output.flush();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                output.write('b');
+            }
+        });
+        try {
+            IOException failure = assertThrows(IOException.class, () -> HttpRequestExecutor.request(
+                    "GET", baseUrl + "/stalled", null, null, Map.of(), 1000, 300, 16));
+            assertTrue(failure.getMessage().contains("timed out"));
+        } finally {
+            release.countDown();
+        }
+    }
 
     @Test
     void createsAndReusesClientsWithTheRequestedConnectTimeout() {

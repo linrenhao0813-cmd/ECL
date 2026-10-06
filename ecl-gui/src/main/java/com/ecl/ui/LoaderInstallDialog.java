@@ -66,14 +66,17 @@ final class LoaderInstallDialog {
                 case "NeoForge" -> ModLoaderInstaller.Loader.NEOFORGE;
                 default -> ModLoaderInstaller.Loader.FABRIC;
             };
-            install.setDisable(true);
-            cancel.setDisable(true);
-            ui.setControlsBusy(true);
-            ui.startProgressAnimation(ui.downloadProgress);
-            ui.downloadTaskCenter.submit("Loader " + loader.displayName(), () -> context -> {
-                try {
+            String loaderVersion = versionField.getText().trim();
+            ui.downloadTaskCenter.<ModLoaderInstaller.InstallResult>submit("Loader " + loader.displayName(), () -> {
+                LauncherUiFactory.runOnUi(() -> {
+                    install.setDisable(true);
+                    cancel.setDisable(true);
+                    ui.setControlsBusy(true);
+                    ui.startProgressAnimation(ui.downloadProgress);
+                });
+                return context -> {
                     ModLoaderInstaller.InstallResult result = ui.modLoaderInstaller.install(
-                            gameVersion, loader, versionField.getText().trim(),
+                            gameVersion, loader, loaderVersion,
                             new ModLoaderInstaller.Listener() {
                                 @Override
                                 public void onStatus(String message) {
@@ -92,39 +95,32 @@ final class LoaderInstallDialog {
                                 }
                             });
                     ui.gameRepository().applyDefaultIsolationSettingForNewInstance(result.profileId());
-                    if (context.isCancelled()) return null;
-                    Platform.runLater(() -> {
-                        if (context.isCancelled()) return;
-                        ui.stopProgressAnimation(ui.downloadProgress, true);
-                        ui.setControlsBusy(false);
-                        ui.versionActions.restoreVersionComboItems(result.profileId());
-                        ui.versionCombo.setValue(result.profileId());
-                        ui.setStatus("加载器安装完成", result.loader().displayName() + " "
-                                + result.loaderVersion() + " / Minecraft " + result.minecraftVersion());
-                        dialog.close();
-                        ui.renderActiveView();
-                    });
-                } catch (Exception error) {
-                    boolean cancelled = context.isCancelled() || ui.isCancellation(error);
-                    Platform.runLater(() -> {
-                        ui.stopProgressAnimation(ui.downloadProgress, true);
-                        ui.setControlsBusy(false);
-                        install.setDisable(false);
-                        cancel.setDisable(false);
-                        if (cancelled) {
-                            installStatus.setText(Messages.get("download.status.cancelled"));
-                            ui.setStatus(Messages.get("download.status.cancelled"), "");
-                        } else {
-                            String message = ui.cleanMessage(error);
-                            installStatus.setText(Messages.format(
-                                    "download.status.failed", message));
-                            ui.setStatus(Messages.get("status.downloadFailed"), message);
-                        }
-                    });
-                    throw error;
+                    if (context.isCancelled()) {
+                        throw new java.util.concurrent.CancellationException(Messages.get("download.status.cancelled"));
+                    }
+                    return result;
+                };
+            }, (result, error) -> Platform.runLater(() -> {
+                ui.stopProgressAnimation(ui.downloadProgress, true);
+                ui.setControlsBusy(false);
+                install.setDisable(false);
+                cancel.setDisable(false);
+                if (error != null) {
+                    String message = ui.cleanMessage(error);
+                    String title = ui.isCancellation(error) ? Messages.get("download.status.cancelled")
+                            : Messages.get("status.downloadFailed");
+                    installStatus.setText(ui.isCancellation(error) ? title
+                            : Messages.format("download.status.failed", message));
+                    ui.setStatus(title, message);
+                    return;
                 }
-                return null;
-            });
+                ui.versionActions.restoreVersionComboItems(result.profileId());
+                ui.setLaunchTarget(result.profileId());
+                ui.setStatus("加载器安装完成", result.loader().displayName() + " "
+                        + result.loaderVersion() + " / Minecraft " + result.minecraftVersion());
+                dialog.close();
+                ui.renderActiveView();
+            }));
         });
 
         HBox buttons = new HBox(10, install, cancel);

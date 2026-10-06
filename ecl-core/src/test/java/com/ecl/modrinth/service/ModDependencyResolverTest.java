@@ -154,6 +154,7 @@ class ModDependencyResolverTest {
         assertEquals(List.of("shared", "first", "second", "root"),
                 result.installOrder().stream().map(mod -> mod.version().projectId()).toList());
         assertEquals("first", result.installOrder().getFirst().requiredByProjectId());
+        assertEquals(Set.of("first", "second"), result.requiredByProjects().get("shared"));
         assertEquals(List.of("root", "first", "shared"), result.installOrder().getFirst().dependencyPath());
         assertEquals(List.of("root", "second"), result.installOrder().get(2).dependencyPath());
         assertEquals(List.of("root"), result.installOrder().getLast().dependencyPath());
@@ -243,6 +244,30 @@ class ModDependencyResolverTest {
 
         assertEquals(List.of("root"),
                 result.installOrder().stream().map(mod -> mod.version().projectId()).toList());
+        assertEquals(Set.of("root"), result.requiredByProjects().get("dependency"));
+    }
+
+    @Test
+    void detectsIncompatibleProjectAddedLaterInTraversal() {
+        ModVersion conflicting = version("bad-v1", "bad");
+        api.projectVersions.put("bad", List.of(conflicting));
+        ModVersion root = version("root-v1", "root", depProject("bad", DependencyType.INCOMPATIBLE),
+                depProject("bad", DependencyType.REQUIRED));
+
+        DependencyResolutionResult result = resolver().resolve(instance, root).join();
+
+        assertEquals(1, result.conflicts().size());
+        assertFalse(new InstallationPlanBuilder().build(instance, root, result).installable());
+    }
+
+    @Test
+    void detectsPinnedIncompatibleVersionAddedLaterInTraversal() {
+        ModVersion conflicting = version("bad-v1", "bad");
+        api.projectVersions.put("bad", List.of(conflicting));
+        ModVersion root = version("root-v1", "root", depVersion("bad-v1", "", DependencyType.INCOMPATIBLE),
+                depProject("bad", DependencyType.REQUIRED));
+
+        assertEquals(1, resolver().resolve(instance, root).join().conflicts().size());
     }
 
     @Test

@@ -7,13 +7,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Writes and annotates Loader-generated version profiles. */
+/** Annotates loader-generated version profiles. */
 final class LoaderProfileWriter {
-    void writeProfile(Path profileDir, String profileId, JsonObject profile) throws IOException {
-        Files.createDirectories(profileDir);
-        HttpUtil.writeJson(profileDir.resolve(profileId + ".json").toFile(), profile);
-    }
-
     void annotateProfile(Path jsonFile, String minecraftVersion,
                          ModLoaderInstaller.Loader loader, String loaderVersion)
             throws IOException {

@@ -57,7 +57,7 @@ public final class InstallationPlanBuilder {
                 warnings,
                 totalSize,
                 files.size() > 1 || !resolution.optionalDependencies().isEmpty()
-                        || !warnings.isEmpty());
+                        || !warnings.isEmpty(), resolution.requiredByProjects());
     }
 
     private static boolean hasExpectedHash(com.ecl.modrinth.model.ModFile file) {

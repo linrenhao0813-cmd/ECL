@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -122,11 +123,12 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
                 selectedOptionalProjectIds == null ? Set.of() : Set.copyOf(selectedOptionalProjectIds),
                 effectiveChannel);
         return visit(context, rootVersion, rootFile, false, "", new ArrayDeque<>(), 0)
-                .thenApply(ignored -> new DependencyResolutionResult(
-                        context.installOrder,
-                        context.optionalDependencies,
-                        context.conflicts,
-                        context.warnings));
+                .thenApply(ignored -> {
+                    context.incompatibleDependencies.forEach(incompatible -> detectIncompatible(
+                            context, incompatible.owner(), incompatible.dependency(), incompatible.path()));
+                    return new DependencyResolutionResult(context.installOrder, context.optionalDependencies,
+                            context.conflicts, context.warnings, context.requiredByProjects);
+                });
     }
 
     private CompletableFuture<Void> visit(
@@ -181,7 +183,7 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
             case REQUIRED -> resolveRequiredDependency(context, owner, dependency, path, depth);
             case OPTIONAL -> resolveOptionalDependency(context, owner, dependency, path, depth);
             case INCOMPATIBLE -> {
-                detectIncompatible(context, owner, dependency, path);
+                context.incompatibleDependencies.add(new IncompatibleDependency(owner, dependency, List.copyOf(path)));
                 yield CompletableFuture.completedFuture(null);
             }
             case EMBEDDED -> {
@@ -194,11 +196,14 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
 
     private CompletableFuture<Void> resolveRequiredDependency(
             ResolutionContext context, ModVersion owner, ModDependency dependency, Deque<String> path, int depth) {
-        if (hasInstalledDependencyFile(context, dependency)) {
+        InstalledMod installed = findInstalledDependency(context, dependency);
+        if (installed != null) {
+            context.requireDependency(installed.projectId(), projectIdentity(owner));
             return CompletableFuture.completedFuture(null);
         }
         return resolveDependencyVersion(context, dependency, path)
                 .thenCompose(version -> {
+                    context.requireDependency(projectIdentity(version), projectIdentity(owner));
                     ModFile file = versionSelector.selectInstallFile(version)
                             .orElseThrow(() -> missingDependency(path, dependency, "没有可安装文件"));
                     return visit(context, version, file, true, projectIdentity(owner), path, depth);
@@ -229,17 +234,17 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
                 });
     }
 
-    private static boolean hasInstalledDependencyFile(ResolutionContext context, ModDependency dependency) {
+    private static InstalledMod findInstalledDependency(ResolutionContext context, ModDependency dependency) {
         String requiredVersionId = text(dependency.versionId());
         String requiredProjectId = text(dependency.projectId());
         if (requiredVersionId.isBlank() && requiredProjectId.isBlank()) {
-            return false;
+            return null;
         }
 
         Collection<InstalledMod> candidates = requiredVersionId.isBlank()
                 ? context.installedByProjectId.getOrDefault(requiredProjectId, List.of())
                 : context.installedByVersionId.getOrDefault(requiredVersionId, List.of());
-        return candidates.stream().anyMatch(context::isUsableInstalledFile);
+        return candidates.stream().filter(context::isUsableInstalledFile).findFirst().orElse(null);
     }
 
     private static boolean isUsableInstalledFile(
@@ -293,11 +298,13 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
     }
 
     private void detectIncompatible(
-            ResolutionContext context, ModVersion owner, ModDependency dependency, Deque<String> path) {
+            ResolutionContext context, ModVersion owner, ModDependency dependency, List<String> path) {
         String targetProject = dependency.projectId();
         String targetVersion = dependency.versionId();
         boolean planned = targetProject != null && !targetProject.isBlank()
                 && context.selectedVersions.containsKey(targetProject);
+        planned |= targetVersion != null && !targetVersion.isBlank()
+                && context.selectedVersions.values().stream().anyMatch(version -> targetVersion.equals(version.id()));
         boolean installed = context.installedMods.stream().anyMatch(mod ->
                 (targetProject != null && !targetProject.isBlank() && targetProject.equals(mod.projectId()))
                         || (targetVersion != null && !targetVersion.isBlank() && targetVersion.equals(mod.versionId())));
@@ -332,10 +339,13 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
                 ? "version:" + version.id() : version.projectId();
     }
 
-    private static List<String> appendPath(Deque<String> path, String value) {
+    private static List<String> appendPath(Collection<String> path, String value) {
         List<String> result = new ArrayList<>(path);
         result.add(value);
         return result;
+    }
+
+    private record IncompatibleDependency(ModVersion owner, ModDependency dependency, List<String> path) {
     }
 
     private static Throwable unwrap(Throwable error) {
@@ -362,6 +372,8 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         private final List<ResolvedMod> optionalDependencies = new ArrayList<>();
         private final List<ModConflict> conflicts = new ArrayList<>();
         private final List<String> warnings = new ArrayList<>();
+        private final Map<String, Set<String>> requiredByProjects = new HashMap<>();
+        private final List<IncompatibleDependency> incompatibleDependencies = new ArrayList<>();
         // Counts distinct visited projects, including the root; repeated versions do not consume the limit.
         private int dependencyCount;
 
@@ -385,6 +397,10 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
                     DefaultModDependencyResolver.isUsableInstalledFile(
                             mod, instance.gameDirectory().toAbsolutePath().normalize(),
                             instance.modsDirectory().toAbsolutePath().normalize()));
+        }
+
+        private void requireDependency(String projectId, String owner) {
+            requiredByProjects.computeIfAbsent(projectId, ignored -> new HashSet<>()).add(owner);
         }
 
         private Map<String, List<InstalledMod>> indexInstalledMods(

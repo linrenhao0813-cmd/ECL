@@ -122,6 +122,7 @@ public final class ModBrowserViewModel implements AutoCloseable {
                 updateService, managementService, downloadTaskCenter, this::requireInstance,
                 () -> List.copyOf(installedMods), installedModController::isLoaded, installedMods::setAll,
                 installedModController::setLoaded, operations::begin, operations::finish,
+                operations::beginDownload, operations::finishDownload,
                 errorMessage::set, currentOperation::set, updateCount::set,
                 this::refreshInstalled, operations::track, operations::trackDownload,
                 ModBrowserViewModel::userMessage);

@@ -33,6 +33,7 @@ final class LaunchVariables {
         variables.put("${game_directory}", gameDir == null ? "" : gameDir.getAbsolutePath());
         variables.put("${assets_root}", assetsRoot.getAbsolutePath());
         variables.put("${assets_index_name}", assetIndexName(version));
+        variables.put("${user_properties}", "{}");
         variables.put("${user_type}", auth.getType().name().toLowerCase());
         variables.put("${natives_directory}", options.nativesDirectory().getAbsolutePath());
         variables.put("${library_directory}", librariesDir.getAbsolutePath());

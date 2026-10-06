@@ -26,6 +26,11 @@ final class LauncherUiFactory {
     private LauncherUiFactory() {
     }
 
+    static void runOnUi(Runnable action) {
+        if (javafx.application.Platform.isFxApplicationThread()) action.run();
+        else javafx.application.Platform.runLater(action);
+    }
+
     static Button actionButton(String text, String styleClass, Runnable action) {
         Button button = new Button(text);
         button.getStyleClass().addAll("app-button", styleClass);

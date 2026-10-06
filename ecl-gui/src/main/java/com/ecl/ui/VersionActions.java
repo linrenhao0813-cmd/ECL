@@ -83,7 +83,7 @@ final class VersionActions {
                     if (generation != versionListGeneration.get()) {
                         return;
                     }
-                    String current = ui.versionCombo.getValue();
+                    String current = ui.getSelectedVersion();
                     applyInstalledVersions(versions, current);
                     ui.setStatus("本地实例已更新", versions.isEmpty()
                             ? "没有发现已下载实例，请先到“下载”页安装。"
@@ -150,20 +150,15 @@ final class VersionActions {
      * Content is downloaded into the instance directory of {@code contentVersion}. To keep the
      * launched game directory identical to the download target (so mods / shaderpacks /
      * resourcepacks are actually loaded), the launch selection is realigned to that version after
-     * a successful import. Only selects the value when it is already offered by the combo.
+     * a successful import, even before the selector's asynchronous refresh has finished.
      */
     void syncLaunchVersionToContent(String contentVersion) {
         if (contentVersion == null || contentVersion.isBlank()) {
             return;
         }
         ui.lastContentVersion = contentVersion;
-        if (ui.versionCombo == null || contentVersion.equals(ui.versionCombo.getValue())) {
-            return;
-        }
-        if (ui.versionCombo.getItems().contains(contentVersion)) {
-            ui.versionCombo.setValue(contentVersion);
-            ui.updateRuntimeSummary();
-        }
+        ui.setLaunchTarget(contentVersion);
+        ui.updateRuntimeSummary();
     }
 
     void openMinecraftWikiVersionPage(String version) {

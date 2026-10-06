@@ -160,7 +160,7 @@ public final class MainController implements AutoCloseable {
                 installedModRepository, instanceOperations, backgroundExecutor,
                 this::isInstanceRunning, hashVerifier);
         localModScanner = new DefaultLocalModScanner(
-                metadataProvider, installedModRepository, hashVerifier, modVersionSelector,
+                metadataProvider, installedModRepository, hashVerifier,
                 instanceOperations, backgroundExecutor, this::isInstanceRunning);
         modUpdateService = new DefaultModUpdateService(
                 metadataProvider, modVersionSelector, modDependencyResolver,

@@ -8,7 +8,7 @@ final class LauncherUiFacadeAdapter implements LaunchUiFacade {
         this.ui = ui;
     }
 
-    @Override public String selectedVersion() { return ui.versionCombo.getValue(); }
+    @Override public String selectedVersion() { return ui.getSelectedVersion(); }
     @Override public LoaderChoice requestedLoader() {
         return ui.loaderChoiceCombo == null ? LoaderChoice.VANILLA : ui.loaderChoiceCombo.getValue();
     }

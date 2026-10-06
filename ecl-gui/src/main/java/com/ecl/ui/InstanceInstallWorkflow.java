@@ -20,6 +20,7 @@ final class InstanceInstallWorkflow {
     private static final String FABRIC_API_SLUG = "fabric-api";
 
     interface Listener {
+        default void onStarted() { }
         void onStatus(String message);
         void onProgress(long downloaded, long total);
         void onComplete(String profileId);
@@ -46,13 +47,16 @@ final class InstanceInstallWorkflow {
             listener.onFailure(com.ecl.util.Messages.get("instance.install.fabricApiVersion.choose"));
             return;
         }
-        ui.setControlsBusy(true);
-        ui.downloadProgress.setProgress(0);
-        ui.startProgressAnimation(ui.downloadProgress);
         String title = "Minecraft " + minecraftVersion + " / " + choice.displayName;
-        DownloadTaskCenter.TaskHandle<String> task = ui.downloadTaskCenter.submit(
-                title, () -> context -> install(context, minecraftVersion, choice, loaderVersion, fabricApiVersion, listener));
-        task.completion().whenComplete((profileId, error) -> Platform.runLater(() -> {
+        ui.downloadTaskCenter.<String>submit(title, () -> {
+            LauncherUiFactory.runOnUi(() -> {
+                ui.setControlsBusy(true);
+                ui.downloadProgress.setProgress(0);
+                ui.startProgressAnimation(ui.downloadProgress);
+                listener.onStarted();
+            });
+            return context -> install(context, minecraftVersion, choice, loaderVersion, fabricApiVersion, listener);
+        }, (profileId, error) -> Platform.runLater(() -> {
             ui.stopProgressAnimation(ui.downloadProgress, error != null);
             ui.setControlsBusy(false);
             if (error != null) {

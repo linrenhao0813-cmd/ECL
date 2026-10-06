@@ -70,37 +70,44 @@ final class ModInstallationWorkflow {
     }
 
     CompletableFuture<ModInstallationResult> install(ModInstallationPlan plan) {
-        operations.begin("正在下载并事务安装…", true);
         CompletableFuture<ModInstallationResult> request = queue(plan);
         operations.track(request);
-        request.whenComplete((result, error) -> Platform.runLater(() -> {
-            operations.finish();
+        return request;
+    }
+
+    private void complete(ModInstallationResult result, Throwable error) {
+        Platform.runLater(() -> {
+            operations.finishDownload();
             if (error == null) {
                 setOperation.accept(result.updated() ? "模组更新完成" : "模组安装完成");
                 refreshInstalled.run();
             } else if (!isCancellation(error)) {
                 setError.accept(errorFormatter.apply(error));
             }
-        }));
-        return request;
+        });
     }
 
     private CompletableFuture<ModInstallationResult> queue(ModInstallationPlan plan) {
         if (taskCenter == null) {
+            operations.beginDownload("正在下载并事务安装…");
             return installationService.install(plan, progress -> operations.updateProgress(
-                    progress.overallDownloaded(), progress.overallTotal(), progress.fileName()));
+                    progress.overallDownloaded(), progress.overallTotal(), progress.fileName()))
+                    .whenComplete(this::complete);
         }
         DownloadTaskCenter.TaskHandle<ModInstallationResult> task = taskCenter.submit(
-                "Mod installation", () -> context -> {
-                    CompletableFuture<ModInstallationResult> inner = installationService.install(plan, progress -> {
-                        context.updateStatus("Downloading " + progress.fileName());
-                        context.updateProgress(progress.overallDownloaded(), progress.overallTotal());
-                        operations.updateProgress(progress.overallDownloaded(), progress.overallTotal(),
-                                progress.fileName());
-                    });
-                    context.registerCancellation(() -> inner.cancel(true));
-                    return inner.join();
-                });
+                "Mod installation", () -> {
+                    operations.beginDownload("正在下载并事务安装…");
+                    return context -> {
+                        CompletableFuture<ModInstallationResult> inner = installationService.install(plan, progress -> {
+                            context.updateStatus("Downloading " + progress.fileName());
+                            context.updateProgress(progress.overallDownloaded(), progress.overallTotal());
+                            operations.updateProgress(progress.overallDownloaded(), progress.overallTotal(),
+                                    progress.fileName());
+                        });
+                        context.registerCancellation(() -> inner.cancel(true));
+                        return inner.join();
+                    };
+                }, this::complete);
         operations.trackDownload(task);
         return task.completion();
     }

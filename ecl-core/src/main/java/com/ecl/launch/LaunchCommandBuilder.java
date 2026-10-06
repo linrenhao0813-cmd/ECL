@@ -108,6 +108,9 @@ public final class LaunchCommandBuilder {
             }
         }
         args.addAll(jvmArgumentsFromVersion(version, variables));
+        if (args.stream().noneMatch(argument -> argument.startsWith("-Djava.library.path="))) {
+            args.add("-Djava.library.path=" + variables.get("${natives_directory}"));
+        }
         args.add("-cp");
         args.add(buildClassPath(options, version));
         args.add(mainClass);

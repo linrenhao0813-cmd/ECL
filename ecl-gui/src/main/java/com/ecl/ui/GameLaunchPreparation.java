@@ -98,46 +98,49 @@ final class GameLaunchPreparation {
                     + "，但当前 Mojang 版本清单中没有该版本。请刷新版本列表后重试。");
             return;
         }
-        ui.setControlsBusy(true);
-        ui.downloadProgress.setProgress(0);
-        ui.startProgressAnimation(ui.downloadProgress);
-        ui.setStatus("正在准备下载", version.equals(downloadVersion)
-                ? version + " 首次启动需要补齐客户端、依赖库和资源文件。"
-                : version + " 将继承 " + downloadVersion + "，正在补齐基础客户端、依赖库和资源文件。");
-        var task = ui.downloadTaskCenter.submit("Minecraft " + downloadVersion, () -> context -> {
-            AtomicReference<String> failure = new AtomicReference<>();
-            ui.downloader.setListener(new GameDownloader.DownloadListener() {
-                @Override public void onStatus(String message) { context.updateStatus(message); Platform.runLater(() -> ui.setStatus("下载中", message)); }
-                @Override public void onProgress(long downloaded, long total) {
-                    context.updateProgress(downloaded, total); Platform.runLater(() -> {
-                        ui.updateProgress(ui.downloadProgress, downloaded, total);
-                        ui.detailLabel.setText("当前进度: " + ui.formatBytes(downloaded)
-                                + (total > 0 ? " / " + ui.formatBytes(total) : ""));
-                    });
-                }
-                @Override public void onError(String message) { failure.set(message); Platform.runLater(() -> {
-                    if (context.isCancelled()) return; ui.setStatus("下载失败", message);
-                    ui.stopProgressAnimation(ui.downloadProgress, true); ui.setControlsBusy(false);
-                }); }
-                @Override public void onComplete() { Platform.runLater(() -> {
-                    if (context.isCancelled()) return;
-                    ui.downloadProgress.setProgress(1); ui.stopProgressAnimation(ui.downloadProgress, true);
-                    if (!ui.versionManager.isVersionDownloaded(version)) { ui.setStatus("基础版本仍不完整",
-                            downloadVersion + " 下载完成，但 " + version + " 的继承客户端仍不可用，请检查版本配置。");
-                        ui.setControlsBusy(false); return; }
-                    ui.setStatus("下载完成", downloadVersion + " 已就绪，准备启动 " + version + "。");
-                    try { ui.gameRepository().applyDefaultIsolationSettingForNewInstance(version); }
-                    catch (IOException error) { LauncherUI.LOGGER.warn("Cannot persist default isolation for {}", version, error); }
-                    launcher.accept(version);
-                }); }
+        ui.downloadTaskCenter.submit("Minecraft " + downloadVersion, () -> {
+            LauncherUiFactory.runOnUi(() -> {
+                ui.setControlsBusy(true);
+                ui.downloadProgress.setProgress(0);
+                ui.startProgressAnimation(ui.downloadProgress);
+                ui.setStatus("正在准备下载", version.equals(downloadVersion)
+                        ? version + " 首次启动需要补齐客户端、依赖库和资源文件。"
+                        : version + " 将继承 " + downloadVersion + "，正在补齐基础客户端、依赖库和资源文件。");
             });
-            context.registerCancellation(ui.downloader::cancelDownload);
-            Future<?> future = ui.downloader.downloadVersionAsync(
-                    downloadVersion, url, target.versionSha1()); future.get();
-            if (failure.get() != null && !failure.get().isBlank()) throw new IOException(failure.get());
-            return null;
-        });
-        task.completion().whenComplete((ignored, error) -> Platform.runLater(() -> {
+            return context -> {
+                AtomicReference<String> failure = new AtomicReference<>();
+                ui.downloader.setListener(new GameDownloader.DownloadListener() {
+                    @Override public void onStatus(String message) { context.updateStatus(message); Platform.runLater(() -> ui.setStatus("下载中", message)); }
+                    @Override public void onProgress(long downloaded, long total) {
+                        context.updateProgress(downloaded, total); Platform.runLater(() -> {
+                            ui.updateProgress(ui.downloadProgress, downloaded, total);
+                            ui.detailLabel.setText("当前进度: " + ui.formatBytes(downloaded)
+                                    + (total > 0 ? " / " + ui.formatBytes(total) : ""));
+                        });
+                    }
+                    @Override public void onError(String message) { failure.set(message); Platform.runLater(() -> {
+                        if (context.isCancelled()) return; ui.setStatus("下载失败", message);
+                        ui.stopProgressAnimation(ui.downloadProgress, true); ui.setControlsBusy(false);
+                    }); }
+                    @Override public void onComplete() { Platform.runLater(() -> {
+                        if (context.isCancelled()) return;
+                        ui.downloadProgress.setProgress(1); ui.stopProgressAnimation(ui.downloadProgress, true);
+                        if (!ui.versionManager.isVersionDownloaded(version)) { ui.setStatus("基础版本仍不完整",
+                                downloadVersion + " 下载完成，但 " + version + " 的继承客户端仍不可用，请检查版本配置。");
+                            ui.setControlsBusy(false); return; }
+                        ui.setStatus("下载完成", downloadVersion + " 已就绪，准备启动 " + version + "。");
+                        try { ui.gameRepository().applyDefaultIsolationSettingForNewInstance(version); }
+                        catch (IOException error) { LauncherUI.LOGGER.warn("Cannot persist default isolation for {}", version, error); }
+                        launcher.accept(version);
+                    }); }
+                });
+                context.registerCancellation(ui.downloader::cancelDownload);
+                Future<?> future = ui.downloader.downloadVersionAsync(
+                        downloadVersion, url, target.versionSha1()); future.get();
+                if (failure.get() != null && !failure.get().isBlank()) throw new IOException(failure.get());
+                return null;
+            };
+        }, (ignored, error) -> Platform.runLater(() -> {
             if (error == null) return;
             ui.stopProgressAnimation(ui.downloadProgress, true);
             ui.setStatus(ui.isCancellation(error) ? com.ecl.util.Messages.get("download.status.cancelled")

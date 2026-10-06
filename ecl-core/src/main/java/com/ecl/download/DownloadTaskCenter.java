@@ -9,8 +9,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 
 /**
  * A process-wide download job queue.  Download implementations remain responsible
@@ -90,39 +92,44 @@ public final class DownloadTaskCenter implements AutoCloseable {
 
     public <T> TaskHandle<T> submit(String title, Operation<T> operation) {
         Objects.requireNonNull(operation, "operation");
-        return submit(title, () -> operation, 0);
+        return submit(title, () -> operation);
     }
 
     /** Submit a task whose operation is recreated for every retry attempt. */
     public <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory) {
-        return submit(title, operationFactory, 0);
+        return submit(title, operationFactory, null);
     }
 
-    private <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory,
-                                     int previousAttempts) {
-        return submit(title, operationFactory, previousAttempts, null);
-    }
-
-    private <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory,
-                                     int previousAttempts,
-                                     AtomicReference<DownloadTaskEntry<?>> familyCurrent) {
+    /** Completion is reported for every attempt, including queued cancellation and retries. */
+    public <T> TaskHandle<T> submit(String title, OperationFactory<T> operationFactory,
+                                    BiConsumer<T, Throwable> onComplete) {
         Objects.requireNonNull(operationFactory, "operationFactory");
         DownloadTaskEntry<T> entry;
         synchronized (lock) {
-            ensureOpen();
-            Operation<T> operation = Objects.requireNonNull(
-                    operationFactory.create(), "operationFactory.create()");
-            String id = "download-" + sequence.incrementAndGet();
-            AtomicReference<DownloadTaskEntry<?>> family = familyCurrent == null
-                    ? new AtomicReference<>() : familyCurrent;
-            entry = new DownloadTaskEntry<>(id,
-                    title == null || title.isBlank() ? "下载任务" : title, operation, family);
-            entry.operationFactory = operationFactory;
-            entry.attempts = Math.max(0, previousAttempts);
-            entries.put(id, entry);
-            family.set(entry);
-            queue.addLast(entry);
+            entry = enqueueLocked(title, operationFactory, 0, new AtomicReference<>(), onComplete);
         }
+        return startSubmitted(entry);
+    }
+
+    private <T> DownloadTaskEntry<T> enqueueLocked(String title, OperationFactory<T> operationFactory,
+                                                   int previousAttempts,
+                                                   AtomicReference<DownloadTaskEntry<?>> family,
+                                                   BiConsumer<T, Throwable> onComplete) {
+        ensureOpen();
+        Operation<T> operation = Objects.requireNonNull(operationFactory.create(), "operationFactory.create()");
+        String id = "download-" + sequence.incrementAndGet();
+        DownloadTaskEntry<T> entry = new DownloadTaskEntry<>(id,
+                title == null || title.isBlank() ? "下载任务" : title, operation, family);
+        entry.operationFactory = operationFactory;
+        entry.completionHandler = onComplete;
+        entry.attempts = Math.max(0, previousAttempts);
+        entries.put(id, entry);
+        family.set(entry);
+        queue.addLast(entry);
+        return entry;
+    }
+
+    private <T> TaskHandle<T> startSubmitted(DownloadTaskEntry<T> entry) {
         // Always notify: when the concurrency limit is reached the new task remains queued and
         // pump() does not emit a second state change for it.
         fireChanged(true);
@@ -196,6 +203,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
     public boolean cancel(String taskId) {
         DownloadTaskEntry<?> entry;
         Runnable cancellationHook;
+        boolean queuedCancellation;
         synchronized (lock) {
             DownloadTaskEntry<?> requested = entries.get(taskId);
             entry = requested == null ? null : requested.familyCurrent.get();
@@ -205,12 +213,12 @@ public final class DownloadTaskCenter implements AutoCloseable {
             }
             entry.cancelRequested = true;
             cancellationHook = entry.cancellationHook;
-            if (entry.status == Status.QUEUED) {
+            queuedCancellation = entry.status == Status.QUEUED;
+            if (queuedCancellation) {
                 queue.remove(entry);
                 entry.status = Status.CANCELLED;
                 entry.detail = "已取消";
                 entry.updatedAtMillis = System.currentTimeMillis();
-                entry.completion.cancel(false);
                 pruneRetainedLocked();
             } else {
                 entry.status = Status.CANCELLING;
@@ -222,6 +230,10 @@ public final class DownloadTaskCenter implements AutoCloseable {
                 entry.runner.interrupt();
             }
         }
+        if (queuedCancellation) {
+            notifyCompletion(entry, null, new CancellationException("已取消"));
+            entry.completion.cancel(false);
+        }
         runCancellation(cancellationHook);
         fireChanged(true);
         pump();
@@ -229,25 +241,33 @@ public final class DownloadTaskCenter implements AutoCloseable {
     }
 
     public TaskHandle<?> retry(String taskId) {
-        DownloadTaskEntry<?> original;
+        DownloadTaskEntry<?> retry;
         synchronized (lock) {
-            original = entries.get(taskId);
+            DownloadTaskEntry<?> original = entries.get(taskId);
             if (!canRetry(original)) {
                 return null;
             }
+            retry = enqueueRetryLocked(original);
         }
-        return submit(original.title, original.operationFactory, original.attempts,
-                original.familyCurrent);
+        return startSubmitted(retry);
+    }
+
+    private <T> DownloadTaskEntry<T> enqueueRetryLocked(DownloadTaskEntry<T> original) {
+        return enqueueLocked(original.title, original.operationFactory, original.attempts,
+                original.familyCurrent, original.completionHandler);
+    }
+
+    public boolean canRetry(String taskId) {
+        synchronized (lock) {
+            return canRetry(entries.get(taskId));
+        }
     }
 
     /** Called while holding lock so the task and its retry family are read together. */
     private boolean canRetry(DownloadTaskEntry<?> entry) {
-        if (entry == null || !DownloadTaskSnapshots.isTerminal(entry.status)
-                || entry.status == Status.COMPLETED) {
-            return false;
-        }
-        DownloadTaskEntry<?> latestAttempt = entry.familyCurrent.get();
-        return latestAttempt == entry || DownloadTaskSnapshots.isTerminal(latestAttempt.status);
+        return entry != null && entry.familyCurrent.get() == entry
+                && entry.completion.isDone()
+                && (entry.status == Status.FAILED || entry.status == Status.CANCELLED);
     }
 
     public int clearFinished() {
@@ -333,6 +353,8 @@ public final class DownloadTaskCenter implements AutoCloseable {
             pruneRetainedLocked();
         }
         // Completing a future may run user callbacks; keep them outside the queue lock.
+        notifyCompletion(entry, result,
+                terminalStatus == Status.CANCELLED ? new CancellationException("已取消") : error);
         switch (terminalStatus) {
             case CANCELLED -> entry.completion.cancel(false);
             case COMPLETED -> complete(entry, result);
@@ -367,6 +389,16 @@ public final class DownloadTaskCenter implements AutoCloseable {
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void complete(DownloadTaskEntry<?> entry, Object result) {
         ((CompletableFuture) entry.completion).complete(result);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> void notifyCompletion(DownloadTaskEntry<T> entry, Object result, Throwable error) {
+        if (entry.completionHandler == null) return;
+        try {
+            entry.completionHandler.accept((T) result, error);
+        } catch (RuntimeException ignored) {
+            // A UI completion callback must not stop the dispatcher or leave its future unfinished.
+        }
     }
 
     private void runCancellation(Runnable cancellationHook) {

@@ -6,7 +6,7 @@ import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.instance.ModLoader;
 import com.ecl.modrinth.model.InstalledMod;
-import com.ecl.modrinth.model.ModFile;
+import com.ecl.modrinth.model.DependencyType;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.provider.ModrinthMetadataProvider;
@@ -23,9 +23,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -41,7 +41,6 @@ public final class DefaultLocalModScanner implements LocalModScanner {
     private final ModMetadataProvider metadataProvider;
     private final InstalledModRepository repository;
     private final HashVerifier hashVerifier;
-    private final ModVersionSelector versionSelector;
     private final InstanceOperationLock operationLock;
     private final Executor executor;
     private final Predicate<UUID> instanceRunning;
@@ -50,20 +49,18 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             ModrinthApiClient apiClient,
             InstalledModRepository repository,
             HashVerifier hashVerifier,
-            ModVersionSelector versionSelector,
             InstanceOperationLock operationLock,
             Executor executor,
             Predicate<UUID> instanceRunning
     ) {
         this(new ModrinthMetadataProvider(apiClient, false), repository, hashVerifier,
-                versionSelector, operationLock, executor, instanceRunning);
+                operationLock, executor, instanceRunning);
     }
 
     public DefaultLocalModScanner(
             ModMetadataProvider metadataProvider,
             InstalledModRepository repository,
             HashVerifier hashVerifier,
-            ModVersionSelector versionSelector,
             InstanceOperationLock operationLock,
             Executor executor,
             Predicate<UUID> instanceRunning
@@ -71,7 +68,6 @@ public final class DefaultLocalModScanner implements LocalModScanner {
         this.metadataProvider = Objects.requireNonNull(metadataProvider, "metadataProvider");
         this.repository = Objects.requireNonNull(repository, "repository");
         this.hashVerifier = Objects.requireNonNull(hashVerifier, "hashVerifier");
-        this.versionSelector = Objects.requireNonNull(versionSelector, "versionSelector");
         this.operationLock = Objects.requireNonNull(operationLock, "operationLock");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.instanceRunning = Objects.requireNonNull(instanceRunning, "instanceRunning");
@@ -102,6 +98,7 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             List<ScannedFile> scanned = scanFiles(instance, scanCache.read(instance));
             Map<Path, ModVersion> recognized = recognizeFiles(scanned);
             LocalModScanResult result = reconcileRecords(instance, previous, scanned, recognized);
+            result = reconcileDependencies(instance, result, recognized);
             repository.saveAll(instance, result.installedMods());
             writeCache(instance, scanned);
             return result;
@@ -109,6 +106,39 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             // Broad catch is required: operationLock.acquire() AutoCloseable.close() declares Exception.
             throw new ModInstallationException("扫描本地模组失败", e);
         }
+    }
+
+    private static LocalModScanResult reconcileDependencies(ModInstanceContext instance, LocalModScanResult result,
+                                                            Map<Path, ModVersion> recognized) {
+        if (recognized.isEmpty()) {
+            return result;
+        }
+        Set<String> knownOwners = recognized.values().stream().map(ModVersion::projectId)
+                .collect(java.util.stream.Collectors.toSet());
+        Map<String, String> versionProjects = new HashMap<>();
+        result.installedMods().forEach(mod -> versionProjects.put(mod.versionId(), mod.projectId()));
+        Map<String, Set<String>> requiredBy = new HashMap<>();
+        for (ModVersion owner : recognized.values()) {
+            owner.dependencies().stream().filter(dependency -> dependency.type() == DependencyType.REQUIRED).forEach(dependency -> {
+                String project = dependency.projectId() == null || dependency.projectId().isBlank()
+                        ? versionProjects.get(dependency.versionId()) : dependency.projectId();
+                if (project != null && !project.isBlank()) {
+                    requiredBy.computeIfAbsent(project, ignored -> new HashSet<>()).add(owner.projectId());
+                }
+            });
+        }
+        List<InstalledMod> records = result.installedMods().stream().map(mod -> {
+            Set<String> owners = new HashSet<>(mod.requiredByProjectIds());
+            owners.removeAll(knownOwners);
+            owners.addAll(requiredBy.getOrDefault(mod.projectId(), Set.of()));
+            return mod.withRequiredByProjectIds(owners)
+                    .withDependencyMetadataKnown(knownOwners.contains(mod.projectId()) || mod.dependencyMetadataKnown());
+        }).toList();
+        Map<Path, InstalledMod> byPath = new HashMap<>();
+        records.forEach(mod -> byPath.put(instance.gameDirectory().resolve(mod.relativePath()).normalize(), mod));
+        List<LocalModScanItem> items = result.items().stream().map(item -> new LocalModScanItem(item.file(),
+                item.installedMod() == null ? null : byPath.get(item.file()), item.recognized(), item.damaged(), item.message())).toList();
+        return new LocalModScanResult(records, items, result.duplicateProjects(), result.warnings());
     }
 
     private Map<Path, ModVersion> recognizeFiles(List<ScannedFile> scanned) {
@@ -135,8 +165,6 @@ public final class DefaultLocalModScanner implements LocalModScanner {
         List<LocalModScanItem> items = new ArrayList<>();
         Map<String, Integer> projectCounts = new LinkedHashMap<>();
         List<String> warnings = new ArrayList<>();
-        // 预建每个版本的 sha1 → ModFile 索引，避免对每个本地文件做线性 findFirst。
-        Map<String, Map<String, ModFile>> versionFileIndex = new HashMap<>();
         for (ScannedFile file : scanned) {
             Path relative = instance.gameDirectory().relativize(file.path);
             InstalledMod old = previousByPath.get(normalizeRelative(relative));
@@ -152,9 +180,7 @@ public final class DefaultLocalModScanner implements LocalModScanner {
             boolean enabled = file.path.getParent().equals(instance.modsDirectory());
             InstalledMod record;
             if (version != null) {
-                ModFile matchedFile = matchFileBySha1(version, file.hashes.sha1(),
-                        versionFileIndex, versionSelector);
-                record = recognizedRecord(instance, version, file, relative, enabled, old, matchedFile);
+                record = recognizedRecord(instance, version, file, relative, enabled, old);
                 projectCounts.merge(record.projectId(), 1, Integer::sum);
                 items.add(new LocalModScanItem(file.path, record, true, false,
                         metadataProvider.displayName() + " 已识别"));
@@ -247,42 +273,13 @@ public final class DefaultLocalModScanner implements LocalModScanner {
         };
     }
 
-    /**
-     * Match a scanned file against a version's files by SHA-1 using a per-version index.
-     * Falls back to the version selector when the hash is missing or unmatched.
-     */
-    private static ModFile matchFileBySha1(
-            ModVersion version,
-            String sha1,
-            Map<String, Map<String, ModFile>> versionFileIndex,
-            ModVersionSelector versionSelector
-    ) {
-        Map<String, ModFile> bySha1 = versionFileIndex.computeIfAbsent(version.id(), ignored -> {
-            Map<String, ModFile> index = new HashMap<>();
-            for (ModFile candidate : version.files()) {
-                if (candidate.sha1() != null && !candidate.sha1().isBlank()) {
-                    index.putIfAbsent(candidate.sha1().toLowerCase(Locale.ROOT), candidate);
-                }
-            }
-            return index;
-        });
-        if (sha1 != null && !sha1.isBlank()) {
-            ModFile matched = bySha1.get(sha1.toLowerCase(Locale.ROOT));
-            if (matched != null) {
-                return matched;
-            }
-        }
-        return versionSelector.selectInstallFile(version).orElse(null);
-    }
-
     private static InstalledMod recognizedRecord(
             ModInstanceContext instance,
             ModVersion version,
             ScannedFile file,
             Path relative,
             boolean enabled,
-            InstalledMod old,
-            ModFile matchedFile
+            InstalledMod old
     ) {
         Instant now = Instant.now();
         return new InstalledMod(
@@ -292,7 +289,8 @@ public final class DefaultLocalModScanner implements LocalModScanner {
                 file.hashes.sha1(), file.hashes.sha512(), file.size,
                 instance.minecraftVersion(), instance.loaderName(), version.versionType(), enabled,
                 old != null && old.dependency(), old == null ? "" : old.requiredByProjectId(),
-                old == null || old.installedAt() == null ? now : old.installedAt(), now);
+                old == null || old.installedAt() == null ? now : old.installedAt(), now,
+                old == null ? Set.of() : old.requiredByProjectIds(), old != null && old.dependencyMetadataKnown());
     }
 
     private static InstalledMod unknownRecord(
@@ -315,7 +313,8 @@ public final class DefaultLocalModScanner implements LocalModScanner {
                         ? file.metadata.loader().apiName() : instance.loaderName(),
                 old == null ? "local" : old.versionType(), enabled,
                 old != null && old.dependency(), old == null ? "" : old.requiredByProjectId(),
-                old == null || old.installedAt() == null ? now : old.installedAt(), now);
+                old == null || old.installedAt() == null ? now : old.installedAt(), now,
+                old == null ? Set.of() : old.requiredByProjectIds(), old == null || old.dependencyMetadataKnown());
     }
 
     private void writeCache(ModInstanceContext instance, Collection<ScannedFile> files) throws IOException {

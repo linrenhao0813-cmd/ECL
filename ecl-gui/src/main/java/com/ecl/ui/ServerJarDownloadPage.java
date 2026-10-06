@@ -233,21 +233,25 @@ final class ServerJarDownloadPage {
                     "server.download.createDirectoryFailed", ui.cleanMessage(error)));
             return;
         }
-        long generation = downloadGeneration.incrementAndGet();
-        setControlsBusy(true, downloadButton, chooseFolderButton, serverVersionCombo,
-                categoryCombo, refreshButton);
-        progress.setProgress(0);
-        progress.setVisible(true);
-        status.setText(Messages.format("server.download.preparing", artifact.versionId()));
-        ui.setStatus(Messages.get("server.download.statusTitle"),
-                artifact.versionId() + " · " + target.getName());
+        AtomicLong attemptGeneration = new AtomicLong();
+        ui.downloadTaskCenter.submit("Server JAR " + artifact.versionId(), () -> {
+            long generation = downloadGeneration.incrementAndGet();
+            attemptGeneration.set(generation);
+            LauncherUiFactory.runOnUi(() -> {
+                setControlsBusy(true, downloadButton, chooseFolderButton, serverVersionCombo,
+                        categoryCombo, refreshButton);
+                progress.setProgress(0);
+                progress.setVisible(true);
+                status.setText(Messages.format("server.download.preparing", artifact.versionId()));
+                ui.setStatus(Messages.get("server.download.statusTitle"),
+                        artifact.versionId() + " · " + target.getName());
+            });
 
-        ui.downloadTaskCenter.submit("Server JAR " + artifact.versionId(), () -> context -> {
-            try {
+            return context -> {
                 ui.serverJarDownloader.download(artifact, target,
                         createDownloadListener(status, progress, generation, downloadGeneration, context));
                 if (context.isCancelled()) {
-                    return null;
+                    throw new java.util.concurrent.CancellationException(Messages.get("download.status.cancelled"));
                 }
                 Platform.runLater(() -> {
                     if (generation != downloadGeneration.get() || context.isCancelled()) {
@@ -257,28 +261,25 @@ final class ServerJarDownloadPage {
                     status.setText(Messages.format(
                             "server.download.completedVerified", target.getAbsolutePath()));
                     ui.setStatus(Messages.get("server.download.completedTitle"), target.getAbsolutePath());
-                    setControlsBusy(false, downloadButton, chooseFolderButton, serverVersionCombo,
-                            categoryCombo, refreshButton);
                 });
-            } catch (Exception error) {
-                boolean cancelled = context.isCancelled() || ui.isCancellation(error);
-                Platform.runLater(() -> {
-                    if (generation != downloadGeneration.get()) {
-                        return;
-                    }
-                    if (cancelled) {
-                        status.setText(Messages.get("download.status.cancelled"));
-                        ui.setStatus(Messages.get("download.status.cancelled"), "");
-                    } else {
-                        status.setText(Messages.format("download.status.failed", ui.cleanMessage(error)));
-                        ui.setStatus(Messages.get("status.downloadFailed"), ui.cleanMessage(error));
-                    }
-                    setControlsBusy(false, downloadButton, chooseFolderButton, serverVersionCombo,
-                            categoryCombo, refreshButton);
-                });
-                throw error;
-            }
-            return null;
+                return null;
+            };
+        }, (result, error) -> {
+            long generation = attemptGeneration.get();
+            Platform.runLater(() -> {
+                if (generation != downloadGeneration.get()) {
+                    return;
+                }
+                if (ui.isCancellation(error)) {
+                    status.setText(Messages.get("download.status.cancelled"));
+                    ui.setStatus(Messages.get("download.status.cancelled"), "");
+                } else if (error != null) {
+                    status.setText(Messages.format("download.status.failed", ui.cleanMessage(error)));
+                    ui.setStatus(Messages.get("status.downloadFailed"), ui.cleanMessage(error));
+                }
+                setControlsBusy(false, downloadButton, chooseFolderButton, serverVersionCombo,
+                        categoryCombo, refreshButton);
+            });
         });
     }
 

@@ -86,8 +86,8 @@ class VersionManagerTest {
                             + "\"libraries\":[{\"name\":\"net.minecraftforge:forge:1.21.1-52.0.1\"}]}");
 
             VersionManager manager = new VersionManager();
-            List<String> merged = manager.mergeLocalLoaderProfiles(List.of("1.21.1"));
-            assertEquals(List.of("1.21.1", "1.21.1-fabric-loader-0.16.9", "1.21.1-forge-52.0.1"), merged);
+            assertEquals(List.of("1.21.1-fabric-loader-0.16.9", "1.21.1-forge-52.0.1"),
+                    manager.getLocalVersionProfiles().stream().map(VersionManager.LocalVersionProfile::profileId).toList());
             assertEquals("1.21.1 · Fabric  [1.21.1-fabric-loader-0.16.9]",
                     manager.getVersionDisplayName("1.21.1-fabric-loader-0.16.9"));
             assertEquals("1.21.1 · Forge  [1.21.1-forge-52.0.1]",
@@ -233,32 +233,6 @@ class VersionManagerTest {
             Files.writeString(parent.resolve(com.ecl.ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER),
                     "complete");
             assertTrue(manager.isVersionDownloaded("fabric-loader-0.16.14-1.21.4"));
-        } finally {
-            baseDir.set(null, previous);
-        }
-    }
-
-    @Test
-    void unmatchedLocalProfileIsInsertedNearItsMinecraftVersion(@TempDir Path tempDir) throws Exception {
-        Field baseDir = com.ecl.ECLConfig.class.getDeclaredField("baseDir");
-        baseDir.setAccessible(true);
-        File previous = (File) baseDir.get(null);
-        baseDir.set(null, tempDir.toFile());
-        try {
-            Path fabric = tempDir.resolve("versions/fabric-1.21.4");
-            Files.createDirectories(fabric);
-            Files.writeString(fabric.resolve("fabric-1.21.4.json"), """
-                    {
-                      "id":"fabric-1.21.4",
-                      "inheritsFrom":"1.21.4",
-                      "mainClass":"net.fabricmc.loader.impl.launch.knot.KnotClient"
-                    }
-                    """);
-
-            List<String> merged = new VersionManager().mergeLocalLoaderProfiles(
-                    List.of("1.21.5", "1.21.3"));
-
-            assertEquals(List.of("1.21.5", "fabric-1.21.4", "1.21.3"), merged);
         } finally {
             baseDir.set(null, previous);
         }

@@ -13,13 +13,8 @@ import com.google.gson.JsonObject;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 
@@ -83,117 +78,6 @@ public class VersionManager {
 
     public List<String> getAllVersions() {
         return getVersions(VersionCategory.ALL);
-    }
-
-    public synchronized List<String> mergeLocalLoaderProfiles(List<String> remoteVersions) {
-        displayNameCache.clear();
-        localProfilesCache = null; // 版本列表刷新时强制重新扫描本地档案
-        List<String> base = remoteVersions == null ? List.of() : List.copyOf(remoteVersions);
-        List<LocalVersionProfile> localProfiles = getLocalVersionProfiles();
-        Map<String, List<LocalVersionProfile>> byMinecraftVersion = new LinkedHashMap<>();
-        Map<String, LocalVersionProfile> profilesById = new HashMap<>();
-        for (LocalVersionProfile profile : localProfiles) {
-            byMinecraftVersion.computeIfAbsent(profile.minecraftVersion(), ignored -> new ArrayList<>())
-                    .add(profile);
-            profilesById.put(profile.profileId(), profile);
-        }
-        byMinecraftVersion.values().forEach(profiles ->
-                profiles.sort(Comparator.comparing(LocalVersionProfile::loader)
-                        .thenComparing(LocalVersionProfile::profileId)));
-
-        List<String> result = new ArrayList<>();
-        Set<String> added = new java.util.HashSet<>();
-        Set<String> remoteVersionIds = new java.util.HashSet<>(base);
-        for (String version : base) {
-            if (added.add(version)) {
-                result.add(version);
-            }
-            for (LocalVersionProfile profile : byMinecraftVersion.getOrDefault(version, List.of())) {
-                if (added.add(profile.profileId())) {
-                    result.add(profile.profileId());
-                }
-            }
-        }
-
-        List<String> unmatchedMinecraftVersions = byMinecraftVersion.keySet().stream()
-                .filter(version -> !remoteVersionIds.contains(version))
-                .sorted((left, right) -> compareMinecraftVersionIds(right, left))
-                .toList();
-        for (String minecraftVersion : unmatchedMinecraftVersions) {
-            int insertionIndex = findProfileInsertionIndex(
-                    result, minecraftVersion, profilesById);
-            for (LocalVersionProfile profile : byMinecraftVersion.get(minecraftVersion)) {
-                if (added.add(profile.profileId())) {
-                    result.add(insertionIndex++, profile.profileId());
-                }
-            }
-        }
-        return result;
-    }
-
-    private static int findProfileInsertionIndex(
-            List<String> entries,
-            String minecraftVersion,
-            Map<String, LocalVersionProfile> profilesById
-    ) {
-        int[] requested = parseReleaseVersion(minecraftVersion);
-        if (requested == null) {
-            return entries.size();
-        }
-        for (int index = 0; index < entries.size(); index++) {
-            String entry = entries.get(index);
-            LocalVersionProfile profile = profilesById.get(entry);
-            String entryVersion = profile == null ? entry : profile.minecraftVersion();
-            int[] candidate = parseReleaseVersion(entryVersion);
-            if (candidate != null && compareReleaseParts(requested, candidate) > 0) {
-                return index;
-            }
-        }
-        return entries.size();
-    }
-
-    private static int compareMinecraftVersionIds(String left, String right) {
-        int[] leftParts = parseReleaseVersion(left);
-        int[] rightParts = parseReleaseVersion(right);
-        if (leftParts != null && rightParts != null) {
-            return compareReleaseParts(leftParts, rightParts);
-        }
-        if (leftParts != null) {
-            return 1;
-        }
-        if (rightParts != null) {
-            return -1;
-        }
-        return left.compareToIgnoreCase(right);
-    }
-
-    private static int[] parseReleaseVersion(String version) {
-        if (version == null || !version.matches("\\d+(?:\\.\\d+)*")) {
-            return null;
-        }
-        String[] segments = version.split("\\.");
-        int[] result = new int[segments.length];
-        try {
-            for (int index = 0; index < segments.length; index++) {
-                result[index] = Integer.parseInt(segments[index]);
-            }
-            return result;
-        } catch (NumberFormatException ignored) {
-            return null;
-        }
-    }
-
-    private static int compareReleaseParts(int[] left, int[] right) {
-        int length = Math.max(left.length, right.length);
-        for (int index = 0; index < length; index++) {
-            int leftPart = index < left.length ? left[index] : 0;
-            int rightPart = index < right.length ? right[index] : 0;
-            int comparison = Integer.compare(leftPart, rightPart);
-            if (comparison != 0) {
-                return comparison;
-            }
-        }
-        return 0;
     }
 
     public synchronized List<LocalVersionProfile> getLocalVersionProfiles() {

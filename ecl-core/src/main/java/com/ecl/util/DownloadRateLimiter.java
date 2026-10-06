@@ -50,7 +50,9 @@ final class DownloadRateLimiter {
     }
 
     void acquire(int bytes) throws IOException {
-        while (true) {
+        int remaining = bytes;
+        while (remaining > 0) {
+            checkInterrupted();
             long waitNanos;
             synchronized (lock) {
                 long rate = bytesPerSecond;
@@ -65,11 +67,13 @@ final class DownloadRateLimiter {
                 availableTokens = Math.min(rate,
                         availableTokens + elapsed * (double) rate / 1_000_000_000d);
                 tokensUpdatedAt = now;
-                if (availableTokens >= bytes) {
-                    availableTokens -= bytes;
+                int consumed = (int) Math.min(remaining, availableTokens);
+                availableTokens -= consumed;
+                remaining -= consumed;
+                if (remaining == 0) {
                     return;
                 }
-                waitNanos = (long) Math.ceil((bytes - availableTokens)
+                waitNanos = (long) Math.ceil((Math.min(remaining, rate) - availableTokens)
                         * 1_000_000_000d / rate);
             }
             try {

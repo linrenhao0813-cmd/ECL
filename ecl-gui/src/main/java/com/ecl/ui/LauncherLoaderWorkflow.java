@@ -135,12 +135,14 @@ final class LauncherLoaderWorkflow {
             ui.setStatus("无法识别 Minecraft 版本", ui.cleanMessage(error));
             return;
         }
-        ui.setControlsBusy(true);
-        ui.startProgressAnimation(ui.downloadProgress);
-        ui.setStatus("正在安装加载器", loader.displayName() + " / Minecraft " + minecraftVersion);
-        ui.downloadTaskCenter.submit(
-                "Loader " + loader.displayName(), () -> context -> {
-            try {
+        ui.downloadTaskCenter.<ModLoaderInstaller.InstallResult>submit(
+                "Loader " + loader.displayName(), () -> {
+            LauncherUiFactory.runOnUi(() -> {
+                ui.setControlsBusy(true);
+                ui.startProgressAnimation(ui.downloadProgress);
+                ui.setStatus("正在安装加载器", loader.displayName() + " / Minecraft " + minecraftVersion);
+            });
+            return context -> {
                 ModLoaderInstaller.InstallResult result = ui.modLoaderInstaller.install(
                         minecraftVersion, loader, "", new ModLoaderInstaller.Listener() {
                             @Override
@@ -155,31 +157,28 @@ final class LauncherLoaderWorkflow {
                             }
                         });
                 ui.gameRepository().applyDefaultIsolationSettingForNewInstance(result.profileId());
-                Platform.runLater(() -> {
-                    ui.stopProgressAnimation(ui.downloadProgress, true);
-                    ui.setControlsBusy(false);
-                    ui.versionActions.restoreVersionComboItems(result.profileId());
-                    ui.versionCombo.setValue(result.profileId());
-                    syncLoaderChoiceFromProfile(result.profileId());
-                    ui.setStatus("加载器安装完成", result.loader().displayName() + " "
-                            + result.loaderVersion() + " / Minecraft " + result.minecraftVersion());
-                    if (afterSuccess != null) {
-                        afterSuccess.run();
-                    } else if (!ui.isHomeViewActive()) {
-                        ui.renderActiveView();
-                    }
-                });
-            } catch (Exception error) {
-                Platform.runLater(() -> {
-                    ui.stopProgressAnimation(ui.downloadProgress, true);
-                    ui.setControlsBusy(false);
-                    updateLoaderControls();
-                    ui.setStatus("加载器安装失败", ui.cleanMessage(error));
-                });
-                throw error;
+                return result;
+            };
+        }, (result, error) -> Platform.runLater(() -> {
+            ui.stopProgressAnimation(ui.downloadProgress, true);
+            ui.setControlsBusy(false);
+            if (error != null) {
+                updateLoaderControls();
+                ui.setStatus(ui.isCancellation(error) ? com.ecl.util.Messages.get("download.status.cancelled")
+                        : "加载器安装失败", ui.cleanMessage(error));
+                return;
             }
-            return null;
-        });
+            ui.versionActions.restoreVersionComboItems(result.profileId());
+            ui.setLaunchTarget(result.profileId());
+            syncLoaderChoiceFromProfile(result.profileId());
+            ui.setStatus("加载器安装完成", result.loader().displayName() + " "
+                    + result.loaderVersion() + " / Minecraft " + result.minecraftVersion());
+            if (afterSuccess != null) {
+                afterSuccess.run();
+            } else if (!ui.isHomeViewActive()) {
+                ui.renderActiveView();
+            }
+        }));
     }
 
     HBox createLoaderQuickActions(String profileId) {

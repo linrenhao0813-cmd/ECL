@@ -20,7 +20,7 @@ public final class JavaVersionRequirement {
     private JavaVersionRequirement() {
     }
 
-    static int forMetadata(VersionMetadata metadata) {
+    public static int forMetadata(VersionMetadata metadata) {
         if (metadata == null) {
             return 0;
         }
@@ -33,6 +33,9 @@ public final class JavaVersionRequirement {
     public static int inferFromVersionId(String versionId) {
         int[] release = parseReleaseVersion(versionId);
         if (release != null) {
+            if (release[0] >= 26) {
+                return 25;
+            }
             int minor = release[1];
             int patch = release[2];
             if (minor > 20 || minor == 20 && patch >= 5) {

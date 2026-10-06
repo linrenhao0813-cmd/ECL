@@ -42,6 +42,28 @@ class MrpackOverrideExtractorTest {
     }
 
     @Test
+    void clientOverridesReplaceCommonLayerWhileSharingSafetyBudget() throws Exception {
+        Path archive = createArchive("overrides/options.txt", "common",
+                "client-overrides/options.txt", "client");
+        Path instanceRoot = tempDir.resolve("instance");
+        MrpackOverrideExtractor.ExtractionBudget budget = new MrpackOverrideExtractor.ExtractionBudget();
+        try (ZipFile zip = new ZipFile(archive.toFile(), StandardCharsets.UTF_8)) {
+            MrpackOverrideExtractor.extract(zip, "overrides/", instanceRoot, budget);
+            MrpackOverrideExtractor.extract(zip, "client-overrides/", instanceRoot, budget);
+        }
+        assertEquals("client", Files.readString(instanceRoot.resolve("options.txt")));
+    }
+
+    @Test
+    void rejectsAliasesOfOneTargetWithinTheSameLayer() throws Exception {
+        Path archive = createArchive("overrides/options.txt", "first", "overrides/./options.txt", "second");
+        try (ZipFile zip = new ZipFile(archive.toFile(), StandardCharsets.UTF_8)) {
+            assertThrows(IOException.class, () -> MrpackOverrideExtractor.extract(zip, "overrides/",
+                    tempDir.resolve("instance"), new MrpackOverrideExtractor.ExtractionBudget()));
+        }
+    }
+
+    @Test
     void rejectsEntriesThatEscapeTheInstanceDirectory() throws Exception {
         Path archive = createArchive("overrides/../outside.txt", "must not escape");
         Path instanceRoot = tempDir.resolve("instance");

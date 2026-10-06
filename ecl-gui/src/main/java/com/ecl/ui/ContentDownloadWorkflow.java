@@ -101,40 +101,41 @@ final class ContentDownloadWorkflow {
             Button searchBtn,
             Button importBtn,
             ComboBox<String> targetProfileCombo,
-            AtomicLong downloadGeneration,
-            AtomicLong activeDownloadGeneration
+            AtomicLong downloadGeneration
     ) {
         if (project == null || selectedVersion == null) {
             dialogStatus.setText("请先选择一个" + target.title + "及其具体版本。");
             return null;
         }
-        return ui.downloadTaskCenter.submit(
+        AtomicLong attemptGeneration = new AtomicLong();
+        return ui.downloadTaskCenter.<ContentInstallationResult>submit(
                 "Content " + project.getTitle(), () -> {
             // This factory is invoked for the initial attempt and every retry. Keep all UI
             // preparation here so a retry cannot reuse stale listeners/progress from the failed
             // attempt or accidentally run alongside another content import.
             long generation = downloadGeneration.incrementAndGet();
-            activeDownloadGeneration.set(generation);
+            attemptGeneration.set(generation);
             String loader = target.usesLoader() ? instance.loader() : null;
             String gameVersion = instance.minecraftVersion();
-            ui.setControlsBusy(true);
-            searchBtn.setDisable(true);
-            importBtn.setDisable(true);
-            targetProfileCombo.setDisable(true);
-            modProgress.setProgress(0);
-            ui.downloadProgress.setProgress(0);
-            ui.startProgressAnimation(modProgress);
-            ui.startProgressAnimation(ui.downloadProgress);
-            String loaderLabel = loader == null ? "" : " / " + loader;
-            ui.setStatus("正在下载" + target.title,
-                    project.getTitle() + " " + selectedVersion.versionNumber()
-                            + " -> " + gameVersion + loaderLabel);
+            LauncherUiFactory.runOnUi(() -> {
+                ui.setControlsBusy(true);
+                searchBtn.setDisable(true);
+                importBtn.setDisable(true);
+                targetProfileCombo.setDisable(true);
+                modProgress.setProgress(0);
+                ui.downloadProgress.setProgress(0);
+                ui.startProgressAnimation(modProgress);
+                ui.startProgressAnimation(ui.downloadProgress);
+                String loaderLabel = loader == null ? "" : " / " + loader;
+                ui.setStatus("正在下载" + target.title,
+                        project.getTitle() + " " + selectedVersion.versionNumber()
+                                + " -> " + gameVersion + loaderLabel);
+            });
 
             return context -> {
-            if (generation != downloadGeneration.get()) {
-                return null;
-            }
-            try {
+                if (generation != downloadGeneration.get()) {
+                    throw new java.util.concurrent.CancellationException("内容下载已被新任务替代");
+                }
                 if (ui.isVersionRunning(instance.profileId())) {
                     throw new IOException("实例正在运行，不能安装内容: " + instance.profileId());
                 }
@@ -155,108 +156,106 @@ final class ContentDownloadWorkflow {
                     if (ui.isVersionRunning(instance.profileId())) {
                         throw new IOException("实例正在运行，不能安装内容: " + instance.profileId());
                     }
-                result = ui.controller.contentDownloader().downloadVersion(
-                        project, selectedVersion, gameVersion, loader, importDir,
-                        target.downloadDependencies,
-                        contentDownloadListener(context, generation, downloadGeneration,
-                                dialogStatus, target, modProgress),
-                        target.allowedExtensions
-                );
-                if (context.isCancelled()) {
-                    throw new java.util.concurrent.CancellationException("内容安装已取消");
-                }
-                if ("modpack".equals(target.projectType)) {
-                    if (result.getMainFile() == null) {
-                        throw new IOException("整合包下载完成，但没有找到安装文件");
+                    result = ui.controller.contentDownloader().downloadVersion(
+                            project, selectedVersion, gameVersion, loader, importDir,
+                            target.downloadDependencies,
+                            contentDownloadListener(context, generation, downloadGeneration,
+                                    dialogStatus, target, modProgress),
+                            target.allowedExtensions
+                    );
+                    if (context.isCancelled()) {
+                        throw new java.util.concurrent.CancellationException("内容安装已取消");
                     }
-                    File installArchive = result.getMainFile();
-                    packResult = ui.mrpackInstaller.install(
-                            installArchive,
-                            ui.getConfiguredGameRootDir(),
-                            project.getTitle(),
-                            project.getProjectId(),
-                            selectedVersion.versionId(),
-                            new MrpackInstaller.Listener() {
-                                @Override
-                                public void onStatus(String message) {
-                                    if (context.isCancelled()) {
-                                        throw new java.util.concurrent.CancellationException("整合包安装已取消");
+                    if ("modpack".equals(target.projectType)) {
+                        if (result.getMainFile() == null) {
+                            throw new IOException("整合包下载完成，但没有找到安装文件");
+                        }
+                        File installArchive = result.getMainFile();
+                        packResult = ui.mrpackInstaller.install(
+                                installArchive,
+                                ui.getConfiguredGameRootDir(),
+                                project.getTitle(),
+                                project.getProjectId(),
+                                selectedVersion.versionId(),
+                                new MrpackInstaller.Listener() {
+                                    @Override
+                                    public void onStatus(String message) {
+                                        if (context.isCancelled()) {
+                                            throw new java.util.concurrent.CancellationException("整合包安装已取消");
+                                        }
+                                        context.updateStatus(message);
+                                        Platform.runLater(() -> {
+                                            if (generation != downloadGeneration.get()) return;
+                                            dialogStatus.setText(message);
+                                            ui.setStatus("正在安装整合包", message);
+                                        });
                                     }
-                                    context.updateStatus(message);
-                                    Platform.runLater(() -> {
-                                        if (generation != downloadGeneration.get()) return;
-                                        dialogStatus.setText(message);
-                                        ui.setStatus("正在安装整合包", message);
-                                    });
-                                }
-                                @Override
-                                public void onProgress(long downloaded, long total) {
-                                    if (context.isCancelled()) {
-                                        throw new java.util.concurrent.CancellationException("整合包安装已取消");
+                                    @Override
+                                    public void onProgress(long downloaded, long total) {
+                                        if (context.isCancelled()) {
+                                            throw new java.util.concurrent.CancellationException("整合包安装已取消");
+                                        }
+                                        context.updateProgress(downloaded, total);
+                                        Platform.runLater(() -> {
+                                            if (generation != downloadGeneration.get()) return;
+                                            ui.updateProgress(modProgress, downloaded, total);
+                                            ui.updateProgress(ui.downloadProgress, downloaded, total);
+                                        });
                                     }
-                                    context.updateProgress(downloaded, total);
-                                    Platform.runLater(() -> {
-                                        if (generation != downloadGeneration.get()) return;
-                                        ui.updateProgress(modProgress, downloaded, total);
-                                        ui.updateProgress(ui.downloadProgress, downloaded, total);
-                                    });
-                                }
-                            });
-                    ui.gameRepository().applyDefaultIsolationSettingForNewInstance(packResult.profileId());
-                }
+                                });
+                        ui.gameRepository().applyDefaultIsolationSettingForNewInstance(packResult.profileId());
+                    }
                 }
 
-                MrpackInstaller.InstallResult completedPack = packResult;
-                Platform.runLater(() -> {
-                    if (generation != downloadGeneration.get()) return;
+                return new ContentInstallationResult(result, packResult);
+            };
+        }, (result, error) -> {
+            long generation = attemptGeneration.get();
+            Platform.runLater(() -> {
+                if (generation != downloadGeneration.get()) return;
+                if (error == null) {
                     modProgress.setProgress(1);
                     ui.downloadProgress.setProgress(1);
-                    activeDownloadGeneration.compareAndSet(generation, 0);
-                    ui.stopProgressAnimation(modProgress, false);
-                    ui.stopProgressAnimation(ui.downloadProgress, true);
-                    ui.setControlsBusy(false);
-                    searchBtn.setDisable(false);
-                    importBtn.setDisable(false);
-                    targetProfileCombo.setDisable(false);
-                    String mainFile = result.getMainFile() == null
-                            ? project.getTitle() : result.getMainFile().getName();
-                    String detail = completedPack == null
-                            ? "已导入 " + result.getFiles().size() + " 个文件到: "
-                                    + importDir.getAbsolutePath()
-                            : "已安装为独立可启动实例 " + completedPack.profileId()
-                                    + "，文件目录: " + completedPack.instanceDirectory();
-                    dialogStatus.setText(mainFile + " 导入完成。 " + detail);
-                    ui.setStatus(target.title + "导入完成", detail);
-                    if (completedPack != null) {
-                        ui.versionActions.restoreVersionComboItems(completedPack.profileId());
-                        ui.versionActions.syncLaunchVersionToContent(completedPack.profileId());
-                        dialogStatus.setText(mainFile + " 安装完成，正在启动整合包…");
-                        ui.setStatus("整合包安装完成", "正在启动 " + completedPack.name());
-                        Platform.runLater(() -> ui.gameLaunch.launchGame());
-                    } else {
-                        ui.versionActions.syncLaunchVersionToContent(instance.profileId());
-                    }
-                });
-            } catch (Exception e) {
-                Platform.runLater(() -> {
-                    if (generation != downloadGeneration.get()) return;
-                    String message = ui.cleanMessage(e);
-                    activeDownloadGeneration.compareAndSet(generation, 0);
-                    ui.stopProgressAnimation(modProgress, true);
-                    ui.stopProgressAnimation(ui.downloadProgress, true);
-                    ui.setControlsBusy(false);
-                    searchBtn.setDisable(false);
-                    importBtn.setDisable(false);
-                    targetProfileCombo.setDisable(false);
-                    dialogStatus.setText("下载失败: " + message);
-                    ui.setStatus(target.title + "下载失败", message);
-                });
-                throw e;
-            }
-            return null;
-            };
+                }
+                ui.stopProgressAnimation(modProgress, error != null);
+                ui.stopProgressAnimation(ui.downloadProgress, true);
+                ui.setControlsBusy(false);
+                searchBtn.setDisable(false);
+                importBtn.setDisable(false);
+                targetProfileCombo.setDisable(false);
+                if (error != null) {
+                    String message = ui.cleanMessage(error);
+                    String title = ui.isCancellation(error)
+                            ? com.ecl.util.Messages.get("download.status.cancelled") : target.title + "下载失败";
+                    dialogStatus.setText(title + ": " + message);
+                    ui.setStatus(title, message);
+                    return;
+                }
+                ContentDownloadResult downloaded = result.download();
+                MrpackInstaller.InstallResult completedPack = result.pack();
+                String mainFile = downloaded.getMainFile() == null
+                        ? project.getTitle() : downloaded.getMainFile().getName();
+                String detail = completedPack == null
+                        ? "已导入 " + downloaded.getFiles().size() + " 个文件到: " + importDir.getAbsolutePath()
+                        : "已安装为独立可启动实例 " + completedPack.profileId()
+                                + "，文件目录: " + completedPack.instanceDirectory();
+                dialogStatus.setText(mainFile + " 导入完成。 " + detail);
+                ui.setStatus(target.title + "导入完成", detail);
+                if (completedPack != null) {
+                    ui.versionActions.syncLaunchVersionToContent(completedPack.profileId());
+                    ui.versionActions.restoreVersionComboItems(completedPack.profileId());
+                    dialogStatus.setText(mainFile + " 安装完成，正在启动整合包…");
+                    ui.setStatus("整合包安装完成", "正在启动 " + completedPack.name());
+                    ui.gameLaunch.launchGame();
+                } else {
+                    ui.versionActions.syncLaunchVersionToContent(instance.profileId());
+                }
+            });
         });
     }
+
+    private record ContentInstallationResult(ContentDownloadResult download,
+                                             MrpackInstaller.InstallResult pack) { }
 
     private ModrinthDownloader.DownloadListener contentDownloadListener(
             DownloadTaskCenter.TaskContext context, long generation, AtomicLong downloadGeneration,

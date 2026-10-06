@@ -146,21 +146,6 @@ public final class DefaultGameRepository {
         }
     }
 
-    public Path instanceDirectory(String versionId, InstanceIsolation isolation, Path customDirectory) {
-        String safeVersion = requireSafeVersionId(versionId);
-        InstanceIsolation effective = isolation == null ? InstanceIsolation.VERSION_ISOLATED : isolation;
-        return switch (effective) {
-            case GLOBAL_SHARED -> sharedGameDirectory;
-            case VERSION_ISOLATED -> instanceRoot(safeVersion);
-            case CUSTOM -> {
-                if (customDirectory == null) {
-                    throw new IllegalArgumentException("Custom instance directory is required");
-                }
-                yield customDirectory.toAbsolutePath().normalize();
-            }
-        };
-    }
-
     private static String requireSafeVersionId(String versionId) {
         try {
             FileUtil.requireSafeVersionId(versionId);

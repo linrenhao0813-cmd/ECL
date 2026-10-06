@@ -310,8 +310,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
             }
         }
         try (var remaining = Files.list(root)) {
-            if (remaining.filter(path -> !path.getFileName().toString().endsWith(".lock"))
-                    .findAny().isEmpty()) {
+            if (remaining.findAny().isEmpty()) {
                 Files.deleteIfExists(root);
             }
         }
@@ -323,10 +322,23 @@ public final class PackUpdateTransaction implements AutoCloseable {
         try (var directories = Files.list(root)) {
             for (Path directory : directories
                     .filter(Files::isDirectory)
-                    .filter(path -> path.getFileName().toString().startsWith(prefix))
+                    .filter(path -> isInstanceTransaction(path, prefix))
                     .toList()) {
                 recoverDirectory(normalizedInstance, profileFile, directory);
             }
+        }
+    }
+
+    private static boolean isInstanceTransaction(Path directory, String prefix) {
+        String name = directory.getFileName().toString();
+        if (!name.startsWith(prefix) || name.length() != prefix.length() + 36) {
+            return false;
+        }
+        try {
+            return UUID.fromString(name.substring(prefix.length())).toString()
+                    .equalsIgnoreCase(name.substring(prefix.length()));
+        } catch (IllegalArgumentException invalid) {
+            return false;
         }
     }
 

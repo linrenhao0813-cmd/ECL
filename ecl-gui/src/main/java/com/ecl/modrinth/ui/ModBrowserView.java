@@ -453,6 +453,4 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         viewModel.close();
     }
 
-    private record DetailResult(ModProject project, List<ModVersion> versions) {
-    }
 }

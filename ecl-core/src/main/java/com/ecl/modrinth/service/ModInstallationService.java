@@ -160,19 +160,14 @@ public final class ModInstallationService {
     ) throws IOException {
         Map<String, InstalledMod> existingByProject = new HashMap<>();
         existing.forEach(mod -> existingByProject.put(mod.projectId(), mod));
-        Set<Path> knownPaths = new HashSet<>();
-        existing.forEach(mod -> knownPaths.add(
-                plan.instance().gameDirectory().resolve(mod.relativePath()).toAbsolutePath().normalize()));
-
         for (PlannedModFile planned : plan.files()) {
             DownloadedModFile downloaded = requireDownload(downloads, planned);
             Path target = planned.targetPath().toAbsolutePath().normalize();
             InstalledMod previous = existingByProject.get(planned.version().projectId());
             Path oldPath = previous == null ? null
                     : plan.instance().gameDirectory().resolve(previous.relativePath()).toAbsolutePath().normalize();
-            if (Files.exists(target) && !knownPaths.contains(target)
-                    && (oldPath == null || !oldPath.equals(target))) {
-                throw new ModInstallationException("目标文件已存在且不属于受控安装记录: " + target);
+            if (Files.exists(target) && (oldPath == null || !oldPath.equals(target))) {
+                throw new ModInstallationException("目标文件已存在且不属于当前模组项目: " + target);
             }
             if (oldPath != null && Files.exists(oldPath)) {
                 transaction.stageReplacement(oldPath, downloaded.temporaryFile(), target);
@@ -192,6 +187,7 @@ public final class ModInstallationService {
         List<InstalledMod> result = new ArrayList<>();
         existing.stream()
                 .filter(mod -> !replacingProjects.contains(mod.projectId()))
+                .map(mod -> mod.withRequiredByProjectIds(updatedOwners(plan, mod, replacingProjects, mod.projectId())))
                 .forEach(result::add);
         Instant now = Instant.now();
         for (PlannedModFile planned : plan.files()) {
@@ -217,12 +213,20 @@ public final class ModInstallationService {
                     plan.instance().loaderName(),
                     planned.version().versionType(),
                     true,
-                    planned.dependency(),
+                    planned.dependency() || old != null && old.dependency(),
                     planned.requiredByProjectId(),
                     old == null || old.installedAt() == null ? now : old.installedAt(),
-                    now));
+                    now, updatedOwners(plan, old, replacingProjects, planned.version().projectId())));
         }
         return List.copyOf(result);
+    }
+
+    private static Set<String> updatedOwners(ModInstallationPlan plan, InstalledMod old,
+                                             Set<String> replacingProjects, String projectId) {
+        Set<String> owners = new HashSet<>(old == null ? Set.of() : old.requiredByProjectIds());
+        owners.removeAll(replacingProjects);
+        owners.addAll(plan.requiredByProjects().getOrDefault(projectId, Set.of()));
+        return owners;
     }
 
     private static DownloadedModFile requireDownload(

@@ -108,13 +108,14 @@ final class LoaderMetadataClient {
         return versions;
     }
 
-    private static String neoForgePrefix(String minecraftVersion) throws IOException {
+    static String neoForgePrefix(String minecraftVersion) throws IOException {
         String[] parts = minecraftVersion.split("\\.");
-        if (parts.length < 2 || !"1".equals(parts[0])) {
+        if (parts.length < 2 || (!"1".equals(parts[0]) && !parts[0].matches("(?:2[6-9]|[3-9]\\d)"))) {
             throw new IOException("NeoForge 不支持该 Minecraft 版本格式: " + minecraftVersion);
         }
         String patch = parts.length >= 3 ? parts[2].replaceAll("\\D.*$", "") : "0";
-        return parts[1] + "." + (patch.isBlank() ? "0" : patch) + ".";
+        String prefix = "1".equals(parts[0]) ? parts[1] : parts[0] + "." + parts[1];
+        return prefix + "." + (patch.isBlank() ? "0" : patch) + ".";
     }
 
     static int compareVersionsDescending(String left, String right) {

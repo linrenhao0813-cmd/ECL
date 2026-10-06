@@ -46,7 +46,7 @@ final class HttpRequestExecutor {
         try {
             HttpResponse<InputStream> response = HttpClientProvider
                     .forConnectTimeout(connectTimeout)
-                    .send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+                    .send(builder.build(), bodyHandler(readTimeout));
             URI resolvedUri = checkedResponseUri(response, url);
             long declaredLength = response.headers().firstValueAsLong("Content-Length")
                     .orElse(-1L);
@@ -79,7 +79,7 @@ final class HttpRequestExecutor {
                 .build();
         try {
             HttpResponse<InputStream> response = HttpClientProvider.defaultClient().send(
-                    request, HttpResponse.BodyHandlers.ofInputStream());
+                    request, bodyHandler(HttpClientProvider.DEFAULT_READ_TIMEOUT_MS));
             try (InputStream input = response.body()) {
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
                     throw new IOException("HTTP " + response.statusCode() + " for " + url);
@@ -122,7 +122,7 @@ final class HttpRequestExecutor {
         try {
             HttpResponse<InputStream> response = HttpClientProvider.defaultClient().send(
                     builder.POST(HttpRequest.BodyPublishers.ofByteArray(body)).build(),
-                    HttpResponse.BodyHandlers.ofInputStream());
+                    bodyHandler(HttpClientProvider.DEFAULT_READ_TIMEOUT_MS));
             return boundedResponse(response, url, DEFAULT_MAX_RESPONSE_BYTES);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -144,7 +144,7 @@ final class HttpRequestExecutor {
         try {
             HttpResponse<InputStream> response = HttpClientProvider.defaultClient().send(
                     builder.POST(HttpRequest.BodyPublishers.ofByteArray(body)).build(),
-                    HttpResponse.BodyHandlers.ofInputStream());
+                    bodyHandler(HttpClientProvider.DEFAULT_READ_TIMEOUT_MS));
             return boundedResponse(response, url, DEFAULT_MAX_RESPONSE_BYTES);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -193,7 +193,8 @@ final class HttpRequestExecutor {
         }
 
         CompletableFuture<HttpResponse<InputStream>> upstream = HttpClientProvider.defaultClient()
-                .sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
+                .sendAsync(request, bodyHandler(request.timeout().orElse(
+                        Duration.ofMillis(HttpClientProvider.DEFAULT_READ_TIMEOUT_MS)).toMillis()));
         CompletableFuture<HttpUtil.Response> result = new CompletableFuture<>();
         upstream.whenComplete((response, error) -> {
             if (error != null) {
@@ -230,6 +231,11 @@ final class HttpRequestExecutor {
                 readStream(response.body(), maxResponseBytes),
                 resolvedUri.toString(),
                 response.headers().map());
+    }
+
+    static HttpResponse.BodyHandler<InputStream> bodyHandler(long timeoutMillis) {
+        return response -> HttpResponse.BodySubscribers.mapping(HttpResponse.BodySubscribers.ofInputStream(),
+                stream -> new ResponseBodyInputStream(stream, timeoutMillis));
     }
 
     /** Reads and closes a response stream. */

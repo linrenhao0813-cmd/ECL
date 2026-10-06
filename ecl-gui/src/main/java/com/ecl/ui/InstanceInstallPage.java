@@ -263,11 +263,15 @@ final class InstanceInstallPage extends VBox {
         LoaderChoice choice = selectedChoice();
         String loaderVersion = loaderVersions.getValue();
         if (busy || missingVersion()) return;
-        setBusy(true);
-        progress.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
-        status.setText(Messages.get("instance.install.starting"));
         new InstanceInstallWorkflow(ui).install(minecraftVersion, choice, loaderVersion, fabricApiVersions.getValue(),
                 new InstanceInstallWorkflow.Listener() {
+                    @Override
+                    public void onStarted() {
+                        setBusy(true);
+                        progress.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+                        status.setText(Messages.get("instance.install.starting"));
+                    }
+
                     @Override
                     public void onStatus(String message) {
                         status.setText(message);

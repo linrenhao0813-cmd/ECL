@@ -18,5 +18,9 @@ class JavaVersionRequirementTest {
         assertEquals(17, JavaVersionRequirement.inferFromVersionId("1.20.4"));
         assertEquals(21, JavaVersionRequirement.inferFromVersionId("1.20.5-pre1"));
         assertEquals(21, JavaVersionRequirement.inferFromVersionId("24w14a"));
+        assertEquals(25, JavaVersionRequirement.inferFromVersionId("26.1"));
+        assertEquals(25, JavaVersionRequirement.inferFromVersionId("26.1.2"));
+        assertEquals(25, JavaVersionRequirement.inferFromVersionId("26.2"));
+        assertEquals(25, JavaVersionRequirement.inferFromVersionId("26.3-snapshot-1"));
     }
 }

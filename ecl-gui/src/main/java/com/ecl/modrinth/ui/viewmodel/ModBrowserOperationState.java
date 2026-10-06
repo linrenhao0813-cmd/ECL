@@ -17,6 +17,7 @@ final class ModBrowserOperationState {
     private final DoubleProperty overallProgress;
     private volatile CompletableFuture<?> activeRequest;
     private volatile DownloadTaskCenter.TaskHandle<?> activeDownload;
+    private volatile boolean downloadInProgress;
 
     ModBrowserOperationState(BooleanProperty loading, StringProperty errorMessage,
                              StringProperty currentOperation, BooleanProperty cancellable,
@@ -38,10 +39,24 @@ final class ModBrowserOperationState {
     }
 
     void finish() {
-        activeDownload = null;
+        if (downloadInProgress) return;
         loading.set(false);
         cancellable.set(false);
         overallProgress.set(0);
+    }
+
+    void beginDownload(String operation) {
+        downloadInProgress = true;
+        begin(operation, true);
+    }
+
+    void finishDownload() {
+        downloadInProgress = false;
+        finish();
+    }
+
+    boolean hasActiveDownload() {
+        return downloadInProgress;
     }
 
     void track(CompletableFuture<?> request) {

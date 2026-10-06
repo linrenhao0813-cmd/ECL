@@ -15,7 +15,7 @@ class DefaultGameRepositoryTest {
     Path temp;
 
     @Test
-    void listsOnlyCompleteVersionsAndResolvesIsolationPaths() throws Exception {
+    void listsOnlyCompleteVersionsAndValidatesInstanceIds() throws Exception {
         Path versions = Files.createDirectories(temp.resolve("versions"));
         Path game = Files.createDirectories(temp.resolve("game"));
         Path ready = Files.createDirectories(versions.resolve("1.21"));
@@ -24,11 +24,10 @@ class DefaultGameRepositoryTest {
         DefaultGameRepository repository = new DefaultGameRepository(versions, game);
 
         assertEquals(List.of("1.21"), repository.installedVersions());
-        assertEquals(game.resolve("versions/1.21"), repository.instanceDirectory(
-                "1.21", InstanceIsolation.VERSION_ISOLATED, null));
-        assertEquals(game, repository.instanceDirectory("1.21", InstanceIsolation.GLOBAL_SHARED, null));
+        assertEquals(game.resolve("versions/1.21"), repository.instanceRoot("1.21"));
+        assertEquals(game, repository.runDirectory("1.21"));
         assertThrows(IllegalArgumentException.class,
-                () -> repository.instanceDirectory("../escape", InstanceIsolation.VERSION_ISOLATED, null));
+                () -> repository.instanceRoot("../escape"));
     }
 
     @Test

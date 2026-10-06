@@ -21,6 +21,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class FileInstalledModRepository implements InstalledModRepository {
@@ -99,7 +100,7 @@ public final class FileInstalledModRepository implements InstalledModRepository 
                 mod.displayName(), mod.versionNumber(), mod.fileName(), mod.relativePath().toString(),
                 mod.sha1(), mod.sha512(), mod.fileSize(), mod.minecraftVersion(), mod.loader(),
                 mod.versionType(), mod.enabled(), mod.dependency(), mod.requiredByProjectId(),
-                string(mod.installedAt()), string(mod.updatedAt()));
+                string(mod.installedAt()), string(mod.updatedAt()), mod.requiredByProjectIds(), mod.dependencyMetadataKnown());
     }
 
     private static InstalledMod fromDto(InstalledModDto dto) {
@@ -115,7 +116,8 @@ public final class FileInstalledModRepository implements InstalledModRepository 
                 relativePath, text(dto.sha1()), text(dto.sha512()), dto.fileSize(),
                 text(dto.minecraftVersion()), text(dto.loader()), text(dto.versionType()),
                 dto.enabled(), dto.dependency(), text(dto.requiredByProjectId()),
-                instant(dto.installedAt()), instant(dto.updatedAt()));
+                instant(dto.installedAt()), instant(dto.updatedAt()), dto.requiredByProjectIds(),
+                Boolean.TRUE.equals(dto.dependencyMetadataKnown()));
     }
 
     private static UUID parseUuid(String value, String field) {
@@ -192,7 +194,9 @@ public final class FileInstalledModRepository implements InstalledModRepository 
             boolean dependency,
             String requiredByProjectId,
             String installedAt,
-            String updatedAt
+            String updatedAt,
+            Set<String> requiredByProjectIds,
+            Boolean dependencyMetadataKnown
     ) {
     }
 }
