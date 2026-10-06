@@ -46,13 +46,6 @@ import java.nio.file.Path;
 
 public final class ModBrowserViewModel implements AutoCloseable {
     private final ModMetadataProvider metadataProvider;
-    private final ModDependencyResolver dependencyResolver;
-    private final InstallationPlanBuilder planBuilder;
-    private final ModInstallationService installationService;
-    private final ModManagementService managementService;
-    private final DownloadTaskCenter downloadTaskCenter;
-    private final LocalModScanner localScanner;
-    private final ModUpdateService updateService;
 
     private final StringProperty searchText = new SimpleStringProperty("");
     private final ObjectProperty<ModSearchIndex> sortIndex =
@@ -97,13 +90,12 @@ public final class ModBrowserViewModel implements AutoCloseable {
             DownloadTaskCenter downloadTaskCenter
     ) {
         this.metadataProvider = Objects.requireNonNull(metadataProvider, "metadataProvider");
-        this.dependencyResolver = Objects.requireNonNull(dependencyResolver, "dependencyResolver");
-        this.planBuilder = Objects.requireNonNull(planBuilder, "planBuilder");
-        this.installationService = Objects.requireNonNull(installationService, "installationService");
-        this.managementService = Objects.requireNonNull(managementService, "managementService");
-        this.localScanner = Objects.requireNonNull(localScanner, "localScanner");
-        this.updateService = Objects.requireNonNull(updateService, "updateService");
-        this.downloadTaskCenter = downloadTaskCenter;
+        Objects.requireNonNull(dependencyResolver, "dependencyResolver");
+        Objects.requireNonNull(planBuilder, "planBuilder");
+        Objects.requireNonNull(installationService, "installationService");
+        Objects.requireNonNull(managementService, "managementService");
+        Objects.requireNonNull(localScanner, "localScanner");
+        Objects.requireNonNull(updateService, "updateService");
         this.operations = new ModBrowserOperationState(loading, errorMessage, currentOperation,
                 operationCancellable, overallProgress);
         this.searchController = new ModBrowserSearchController(metadataProvider, searchText, sortIndex,
@@ -121,10 +113,9 @@ public final class ModBrowserViewModel implements AutoCloseable {
         this.updateCoordinator = new ModBrowserUpdateCoordinator(
                 updateService, managementService, downloadTaskCenter, this::requireInstance,
                 () -> List.copyOf(installedMods), installedModController::isLoaded, installedMods::setAll,
-                installedModController::setLoaded, operations::begin, operations::finish,
-                operations::beginDownload, operations::finishDownload,
+                installedModController::setLoaded, operations,
                 errorMessage::set, currentOperation::set, updateCount::set,
-                this::refreshInstalled, operations::track, operations::trackDownload,
+                this::refreshInstalled,
                 ModBrowserViewModel::userMessage);
     }
 

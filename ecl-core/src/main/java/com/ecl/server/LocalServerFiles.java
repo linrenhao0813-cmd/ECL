@@ -5,11 +5,9 @@ import com.ecl.util.GsonProvider;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 
 /** Bounded, atomic persistence and managed-path checks shared by server operations. */
 final class LocalServerFiles {
@@ -47,11 +45,7 @@ final class LocalServerFiles {
         try {
             Files.writeString(temporary, text, StandardCharsets.UTF_8);
             safe(file);
-            try {
-                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException unsupported) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temporary, file);
         } finally {
             Files.deleteIfExists(temporary);
         }

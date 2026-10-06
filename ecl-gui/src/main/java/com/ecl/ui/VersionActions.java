@@ -1,6 +1,5 @@
 package com.ecl.ui;
 
-import com.ecl.launcher.VersionManager;
 import javafx.application.Platform;
 
 import java.io.IOException;
@@ -133,13 +132,6 @@ final class VersionActions {
             return preferredVersion;
         }
         return selectFirstWhenMissing ? versions.getFirst() : null;
-    }
-
-    VersionManager.VersionCategory getSelectedVersionCategory() {
-        if (ui.versionTypeCombo == null || ui.versionTypeCombo.getValue() == null) {
-            return VersionManager.VersionCategory.FEATURED;
-        }
-        return ui.versionTypeCombo.getValue();
     }
 
     void updateSelectedVersionWikiButton() {

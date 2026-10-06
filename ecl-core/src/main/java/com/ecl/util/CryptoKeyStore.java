@@ -15,10 +15,8 @@ import java.io.IOException;
 import java.net.NetworkInterface;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -393,12 +391,7 @@ final class CryptoKeyStore {
         try {
             Files.write(temp, value);
             enforceOwnerOnlyPermissions(temp);
-            try {
-                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temp, target);
             enforceOwnerOnlyPermissions(target);
         } finally {
             Files.deleteIfExists(temp);

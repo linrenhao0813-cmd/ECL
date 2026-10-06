@@ -1,5 +1,6 @@
 package com.ecl.config;
 
+import com.ecl.util.FileUtil;
 import com.ecl.util.GsonProvider;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -10,7 +11,6 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -104,11 +104,7 @@ public class SettingsManager {
             try (Writer writer = Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8)) {
                 GSON.toJson(settings, writer);
             }
-            try {
-                Files.move(tempFile, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(tempFile, target);
             autoSaveScheduler.markClean(savedVersion);
             return true;
         } catch (IOException e) {
@@ -160,12 +156,6 @@ public class SettingsManager {
         return defaultValue;
     }
 
-    public synchronized void setInt(String key, int value) {
-        ensureLoaded();
-        settings.addProperty(key, value);
-        markDirty();
-    }
-
     public synchronized long getLong(String key, long defaultValue) {
         ensureLoaded();
         if (settings.has(key)) {
@@ -176,12 +166,6 @@ public class SettingsManager {
             }
         }
         return defaultValue;
-    }
-
-    public synchronized void setLong(String key, long value) {
-        ensureLoaded();
-        settings.addProperty(key, value);
-        markDirty();
     }
 
     public synchronized boolean getBoolean(String key, boolean defaultValue) {

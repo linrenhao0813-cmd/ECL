@@ -26,11 +26,6 @@ public record AuthAccount(
         return type.name() + ":" + (uuid.isBlank() ? username.toLowerCase() : uuid.toLowerCase());
     }
 
-    public AuthAccount withoutSecrets() {
-        return new AuthAccount(type, uuid, username, displayName, "", "", tokenExpiry,
-                authServerUrl, defaultAccount);
-    }
-
     private static String text(String value) {
         return value == null ? "" : value.trim();
     }

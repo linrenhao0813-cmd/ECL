@@ -7,7 +7,9 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.FileSystems;
 import java.nio.file.Path;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -22,6 +24,33 @@ class FileUtilTest {
         Files.writeString(file, "abc", StandardCharsets.UTF_8);
         assertEquals("a9993e364706816aba3e25717850c26c9cd0d89d", FileUtil.sha1(file.toFile()));
         assertTrue(FileUtil.verifySha1(file.toFile(), "A9993E364706816ABA3E25717850C26C9CD0D89D"));
+    }
+
+    @Test
+    void moveReplacingPublishesContentAndRemovesSource() throws Exception {
+        Path source = Files.writeString(tempDir.resolve("incoming.txt"), "new");
+        Path target = Files.writeString(tempDir.resolve("existing.txt"), "old");
+        FileUtil.moveReplacing(source, target);
+        assertEquals("new", Files.readString(target));
+        assertTrue(Files.notExists(source));
+    }
+
+    @Test
+    void moveReplacingFallsBackWhenAtomicMoveIsUnsupported() throws Exception {
+        Path source = Files.writeString(tempDir.resolve("incoming.txt"), "new");
+        try (var archive = FileSystems.newFileSystem(tempDir.resolve("archive.zip"), Map.of("create", "true"))) {
+            Path target = Files.writeString(archive.getPath("/existing.txt"), "old");
+            FileUtil.moveReplacing(source, target);
+            assertEquals("new", Files.readString(target));
+            assertTrue(Files.notExists(source));
+        }
+    }
+
+    @Test
+    void moveReplacingPreservesTargetWhenSourceIsMissing() throws Exception {
+        Path target = Files.writeString(tempDir.resolve("existing.txt"), "old");
+        assertThrows(IOException.class, () -> FileUtil.moveReplacing(tempDir.resolve("missing.txt"), target));
+        assertEquals("old", Files.readString(target));
     }
 
     @Test
@@ -95,7 +124,9 @@ class FileUtilTest {
 
         assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("../outside"));
         assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("..\\outside"));
-        assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("CON"));
+        for (String reserved : new String[] {"CON", "con.json", "PRN", "AUX.txt", "NUL", "COM1.jar", "LPT9"}) {
+            assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId(reserved));
+        }
         assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("version."));
         assertThrows(IOException.class, () -> FileUtil.requireSafeVersionId("version\u0000"));
     }

@@ -12,8 +12,4 @@ public interface DownloadProvider {
     boolean supports(URI original);
 
     List<URI> resolve(URI original);
-
-    default int concurrentDownloads() {
-        return 6;
-    }
 }

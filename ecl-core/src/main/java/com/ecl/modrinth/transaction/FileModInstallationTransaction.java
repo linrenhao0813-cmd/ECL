@@ -11,11 +11,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -190,13 +188,13 @@ public final class FileModInstallationTransaction implements AutoCloseable {
 
         if (old != null && !old.equals(target) && Files.exists(old)) {
             Files.createDirectories(oldBackup.getParent());
-            move(old, oldBackup);
+            FileUtil.moveReplacing(old, oldBackup);
         }
         if (Files.exists(target)) {
             Files.createDirectories(finalBackup.getParent());
-            move(target, finalBackup);
+            FileUtil.moveReplacing(target, finalBackup);
         }
-        move(staged, target);
+        FileUtil.moveReplacing(staged, target);
     }
 
     public synchronized void rollback() {
@@ -238,13 +236,13 @@ public final class FileModInstallationTransaction implements AutoCloseable {
                 if (Files.exists(finalBackup)) {
                     Files.deleteIfExists(target);
                     Files.createDirectories(target.getParent());
-                    move(finalBackup, target);
+                    FileUtil.moveReplacing(finalBackup, target);
                 } else if (Boolean.FALSE.equals(entry.finalFileExisted())) {
                     Files.deleteIfExists(target);
                 }
                 if (old != null && Files.exists(oldBackup)) {
                     Files.createDirectories(old.getParent());
-                    move(oldBackup, old);
+                    FileUtil.moveReplacing(oldBackup, old);
                 }
             } catch (IOException e) {
                 if (failure == null) {
@@ -329,13 +327,13 @@ public final class FileModInstallationTransaction implements AutoCloseable {
                 if (Files.exists(finalBackup)) {
                     Files.deleteIfExists(target);
                     Files.createDirectories(target.getParent());
-                    move(finalBackup, target);
+                    FileUtil.moveReplacing(finalBackup, target);
                 } else if (Boolean.FALSE.equals(entry.finalFileExisted())) {
                     Files.deleteIfExists(target);
                 }
                 if (old != null && Files.exists(oldBackup)) {
                     Files.createDirectories(old.getParent());
-                    move(oldBackup, old);
+                    FileUtil.moveReplacing(oldBackup, old);
                 }
             } catch (IOException e) {
                 if (failure == null) {
@@ -357,7 +355,7 @@ public final class FileModInstallationTransaction implements AutoCloseable {
                 channel.write(ByteBuffer.wrap(bytes));
                 channel.force(true);
             }
-            move(temp, target);
+            FileUtil.moveReplacing(temp, target);
         } finally {
             Files.deleteIfExists(temp);
         }
@@ -380,14 +378,6 @@ public final class FileModInstallationTransaction implements AutoCloseable {
         ensureInside(gameRoot, result, "journal path");
         FileUtil.validateExistingAncestors(gameRoot, result);
         return result;
-    }
-
-    private static void move(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
     }
 
     private static void cleanupDirectory(Path directory) throws IOException {

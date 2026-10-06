@@ -1,6 +1,7 @@
 package com.ecl.modrinth.service;
 
 import com.ecl.modrinth.instance.ModInstanceContext;
+import com.ecl.util.FileUtil;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,10 +10,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,11 +46,7 @@ final class LocalModScanCache {
             Files.writeString(temporary,
                     MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(new ScanCache(entries)),
                     StandardCharsets.UTF_8);
-            try {
-                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temporary, target);
         } finally {
             Files.deleteIfExists(temporary);
         }

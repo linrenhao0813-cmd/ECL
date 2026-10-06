@@ -90,7 +90,6 @@ class LauncherUIView extends javafx.application.Application {
 
     ComboBox<String> versionCombo;
     String lastContentVersion;
-    ComboBox<VersionManager.VersionCategory> versionTypeCombo;
     ComboBox<LoaderChoice> loaderChoiceCombo;
     Button installSelectedLoaderButton;
     boolean syncingLoaderChoice;
@@ -124,6 +123,8 @@ class LauncherUIView extends javafx.application.Application {
     Label selectedVersionTitleLabel;
     Label selectedRuntimeMetaLabel;
     private final LauncherContentBrowser contentBrowser = new LauncherContentBrowser((LauncherUI) this);
+    final LauncherAuthController authController = new LauncherAuthController((LauncherUI) this);
+    final LauncherLoaderWorkflow loaderWorkflow = new LauncherLoaderWorkflow((LauncherUI) this);
     private final LauncherLaunchForm launchForm = new LauncherLaunchForm((LauncherUI) this);
     final LauncherPageFactory pageFactory = new LauncherPageFactory((LauncherUI) this);
     private final LauncherPathService pathService = new LauncherPathService((LauncherUI) this);
@@ -605,11 +606,11 @@ class LauncherUIView extends javafx.application.Application {
     }
 
     LoaderChoice loaderChoiceForProfile(String profileId) {
-        return launchForm.loaderChoiceForProfile(profileId);
+        return loaderWorkflow.loaderChoiceForProfile(profileId);
     }
 
     void updateLoaderControls() {
-        launchForm.updateLoaderControls();
+        loaderWorkflow.updateLoaderControls();
     }
 
     void updateLaunchButtonLabel() {
@@ -617,11 +618,11 @@ class LauncherUIView extends javafx.application.Application {
     }
 
     void syncLoaderChoiceFromProfile(String profileId) {
-        launchForm.syncLoaderChoiceFromProfile(profileId);
+        loaderWorkflow.syncLoaderChoiceFromProfile(profileId);
     }
 
     void installSelectedLoader(Runnable afterSuccess) {
-        launchForm.installSelectedLoader(afterSuccess);
+        loaderWorkflow.installSelectedLoader(afterSuccess);
     }
 
     ListCell<String> createVersionCell() {
@@ -641,15 +642,11 @@ class LauncherUIView extends javafx.application.Application {
     }
 
     void updateAuthFields() {
-        launchForm.updateAuthFields();
+        authController.updateAuthFields();
     }
 
     void updateOfflineSkinControls() {
-        launchForm.updateOfflineSkinControls();
-    }
-
-    boolean offlineSkinExists() {
-        return launchForm.offlineSkinExists();
+        authController.updateOfflineSkinControls();
     }
 
     void updateRuntimeSummary() {
@@ -657,7 +654,7 @@ class LauncherUIView extends javafx.application.Application {
     }
 
     String getAuthDisplayName() {
-        return launchForm.getAuthDisplayName();
+        return authController.getAuthDisplayName();
     }
 
     void setStatus(String title, String detail) {

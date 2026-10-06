@@ -7,10 +7,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 
 /** UTF-8 JSON file persistence kept separate from HTTP transport. */
 final class JsonFileStore {
@@ -29,12 +27,7 @@ final class JsonFileStore {
             try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
                 writer.write(GsonProvider.pretty().toJson(object));
             }
-            try {
-                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temp, target);
         } finally {
             Files.deleteIfExists(temp);
         }

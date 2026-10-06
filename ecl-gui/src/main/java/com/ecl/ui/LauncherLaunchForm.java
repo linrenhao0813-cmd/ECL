@@ -1,7 +1,6 @@
 package com.ecl.ui;
 
 import com.ecl.ECLConfig;
-import com.ecl.launcher.VersionManager;
 import com.ecl.util.Messages;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -16,16 +15,12 @@ import javafx.scene.layout.VBox;
 /** Owns the launcher start form, account controls, and loader-install interaction. */
 final class LauncherLaunchForm {
     private final LauncherUI ui;
-    private final LauncherAuthController auth;
-    private final LauncherLoaderWorkflow loader;
     private Label launchHintLabel;
     private Button launchHintAction;
     private boolean controlsBusy;
 
     LauncherLaunchForm(LauncherUI ui) {
         this.ui = ui;
-        this.auth = new LauncherAuthController(ui);
-        this.loader = new LauncherLoaderWorkflow(ui);
     }
 
     void initializeControls() {
@@ -34,8 +29,8 @@ final class LauncherLaunchForm {
         String previousVersion = ui.versionCombo == null || ui.versionCombo.getValue() == null
                 ? ui.settingsManager.get(ECLConfig.KEY_SELECTED_VERSION) : ui.versionCombo.getValue();
         String previousAuthType = ui.authTypeCombo == null
-                ? auth.normalizeAuthType(ui.settingsManager.get(ECLConfig.KEY_AUTH_TYPE))
-                : auth.normalizeAuthType(ui.authTypeCombo.getValue());
+                ? ui.authController.normalizeAuthType(ui.settingsManager.get(ECLConfig.KEY_AUTH_TYPE))
+                : ui.authController.normalizeAuthType(ui.authTypeCombo.getValue());
         String previousUsername = ui.usernameField == null
                 ? ui.settingsManager.get(ECLConfig.KEY_USERNAME)
                 : ui.usernameField.getText();
@@ -45,30 +40,16 @@ final class LauncherLaunchForm {
 
         ui.authTypeCombo = new ComboBox<>();
         ui.authTypeCombo.getItems().addAll(LauncherUI.AUTH_OFFLINE, LauncherUI.AUTH_MICROSOFT);
-        ui.authTypeCombo.setCellFactory(list -> new ListCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : auth.authDisplayName(item));
-            }
-        });
-        ui.authTypeCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : auth.authDisplayName(item));
-            }
-        });
+        ui.configureLocalizedCombo(ui.authTypeCombo, ui.authController::authDisplayName);
         ui.authTypeCombo.setValue(previousAuthType);
-        ui.authTypeCombo.valueProperty().addListener((observable, previous, selected) -> auth.updateAuthFields());
-        ui.applyFieldStyle(ui.authTypeCombo);
+        ui.authTypeCombo.valueProperty().addListener((observable, previous, selected) -> ui.updateAuthFields());
 
         ui.usernameField = new TextField(previousUsername);
         ui.usernameField.setPromptText("输入玩家名称");
         ui.applyFieldStyle(ui.usernameField);
         ui.usernameField.textProperty().addListener((obs, oldValue, newValue) -> {
             ui.updateRuntimeSummary();
-            auth.updateOfflineSkinControls();
+            ui.updateOfflineSkinControls();
         });
 
         ui.authSummaryLabel = ui.createValueLabel();
@@ -76,34 +57,19 @@ final class LauncherLaunchForm {
         ui.authHintLabel.getStyleClass().add("status-detail");
         ui.authHintLabel.setWrapText(true);
 
-        ui.versionTypeCombo = new ComboBox<>();
-        ui.versionTypeCombo.getItems().addAll(VersionManager.VersionCategory.values());
-        ui.versionTypeCombo.setValue(VersionManager.VersionCategory.FEATURED);
-        ui.versionTypeCombo.setPrefWidth(176);
-        ui.versionTypeCombo.setTooltip(new Tooltip("默认显示正式版、预览版/快照和愚人节版，也可以只看某一类"));
-        ui.versionTypeCombo.setOnAction(e -> {
-            ui.settingsManager.set(ECLConfig.KEY_VERSION_CATEGORY, ui.versionActions.getSelectedVersionCategory().name());
-            if (!ui.settingsManager.save()) {
-                ui.setStatus("设置保存失败", "无法写入 settings.json，请检查目录权限或查看日志。");
-                return;
-            }
-            ui.versionActions.refreshVersions();
-        });
-        ui.applyFieldStyle(ui.versionTypeCombo);
-
         ui.loaderChoiceCombo = new ComboBox<>();
         ui.loaderChoiceCombo.getItems().setAll(LoaderChoice.values());
         ui.loaderChoiceCombo.setValue(LoaderChoice.VANILLA);
         ui.loaderChoiceCombo.setPrefWidth(160);
         ui.loaderChoiceCombo.setTooltip(new Tooltip(
                 "选择 Fabric、Quilt、Forge 或 NeoForge 后，可直接安装对应实例"));
-        ui.loaderChoiceCombo.setOnAction(event -> loader.handleLoaderChoiceChanged());
+        ui.loaderChoiceCombo.setOnAction(event -> ui.loaderWorkflow.handleLoaderChoiceChanged());
         ui.applyFieldStyle(ui.loaderChoiceCombo);
         ui.installSelectedLoaderButton = new Button("当前为原版");
         ui.installSelectedLoaderButton.getStyleClass().addAll(
                 "app-button", "secondary-button", "compact-button");
         ui.installSelectedLoaderButton.setDisable(true);
-        ui.installSelectedLoaderButton.setOnAction(event -> loader.installSelectedLoader(null));
+        ui.installSelectedLoaderButton.setOnAction(event -> ui.installSelectedLoader(null));
 
         ui.versionActions.restoreVersionComboItems(previousVersion);
         ui.versionActions.updateSelectedVersionWikiButton();
@@ -161,7 +127,7 @@ final class LauncherLaunchForm {
         VBox guidance = new VBox(12,
                 ui.createBodyText("为 Minecraft " + minecraftVersion
                         + " 选择加载器，安装完成后会自动进入对应的独立模组实例。"),
-                loader.createLoaderQuickActions(profileId));
+                ui.loaderWorkflow.createLoaderQuickActions(profileId));
         page.getChildren().add(ui.createSurface(
                 "// 当前版本没有模组加载器",
                 ui.versionManager.getVersionDisplayName(profileId),
@@ -210,7 +176,7 @@ final class LauncherLaunchForm {
         ui.launchBtn.setDefaultButton(true);
         ui.launchBtn.setOnAction(e -> handleLaunchAction());
         updateLaunchButtonLabel();
-        loader.updateLoaderControls();
+        ui.updateLoaderControls();
 
         HBox buttonBar = new HBox(14, ui.launchBtn, ui.instanceUpdates.createButton());
         buttonBar.getStyleClass().add("launch-actions");
@@ -368,7 +334,6 @@ final class LauncherLaunchForm {
             ui.microsoftAccountCombo.setDisable(busy);
         }
         ui.versionCombo.setDisable(busy);
-        ui.versionTypeCombo.setDisable(busy);
         if (ui.loaderChoiceCombo != null) {
             ui.loaderChoiceCombo.setDisable(busy);
         }
@@ -379,43 +344,11 @@ final class LauncherLaunchForm {
         ui.authTypeCombo.setDisable(busy);
         ui.usernameField.setDisable(busy || LauncherUI.AUTH_MICROSOFT.equals(ui.authTypeCombo.getValue()));
         if (!busy) {
-            loader.updateLoaderControls();
+            ui.updateLoaderControls();
         }
         ui.instanceUpdates.updateButton();
         // Recompute last so the primary action reflects the settled busy state.
         updateLaunchButtonLabel();
     }
 
-    // Delegates kept for LauncherUIView wrappers
-    LoaderChoice loaderChoiceForProfile(String profileId) {
-        return loader.loaderChoiceForProfile(profileId);
-    }
-
-    void updateLoaderControls() {
-        loader.updateLoaderControls();
-    }
-
-    void syncLoaderChoiceFromProfile(String profileId) {
-        loader.syncLoaderChoiceFromProfile(profileId);
-    }
-
-    void installSelectedLoader(Runnable afterSuccess) {
-        loader.installSelectedLoader(afterSuccess);
-    }
-
-    void updateAuthFields() {
-        auth.updateAuthFields();
-    }
-
-    void updateOfflineSkinControls() {
-        auth.updateOfflineSkinControls();
-    }
-
-    boolean offlineSkinExists() {
-        return auth.offlineSkinExists();
-    }
-
-    String getAuthDisplayName() {
-        return auth.getAuthDisplayName();
-    }
 }

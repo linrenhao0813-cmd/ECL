@@ -56,11 +56,6 @@ public class VersionRepository {
         cache.remove(versionId);
     }
 
-    /** Drop the whole cache. Call after bulk changes (install, removal, reinstall). */
-    public void invalidateAll() {
-        cache.clear();
-    }
-
     /** True when {@code id}/{@code id}.json exists in the versions directory. */
     public boolean contains(String versionId) {
         try {
@@ -113,16 +108,6 @@ public class VersionRepository {
         VersionMetadata metadata = parseEffective(versionId, chain.effectiveJson(), chain.baseId());
         cache.put(versionId, metadata);
         return metadata;
-    }
-
-    /** The base (non-inheriting) version id behind a profile, e.g. {@code 1.21} for a loader install. */
-    public String minecraftVersionOf(String versionId) throws IOException {
-        return resolve(versionId).minecraftVersion();
-    }
-
-    /** Id of the version whose client jar sits on the classpath for the given profile. */
-    public String effectiveClientJar(String versionId) throws IOException {
-        return resolve(versionId).clientJarId();
     }
 
     // ------------------------------------------------------------------ chain resolution

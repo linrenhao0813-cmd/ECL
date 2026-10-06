@@ -8,6 +8,7 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,7 +19,15 @@ import com.sun.jna.platform.win32.WinNT;
 public class FileUtil {
     private static final Logger LOGGER = LoggerFactory.getLogger(FileUtil.class);
     private static final int SHA1_BUFFER_SIZE = 64 * 1024;
-    private static final char[] HEX_DIGITS = "0123456789abcdef".toCharArray();
+
+    /** Replaces a file atomically where supported, without changing caller-owned validation or cleanup. */
+    public static void moveReplacing(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException unsupported) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
 
     public static String sha1(File file) throws IOException {
         MessageDigest digest;
@@ -37,14 +46,7 @@ public class FileUtil {
             }
         }
 
-        byte[] hash = digest.digest();
-        char[] chars = new char[hash.length * 2];
-        for (int i = 0; i < hash.length; i++) {
-            int b = hash[i] & 0xFF;
-            chars[i * 2] = HEX_DIGITS[b >>> 4];
-            chars[i * 2 + 1] = HEX_DIGITS[b & 0x0F];
-        }
-        return new String(chars);
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     public static boolean verifySha1(File file, String expected) {
@@ -66,14 +68,7 @@ public class FileUtil {
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("SHA-1 algorithm not available", e);
         }
-        byte[] hash = digest.digest(data);
-        char[] chars = new char[hash.length * 2];
-        for (int i = 0; i < hash.length; i++) {
-            int b = hash[i] & 0xFF;
-            chars[i * 2] = HEX_DIGITS[b >>> 4];
-            chars[i * 2 + 1] = HEX_DIGITS[b & 0x0F];
-        }
-        return new String(chars);
+        return HexFormat.of().formatHex(digest.digest(data));
     }
 
     public static boolean verifySha1(byte[] data, String expected) {
@@ -287,10 +282,7 @@ public class FileUtil {
                 || versionId.endsWith(".") || versionId.endsWith(" ")) {
             throw new IOException("非法的版本 ID: " + versionId);
         }
-        String stem = versionId.substring(0, versionId.indexOf('.') >= 0
-                ? versionId.indexOf('.') : versionId.length()).toUpperCase(java.util.Locale.ROOT);
-        if (stem.equals("CON") || stem.equals("PRN") || stem.equals("AUX") || stem.equals("NUL")
-                || stem.matches("COM[1-9]") || stem.matches("LPT[1-9]")) {
+        if (TextUtil.isWindowsReservedName(versionId)) {
             throw new IOException("非法的版本 ID: " + versionId);
         }
     }

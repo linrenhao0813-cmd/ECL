@@ -2,6 +2,7 @@ package com.ecl.auth;
 
 import com.ecl.ECLConfig;
 import com.ecl.exception.AuthException;
+import com.ecl.util.FileUtil;
 import com.ecl.util.GsonProvider;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -11,7 +12,6 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -84,7 +84,7 @@ public final class OfflineSkinStore {
                 backup = Files.createTempFile(skinsDir, "skin-backup-", ".png.tmp");
                 Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
             }
-            moveReplacing(staged, target);
+            FileUtil.moveReplacing(staged, target);
 
             JsonObject index = readIndex();
             JsonObject entry = new JsonObject();
@@ -200,20 +200,12 @@ public final class OfflineSkinStore {
         return AuthType.OFFLINE.name() + ":" + accountId.toLowerCase(Locale.ROOT);
     }
 
-    private static void moveReplacing(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
-
     private static void rollbackSkin(Path target, Path backup, RuntimeException failure) {
         try {
             if (backup == null) {
                 Files.deleteIfExists(target);
             } else {
-                moveReplacing(backup, target);
+                FileUtil.moveReplacing(backup, target);
             }
         } catch (IOException rollbackFailure) {
             failure.addSuppressed(rollbackFailure);
@@ -254,11 +246,7 @@ public final class OfflineSkinStore {
             try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
                 GsonProvider.pretty().toJson(index, writer);
             }
-            try {
-                Files.move(temp, absolute, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temp, absolute, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temp, absolute);
         } catch (IOException failure) {
             throw new AuthException("无法保存皮肤索引文件", failure);
         } finally {

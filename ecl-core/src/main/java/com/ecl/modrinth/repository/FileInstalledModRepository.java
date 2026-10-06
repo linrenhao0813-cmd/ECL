@@ -2,6 +2,7 @@ package com.ecl.modrinth.repository;
 
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.InstalledMod;
+import com.ecl.util.FileUtil;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -10,10 +11,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -62,7 +61,7 @@ public final class FileInstalledModRepository implements InstalledModRepository 
             Files.createDirectories(target.getParent());
             Path staged = createSnapshot(instance, mods, target.getParent());
             try {
-                move(staged, target);
+                FileUtil.moveReplacing(staged, target);
             } finally {
                 Files.deleteIfExists(staged);
             }
@@ -157,14 +156,6 @@ public final class FileInstalledModRepository implements InstalledModRepository 
 
     private static String text(String value) {
         return value == null ? "" : value;
-    }
-
-    private static void move(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

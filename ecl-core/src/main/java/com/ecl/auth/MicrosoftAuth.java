@@ -73,11 +73,6 @@ public class MicrosoftAuth implements AuthProvider {
         return sessionState.refreshToken();
     }
 
-    /** Epoch milliseconds at which the cached Minecraft access token expires. */
-    public long getAccessTokenExpiresAt() {
-        return sessionState.accessTokenExpiresAt();
-    }
-
     @Override
     public AuthType getType() {
         return AuthType.MICROSOFT;
@@ -311,45 +306,11 @@ public class MicrosoftAuth implements AuthProvider {
         }
     }
 
-    public static class DeviceCode {
-        private final String deviceCode;
-        private final String userCode;
-        private final String verificationUri;
-        private final String message;
-        private final int expiresIn;
-        private final int interval;
-
-        public DeviceCode(String deviceCode, String userCode, String verificationUri, String message, int expiresIn, int interval) {
-            this.deviceCode = deviceCode;
-            this.userCode = userCode;
-            this.verificationUri = verificationUri;
-            this.message = message;
-            this.expiresIn = expiresIn;
-            this.interval = interval;
-        }
-
-        public String getDeviceCode() {
-            return deviceCode;
-        }
-
-        public String getUserCode() {
-            return userCode;
-        }
-
-        public String getVerificationUri() {
-            return verificationUri;
-        }
-
-        public String getMessage() {
-            return message;
-        }
-
-        public int getExpiresIn() {
-            return expiresIn;
-        }
-
-        public int getInterval() {
-            return interval;
+    public record DeviceCode(String deviceCode, String userCode, String verificationUri,
+                             String message, int expiresIn, int interval) {
+        @Override
+        public String toString() {
+            return "DeviceCode[redacted]";
         }
     }
 

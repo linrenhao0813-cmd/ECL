@@ -10,10 +10,8 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -162,12 +160,7 @@ public final class WorldSaveService {
         Path temporary = Files.createTempFile(target.getParent(), "level-", ".dat.tmp");
         try {
             NbtIo.write(temporary, root);
-            try {
-                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temporary, target);
         } finally {
             Files.deleteIfExists(temporary);
         }

@@ -76,10 +76,6 @@ public class VersionManager {
         return VersionCatalogService.versions(manifest, category);
     }
 
-    public List<String> getAllVersions() {
-        return getVersions(VersionCategory.ALL);
-    }
-
     public synchronized List<LocalVersionProfile> getLocalVersionProfiles() {
         List<LocalVersionProfile> cached = localProfilesCache;
         if (cached != null) {

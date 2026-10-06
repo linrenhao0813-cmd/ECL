@@ -8,11 +8,9 @@ import com.google.gson.JsonParser;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
@@ -40,12 +38,7 @@ public final class GameProcessMarker {
         try {
             Files.writeString(temporary, GsonProvider.pretty().toJson(marker.toJson()),
                     StandardCharsets.UTF_8);
-            try {
-                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temporary, target);
         } finally {
             Files.deleteIfExists(temporary);
         }

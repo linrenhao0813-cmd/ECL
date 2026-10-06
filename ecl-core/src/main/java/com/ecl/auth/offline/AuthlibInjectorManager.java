@@ -1,6 +1,7 @@
 package com.ecl.auth.offline;
 
 import com.ecl.ECLConfig;
+import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.NetworkUriPolicy;
 import com.google.gson.JsonObject;
@@ -9,7 +10,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -64,12 +64,6 @@ public final class AuthlibInjectorManager {
         synchronized (CACHE_LOCK) {
             return ensureJarLocked(status == null ? message -> { } : status,
                     progress == null ? (downloaded, total) -> { } : progress);
-        }
-    }
-
-    public boolean requiresDownload() {
-        synchronized (CACHE_LOCK) {
-            return !isCachedJarValid();
         }
     }
 
@@ -186,12 +180,7 @@ public final class AuthlibInjectorManager {
         Path temp = Files.createTempFile(checksumFile.getParent(), "authlib-injector-", ".sha256.tmp");
         try {
             Files.writeString(temp, checksum + System.lineSeparator(), StandardCharsets.US_ASCII);
-            try {
-                Files.move(temp, checksumFile, StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temp, checksumFile, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temp, checksumFile);
         } finally {
             Files.deleteIfExists(temp);
         }

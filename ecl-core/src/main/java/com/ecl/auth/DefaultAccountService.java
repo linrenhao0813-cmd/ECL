@@ -3,6 +3,7 @@ package com.ecl.auth;
 import com.ecl.ECLConfig;
 import com.ecl.exception.AuthException;
 import com.ecl.util.CryptoUtil;
+import com.ecl.util.FileUtil;
 import com.ecl.util.GsonProvider;
 import com.ecl.util.JsonUtil;
 import com.google.gson.JsonArray;
@@ -14,10 +15,8 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -142,11 +141,7 @@ public final class DefaultAccountService {
             try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
                 GsonProvider.pretty().toJson(array, writer);
             }
-            try {
-                Files.move(temp, absolute, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temp, absolute, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temp, absolute);
         } catch (IOException failure) {
             throw new AuthException("无法保存账户文件", failure);
         } finally {

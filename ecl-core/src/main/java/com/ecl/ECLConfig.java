@@ -37,7 +37,6 @@ public class ECLConfig {
     public static final SettingKey<String> KEY_MICROSOFT_PROFILE_NAME = new SettingKey<>("microsoftProfileName", String.class, "");
     public static final SettingKey<String> KEY_MICROSOFT_PROFILE_UUID = new SettingKey<>("microsoftProfileUuid", String.class, "");
     public static final SettingKey<String> KEY_SELECTED_VERSION = new SettingKey<>("selectedVersion", String.class, "");
-    public static final SettingKey<String> KEY_VERSION_CATEGORY = new SettingKey<>("versionCategory2", String.class, "FEATURED");
     public static final SettingKey<String> KEY_AUTH_TYPE = new SettingKey<>("authType", String.class, "OFFLINE");
     public static final SettingKey<String> KEY_USERNAME = new SettingKey<>("username", String.class, "");
     public static final SettingKey<String> KEY_MOD_RELEASE_CHANNEL =

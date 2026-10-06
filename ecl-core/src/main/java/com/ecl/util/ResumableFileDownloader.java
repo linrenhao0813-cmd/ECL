@@ -14,10 +14,8 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -207,7 +205,7 @@ final class ResumableFileDownloader {
                 throw new DownloadLimitExceededException(
                         "Download exceeds byte limit: " + totalSize + " > " + maxBytes);
             }
-            promote(partial.toPath(), target.toPath());
+            FileUtil.moveReplacing(partial.toPath(), target.toPath());
             Files.deleteIfExists(metadataFile.toPath());
             if (progress != null) {
                 progress.onStart(totalSize);
@@ -289,7 +287,7 @@ final class ResumableFileDownloader {
             throw new IOException("Downloaded size does not match HTTP response: expected "
                     + totalLength + ", got " + partial.length());
         }
-        promote(partial.toPath(), target.toPath());
+        FileUtil.moveReplacing(partial.toPath(), target.toPath());
         Files.deleteIfExists(metadataFile.toPath());
         if (progress != null) progress.onComplete(target);
         return true;
@@ -379,7 +377,7 @@ final class ResumableFileDownloader {
             try (Writer writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
                 GsonProvider.pretty().toJson(json, writer);
             }
-            promote(temporary, target);
+            FileUtil.moveReplacing(temporary, target);
         } finally {
             Files.deleteIfExists(temporary);
         }
@@ -424,15 +422,6 @@ final class ResumableFileDownloader {
         File parent = target.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.isDirectory()) {
             throw new IOException("Failed to create directory: " + parent);
-        }
-    }
-
-    private static void promote(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

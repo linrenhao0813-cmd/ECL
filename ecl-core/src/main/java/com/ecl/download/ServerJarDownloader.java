@@ -12,7 +12,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 /** Resolves and downloads the official dedicated-server JAR declared by Minecraft metadata. */
@@ -104,12 +103,7 @@ public final class ServerJarDownloader {
             if (!matches(temporary.toFile(), artifact)) {
                 throw new IOException(target.getName() + " 的大小或 SHA-1 校验失败");
             }
-            try {
-                Files.move(temporary, targetPath, StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-                Files.move(temporary, targetPath, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(temporary, targetPath);
             if (listener != null) listener.onComplete(target);
             return target;
         } finally {

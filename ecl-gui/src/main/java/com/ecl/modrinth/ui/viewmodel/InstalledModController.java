@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -94,33 +95,28 @@ final class InstalledModController {
     }
 
     CompletableFuture<?> setEnabled(Collection<String> projectIds, boolean enabled) {
-        operations.begin(enabled ? "正在启用模组…" : "正在禁用模组…", false);
-        CompletableFuture<?> request = managementService.setEnabled(instanceSupplier.get(), projectIds, enabled)
-                .whenComplete((mods, error) -> Platform.runLater(() -> {
-                    operations.finish();
-                    if (error != null) {
-                        setError.accept(errorFormatter.apply(error));
-                    } else {
-                        installedMods.setAll(mods);
-                        setOperation.accept(enabled ? "模组已启用" : "模组已禁用");
-                    }
-                }));
-        operations.track(request);
-        return request;
+        return updateInstalled(enabled ? "正在启用模组…" : "正在禁用模组…",
+                enabled ? "模组已启用" : "模组已禁用",
+                () -> managementService.setEnabled(instanceSupplier.get(), projectIds, enabled));
     }
 
     CompletableFuture<?> uninstall(Collection<String> projectIds) {
-        operations.begin("正在卸载模组…", false);
-        CompletableFuture<?> request = managementService.uninstall(instanceSupplier.get(), projectIds)
-                .whenComplete((mods, error) -> Platform.runLater(() -> {
-                    operations.finish();
-                    if (error != null) {
-                        setError.accept(errorFormatter.apply(error));
-                    } else {
-                        installedMods.setAll(mods);
-                        setOperation.accept("模组已卸载");
-                    }
-                }));
+        return updateInstalled("正在卸载模组…", "模组已卸载",
+                () -> managementService.uninstall(instanceSupplier.get(), projectIds));
+    }
+
+    private CompletableFuture<?> updateInstalled(String pending, String completed,
+                                                 Supplier<CompletableFuture<List<InstalledMod>>> action) {
+        operations.begin(pending, false);
+        CompletableFuture<?> request = action.get().whenComplete((mods, error) -> Platform.runLater(() -> {
+            operations.finish();
+            if (error != null) {
+                setError.accept(errorFormatter.apply(error));
+            } else {
+                installedMods.setAll(mods);
+                setOperation.accept(completed);
+            }
+        }));
         operations.track(request);
         return request;
     }

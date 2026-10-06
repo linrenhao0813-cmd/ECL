@@ -128,11 +128,6 @@ public final class VersionMetadata {
         return arguments;
     }
 
-    /** Convenience: the client jar download object, or null when not declared. */
-    public DownloadObject clientDownload() {
-        return downloads.get("client");
-    }
-
     @Override
     public String toString() {
         return id;

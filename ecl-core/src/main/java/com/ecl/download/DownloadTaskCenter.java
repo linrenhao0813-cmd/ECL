@@ -270,21 +270,6 @@ public final class DownloadTaskCenter implements AutoCloseable {
                 && (entry.status == Status.FAILED || entry.status == Status.CANCELLED);
     }
 
-    public int clearFinished() {
-        int removed = 0;
-        synchronized (lock) {
-            var iterator = entries.entrySet().iterator();
-            while (iterator.hasNext()) {
-                if (DownloadTaskSnapshots.isTerminal(iterator.next().getValue().status)) {
-                    iterator.remove();
-                    removed++;
-                }
-            }
-        }
-        if (removed > 0) fireChanged(true);
-        return removed;
-    }
-
     public void cancelAll() {
         List<String> ids;
         synchronized (lock) {

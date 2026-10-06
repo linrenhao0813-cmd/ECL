@@ -265,12 +265,7 @@ public final class ModLoaderInstaller {
                             ".ecl-copy-", ".tmp");
                     try {
                         Files.copy(item, temp, StandardCopyOption.REPLACE_EXISTING);
-                        try {
-                            Files.move(temp, destination, StandardCopyOption.ATOMIC_MOVE,
-                                    StandardCopyOption.REPLACE_EXISTING);
-                        } catch (java.nio.file.AtomicMoveNotSupportedException error) {
-                            Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING);
-                        }
+                        FileUtil.moveReplacing(temp, destination);
                     } finally {
                         Files.deleteIfExists(temp);
                     }

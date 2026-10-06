@@ -32,6 +32,19 @@ class MicrosoftAuthTest {
     }
 
     @Test
+    void deviceCodeCarriesPromptValuesWithoutLoggingAuthorizationCodes() {
+        MicrosoftAuth.DeviceCode code = new MicrosoftAuth.DeviceCode(
+                "private-device-code", "private-user-code", "https://example.com", "Sign in", 900, 5);
+        assertEquals("private-user-code", code.userCode());
+        assertEquals("https://example.com", code.verificationUri());
+        assertEquals("Sign in", code.message());
+        assertEquals(900, code.expiresIn());
+        assertEquals(5, code.interval());
+        assertFalse(code.toString().contains("private-device-code"));
+        assertFalse(code.toString().contains("private-user-code"));
+    }
+
+    @Test
     void slowDownPollingIntervalIsCapped() {
         assertEquals(10, MicrosoftAuth.nextDevicePollInterval(5));
         assertEquals(60, MicrosoftAuth.nextDevicePollInterval(58));

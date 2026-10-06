@@ -79,8 +79,8 @@ public final class LauncherRuntimeValidation {
         MicrosoftAuth auth = new MicrosoftAuth(MicrosoftAuth.CachedSession.empty(), new MicrosoftAuth.LoginListener() {
             @Override
             public void onDeviceCode(MicrosoftAuth.DeviceCode deviceCode) {
-                System.out.println("MICROSOFT_DEVICE_CODE " + deviceCode.getUserCode());
-                System.out.println("MICROSOFT_VERIFICATION_URI " + deviceCode.getVerificationUri());
+                System.out.println("MICROSOFT_DEVICE_CODE " + deviceCode.userCode());
+                System.out.println("MICROSOFT_VERIFICATION_URI " + deviceCode.verificationUri());
             }
         });
         try (MainController controller = new MainController()) {

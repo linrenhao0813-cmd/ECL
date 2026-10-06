@@ -105,10 +105,10 @@ final class MicrosoftAccountCoordinator {
             @Override
             public void onDeviceCode(MicrosoftAuth.DeviceCode deviceCode) {
                 Platform.runLater(() -> {
-                    boolean copied = copyMicrosoftDeviceCodeToClipboard(deviceCode.getUserCode());
+                    boolean copied = copyMicrosoftDeviceCodeToClipboard(deviceCode.userCode());
                     ui.setStatus("微软正版登录", copied
-                            ? "登录代码已自动复制: " + deviceCode.getUserCode() + "。浏览器打开后直接粘贴完成授权。"
-                            : "无法自动复制登录代码，请手动复制 " + deviceCode.getUserCode() + " 完成授权。");
+                            ? "登录代码已自动复制: " + deviceCode.userCode() + "。浏览器打开后直接粘贴完成授权。"
+                            : "无法自动复制登录代码，请手动复制 " + deviceCode.userCode() + " 完成授权。");
                     showMicrosoftDeviceCodeDialog(deviceCode);
                     openMicrosoftVerificationPage(deviceCode);
                 });
@@ -167,17 +167,17 @@ final class MicrosoftAccountCoordinator {
         title.getStyleClass().add("section-title");
         Label message = ui.createBodyText("登录代码已自动复制。打开浏览器访问验证地址并粘贴代码完成授权，授权成功后可以关闭本窗口。");
 
-        TextField codeField = new TextField(deviceCode.getUserCode());
+        TextField codeField = new TextField(deviceCode.userCode());
         codeField.setEditable(false);
         codeField.setFocusTraversable(true);
         ui.applyFieldStyle(codeField);
 
-        TextField urlField = new TextField(deviceCode.getVerificationUri());
+        TextField urlField = new TextField(deviceCode.verificationUri());
         urlField.setEditable(false);
         ui.applyFieldStyle(urlField);
 
         Button openButton = ui.createActionButton("打开浏览器", "primary-button", () -> openMicrosoftVerificationPage(deviceCode));
-        Button copyButton = ui.createActionButton("复制代码", "secondary-button", () -> copyMicrosoftDeviceCode(deviceCode.getUserCode()));
+        Button copyButton = ui.createActionButton("复制代码", "secondary-button", () -> copyMicrosoftDeviceCode(deviceCode.userCode()));
         Button closeButton = ui.createActionButton("关闭", "ghost-button", dialog::close);
         HBox actions = new HBox(10, openButton, copyButton, closeButton);
         actions.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
@@ -185,9 +185,9 @@ final class MicrosoftAccountCoordinator {
         VBox root = new VBox(12,
                 title,
                 message,
-                ui.createInfoRow("登录码", ui.createStaticValueLabel(deviceCode.getUserCode())),
+                ui.createInfoRow("登录码", ui.createStaticValueLabel(deviceCode.userCode())),
                 codeField,
-                ui.createInfoRow("验证 URL", ui.createStaticValueLabel(deviceCode.getVerificationUri())),
+                ui.createInfoRow("验证 URL", ui.createStaticValueLabel(deviceCode.verificationUri())),
                 urlField,
                 actions
         );
@@ -208,10 +208,10 @@ final class MicrosoftAccountCoordinator {
 
     private void openMicrosoftVerificationPage(MicrosoftAuth.DeviceCode deviceCode) {
         try {
-            ui.openExternalUrl(deviceCode.getVerificationUri());
-            ui.setStatus("微软正版登录", "登录代码已自动复制: " + deviceCode.getUserCode() + "。浏览器打开后直接粘贴完成授权。");
+            ui.openExternalUrl(deviceCode.verificationUri());
+            ui.setStatus("微软正版登录", "登录代码已自动复制: " + deviceCode.userCode() + "。浏览器打开后直接粘贴完成授权。");
         } catch (Exception e) {
-            ui.setStatus("无法打开微软登录页面", ui.cleanMessage(e) + "；请手动打开 " + deviceCode.getVerificationUri());
+            ui.setStatus("无法打开微软登录页面", ui.cleanMessage(e) + "；请手动打开 " + deviceCode.verificationUri());
         }
     }
 

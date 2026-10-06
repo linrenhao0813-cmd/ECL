@@ -110,11 +110,6 @@ public final class VersionArguments {
         return legacyMinecraftArguments;
     }
 
-    /** Whether the version uses the modern structured {@code arguments} form. */
-    public boolean usesStructuredArguments() {
-        return !jvm.isEmpty() || !game.isEmpty();
-    }
-
     /** Whether the version declares anything at all to append. */
     public boolean isEmpty() {
         return jvm.isEmpty() && game.isEmpty() && legacyJvmArguments.isEmpty()

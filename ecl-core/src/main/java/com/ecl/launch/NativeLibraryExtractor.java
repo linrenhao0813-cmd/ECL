@@ -11,10 +11,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
@@ -227,11 +225,7 @@ public final class NativeLibraryExtractor {
         try {
             Files.writeString(tempFile, fingerprint, StandardCharsets.UTF_8,
                     StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
-            try {
-                Files.move(tempFile, marker, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tempFile, marker, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileUtil.moveReplacing(tempFile, marker);
         } finally {
             Files.deleteIfExists(tempFile);
         }

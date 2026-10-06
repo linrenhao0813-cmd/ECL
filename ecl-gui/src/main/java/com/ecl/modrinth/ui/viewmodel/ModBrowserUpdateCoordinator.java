@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -30,16 +29,11 @@ final class ModBrowserUpdateCoordinator {
     private final BooleanSupplier installedLoaded;
     private final Consumer<List<InstalledMod>> installedConsumer;
     private final Consumer<Boolean> installedLoadedConsumer;
-    private final BiConsumer<String, Boolean> setBusy;
-    private final Runnable finishBusy;
-    private final Consumer<String> beginDownload;
-    private final Runnable finishDownload;
+    private final ModBrowserOperationState operations;
     private final Consumer<String> setError;
     private final Consumer<String> setOperation;
     private final Consumer<Integer> setUpdateCount;
     private final Runnable refreshInstalled;
-    private final Consumer<CompletableFuture<?>> setActiveRequest;
-    private final Consumer<DownloadTaskCenter.TaskHandle<?>> setActiveDownload;
     private final Function<Throwable, String> errorFormatter;
     private final Map<String, ModUpdate> updates = new LinkedHashMap<>();
     private final ModUpdateService updateService;
@@ -55,16 +49,11 @@ final class ModBrowserUpdateCoordinator {
             BooleanSupplier installedLoaded,
             Consumer<List<InstalledMod>> installedConsumer,
             Consumer<Boolean> installedLoadedConsumer,
-            BiConsumer<String, Boolean> setBusy,
-            Runnable finishBusy,
-            Consumer<String> beginDownload,
-            Runnable finishDownload,
+            ModBrowserOperationState operations,
             Consumer<String> setError,
             Consumer<String> setOperation,
             Consumer<Integer> setUpdateCount,
             Runnable refreshInstalled,
-            Consumer<CompletableFuture<?>> setActiveRequest,
-            Consumer<DownloadTaskCenter.TaskHandle<?>> setActiveDownload,
             Function<Throwable, String> errorFormatter) {
         this.updateService = updateService;
         this.managementService = managementService;
@@ -74,16 +63,11 @@ final class ModBrowserUpdateCoordinator {
         this.installedLoaded = installedLoaded;
         this.installedConsumer = installedConsumer;
         this.installedLoadedConsumer = installedLoadedConsumer;
-        this.setBusy = setBusy;
-        this.finishBusy = finishBusy;
-        this.beginDownload = beginDownload;
-        this.finishDownload = finishDownload;
+        this.operations = operations;
         this.setError = setError;
         this.setOperation = setOperation;
         this.setUpdateCount = setUpdateCount;
         this.refreshInstalled = refreshInstalled;
-        this.setActiveRequest = setActiveRequest;
-        this.setActiveDownload = setActiveDownload;
         this.errorFormatter = errorFormatter;
     }
 
@@ -108,7 +92,7 @@ final class ModBrowserUpdateCoordinator {
             return CompletableFuture.completedFuture(availableUpdates());
         }
         if (!installedLoaded.getAsBoolean()) {
-            setBusy.accept("正在同步本地模组…", true);
+            operations.begin("正在同步本地模组…", true);
             CompletableFuture<List<ModUpdate>> request = managementService.list(instanceSupplier.get())
                     .thenCompose(mods -> {
                         Platform.runLater(() -> {
@@ -128,7 +112,7 @@ final class ModBrowserUpdateCoordinator {
             return CompletableFuture.failedFuture(new IllegalArgumentException("该模组没有可用更新"));
         }
         CompletableFuture<?> request = queueUpdate(update);
-        setActiveRequest.accept(request);
+        operations.track(request);
         return request;
     }
 
@@ -142,7 +126,7 @@ final class ModBrowserUpdateCoordinator {
 
     private CompletableFuture<?> checkUpdates(ReleaseChannel channel, boolean automatic,
                                                List<InstalledMod> candidates) {
-        setBusy.accept("正在检查兼容更新…", true);
+        operations.begin("正在检查兼容更新…", true);
         CompletableFuture<List<ModUpdate>> request = updateService.checkUpdates(
                 instanceSupplier.get(), candidates, channel);
         return observeUpdateRequest(request, automatic);
@@ -151,7 +135,7 @@ final class ModBrowserUpdateCoordinator {
     private CompletableFuture<?> observeUpdateRequest(
             CompletableFuture<List<ModUpdate>> request, boolean automatic) {
         CompletableFuture<?> observed = request.whenComplete((result, error) -> Platform.runLater(() -> {
-            finishBusy.run();
+            operations.finish();
             if (error != null) {
                 setError.accept(errorFormatter.apply(error));
             } else {
@@ -165,32 +149,32 @@ final class ModBrowserUpdateCoordinator {
                 installedConsumer.accept(List.copyOf(installedSupplier.get()));
             }
         }));
-        setActiveRequest.accept(observed);
+        operations.track(observed);
         updateRequest = observed;
         return observed;
     }
 
     private CompletableFuture<?> queueUpdate(ModUpdate update) {
         if (downloadTaskCenter == null) {
-            beginDownload.accept("正在更新 " + update.installedMod().displayName() + "…");
+            operations.beginDownload("正在更新 " + update.installedMod().displayName() + "…");
             return updateService.applyUpdate(update).whenComplete((result, error) -> completeUpdate(update, error));
         }
         DownloadTaskCenter.TaskHandle<Object> task = downloadTaskCenter.submit(
                 "Mod update", () -> {
-                    beginDownload.accept("正在更新 " + update.installedMod().displayName() + "…");
+                    operations.beginDownload("正在更新 " + update.installedMod().displayName() + "…");
                     return context -> {
                         CompletableFuture<?> inner = updateService.applyUpdate(update);
                         context.registerCancellation(() -> inner.cancel(true));
                         return inner.join();
                     };
                 }, (result, error) -> completeUpdate(update, error));
-        setActiveDownload.accept(task);
+        operations.trackDownload(task);
         return task.completion();
     }
 
     private void completeUpdate(ModUpdate update, Throwable error) {
         Platform.runLater(() -> {
-            finishDownload.run();
+            operations.finishDownload();
             if (error != null) {
                 setError.accept(errorFormatter.apply(error));
             } else {
