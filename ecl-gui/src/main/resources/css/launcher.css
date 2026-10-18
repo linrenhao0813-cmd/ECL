@@ -2408,3 +2408,35 @@
     -fx-border-color: -ecl-blue;
     -fx-border-radius: 12;
 }
+
+/* "More actions" menu on the instance overview header. Mirrors .ghost-button so it sits
+   alongside the secondary buttons without competing with the primary action. */
+.instance-more-actions {
+    -fx-background-color: transparent;
+    -fx-border-color: rgba(100, 116, 139, 0.5);
+    -fx-text-fill: #94a3b8;
+    -fx-effect: null;
+}
+.instance-more-actions:hover,
+.instance-more-actions:showing {
+    -fx-background-color: rgba(0, 255, 213, 0.08);
+    -fx-border-color: rgba(0, 255, 213, 0.5);
+    -fx-text-fill: #00ffd5;
+}
+.instance-more-actions > .label {
+    -fx-text-fill: inherit;
+}
+.instance-more-actions .context-menu {
+    -fx-background-color: -ecl-surface;
+    -fx-border-color: -ecl-border;
+}
+.backup-options .check-box {
+    -fx-text-fill: -ecl-text;
+}
+
+.mod-instance-badge {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-text-fill: -ecl-text;
+    -fx-padding: 6 10;
+    -fx-background-radius: 8;
+}

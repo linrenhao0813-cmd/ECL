@@ -222,12 +222,50 @@ class GameDownloaderTest {
                     () -> downloader.downloadVersionAsync("short-client", versionUrl).get());
 
             assertTrue(failure.getCause() instanceof IOException);
-            assertEquals("Minecraft client size does not match metadata", failure.getCause().getMessage());
+            assertEquals("short-client.jar size does not match metadata", failure.getCause().getMessage());
             Path versionDirectory = ECLConfig.getVersionsDir().toPath().resolve("short-client");
             assertFalse(Files.exists(versionDirectory.resolve("short-client.jar")));
             assertFalse(Files.exists(versionDirectory.resolve(ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER)));
             assertEquals(Set.of("/client.jar"), requests);
             assertFalse(completed.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void failedClientVerificationPreservesTheExistingFile() throws Exception {
+        byte[] expected = "good-client".getBytes(StandardCharsets.UTF_8);
+        byte[] returned = "bad!-client".getBytes(StandardCharsets.UTF_8);
+        byte[] existing = "old-client".getBytes(StandardCharsets.UTF_8);
+        String sha1 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(expected));
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/client.jar", exchange -> {
+            exchange.sendResponseHeaders(200, returned.length);
+            exchange.getResponseBody().write(returned);
+            exchange.close();
+        });
+        server.createContext("/version.json", exchange -> {
+            String root = "http://127.0.0.1:" + server.getAddress().getPort();
+            byte[] metadata = ("{\"downloads\":{\"client\":{\"url\":\"" + root
+                    + "/client.jar\",\"sha1\":\"" + sha1 + "\",\"size\":"
+                    + expected.length + "}},\"libraries\":[]}").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, metadata.length);
+            exchange.getResponseBody().write(metadata);
+            exchange.close();
+        });
+        server.start();
+        try (GameDownloader downloader = new GameDownloader(1)) {
+            Path client = ECLConfig.getVersionsDir().toPath()
+                    .resolve("preserve-client/preserve-client.jar");
+            Files.createDirectories(client.getParent());
+            Files.write(client, existing);
+            Future<?> task = downloader.downloadVersionAsync("preserve-client",
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/version.json");
+
+            assertThrows(ExecutionException.class, task::get);
+            assertArrayEquals(existing, Files.readAllBytes(client));
+            assertFalse(Files.exists(client.resolveSibling(client.getFileName() + ".part")));
         } finally {
             server.stop(0);
         }

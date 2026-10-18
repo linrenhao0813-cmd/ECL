@@ -480,7 +480,7 @@ final class LauncherPageFactory {
         VBox page = ui.createMainPage();
         Button logsButton = ui.createActionButton(Messages.get("settings.openLogs"),
                 "secondary-button", () -> ui.openLocalFolder(
-                        new File(System.getProperty("user.home"), ".ecl/logs"), Messages.get("settings.openLogs")));
+                        new File(ECLConfig.getBaseDir(), "logs"), Messages.get("settings.openLogs")));
         logsButton.setId("settings-open-logs");
         Button wizardButton = ui.createActionButton(Messages.get("wizard.title"),
                 "ghost-button", ui::showFirstRunWizard);
@@ -494,7 +494,7 @@ final class LauncherPageFactory {
                 Messages.get("settings.tab.about"),
                 Messages.get("settings.about.subtitle"),
                 ui.createInfoRow(Messages.get("settings.about.version"),
-                        ui.createStaticValueLabel(Messages.get("app.version"))),
+                        ui.createStaticValueLabel(ECLConfig.LAUNCHER_VERSION)),
                 ui.createInfoRow("Java", ui.createStaticValueLabel(System.getProperty("java.version")))));
         page.getChildren().add(ui.createSurface(Messages.get("settings.group.diagnostics"),
                 Messages.get("settings.about.subtitle"), actions));

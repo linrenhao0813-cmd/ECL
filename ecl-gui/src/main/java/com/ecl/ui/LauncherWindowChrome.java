@@ -1,6 +1,7 @@
 package com.ecl.ui;
 
 import javafx.scene.control.Button;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.stage.Stage;
 
@@ -50,6 +51,7 @@ final class LauncherWindowChrome {
         button.getStyleClass().add("window-button");
         button.setFocusTraversable(false);
         button.setAccessibleText(accessibleText);
+        button.setTooltip(new Tooltip(accessibleText));
         button.setOnAction(event -> action.run());
         return button;
     }

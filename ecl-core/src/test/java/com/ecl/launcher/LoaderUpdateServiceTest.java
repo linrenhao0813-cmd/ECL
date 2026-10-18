@@ -83,6 +83,22 @@ class LoaderUpdateServiceTest {
     }
 
     @Test
+    void appliesTheExactLoaderVersionFromPreviewAfterNewerVersionAppears() throws Exception {
+        ModInstanceContext instance = instance(ModLoaderInstaller.Loader.FABRIC, "1.0");
+        FakeBackend backend = new FakeBackend(ModLoaderInstaller.Loader.FABRIC);
+        LoaderUpdateService service = service(backend, new AtomicBoolean());
+
+        LoaderUpdateService.UpdatePlan plan = service.previewUpdate(instance).join();
+        backend.versions = List.of("3.0", "2.0", "1.0");
+        LoaderUpdateService.Result result = service.update(instance, plan, null).join();
+
+        assertTrue(result.updated());
+        assertEquals("2.0", result.version());
+        assertEquals(List.of("2.0"), backend.installedVersions);
+        assertEquals(1, backend.listCalls);
+    }
+
+    @Test
     void failedInstallLeavesOriginalProfileIntact() throws Exception {
         ModInstanceContext instance = instance(ModLoaderInstaller.Loader.FABRIC, "1.0");
         FakeBackend backend = new FakeBackend(ModLoaderInstaller.Loader.FABRIC);
@@ -168,6 +184,9 @@ class LoaderUpdateServiceTest {
         private final ModLoaderInstaller.Loader expectedLoader;
         private String minecraftVersion = "1.21.1";
         private int installs;
+        private int listCalls;
+        private List<String> versions = List.of("2.0", "1.0");
+        private final List<String> installedVersions = new java.util.ArrayList<>();
         private boolean fail;
         private boolean overwriteOriginal;
         private Runnable afterInstall = () -> { };
@@ -176,15 +195,17 @@ class LoaderUpdateServiceTest {
 
         @Override
         public List<String> listVersions(String minecraftVersion, ModLoaderInstaller.Loader loader) {
+            listCalls++;
             assertEquals("1.21.1", minecraftVersion);
             assertEquals(expectedLoader, loader);
-            return List.of("2.0", "1.0");
+            return versions;
         }
 
         @Override
         public ModLoaderInstaller.InstallResult install(String minecraftVersion, ModLoaderInstaller.Loader loader,
                                                         String version, ModLoaderInstaller.Listener listener) throws IOException {
             installs++;
+            installedVersions.add(version);
             if (overwriteOriginal) Files.writeString(profile(), "broken metadata");
             if (fail) throw new IOException("download failed");
             write("new-loader", """

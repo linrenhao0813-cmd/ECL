@@ -385,7 +385,7 @@ public final class JavaRuntimeUtil {
     }
 
     private static String executableName() {
-        return "java.exe";
+        return OperatingSystem.javaExecutableName();
     }
 
     /** Identity of a probed java executable; the file attributes detect on-disk replacement. */

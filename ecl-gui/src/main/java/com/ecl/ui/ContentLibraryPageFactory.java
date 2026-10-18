@@ -87,14 +87,11 @@ final class ContentLibraryPageFactory {
                 selectCategory(categoryButtons, categoryButton);
                 ui.downloadSection = DownloadSection.CONTENT;
                 ui.contentCategoryKey = target.projectType;
-                // Server jars go to their own directory, so the banner must not reuse instance wording.
-                ui.contentTargetMode = "server".equals(target.projectType) ? "server" : "instance";
+                ui.contentTargetMode = "instance";
                 ui.closeActiveModBrowserView();
-                Node selectedContent = switch (target.projectType) {
-                    case "mod" -> ui.createModLibraryContent();
-                    case "server" -> ui.createServerJarLibraryContent();
-                    default -> ui.createContentLibraryBrowser(target);
-                };
+                Node selectedContent = "mod".equals(target.projectType)
+                        ? ui.createModLibraryContent()
+                        : ui.createContentLibraryBrowser(target);
                 content.getChildren().setAll(selectedContent);
                 ui.updateRuntimeSummary();
             });

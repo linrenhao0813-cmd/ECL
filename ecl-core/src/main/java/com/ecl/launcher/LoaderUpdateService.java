@@ -8,6 +8,7 @@ import com.ecl.modrinth.service.InstanceOperationLock;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.InstanceOperationLease;
+import com.ecl.util.Messages;
 import com.google.gson.JsonObject;
 
 import java.io.IOException;
@@ -74,31 +75,95 @@ public final class LoaderUpdateService {
     public CompletableFuture<Result> update(ModInstanceContext instance, ModLoaderInstaller.Listener listener) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                return updateBlocking(instance, listener);
+                return updateBlocking(instance, null, listener);
             } catch (Exception error) {
                 throw new CompletionException(error);
             }
         }, executor);
     }
 
-    private Result updateBlocking(ModInstanceContext instance, ModLoaderInstaller.Listener listener) throws Exception {
-        if (!instance.loader().supportsMods()) throw new IOException("当前实例没有可升级的模组加载器");
+    /** Resolves the currently available compatible loader version without changing local files. */
+    public CompletableFuture<UpdatePlan> previewUpdate(ModInstanceContext instance) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                ensureStopped(instance);
+                VersionMetadata current = new VersionRepository(versionsDirectory.toFile())
+                        .resolve(instance.profileId());
+                if (!instance.minecraftVersion().equals(current.minecraftVersion())
+                        || !instance.loaderName().equals(current.modLoader())) {
+                    throw new IOException(Messages.get("loaderUpdate.profileChanged"));
+                }
+                ModLoaderInstaller.Loader loader = ModLoaderInstaller.Loader.valueOf(
+                        instance.loaderName().toUpperCase(Locale.ROOT));
+                List<String> versions = backend.listVersions(instance.minecraftVersion(), loader);
+                if (versions.isEmpty()) throw new IOException(Messages.get("loaderUpdate.noVersions"));
+                String latest = versions.getFirst();
+                boolean updateAvailable = current.modLoaderVersion().isBlank()
+                        || ModLoaderInstaller.compareVersionsDescending(
+                                latest, current.modLoaderVersion()) < 0;
+                return new UpdatePlan(instance.profileId(), instance.minecraftVersion(),
+                        instance.loaderName(), current.modLoaderVersion(),
+                        updateAvailable ? latest : current.modLoaderVersion(), updateAvailable);
+            } catch (Exception error) {
+                throw new CompletionException(error);
+            }
+        }, executor);
+    }
+
+    /** Applies the explicit version selected by a prior preview without asking for a newer one. */
+    public CompletableFuture<Result> update(ModInstanceContext instance, UpdatePlan plan,
+                                            ModLoaderInstaller.Listener listener) {
+        Objects.requireNonNull(plan, "plan");
+        if (!instance.profileId().equals(plan.profileId())) {
+            return CompletableFuture.failedFuture(new IOException(Messages.get("loaderUpdate.planOtherInstance")));
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return updateBlocking(instance, plan, listener);
+            } catch (Exception error) {
+                throw new CompletionException(error);
+            }
+        }, executor);
+    }
+
+    private Result updateBlocking(ModInstanceContext instance, UpdatePlan plan,
+                                  ModLoaderInstaller.Listener listener) throws Exception {
+        if (!instance.loader().supportsMods()) {
+            throw new IOException(Messages.get("loaderUpdate.unsupported"));
+        }
         ensureStopped(instance);
         try (AutoCloseable ignored = operationLock.acquire(instance.instanceId());
              InstanceOperationLease lease = InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
-            if (lease == null) throw new IOException("实例正在运行或被另一个启动器占用");
+            if (lease == null) throw new IOException(Messages.get("loaderUpdate.busy"));
             ensureStopped(instance);
             VersionMetadata current = new VersionRepository(versionsDirectory.toFile()).resolve(instance.profileId());
             if (!instance.minecraftVersion().equals(current.minecraftVersion())
                     || !instance.loaderName().equals(current.modLoader())) {
-                throw new IOException("实例版本或加载器已发生变化，请刷新后重试");
+                throw new IOException(Messages.get("loaderUpdate.profileChanged"));
             }
             ModLoaderInstaller.Loader loader = ModLoaderInstaller.Loader.valueOf(instance.loaderName().toUpperCase(Locale.ROOT));
-            List<String> versions = backend.listVersions(instance.minecraftVersion(), loader);
-            if (versions.isEmpty()) throw new IOException("没有找到兼容的加载器版本");
-            String latest = versions.getFirst();
-            if (!current.modLoaderVersion().isBlank()
-                    && ModLoaderInstaller.compareVersionsDescending(latest, current.modLoaderVersion()) >= 0) {
+            String targetVersion;
+            if (plan == null) {
+                List<String> versions = backend.listVersions(instance.minecraftVersion(), loader);
+                if (versions.isEmpty()) throw new IOException(Messages.get("loaderUpdate.noVersions"));
+                targetVersion = versions.getFirst();
+                if (!current.modLoaderVersion().isBlank()
+                        && ModLoaderInstaller.compareVersionsDescending(
+                                targetVersion, current.modLoaderVersion()) >= 0) {
+                    dependencyPreparer.prepare(instance.profileId(), listener);
+                    checkCancelled();
+                    ensureStopped(instance);
+                    return new Result(false, loader.displayName(), current.modLoaderVersion());
+                }
+            } else {
+                if (!instance.minecraftVersion().equals(plan.minecraftVersion())
+                        || !instance.loaderName().equals(plan.loaderName())
+                        || !current.modLoaderVersion().equals(plan.currentVersion())) {
+                    throw new IOException(Messages.get("loaderUpdate.planStale"));
+                }
+                targetVersion = plan.targetVersion();
+            }
+            if (targetVersion.equals(current.modLoaderVersion())) {
                 dependencyPreparer.prepare(instance.profileId(), listener);
                 checkCancelled();
                 ensureStopped(instance);
@@ -109,13 +174,18 @@ public final class LoaderUpdateService {
             JsonObject original = HttpUtil.readJson(target.toFile());
             ModLoaderInstaller.InstallResult installed;
             try {
-                installed = backend.install(instance.minecraftVersion(), loader, latest, listener);
+                installed = backend.install(instance.minecraftVersion(), loader, targetVersion, listener);
             } catch (IOException | RuntimeException failure) {
                 restoreIfChanged(target, original, failure);
                 throw failure;
             }
             if (installed.profileId().equals(instance.profileId())) {
-                IOException failure = new IOException("加载器安装结果与原实例 ID 相同，无法安全升级");
+                IOException failure = new IOException(Messages.get("loaderUpdate.sameProfile"));
+                restoreIfChanged(target, original, failure);
+                throw failure;
+            }
+            if (plan != null && !plan.targetVersion().equals(installed.loaderVersion())) {
+                IOException failure = new IOException(Messages.get("loaderUpdate.planMismatch"));
                 restoreIfChanged(target, original, failure);
                 throw failure;
             }
@@ -124,7 +194,7 @@ public final class LoaderUpdateService {
             VersionMetadata prepared = new VersionRepository(versionsDirectory.toFile()).resolve(installed.profileId());
             if (!instance.minecraftVersion().equals(prepared.minecraftVersion())
                     || !instance.loaderName().equals(prepared.modLoader())) {
-                throw new IOException("新版加载器与当前实例不兼容");
+                throw new IOException(Messages.get("loaderUpdate.incompatible"));
             }
             dependencyPreparer.prepare(installed.profileId(), listener);
             checkCancelled();
@@ -146,7 +216,7 @@ public final class LoaderUpdateService {
     private void ensureStopped(ModInstanceContext instance) throws IOException {
         checkCancelled();
         if (instanceRunning.test(instance.instanceId()) || GameProcessMarker.isRunning(instance.gameDirectory())) {
-            throw new IOException("实例正在运行，请先退出游戏再升级");
+            throw new IOException(Messages.get("loaderUpdate.running"));
         }
     }
 
@@ -164,10 +234,15 @@ public final class LoaderUpdateService {
     }
 
     private static void checkCancelled() throws IOException {
-        if (Thread.currentThread().isInterrupted()) throw new IOException("升级已取消");
+        if (Thread.currentThread().isInterrupted()) {
+            throw new IOException(Messages.get("loaderUpdate.cancelled"));
+        }
     }
 
     public record Result(boolean updated, String loaderName, String version) { }
+
+    public record UpdatePlan(String profileId, String minecraftVersion, String loaderName,
+                             String currentVersion, String targetVersion, boolean updateAvailable) { }
 
     /** Boundary for official loader metadata and installation. */
     public interface Backend {

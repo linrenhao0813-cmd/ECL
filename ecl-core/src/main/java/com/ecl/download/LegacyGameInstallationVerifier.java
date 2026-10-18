@@ -51,7 +51,8 @@ public final class LegacyGameInstallationVerifier {
                 ? versionJson.getAsJsonArray("libraries") : new JsonArray();
         String architecture = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
         String bits = architecture.contains("64") || architecture.contains("aarch64") ? "64" : "32";
-        String nativeClassifier = "windows-" + FileUtil.nativeArchitecture(architecture);
+        String nativeClassifier = com.ecl.util.OperatingSystem.minecraftName() + "-"
+                + FileUtil.nativeArchitecture(architecture);
         for (JsonElement element : libraries) {
             if (!element.isJsonObject()) return false;
             JsonObject library = element.getAsJsonObject();
@@ -67,7 +68,8 @@ public final class LegacyGameInstallationVerifier {
                 JsonObject classifiers = object(downloads, "classifiers");
                 if (classifiers != null) {
                     String nativeKey = GameDownloader.nativeClassifierKey(
-                            library, classifiers, "windows", bits, nativeClassifier);
+                            library, classifiers, com.ecl.util.OperatingSystem.minecraftName(), bits,
+                            nativeClassifier);
                     if (nativeKey != null
                             && !managedFileMatches(ECLConfig.getLibrariesDir(),
                                     classifiers.getAsJsonObject(nativeKey))) {

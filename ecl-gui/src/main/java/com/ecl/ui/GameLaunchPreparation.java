@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -15,6 +17,7 @@ import java.util.function.Consumer;
 final class GameLaunchPreparation {
     private final LauncherUI ui;
     private final LaunchUiFacade facade;
+    private volatile String preparingVersion;
 
     GameLaunchPreparation(LauncherUI ui, LaunchUiFacade facade) {
         this.ui = ui;
@@ -25,6 +28,11 @@ final class GameLaunchPreparation {
         String selectedVersion = facade.selectedVersion();
         if (selectedVersion == null || selectedVersion.isBlank()) {
             ui.setStatus("请选择游戏版本", "先刷新并选择一个可启动的 Minecraft 版本。 ");
+            return;
+        }
+        if (ui.controller.instanceUpdateService().hasUnfinishedRecovery(selectedVersion)) {
+            ui.setStatus(com.ecl.util.Messages.get("instanceRepair.title"),
+                    GuiMessages.get("instanceUpdate.recoveryPending"));
             return;
         }
         LoaderChoice requestedLoader = facade.requestedLoader();
@@ -61,6 +69,7 @@ final class GameLaunchPreparation {
                     "无法写入 settings.json，请检查目录权限或查看日志。"));
         });
         ui.updateRuntimeSummary();
+        preparingVersion = selectedVersion;
         CompletableFuture<Boolean> readiness =
                 ui.versionManager.ensureVersionDownloadedAsync(selectedVersion);
         if (readiness.isDone() && !readiness.isCompletedExceptionally()) {
@@ -72,12 +81,14 @@ final class GameLaunchPreparation {
         ui.setStatus("正在验证本地版本", selectedVersion + " 的旧安装正在后台执行完整性检查。");
         readiness.whenComplete((ready, error) -> Platform.runLater(() -> {
             if (!Objects.equals(selectedVersion, facade.selectedVersion())) {
+                completePreparation(selectedVersion);
                 ui.setControlsBusy(false);
                 return;
             }
             ui.setControlsBusy(false);
             ui.updateRuntimeSummary();
             if (error != null) {
+                completePreparation(selectedVersion);
                 ui.setStatus("本地版本检查失败", ui.cleanMessage(error));
             } else if (Boolean.TRUE.equals(ready)) {
                 launcher.accept(selectedVersion);
@@ -90,10 +101,15 @@ final class GameLaunchPreparation {
     private void downloadAndLaunch(String version, Consumer<String> launcher) {
         com.ecl.launcher.VersionManager.VersionDownloadTarget target;
         try { target = ui.versionManager.resolveDownloadTarget(version); }
-        catch (IOException error) { ui.setStatus("无法解析基础版本", ui.cleanMessage(error)); return; }
+        catch (IOException error) {
+            completePreparation(version);
+            ui.setStatus("无法解析基础版本", ui.cleanMessage(error));
+            return;
+        }
         String downloadVersion = target.downloadVersionId();
         String url = target.versionUrl();
         if (url == null || url.isBlank()) {
+            completePreparation(version);
             ui.setStatus("找不到基础版本下载地址", version + " 需要 " + downloadVersion
                     + "，但当前 Mojang 版本清单中没有该版本。请刷新版本列表后重试。");
             return;
@@ -127,6 +143,7 @@ final class GameLaunchPreparation {
                         ui.downloadProgress.setProgress(1); ui.stopProgressAnimation(ui.downloadProgress, true);
                         if (!ui.versionManager.isVersionDownloaded(version)) { ui.setStatus("基础版本仍不完整",
                                 downloadVersion + " 下载完成，但 " + version + " 的继承客户端仍不可用，请检查版本配置。");
+                            completePreparation(version);
                             ui.setControlsBusy(false); return; }
                         ui.setStatus("下载完成", downloadVersion + " 已就绪，准备启动 " + version + "。");
                         try { ui.gameRepository().applyDefaultIsolationSettingForNewInstance(version); }
@@ -136,16 +153,35 @@ final class GameLaunchPreparation {
                 });
                 context.registerCancellation(ui.downloader::cancelDownload);
                 Future<?> future = ui.downloader.downloadVersionAsync(
-                        downloadVersion, url, target.versionSha1()); future.get();
+                        downloadVersion, url, target.versionSha1());
+                try {
+                    future.get(10, TimeUnit.MINUTES);
+                } catch (TimeoutException timedOut) {
+                    future.cancel(true);
+                    throw new IOException(GuiMessages.get("launch.downloadTimeout"), timedOut);
+                } catch (InterruptedException interrupted) {
+                    future.cancel(true);
+                    Thread.currentThread().interrupt();
+                    throw interrupted;
+                }
                 if (failure.get() != null && !failure.get().isBlank()) throw new IOException(failure.get());
                 return null;
             };
         }, (ignored, error) -> Platform.runLater(() -> {
             if (error == null) return;
+            completePreparation(version);
             ui.stopProgressAnimation(ui.downloadProgress, true);
             ui.setStatus(ui.isCancellation(error) ? com.ecl.util.Messages.get("download.status.cancelled")
                     : com.ecl.util.Messages.get("download.status.failedTitle"), ui.cleanMessage(error));
             ui.setControlsBusy(false);
         }));
+    }
+
+    boolean isPreparingVersion(String profileId) {
+        return profileId != null && profileId.equals(preparingVersion);
+    }
+
+    void completePreparation(String profileId) {
+        if (profileId != null && profileId.equals(preparingVersion)) preparingVersion = null;
     }
 }

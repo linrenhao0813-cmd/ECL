@@ -1,6 +1,10 @@
 package com.ecl.download;
 
+import com.ecl.ECLConfig;
+import com.ecl.util.FileLockLease;
+import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.ManagedLockPaths;
 import com.ecl.util.NetworkUriPolicy;
 
 import java.io.File;
@@ -8,6 +12,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.UUID;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -87,21 +92,45 @@ final class GameDownloadBatchExecutor {
 
     private void downloadAndVerify(DownloadTask task,
                                    GameDownloader.DownloadListener listener) throws IOException {
-        NetworkUriPolicy.requireSecureDownload(
+        downloadSingleVerified(task, listener, null);
+    }
+
+    void downloadSingleVerified(DownloadTask task, GameDownloader.DownloadListener listener,
+                                HttpUtil.ProgressCallback progress) throws IOException {
+        NetworkUriPolicy.requireArtifactDownload(
                 URI.create(task.url()), task.sourceLabel() + " URL");
         long maxBytes = task.expectedSize() > 0
                 ? task.expectedSize() : MAX_UNSIZED_LIBRARY_BYTES;
         Path target = task.target().toPath().toAbsolutePath().normalize();
-        try {
-            HttpUtil.downloadFileWithProgress(task.url(), target.toFile(), null,
-                    sourceCallback(task.sourceLabel(), listener), maxBytes);
-            if (task.expectedSize() > 0 && Files.size(target) != task.expectedSize()) {
-                throw new IOException(task.target().getName() + " size does not match metadata");
+        Path root = task.targetRoot().toAbsolutePath().normalize();
+        FileUtil.validateExistingAncestors(root, target);
+        Files.createDirectories(target.getParent());
+        FileUtil.validateExistingAncestors(root, target);
+        Path dataRoot = ECLConfig.getBaseDir().toPath().toAbsolutePath().normalize();
+        Path lockPath = ManagedLockPaths.filePublication(dataRoot.resolve(".ecl-download-locks"), target);
+        FileUtil.validateExistingAncestors(dataRoot, lockPath);
+        try (FileLockLease ignored = FileLockLease.tryAcquire(lockPath)) {
+            if (ignored == null) {
+                throw new IOException("Shared artifact is being repaired by another task: " + target);
             }
-            InstallHelpers.verifyDownloadedFile(target.toFile(), task.sha1());
-        } catch (IOException failure) {
-            Files.deleteIfExists(target);
-            throw failure;
+            Path staging = target.resolveSibling(target.getFileName() + ".ecl-"
+                    + UUID.randomUUID() + ".part");
+            Path partial = staging.resolveSibling(staging.getFileName() + ".part");
+            Path partialMetadata = partial.resolveSibling(partial.getFileName() + ".meta");
+            try {
+                HttpUtil.downloadFileWithProgress(task.url(), staging.toFile(), progress,
+                        sourceCallback(task.sourceLabel(), listener), maxBytes);
+                if (task.expectedSize() > 0 && Files.size(staging) != task.expectedSize()) {
+                    throw new IOException(task.target().getName() + " size does not match metadata");
+                }
+                InstallHelpers.verifyDownloadedFile(staging.toFile(), task.sha1());
+                FileUtil.validateExistingAncestors(root, target);
+                FileUtil.moveReplacing(staging, target);
+            } finally {
+                Files.deleteIfExists(staging);
+                Files.deleteIfExists(partial);
+                Files.deleteIfExists(partialMetadata);
+            }
         }
     }
 
@@ -126,6 +155,10 @@ final class GameDownloadBatchExecutor {
     }
 
     record DownloadTask(String url, File target, String sha1, long expectedSize,
-                        String sourceLabel) {
+                        String sourceLabel, Path targetRoot) {
+        DownloadTask(String url, File target, String sha1, long expectedSize, String sourceLabel) {
+            this(url, target, sha1, expectedSize, sourceLabel,
+                    target.toPath().toAbsolutePath().normalize().getParent());
+        }
     }
 }

@@ -75,37 +75,56 @@ public final class DefaultLocalModScanner implements LocalModScanner {
 
     @Override
     public CompletableFuture<LocalModScanResult> scan(ModInstanceContext instance) {
-        return CompletableFuture.supplyAsync(() -> scanBlocking(instance), executor);
+        return CompletableFuture.supplyAsync(() -> scanBlocking(instance, true), executor);
     }
 
-    private LocalModScanResult scanBlocking(ModInstanceContext instance) {
+    @Override
+    public CompletableFuture<LocalModScanResult> inspect(ModInstanceContext instance) {
+        return CompletableFuture.supplyAsync(() -> scanBlocking(instance, false), executor);
+    }
+
+    private LocalModScanResult scanBlocking(ModInstanceContext instance, boolean persist) {
         if (instanceRunning.test(instance.instanceId())) {
             throw new ModInstallationException(
                     "实例正在运行，不能修复模组索引");
         }
-        try (AutoCloseable ignored = operationLock.acquire(instance.instanceId());
-             InstanceOperationLease processLock =
-                     InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
-            if (processLock == null) {
-                throw new IOException("Instance is running or busy in another launcher process");
+        try {
+            if (persist) {
+                try (AutoCloseable ignored = operationLock.acquire(instance.instanceId());
+                     InstanceOperationLease processLock =
+                             InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
+                    if (processLock == null) {
+                        throw new IOException("Instance is running or busy in another launcher process");
+                    }
+                    return scanFiles(instance, true);
+                }
             }
-            FileUtil.validateExistingAncestors(instance.gameDirectory(), instance.modsDirectory());
-            FileUtil.validateExistingAncestors(instance.gameDirectory(),
-                    instance.gameDirectory().resolve("disabled-mods"));
-            Files.createDirectories(instance.modsDirectory());
-            Files.createDirectories(instance.gameDirectory().resolve("disabled-mods"));
-            List<InstalledMod> previous = repository.findAll(instance);
-            List<ScannedFile> scanned = scanFiles(instance, scanCache.read(instance));
-            Map<Path, ModVersion> recognized = recognizeFiles(scanned);
-            LocalModScanResult result = reconcileRecords(instance, previous, scanned, recognized);
-            result = reconcileDependencies(instance, result, recognized);
-            repository.saveAll(instance, result.installedMods());
-            writeCache(instance, scanned);
-            return result;
+            return scanFiles(instance, false);
         } catch (Exception e) {
             // Broad catch is required: operationLock.acquire() AutoCloseable.close() declares Exception.
             throw new ModInstallationException("扫描本地模组失败", e);
         }
+    }
+
+    private LocalModScanResult scanFiles(ModInstanceContext instance, boolean persist)
+            throws IOException {
+        FileUtil.validateExistingAncestors(instance.gameDirectory(), instance.modsDirectory());
+        FileUtil.validateExistingAncestors(instance.gameDirectory(),
+                instance.gameDirectory().resolve("disabled-mods"));
+        if (persist) {
+            Files.createDirectories(instance.modsDirectory());
+            Files.createDirectories(instance.gameDirectory().resolve("disabled-mods"));
+        }
+        List<InstalledMod> previous = repository.findAll(instance);
+        List<ScannedFile> scanned = scanFiles(instance, scanCache.read(instance));
+        Map<Path, ModVersion> recognized = recognizeFiles(scanned);
+        LocalModScanResult result = reconcileRecords(instance, previous, scanned, recognized);
+        result = reconcileDependencies(instance, result, recognized);
+        if (persist) {
+            repository.saveAll(instance, result.installedMods());
+            writeCache(instance, scanned);
+        }
+        return result;
     }
 
     private static LocalModScanResult reconcileDependencies(ModInstanceContext instance, LocalModScanResult result,

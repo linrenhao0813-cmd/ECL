@@ -20,6 +20,17 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
         return lease(id, entry);
     }
 
+    /** Returns {@code null} instead of waiting when another operation owns the instance. */
+    public AutoCloseable tryAcquire(UUID instanceId) {
+        UUID id = Objects.requireNonNull(instanceId, "instanceId");
+        LockEntry entry = retain(id);
+        if (entry.lock.tryLock()) {
+            return lease(id, entry);
+        }
+        releaseUser(id, entry);
+        return null;
+    }
+
     /** Acquire the per-instance lock while honoring task cancellation/interruption. */
     public AutoCloseable acquireInterruptibly(UUID instanceId) throws InterruptedException {
         UUID id = Objects.requireNonNull(instanceId, "instanceId");
@@ -33,14 +44,6 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
             if (!acquired) {
                 releaseUser(id, entry);
             }
-        }
-    }
-
-    @Override
-    public boolean isLocked(UUID instanceId) {
-        synchronized (locks) {
-            LockEntry entry = locks.get(Objects.requireNonNull(instanceId, "instanceId"));
-            return entry != null && entry.lock.isLocked();
         }
     }
 

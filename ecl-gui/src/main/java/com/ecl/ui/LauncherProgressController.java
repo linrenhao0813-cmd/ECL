@@ -8,10 +8,18 @@ import javafx.util.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 /** Owns progress-bar visibility, determinate progress, and pulse animations. */
 final class LauncherProgressController {
     private final Map<ProgressBar, Timeline> animations = new HashMap<>();
+    /** Set from the UI so "reduce animations" also stops the progress pulse. */
+    private BooleanSupplier reduceMotion = () -> Boolean.getBoolean("ecl.reduceMotion");
+
+    /** Keeps the pulse in sync with the user preference. */
+    void setReduceMotion(BooleanSupplier reduceMotion) {
+        this.reduceMotion = reduceMotion;
+    }
 
     void start(ProgressBar progressBar) {
         if (progressBar == null) {
@@ -21,6 +29,11 @@ final class LauncherProgressController {
         stop(progressBar, false);
         progressBar.setVisible(true);
         progressBar.getProperties().put("pulse-step", 0);
+        if (reduceMotion.getAsBoolean()) {
+            // A static indeterminate indicator keeps the "working on it" signal without the pulse.
+            progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+            return;
+        }
 
         Timeline timeline = new Timeline(new KeyFrame(
                 Duration.millis(260), event -> advancePulse(progressBar)));

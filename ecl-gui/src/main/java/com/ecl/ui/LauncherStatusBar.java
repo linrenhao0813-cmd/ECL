@@ -79,7 +79,7 @@ final class LauncherStatusBar {
         taskList.setMaxHeight(220);
         detailPanel.getChildren().addAll(ui.detailLabel, taskList);
 
-        Label version = new Label("ECL " + Messages.get("app.version"));
+        Label version = new Label("ECL " + com.ecl.ECLConfig.LAUNCHER_VERSION);
         version.setId("status-version");
         version.getStyleClass().add("status-version");
 

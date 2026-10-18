@@ -246,20 +246,22 @@ public final class LauncherUiSnapshot {
                 authType.setValue("MICROSOFT");
                 return primaryStage.getScene();
             }
-            if ("modrinth-vanilla".equalsIgnoreCase(mode)) {
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("modrinth-vanilla")) {
                 String profileId = createVisualProfile("visual-vanilla-instance", "");
                 ComboBox<String> combo = versionCombo();
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
+                versionActions.restoreVersionComboItems(profileId);
                 showAppView("DOWNLOADS");
                 selectDownloadCategory(primaryStage, 1);
                 return primaryStage.getScene();
             }
-            if ("modrinth".equalsIgnoreCase(mode) || "modrinth-online".equalsIgnoreCase(mode)) {
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("modrinth")) {
                 String profileId = createVisualProfile("visual-fabric-instance", "fabric");
                 ComboBox<String> combo = versionCombo();
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
+                versionActions.restoreVersionComboItems(profileId);
                 showAppView("DOWNLOADS");
                 selectDownloadCategory(primaryStage, 1);
                 return primaryStage.getScene();
@@ -278,12 +280,10 @@ public final class LauncherUiSnapshot {
                 showAppView("DOWNLOADS");
                 primaryStage.getScene().getRoot().applyCss();
                 String normalizedMode = mode.toLowerCase(java.util.Locale.ROOT);
+                // The content bar holds one instances chip plus four Modrinth categories
+                // (mod, shader, resourcepack, modpack), so the valid range is 0..4.
                 int categoryIndex = normalizedMode.startsWith("content-shader") ? 2
-                        : normalizedMode.startsWith("content-resourcepack") ? 3
-                        : normalizedMode.startsWith("content-server") ? 5 : 4;
-                if (categoryIndex == 5) {
-                    createVisualServerVersion("1.21.4");
-                }
+                        : normalizedMode.startsWith("content-resourcepack") ? 3 : 4;
                 selectDownloadCategory(primaryStage, categoryIndex);
                 return primaryStage.getScene();
             }
@@ -301,14 +301,16 @@ public final class LauncherUiSnapshot {
                 }
                 return scene;
             }
-            if ("backups".equalsIgnoreCase(mode)) {
+            if (mode.toLowerCase(java.util.Locale.ROOT).startsWith("backups")) {
                 String profileId = "visual-backup-instance";
+                createVisualProfile(profileId, "fabric");
                 Field comboField = LauncherUIView.class.getDeclaredField("versionCombo");
                 comboField.setAccessible(true);
                 @SuppressWarnings("unchecked")
                 ComboBox<String> combo = (ComboBox<String>) comboField.get(this);
                 if (!combo.getItems().contains(profileId)) combo.getItems().add(profileId);
                 combo.setValue(profileId);
+                versionActions.restoreVersionComboItems(profileId);
 
                 Field gameDirField = LauncherUIView.class.getDeclaredField("gameDir");
                 gameDirField.setAccessible(true);
@@ -451,6 +453,7 @@ public final class LauncherUiSnapshot {
                                            String minecraftVersion) throws IOException {
             Path profileDirectory = ECLConfig.getVersionsDir().toPath().resolve(profileId);
             Files.createDirectories(profileDirectory);
+            Files.createDirectories(gameDir.toPath().resolve("versions").resolve(profileId));
             String loaderProperty = loader.isBlank() ? ""
                     : ",\n  \"eclModLoader\": \"" + loader + "\"";
             Files.writeString(profileDirectory.resolve(profileId + ".json"), """
@@ -465,21 +468,6 @@ public final class LauncherUiSnapshot {
         private void createVisualSave(Path directory) throws IOException {
             Files.createDirectories(directory);
             Files.writeString(directory.resolve("level.dat"), "visual snapshot fixture");
-        }
-
-        private void createVisualServerVersion(String versionId) throws IOException {
-            Path versionDirectory = ECLConfig.getVersionsDir().toPath().resolve(versionId);
-            Files.createDirectories(versionDirectory);
-            Files.writeString(versionDirectory.resolve(versionId + ".json"), """
-                    {
-                      "id":"%s",
-                      "downloads":{"server":{
-                        "url":"https://piston-data.mojang.com/v1/objects/visual/server.jar",
-                        "sha1":"0123456789abcdef0123456789abcdef01234567",
-                        "size":52142812
-                      }}
-                    }
-                    """.formatted(versionId));
         }
 
         @SuppressWarnings("unchecked")

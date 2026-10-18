@@ -1,0 +1,43 @@
+# Normalize line endings in the repository, keep the working tree behavior Windows-friendly.
+# `* text=auto` lets Git normalize text files to LF in the index while honoring the
+# platform checkout rules configured with core.autocrlf. Forcing `eol=lf` here would
+# renormalize every tracked file at once, so the explicit rules below only cover the
+# cases where the on-disk format genuinely matters.
+* text=auto
+
+# Windows scripts must keep CRLF so cmd.exe keeps parsing them correctly.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets: never apply text conversion, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.jar binary
+*.gz binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.keys binary
+
+# Gradle wrapper and lock/metadata files are generated or verified by checksum;
+# keep them byte-stable.
+gradle/wrapper/gradle-wrapper.jar binary
+gradle/verification-metadata.xml text eol=lf
+gradle/verification-keyring.keys binary
+gradlew.bat text eol=crlf
+*.lockfile text eol=lf
+
+# Markdown and Java sources stay LF so diffs and tooling agree across platforms.
+*.md text eol=lf
+*.java text eol=lf
+*.kts text eol=lf
+*.properties text eol=lf
+*.xml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.css text eol=lf

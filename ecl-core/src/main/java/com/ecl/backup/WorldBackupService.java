@@ -1,6 +1,7 @@
 package com.ecl.backup;
 
 import com.ecl.ECLConfig;
+import com.ecl.launch.GameProcessMarker;
 import com.ecl.util.FileLockLease;
 import com.ecl.util.FileUtil;
 import com.ecl.util.InstanceOperationLease;
@@ -175,6 +176,11 @@ public final class WorldBackupService {
         });
     }
 
+    /** Rolls back an interrupted restore before a new backup, restore, or game launch. */
+    public synchronized void recoverInterruptedRestore(Path instanceDirectory) throws IOException {
+        withInstanceLock(instanceDirectory, () -> null);
+    }
+
     public synchronized void deleteBackup(BackupEntry backup) throws IOException {
         Objects.requireNonNull(backup, "backup");
         String profileId = metadataHelper.requireProfileId(backup.profileId());
@@ -247,6 +253,10 @@ public final class WorldBackupService {
             if (ignored == null) {
                 throw new IOException("Instance is running or busy in another launcher process");
             }
+            if (GameProcessMarker.isRunning(instanceRoot)) {
+                throw new IOException("Game is still running; stop it before changing backup files");
+            }
+            WorldBackupRestorer.recover(instanceRoot);
             return operation.run();
         }
     }

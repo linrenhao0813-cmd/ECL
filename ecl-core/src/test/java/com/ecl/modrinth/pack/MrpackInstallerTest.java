@@ -1,6 +1,10 @@
 package com.ecl.modrinth.pack;
 
 import com.ecl.ECLConfig;
+import com.ecl.modrinth.TestFixtures;
+import com.ecl.modrinth.instance.VersionProfileModInstanceContext;
+import com.ecl.modrinth.service.InstanceUpdateService;
+import com.ecl.modrinth.service.InstanceUpgradeRecoveryService;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.AfterEach;
@@ -14,9 +18,11 @@ import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -117,6 +123,123 @@ class MrpackInstallerTest {
         assertEquals("project-id", profile.get("eclModpackProjectId").getAsString());
         assertEquals("version-2", profile.get("eclModpackVersionId").getAsString());
         assertEquals("2", profile.get("eclModpackVersion").getAsString());
+    }
+
+    @Test
+    void preparesPackFileChangesWithoutChangingTheInstance() throws Exception {
+        Path initial = tempDir.resolve("preview-initial.mrpack");
+        writePack(initial, "Preview Pack", "1", "{\"minecraft\":\"1.21.4\"}",
+                Map.of("config/example.txt", "old=true", "mods/removed.jar", "old mod"));
+        Path gameRoot = tempDir.resolve("preview-game");
+        MrpackInstaller installer = new MrpackInstaller();
+        MrpackInstaller.InstallResult installed = installer.install(
+                initial.toFile(), gameRoot.toFile(), "Preview Pack", "project", "v1", null);
+        Path updated = tempDir.resolve("preview-updated.mrpack");
+        writePack(updated, "Preview Pack", "2", "{\"minecraft\":\"1.21.4\"}",
+                Map.of("config/example.txt", "old=false", "resourcepacks/new.zip", "new resource pack"));
+        Path profileFile = ECLConfig.getVersionsDir().toPath().resolve(installed.profileId())
+                .resolve(installed.profileId() + ".json");
+        String beforeProfile = Files.readString(profileFile);
+        String beforeManifest = Files.readString(installed.instanceDirectory()
+                .resolve(PackManifest.FILE_NAME));
+        Path config = installed.instanceDirectory().resolve("config/example.txt");
+        Path oldMod = installed.instanceDirectory().resolve("mods/removed.jar");
+        String beforeConfig = Files.readString(config);
+        Path work = Files.createTempDirectory(ECLConfig.getBaseDir().toPath(), "ecl-modpack-preview-");
+
+        try (MrpackInstaller.UpdatePreview preview = installer.prepareUpdate(updated.toFile(),
+                gameRoot.toFile(), installed.profileId(), "project", "v2", work, null)) {
+            assertTrue(preview.changes().stream().anyMatch(change ->
+                    change.path().equals("config/example.txt")
+                            && change.kind() == MrpackInstaller.FileChangeKind.REPLACED));
+            assertTrue(preview.changes().stream().anyMatch(change ->
+                    change.path().equals("mods/removed.jar")
+                            && change.kind() == MrpackInstaller.FileChangeKind.DELETED));
+            assertTrue(preview.changes().stream().anyMatch(change ->
+                    change.path().equals("resourcepacks/new.zip")
+                            && change.kind() == MrpackInstaller.FileChangeKind.ADDED));
+            assertEquals(beforeProfile, Files.readString(profileFile));
+            assertEquals(beforeManifest, Files.readString(installed.instanceDirectory()
+                    .resolve(PackManifest.FILE_NAME)));
+            assertEquals(beforeConfig, Files.readString(config));
+            assertEquals("old mod", Files.readString(oldMod));
+            assertFalse(Files.exists(installed.instanceDirectory().resolve("resourcepacks/new.zip")));
+
+            installer.applyPreparedUpdate(preview, gameRoot.toFile(), () -> false, null);
+            assertEquals("old=false", Files.readString(config));
+            assertFalse(Files.exists(oldMod));
+            assertEquals("new resource pack", Files.readString(
+                    installed.instanceDirectory().resolve("resourcepacks/new.zip")));
+        }
+    }
+
+    @Test
+    void updatePreviewRejectsMinecraftOrLoaderTypeChanges() throws Exception {
+        Path initial = tempDir.resolve("compat-initial.mrpack");
+        writePack(initial, "Compat Pack", "1", "{\"minecraft\":\"1.21.4\"}", Map.of());
+        Path gameRoot = tempDir.resolve("compat-game");
+        MrpackInstaller installer = new MrpackInstaller();
+        MrpackInstaller.InstallResult installed = installer.install(
+                initial.toFile(), gameRoot.toFile(), "Compat Pack", "project", "v1", null);
+        Path profile = ECLConfig.getVersionsDir().toPath().resolve(installed.profileId())
+                .resolve(installed.profileId() + ".json");
+        String beforeProfile = Files.readString(profile);
+        String beforeManifest = Files.readString(installed.instanceDirectory()
+                .resolve(PackManifest.FILE_NAME));
+        Path changedMinecraft = tempDir.resolve("compat-minecraft.mrpack");
+        writePack(changedMinecraft, "Compat Pack", "2", "{\"minecraft\":\"1.21.5\"}", Map.of());
+        Path changedLoader = tempDir.resolve("compat-loader.mrpack");
+        writePack(changedLoader, "Compat Pack", "3",
+                "{\"minecraft\":\"1.21.4\",\"fabric-loader\":\"0.16.10\"}", Map.of());
+
+        assertThrows(IOException.class, () -> installer.prepareUpdate(changedMinecraft.toFile(),
+                gameRoot.toFile(), installed.profileId(), "project", "v2",
+                Files.createTempDirectory(ECLConfig.getBaseDir().toPath(), "ecl-modpack-preview-"), null));
+        assertThrows(IOException.class, () -> installer.prepareUpdate(changedLoader.toFile(),
+                gameRoot.toFile(), installed.profileId(), "project", "v3",
+                Files.createTempDirectory(ECLConfig.getBaseDir().toPath(), "ecl-modpack-preview-"), null));
+
+        assertEquals(beforeProfile, Files.readString(profile));
+        assertEquals(beforeManifest, Files.readString(installed.instanceDirectory()
+                .resolve(PackManifest.FILE_NAME)));
+    }
+
+    @Test
+    void rollbackRestoresUserFileFirstManagedByTheNewPack() throws Exception {
+        Path initial = tempDir.resolve("rollback-initial.mrpack");
+        writePack(initial, "Rollback Pack", "1", "{\"minecraft\":\"1.21.4\"}", Map.of());
+        Path gameRoot = tempDir.resolve("rollback-game");
+        MrpackInstaller installer = new MrpackInstaller();
+        var installed = installer.install(initial.toFile(), gameRoot.toFile(), "Rollback Pack", "project", "v1", null);
+        Path userFile = installed.instanceDirectory().resolve("config/user.txt");
+        Files.createDirectories(userFile.getParent());
+        Files.writeString(userFile, "user content");
+        Path updated = tempDir.resolve("rollback-updated.mrpack");
+        writePack(updated, "Rollback Pack", "2", "{\"minecraft\":\"1.21.4\"}",
+                Map.of("config/user.txt", "pack content", "resourcepacks/new.zip", "new resourcepack"));
+        Path versions = ECLConfig.getVersionsDir().toPath();
+        var instance = VersionProfileModInstanceContext.load(installed.profileId(), versions, gameRoot);
+        var pack = new ModpackInstance(instance.instanceId(), instance.profileId(), "Rollback Pack", "1",
+                instance.minecraftVersion(), instance.loaderName(), "project", "v1", instance.gameDirectory());
+        var version = TestFixtures.fabricVersion("v2", "project", List.of());
+        var update = new ModpackUpdate(pack, version, version.files().getFirst());
+        var preview = new InstanceUpdateService.Preview(instance, Instant.now(), versions, gameRoot,
+                "fingerprint", null, List.of(), List.of(), Set.of(), List.of(), pack, update);
+        var recovery = new InstanceUpgradeRecoveryService(tempDir.resolve("recovery"));
+        Path work = Files.createTempDirectory(ECLConfig.getBaseDir().toPath(), "ecl-modpack-preview-");
+        try (var prepared = installer.prepareUpdate(updated.toFile(), gameRoot.toFile(), instance.profileId(),
+                "project", "v2", work, null)) {
+            var execution = new InstanceUpdateService.PreparedExecution(preview, List.of(),
+                    new ModpackUpdateService.PreparedUpdate(update, prepared));
+            var draft = recovery.begin(execution);
+            assertEquals("user content", Files.readString(userFile));
+            installer.applyPreparedUpdate(prepared, gameRoot.toFile(), () -> false, null);
+            assertEquals("pack content", Files.readString(userFile));
+            recovery.complete(draft);
+            assertTrue(recovery.restore(instance.profileId(), instance, versions, gameRoot, Set.of()).restored());
+            assertEquals("user content", Files.readString(userFile));
+            assertFalse(Files.exists(instance.gameDirectory().resolve("resourcepacks/new.zip")));
+        }
     }
 
     @Test
@@ -340,6 +463,33 @@ class MrpackInstallerTest {
                 () -> MrpackDependencyResolver.findLoader(dependencies));
 
         assertTrue(error.getMessage().contains("整合包同时声明了多个模组加载器"));
+    }
+
+    @Test
+    void stalePreviewCleanupRemovesOnlyOldPreviewDirectories() throws Exception {
+        Path base = ECLConfig.getBaseDir().toPath();
+        Files.createDirectories(base);
+        Path stale = Files.createDirectory(base.resolve(MrpackInstaller.PREVIEW_DIRECTORY_PREFIX + "stale"));
+        Files.writeString(stale.resolve("leftover.bin"), "old");
+        Files.setLastModifiedTime(stale, java.nio.file.attribute.FileTime.fromMillis(
+                System.currentTimeMillis() - java.time.Duration.ofHours(2).toMillis()));
+        Path fresh = Files.createDirectory(base.resolve(MrpackInstaller.PREVIEW_DIRECTORY_PREFIX + "fresh"));
+        Path versions = Files.createDirectory(base.resolve("versions"));
+        Path notAPreview = Files.createDirectory(base.resolve("other-temp"));
+
+        try {
+            int removed = MrpackInstaller.cleanStalePreviews(java.time.Duration.ofHours(1));
+
+            assertTrue(removed >= 1, "The abandoned preview directory must be removed");
+            assertFalse(Files.exists(stale), "Stale preview directories are deleted");
+            assertTrue(Files.exists(fresh), "Recent preview directories may still be in use");
+            assertTrue(Files.exists(notAPreview), "Only preview directories are cleaned");
+            assertTrue(Files.exists(versions), "Managed data roots are never touched");
+        } finally {
+            Files.deleteIfExists(fresh);
+            Files.deleteIfExists(notAPreview);
+            Files.deleteIfExists(versions);
+        }
     }
 
     private static void writePack(Path archive, String name, String version, String config)

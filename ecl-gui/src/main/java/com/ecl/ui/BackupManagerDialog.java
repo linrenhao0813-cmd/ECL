@@ -1,5 +1,7 @@
 package com.ecl.ui;
 
+import com.ecl.util.Messages;
+
 import com.ecl.backup.BackupEntry;
 import com.ecl.backup.WorldBackupService;
 import javafx.application.Platform;
@@ -16,6 +18,7 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
@@ -43,19 +46,19 @@ final class BackupManagerDialog {
     void show() {
         String profileId = ui.getSelectedVersion();
         if (profileId == null || profileId.isBlank()) {
-            ui.setStatus("无法打开备份管理", "请先选择一个实例。");
+            ui.setStatus(Messages.get("backup.openFailed"), Messages.get("backup.selectInstance"));
             return;
         }
         Stage dialog = new Stage(StageStyle.UTILITY);
         dialog.initOwner(ui.primaryStage);
         dialog.initModality(Modality.WINDOW_MODAL);
-        dialog.setTitle("备份管理 · " + profileId);
+        dialog.setTitle(Messages.format("backup.title", profileId));
         ui.applyWindowIcon(dialog);
 
         ListView<BackupEntry> backupList = new ListView<>();
         backupList.setPrefHeight(270);
         backupList.setPlaceholder(ui.createBodyText(
-                "还没有备份。点击“新建备份”保存当前存档。"));
+                Messages.get("backup.empty")));
         backupList.setCellFactory(list -> new ListCell<>() {
             @Override
             protected void updateItem(BackupEntry item, boolean empty) {
@@ -68,37 +71,38 @@ final class BackupManagerDialog {
                 String created = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
                         .withZone(ZoneId.systemDefault()).format(item.createdAt());
                 setText(created + "    " + formatBytes(item.archiveSize()) + "\n"
-                        + formatContents(item) + " · " + item.files().size() + " 个文件");
+                        + formatContents(item) + " · " + Messages.format("backup.fileCount", item.files().size()));
                 setTooltip(new Tooltip(item.archivePath().toString()));
             }
         });
 
-        CheckBox includeSaves = new CheckBox("存档 saves（必选）");
+        CheckBox includeSaves = new CheckBox(Messages.get("backup.savesRequired"));
         includeSaves.setSelected(true);
         includeSaves.setDisable(true);
-        CheckBox includeMods = new CheckBox("模组 mods");
+        CheckBox includeMods = new CheckBox(Messages.get("backup.mods"));
         includeMods.setSelected(ui.backupIncludeMods);
-        CheckBox includeShaders = new CheckBox("光影包 shaderpacks");
-        CheckBox includeResources = new CheckBox("材质包 resourcepacks");
-        CheckBox includeConfig = new CheckBox("配置 config");
-        HBox backupOptions = new HBox(18, includeSaves, includeMods, includeShaders,
+        CheckBox includeShaders = new CheckBox(Messages.get("backup.shaders"));
+        CheckBox includeResources = new CheckBox(Messages.get("backup.resources"));
+        CheckBox includeConfig = new CheckBox(Messages.get("backup.config"));
+        FlowPane backupOptions = new FlowPane(18, 10, includeSaves, includeMods, includeShaders,
                 includeResources, includeConfig);
+        backupOptions.getStyleClass().add("backup-options");
         backupOptions.setAlignment(Pos.CENTER_LEFT);
 
-        Label operationStatus = ui.createBodyText("备份保存在 "
-                + ui.worldBackupService.backupDirectory(profileId));
+        Label operationStatus = ui.createBodyText(Messages.format("backup.location",
+                ui.worldBackupService.backupDirectory(profileId)));
         ProgressBar operationProgress = new ProgressBar(0);
         operationProgress.setMaxWidth(Double.MAX_VALUE);
-        Button createButton = button("新建备份", "primary-button");
-        Button restoreButton = button("恢复所选", "secondary-button");
+        Button createButton = button(Messages.get("backup.create"), "primary-button");
+        Button restoreButton = button(Messages.get("backup.restore"), "secondary-button");
         restoreButton.setDisable(true);
-        Button deleteButton = button("删除所选", "secondary-button");
+        Button deleteButton = button(Messages.get("backup.delete"), "secondary-button");
         deleteButton.setDisable(true);
-        Button openDirectoryButton = button("打开备份目录", "ghost-button");
-        Button closeButton = button("关闭", "ghost-button");
+        Button openDirectoryButton = button(Messages.get("backup.openDirectory"), "ghost-button");
+        Button closeButton = button(Messages.get("backup.close"), "ghost-button");
         closeButton.setOnAction(event -> dialog.close());
         openDirectoryButton.setOnAction(event -> ui.openLocalFolder(
-                ui.worldBackupService.backupDirectory(profileId).toFile(), "备份目录"));
+                ui.worldBackupService.backupDirectory(profileId).toFile(), Messages.get("backup.directory")));
 
         AtomicBoolean operationRunning = new AtomicBoolean();
         java.util.function.Consumer<Boolean> setBusy = busy -> {
@@ -124,7 +128,7 @@ final class BackupManagerDialog {
                             .findFirst().ifPresent(item -> backupList.getSelectionModel().select(item));
                 }
             } catch (IOException error) {
-                operationStatus.setText("读取备份失败：" + cleanMessage(error));
+                operationStatus.setText(Messages.format("backup.readFailed", cleanMessage(error)));
             }
         };
         backupList.getSelectionModel().selectedItemProperty().addListener(
@@ -137,8 +141,7 @@ final class BackupManagerDialog {
 
         createButton.setOnAction(event -> createBackup(profileId, backupList, includeMods,
                 includeShaders, includeResources, includeConfig, operationStatus,
-                operationProgress, backupOptions, restoreButton, deleteButton,
-                openDirectoryButton, closeButton, setBusy, refreshList));
+                operationProgress, setBusy, refreshList));
         restoreButton.setOnAction(event -> restoreBackup(profileId, dialog, backupList,
                 operationStatus, operationProgress, setBusy, refreshList));
         deleteButton.setOnAction(event -> deleteBackup(dialog, backupList, operationStatus,
@@ -150,9 +153,9 @@ final class BackupManagerDialog {
                 spacer, openDirectoryButton, closeButton);
         actionBar.setAlignment(Pos.CENTER_RIGHT);
         VBox root = new VBox(16,
-                ui.createSurface("// " + profileId + " 的存档备份",
-                        "恢复时会先校验压缩包，并为当前文件创建临时回滚副本。", backupList),
-                ui.createSurface("新建备份包含内容", "saves 始终包含，其余目录按需选择",
+                ui.createSurface(Messages.format("backup.heading", profileId),
+                        Messages.get("backup.explanation"), backupList),
+                ui.createSurface(Messages.get("backup.contents"), Messages.get("backup.contentsHint"),
                         backupOptions), operationStatus, operationProgress, actionBar);
         root.getStyleClass().add("root-pane");
         root.setPadding(new Insets(20));
@@ -170,13 +173,12 @@ final class BackupManagerDialog {
     private void createBackup(String profileId, ListView<BackupEntry> backupList,
                               CheckBox includeMods, CheckBox includeShaders,
                               CheckBox includeResources, CheckBox includeConfig,
-                              Label status, ProgressBar progress, HBox options,
-                              Button restore, Button delete, Button open, Button close,
+                              Label status, ProgressBar progress,
                               java.util.function.Consumer<Boolean> setBusy,
                               Runnable refreshList) {
         Path instanceDirectory = ui.resolveVersionGameDir(profileId).toPath();
         if (!Files.isDirectory(instanceDirectory)) {
-            status.setText("实例目录不存在，无法创建备份：" + instanceDirectory);
+            status.setText(Messages.format("backup.missingDirectory", instanceDirectory));
             return;
         }
         EnumSet<BackupEntry.Content> content = EnumSet.of(BackupEntry.Content.SAVES);
@@ -185,9 +187,9 @@ final class BackupManagerDialog {
         if (includeResources.isSelected()) content.add(BackupEntry.Content.RESOURCEPACKS);
         if (includeConfig.isSelected()) content.add(BackupEntry.Content.CONFIG);
         setBusy.accept(true);
-        status.setText("正在创建备份…");
+        status.setText(Messages.get("backup.creating"));
         progress.setProgress(-1);
-        WorldBackupService.ProgressListener listener = progressListener(progress, status, "正在备份");
+        WorldBackupService.ProgressListener listener = progressListener(progress, status, Messages.get("backup.backingUp"));
         ui.runAsync("ecl-world-backup-create", () -> {
             try {
                 BackupEntry created = ui.worldBackupService.createBackup(profileId,
@@ -197,13 +199,13 @@ final class BackupManagerDialog {
                     backupList.getItems().stream()
                             .filter(item -> item.archivePath().equals(created.archivePath()))
                             .findFirst().ifPresent(item -> backupList.getSelectionModel().select(item));
-                    status.setText("备份已创建：" + created.archivePath().getFileName());
-                    ui.setStatus("实例备份完成", profileId + " · " + formatBytes(created.archiveSize()));
+                    status.setText(Messages.format("backup.created", created.archivePath().getFileName()));
+                    ui.setStatus(Messages.get("backup.createComplete"), profileId + " · " + formatBytes(created.archiveSize()));
                     setBusy.accept(false);
                 });
             } catch (Exception error) {
                 Platform.runLater(() -> {
-                    status.setText("备份失败：" + cleanMessage(error));
+                    status.setText(Messages.format("backup.createFailed", cleanMessage(error)));
                     setBusy.accept(false);
                 });
             }
@@ -217,36 +219,35 @@ final class BackupManagerDialog {
         BackupEntry selected = list.getSelectionModel().getSelectedItem();
         if (selected == null) return;
         if (ui.gameLaunch.isGameProcessRunning()) {
-            status.setText("游戏正在运行，退出游戏后才能恢复存档。");
+            status.setText(Messages.get("backup.running"));
             return;
         }
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                "将用所选备份替换实例中的“" + formatContents(selected)
-                        + "”。恢复过程会保留可回滚副本，确认继续吗？",
+                Messages.format("backup.restoreBody", formatContents(selected)),
                 ButtonType.CANCEL, ButtonType.OK);
         confirm.initOwner(dialog);
-        confirm.setTitle("恢复实例备份");
-        confirm.setHeaderText("恢复 " + selected.archivePath().getFileName());
+        confirm.setTitle(Messages.get("backup.restoreTitle"));
+        confirm.setHeaderText(Messages.format("backup.restoreHeader", selected.archivePath().getFileName()));
         if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
         setBusy.accept(true);
-        status.setText("正在校验并恢复备份…");
+        status.setText(Messages.get("backup.verifying"));
         progress.setProgress(-1);
         ui.runAsync("ecl-world-backup-restore", () -> {
             try {
                 if (ui.gameLaunch.isGameProcessRunning()) {
-                    throw new IOException("游戏正在运行，不能恢复实例文件");
+                    throw new IOException(Messages.get("backup.running"));
                 }
                 ui.worldBackupService.restore(selected,
                         ui.resolveVersionGameDir(profileId).toPath(),
-                        progressListener(progress, status, "正在恢复"));
+                        progressListener(progress, status, Messages.get("backup.restoring")));
                 Platform.runLater(() -> {
-                    status.setText("恢复完成：" + selected.archivePath().getFileName());
-                    ui.setStatus("实例备份已恢复", profileId + " 的存档与所选内容已恢复。");
+                    status.setText(Messages.format("backup.restored", selected.archivePath().getFileName()));
+                    ui.setStatus(Messages.get("backup.restoreComplete"), Messages.format("backup.restoreDetail", profileId));
                     setBusy.accept(false);
                 });
             } catch (Exception error) {
                 Platform.runLater(() -> {
-                    status.setText("恢复失败，原文件已回滚：" + cleanMessage(error));
+                    status.setText(Messages.format("backup.restoreFailed", cleanMessage(error)));
                     setBusy.accept(false);
                 });
             }
@@ -259,24 +260,24 @@ final class BackupManagerDialog {
         BackupEntry selected = list.getSelectionModel().getSelectedItem();
         if (selected == null) return;
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                "将永久删除备份文件及其元数据。", ButtonType.CANCEL, ButtonType.OK);
+                Messages.get("backup.deleteBody"), ButtonType.CANCEL, ButtonType.OK);
         confirm.initOwner(dialog);
-        confirm.setTitle("删除实例备份");
+        confirm.setTitle(Messages.get("backup.deleteTitle"));
         confirm.setHeaderText(selected.archivePath().getFileName().toString());
         if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
         setBusy.accept(true);
-        status.setText("正在删除备份…");
+        status.setText(Messages.get("backup.deleting"));
         ui.runAsync("ecl-world-backup-delete", () -> {
             try {
                 ui.worldBackupService.deleteBackup(selected);
                 Platform.runLater(() -> {
                     refreshList.run();
-                    status.setText("备份已删除。");
+                    status.setText(Messages.get("backup.deleted"));
                     setBusy.accept(false);
                 });
             } catch (Exception error) {
                 Platform.runLater(() -> {
-                    status.setText("删除失败：" + cleanMessage(error));
+                    status.setText(Messages.format("backup.deleteFailed", cleanMessage(error)));
                     setBusy.accept(false);
                 });
             }
@@ -318,8 +319,8 @@ final class BackupManagerDialog {
         StringBuilder result = new StringBuilder();
         for (BackupEntry.Content content : BackupEntry.Content.values()) {
             if (!backup.includedContent().contains(content)) continue;
-            if (!result.isEmpty()) result.append("、");
-            result.append(content.displayName());
+            if (!result.isEmpty()) result.append(", ");
+            result.append(Messages.get("backup.content." + content.directoryName()));
         }
         return result.toString();
     }

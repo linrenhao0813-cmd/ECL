@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.jar.JarFile;
 
 /** Imports and manages explicitly trusted server JARs without executing a shell. */
@@ -23,6 +25,11 @@ public final class LocalServerManager {
     private static final Object PROCESS_LOCK = new Object();
     private static final Map<Path, Process> PROCESSES = new HashMap<>();
     private static final int MAX_LOG_BYTES = 262144;
+    /** Grace period for a dedicated server to save the world and exit after {@code stop}. */
+    static final int STOP_TIMEOUT_SECONDS = 60;
+    /** How long to wait for a competing process to release the manager lock. */
+    private static final int LOCK_WAIT_SECONDS = 5;
+    private static final long LOCK_RETRY_MILLIS = 50;
     private final Path root;
 
     public LocalServerManager(Path dataDirectory) {
@@ -135,8 +142,40 @@ public final class LocalServerManager {
         });
     }
 
-    public void stop(String id) throws IOException {
+    /**
+     * Sends {@code stop} and waits up to {@link #STOP_TIMEOUT_SECONDS} for the process to exit.
+     *
+     * <p>A healthy dedicated server saves the world and terminates on its own. A server still
+     * alive after the grace period is reported as {@link StopOutcome#TIMED_OUT} instead of being
+     * force-killed, because destroying it mid-save can corrupt the world. Callers must surface the
+     * timeout and let the user decide.</p>
+     */
+    public StopOutcome stop(String id) throws IOException {
         sendCommand(id, "stop");
+        Process process;
+        synchronized (PROCESS_LOCK) {
+            process = PROCESSES.get(directory(id));
+        }
+        if (process == null) {
+            return StopOutcome.STOPPED;
+        }
+        try {
+            if (process.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                return StopOutcome.STOPPED;
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for the server to stop", interrupted);
+        }
+        return process.isAlive() ? StopOutcome.TIMED_OUT : StopOutcome.STOPPED;
+    }
+
+    /** Result of {@link #stop(String)}: whether the server confirmed its own exit. */
+    public enum StopOutcome {
+        /** The server process exited within the grace period. */
+        STOPPED,
+        /** {@code stop} was delivered but the process is still alive; it was not force-killed. */
+        TIMED_OUT
     }
 
     public void sendCommand(String id, String command) throws IOException {
@@ -215,15 +254,47 @@ public final class LocalServerManager {
         if (isRunning(id)) throw new IOException("Stop the server before changing its files or settings");
     }
 
+    /**
+     * Runs {@code operation} while holding the per-server manager lock.
+     *
+     * <p>Uses {@link FileChannel#tryLock()} instead of {@link FileChannel#lock()}: an OS file lock
+     * held by another ECL process is never released on its own, so a blocking lock could wait
+     * forever and freeze the UI thread. Contention is retried briefly, then reported as an
+     * {@link IOException} to keep the previous "could not lock" semantics.</p>
+     */
     private <T> T locked(String id, IoOperation<T> operation) throws IOException {
         synchronized (PROCESS_LOCK) {
             Path folder = directory(id);
             if (!Files.isDirectory(folder, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Server directory does not exist");
             Path lock = LocalServerFiles.safe(folder.resolve("manager.lock"));
             try (FileChannel channel = FileChannel.open(lock, StandardOpenOption.CREATE, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
-                    FileLock lease = channel.lock()) {
+                    FileLock lease = acquireLock(channel)) {
                 if (!lease.isValid()) throw new IOException("Could not lock server directory");
                 return operation.run();
+            }
+        }
+    }
+
+    private static FileLock acquireLock(FileChannel channel) throws IOException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(LOCK_WAIT_SECONDS);
+        while (true) {
+            FileLock lease;
+            try {
+                lease = channel.tryLock();
+            } catch (OverlappingFileLockException busy) {
+                throw new IOException("Server is busy in this ECL process", busy);
+            }
+            if (lease != null) {
+                return lease;
+            }
+            if (System.nanoTime() >= deadline) {
+                throw new IOException("Server is busy in another ECL process");
+            }
+            try {
+                Thread.sleep(LOCK_RETRY_MILLIS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while waiting for the server lock", interrupted);
             }
         }
     }

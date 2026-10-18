@@ -67,6 +67,7 @@ final class GameLaunchCoordinator {
             boolean monitorOwnsGameLock = false;
             try {
                 ensureVersionGameDirs(version);
+                ui.worldBackupService.recoverInterruptedRestore(launchDir.toPath());
                 createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
                 if (GameProcessMarker.isRunning(launchDir.toPath())) {
                     throw new IOException("实例中的游戏进程仍在运行: " + version);
@@ -142,6 +143,7 @@ final class GameLaunchCoordinator {
                     ui.setControlsBusy(false);
                 });
             } finally {
+                preparation.completePreparation(version);
                 if (!monitorOwnsGameLock && gameLock != null) {
                     try {
                         gameLock.close();
@@ -152,6 +154,10 @@ final class GameLaunchCoordinator {
                 }
             }
         });
+    }
+
+    boolean isPreparingVersion(String profileId) {
+        return preparation.isPreparingVersion(profileId);
     }
 
     private void createAutomaticBackupBeforeLaunch(String profileId, java.nio.file.Path instanceDirectory) {

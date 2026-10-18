@@ -125,7 +125,8 @@ public final class LaunchOptions {
     public File nativesDirectory() {
         return instanceDirectory == null
                 ? environment.nativesDirectory(versionId)
-                : new File(instanceDirectory, "natives-windows");
+                : new File(instanceDirectory,
+                        "natives-" + com.ecl.util.OperatingSystem.minecraftName());
     }
 
     /** Optional console log destination when the caller will not retain the output pipe. */

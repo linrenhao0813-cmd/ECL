@@ -1,5 +1,6 @@
 package com.ecl.modrinth.service;
 
+import com.ecl.ECLConfig;
 import com.ecl.launch.GameProcessMarker;
 import com.ecl.launcher.LoaderUpdateService;
 import com.ecl.launcher.ModLoaderInstaller;
@@ -13,16 +14,22 @@ import com.ecl.modrinth.model.InstalledMod;
 import com.ecl.modrinth.model.ModUpdate;
 import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.operation.InstanceOperationCoordinator;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,6 +43,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InstanceUpdateServiceTest {
     @TempDir Path temp;
+
+    private Field baseDirField;
+    private File previousBaseDir;
+
+    @BeforeEach
+    void useTemporaryBaseDirectory() throws Exception {
+        baseDirField = ECLConfig.class.getDeclaredField("baseDir");
+        baseDirField.setAccessible(true);
+        previousBaseDir = (File) baseDirField.get(null);
+        baseDirField.set(null, temp.resolve("ecl").toFile());
+    }
+
+    @AfterEach
+    void restoreBaseDirectory() throws Exception {
+        baseDirField.set(null, previousBaseDir);
+    }
 
     @Test
     void updatesSequentiallyContinuesAfterFailureAndSkipsUnsafeCandidates() throws Exception {
@@ -96,6 +119,38 @@ class InstanceUpdateServiceTest {
     }
 
     @Test
+    void previewDoesNotWriteIndexesAndExpiresWhenManagedFilesChange() throws Exception {
+        ModInstanceContext instance = instance();
+        InstalledMod updateCandidate = mod(instance, "first", true);
+        LocalModScanResult scan = new LocalModScanResult(List.of(updateCandidate), List.of(
+                new LocalModScanItem(instance.gameDirectory().resolve(updateCandidate.relativePath()),
+                        updateCandidate, true, false, "")), List.of(), List.of());
+        FakeUpdates updates = new FakeUpdates();
+        LocalModScanner scanner = new LocalModScanner() {
+            @Override public CompletableFuture<LocalModScanResult> scan(ModInstanceContext target) {
+                return CompletableFuture.completedFuture(scan);
+            }
+
+            @Override public CompletableFuture<LocalModScanResult> inspect(ModInstanceContext target) {
+                return CompletableFuture.completedFuture(scan);
+            }
+        };
+        InstanceUpdateService service = new InstanceUpdateService(loaders(false), scanner,
+                updates, ignored -> false);
+
+        InstanceUpdateService.Preview preview = service.preview(instance, ReleaseChannel.RELEASE_ONLY,
+                null, temp.resolve("versions"), temp.resolve("game"), new FakePacks()).join();
+
+        assertTrue(preview.hasUpdates());
+        assertEquals("new-first", preview.modUpdates().getFirst().availableVersion().id());
+        assertFalse(Files.exists(instance.gameDirectory().resolve("launcher-mods.json")));
+        assertFalse(Files.exists(instance.gameDirectory().resolve("launcher-mod-scan.json")));
+
+        Files.writeString(instance.gameDirectory().resolve(updateCandidate.relativePath()), "changed");
+        assertThrows(CompletionException.class, () -> service.prepare(preview, Set.of()).join());
+    }
+
+    @Test
     void rechecksRunningStateBeforeInstallingAMod() throws Exception {
         ModInstanceContext instance = instance();
         InstalledMod mod = mod(instance, "first", true);
@@ -123,6 +178,55 @@ class InstanceUpdateServiceTest {
         assertEquals(1, packs.applied);
         assertEquals("2.0", result.packVersion());
         assertEquals(List.of(InstanceUpdateService.Stage.PACK_CHECK, InstanceUpdateService.Stage.PACK), stages);
+    }
+
+    @Test
+    void packPreviewChecksThePackVersionWithoutApplyingIt() throws Exception {
+        ModInstanceContext instance = packInstance(true);
+        FakePacks packs = new FakePacks();
+        Path profile = temp.resolve("versions").resolve(instance.profileId())
+                .resolve(instance.profileId() + ".json");
+        String before = Files.readString(profile);
+        InstanceUpdateService service = packService();
+
+        InstanceUpdateService.Preview preview = service.preview(instance, ReleaseChannel.ALL, null,
+                temp.resolve("versions"), temp.resolve("game"), packs).join();
+
+        assertTrue(preview.packProfile());
+        assertTrue(preview.hasUpdates());
+        assertEquals("new", preview.packUpdate().availableVersion().versionNumber());
+        assertEquals(0, packs.applied);
+        assertEquals(before, Files.readString(profile));
+    }
+
+    @Test
+    void packUpdateRunsPreviewPrepareAndExecuteWithPackService() throws Exception {
+        ModInstanceContext instance = packInstance(true);
+        FakePacks packs = new FakePacks();
+        InstanceUpdateService service = packService();
+        Path metadataRoot = temp.resolve("versions");
+        Path gameRoot = temp.resolve("game");
+
+        InstanceUpdateService.Preview preview = service.preview(instance, ReleaseChannel.ALL, null,
+                metadataRoot, gameRoot, packs).join();
+        assertTrue(preview.packProfile());
+        assertTrue(preview.hasUpdates());
+        assertEquals(0, packs.prepared);
+        assertEquals(0, packs.appliedPrepared);
+
+        InstanceUpdateService.PreparedExecution execution = service
+                .prepare(preview, Set.of(), packs, null).join();
+        assertEquals(1, packs.prepared);
+        assertNotNull(execution.packUpdate());
+        assertEquals(instance.profileId(), execution.packUpdate().preview().profileId());
+
+        InstanceUpdateService.Result result = service.execute(execution, null, packs).join();
+        assertEquals(1, packs.appliedPrepared);
+        assertEquals("new", result.packVersion());
+        assertEquals(0, result.updatedMods());
+        assertTrue(result.failures().isEmpty());
+        assertFalse(Files.exists(packs.preparedWorkingDirectory),
+                "Prepared pack staging must be cleaned up after execute");
     }
 
     @Test
@@ -198,6 +302,9 @@ class InstanceUpdateServiceTest {
         private ModpackInstance checked;
         private ReleaseChannel channel;
         private int applied;
+        private int prepared;
+        private int appliedPrepared;
+        private Path preparedWorkingDirectory;
         private boolean current;
         private boolean fail;
         private List<String> warnings = List.of();
@@ -220,6 +327,41 @@ class InstanceUpdateServiceTest {
             }
             return CompletableFuture.completedFuture(new MrpackInstaller.InstallResult(
                     update.instance().profileId(), "Example Pack", "2.0", "1.21.1", "fabric", root, 0));
+        }
+
+        @Override public CompletableFuture<PreparedUpdate> prepareUpdate(
+                ModpackUpdate update, Path root, MrpackInstaller.Listener listener) {
+            prepared++;
+            try {
+                Path base = ECLConfig.getBaseDir().toPath();
+                Files.createDirectories(base);
+                Path work = Files.createTempDirectory(base, MrpackInstaller.PREVIEW_DIRECTORY_PREFIX);
+                preparedWorkingDirectory = work;
+                Path stagedFiles = Files.createDirectory(work.resolve("files"));
+                Path stagedVersions = Files.createDirectory(work.resolve("versions"));
+                Path stagedLibraries = Files.createDirectory(work.resolve("libraries"));
+                Path archive = Files.writeString(work.resolve("update.mrpack"), "fake pack");
+                if (!warnings.isEmpty()) {
+                    listener.onStatus("正在准备整合包文件");
+                    warnings.forEach(listener::onWarning);
+                }
+                MrpackInstaller.UpdatePreview preview = new MrpackInstaller.UpdatePreview(
+                        work, update.instance().profileId(), update.instance().projectId(),
+                        update.availableVersion().id(), update.instance().minecraftVersion(),
+                        update.availableVersion().versionNumber(), "fabric", "1.0", "", archive,
+                        stagedFiles, stagedVersions, stagedLibraries, "", Map.of(), List.of(), 0);
+                return CompletableFuture.completedFuture(new PreparedUpdate(update, preview));
+            } catch (IOException failure) {
+                return CompletableFuture.failedFuture(failure);
+            }
+        }
+
+        @Override public CompletableFuture<MrpackInstaller.InstallResult> applyPreparedUpdate(
+                PreparedUpdate prepared, Path root, MrpackInstaller.Listener listener) {
+            appliedPrepared++;
+            return CompletableFuture.completedFuture(new MrpackInstaller.InstallResult(
+                    prepared.update().instance().profileId(), "Example Pack",
+                    prepared.preview().packVersion(), "1.21.1", "fabric", root, 0));
         }
     }
 

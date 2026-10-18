@@ -1,6 +1,8 @@
 package com.ecl.modrinth.service;
 
 import com.ecl.modrinth.TestFixtures;
+import com.ecl.launcher.LoaderUpdateService;
+import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.download.ModFileDownloadService;
 import com.ecl.modrinth.instance.ModInstanceContext;
@@ -8,6 +10,8 @@ import com.ecl.modrinth.model.DependencyType;
 import com.ecl.modrinth.model.ModDependency;
 import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModVersion;
+import com.ecl.modrinth.model.ModUpdate;
+import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.repository.FileInstalledModRepository;
 import com.ecl.modrinth.transaction.InstallationPlanBuilder;
 import com.ecl.operation.InstanceOperationCoordinator;
@@ -34,6 +38,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -94,6 +99,82 @@ class ModInstallationServiceTest {
 
         assertEquals(before, Files.readString(instance.modsDirectory().resolve("same.jar")));
         assertEquals(List.of("a"), repository.findAll(instance).stream().map(mod -> mod.projectId()).toList());
+    }
+
+    @Test
+    void preparedUpdateReplacesRecognizedUnindexedJar() throws Exception {
+        Path oldJar = instance.modsDirectory().resolve("manual-old.jar");
+        TestFixtures.createJar(oldJar, "manual");
+        var hashes = new HashVerifier().calculate(oldJar);
+        var oldVersion = version("manual-v1", "manual", "manual-old.jar");
+        api.hashes.put(hashes.sha1(), oldVersion);
+        var scanner = new DefaultLocalModScanner(api, repository, new HashVerifier(),
+                new InstanceOperationCoordinator(), Runnable::run, ignored -> false);
+        var scan = scanner.inspect(instance).join();
+        var latest = version("manual-v2", "manual", "manual-new.jar");
+        var updates = new DefaultModUpdateService(api, new DefaultModVersionSelector(), resolver,
+                new InstallationPlanBuilder(), installer, ignored -> instance);
+        var update = new ModUpdate(scan.installedMods().getFirst(), latest,
+                latest.files().getFirst(), ReleaseChannel.RELEASE_ONLY);
+        var prepared = updates.prepareUpdate(update, Set.of()).join();
+
+        assertFalse(Files.exists(repository.indexPath(instance)));
+        assertTrue(Files.exists(oldJar));
+        updates.applyPreparedUpdate(prepared).join();
+
+        assertFalse(Files.exists(oldJar));
+        assertEquals("/manual-v2", Files.readString(instance.modsDirectory().resolve("manual-new.jar")));
+        assertEquals("manual-v2", repository.findByProjectId(instance, "manual").orElseThrow().versionId());
+    }
+
+    @Test
+    void previewedUpgradeReplacesUnindexedDependenciesAndCanRestoreThem() throws Exception {
+        for (String project : List.of("manual", "shared")) {
+            Path jar = instance.modsDirectory().resolve(project + "-old.jar");
+            TestFixtures.createJar(jar, project);
+            api.hashes.put(new HashVerifier().calculate(jar).sha1(), version(project + "-v1", project, project + "-old.jar"));
+        }
+        byte[] original = Files.readAllBytes(instance.modsDirectory().resolve("manual-old.jar"));
+        api.projectVersions.put("manual", List.of(version("manual-v2", "manual", "manual-new.jar", required("shared"))));
+        api.projectVersions.put("shared", List.of(version("shared-v2", "shared", "shared-new.jar")));
+        Path versions = temp.resolve("metadata");
+        Path profile = versions.resolve(instance.profileId()).resolve(instance.profileId() + ".json");
+        Files.createDirectories(profile.getParent());
+        Files.writeString(profile, """
+                {"id":"%s","eclMinecraftVersion":"1.21.1","eclModLoader":"fabric","eclModLoaderVersion":"1.0"}
+                """.formatted(instance.profileId()));
+        var lock = new InstanceOperationCoordinator();
+        var loaders = new LoaderUpdateService(versions, new LoaderUpdateService.Backend() {
+            @Override public List<String> listVersions(String minecraft, ModLoaderInstaller.Loader loader) {
+                return List.of("1.0");
+            }
+            @Override public ModLoaderInstaller.InstallResult install(String minecraft, ModLoaderInstaller.Loader loader,
+                                                                      String target, ModLoaderInstaller.Listener listener) {
+                throw new AssertionError("Loader is already current");
+            }
+        }, lock, Runnable::run, ignored -> false);
+        var scanner = new DefaultLocalModScanner(api, repository, new HashVerifier(), lock, Runnable::run, ignored -> false);
+        var updates = new DefaultModUpdateService(api, new DefaultModVersionSelector(), resolver,
+                new InstallationPlanBuilder(), installer, ignored -> instance);
+        var recovery = new InstanceUpgradeRecoveryService(temp.resolve("recovery"), lock, ignored -> false);
+        var service = new InstanceUpdateService(loaders, scanner, updates, ignored -> false, Runnable::run, recovery);
+        var preview = service.preview(instance, ReleaseChannel.RELEASE_ONLY, null, versions, temp.resolve("game-root"), null).join();
+        var prepared = service.prepare(preview, Set.of("manual")).join();
+        assertFalse(Files.exists(repository.indexPath(instance)));
+
+        var result = service.execute(prepared, null, null).join();
+
+        assertTrue(result.failures().isEmpty());
+        assertFalse(Files.exists(instance.modsDirectory().resolve("manual-old.jar")));
+        assertFalse(Files.exists(instance.modsDirectory().resolve("shared-old.jar")));
+        assertTrue(Files.exists(instance.modsDirectory().resolve("manual-new.jar")));
+        assertTrue(Files.exists(instance.modsDirectory().resolve("shared-new.jar")));
+        assertTrue(recovery.restore(instance.profileId(), instance, versions, temp.resolve("game-root"), Set.of()).restored());
+        assertTrue(java.util.Arrays.equals(original, Files.readAllBytes(instance.modsDirectory().resolve("manual-old.jar"))));
+        assertTrue(Files.exists(instance.modsDirectory().resolve("shared-old.jar")));
+        assertFalse(Files.exists(instance.modsDirectory().resolve("manual-new.jar")));
+        assertFalse(Files.exists(instance.modsDirectory().resolve("shared-new.jar")));
+        assertFalse(Files.exists(repository.indexPath(instance)));
     }
 
     @Test

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/linrenhao0813-cmd/ECL/security/advisories/new
+    about: 请勿用公开 Issue 报告安全问题，改用私密 Security Advisory。
+  - name: 使用问题与讨论
+    url: https://github.com/linrenhao0813-cmd/ECL/discussions
+    about: 安装、启动失败、模组兼容等求助，请先查阅 README 的“故障排查”。

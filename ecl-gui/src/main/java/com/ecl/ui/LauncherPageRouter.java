@@ -84,7 +84,8 @@ final class LauncherPageRouter {
     }
 
     private void playContentTransition(int direction) {
-        if (Boolean.getBoolean("ecl.reduceMotion") || ui.workspacePane.getChildren().isEmpty()) {
+        if (ui.reduceMotion || Boolean.getBoolean("ecl.reduceMotion")
+                || ui.workspacePane.getChildren().isEmpty()) {
             return;
         }
         if (ui.contentTransition != null) {

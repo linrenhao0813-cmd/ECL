@@ -7,7 +7,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -42,28 +41,17 @@ class ModrinthDownloaderTest {
     }
 
     @Test
-    void shaderAndResourcePackDownloadsOnlyAcceptZipFiles() throws Exception {
-        ModrinthDownloader downloader = new ModrinthDownloader();
-        Method method = ModrinthDownloader.class.getDeclaredMethod(
-                "isAllowedFilename", String.class, String[].class);
-        method.setAccessible(true);
+    void shaderAndResourcePackDownloadsOnlyAcceptZipFiles() {
+        assertTrue(ModrinthFileSelector.isAllowedFilename("complementary-shaders.zip",
+                ".zip"));
+        assertFalse(ModrinthFileSelector.isAllowedFilename("shader-pack.jar", ".zip"));
+        assertFalse(ModrinthFileSelector.isAllowedFilename("no-extension", ".zip"));
 
-        assertTrue((boolean) method.invoke(downloader, "complementary-shaders.zip",
-                (Object) new String[]{".zip"}));
-        assertFalse((boolean) method.invoke(downloader, "shader-pack.jar",
-                (Object) new String[]{".zip"}));
-        assertFalse((boolean) method.invoke(downloader, "no-extension",
-                (Object) new String[]{".zip"}));
+        assertTrue(ModrinthFileSelector.isAllowedFilename("faithful-32x.zip", ".zip"));
+        assertFalse(ModrinthFileSelector.isAllowedFilename("resourcepack.jar", ".zip"));
 
-        assertTrue((boolean) method.invoke(downloader, "faithful-32x.zip",
-                (Object) new String[]{".zip"}));
-        assertFalse((boolean) method.invoke(downloader, "resourcepack.jar",
-                (Object) new String[]{".zip"}));
-
-        assertTrue((boolean) method.invoke(downloader, "sodium.jar",
-                (Object) new String[]{".jar"}));
-        assertTrue((boolean) method.invoke(downloader, "pack.zip",
-                (Object) new String[]{".jar", ".zip"}));
+        assertTrue(ModrinthFileSelector.isAllowedFilename("sodium.jar", ".jar"));
+        assertTrue(ModrinthFileSelector.isAllowedFilename("pack.zip", ".jar", ".zip"));
     }
 
     @Test

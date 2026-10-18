@@ -192,35 +192,19 @@ public class GameDownloader implements DownloadService {
         File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
         if (!assetVerifier.needsDownload(clientJar, clientSha1)) return;
 
-        try {
-            HttpUtil.downloadFileWithProgress(clientUrl, clientJar,
-                    new HttpUtil.ProgressCallback() {
-                        @Override
-                        public void onStart(long total) {
-                            if (runListener != null) {
-                                runListener.onProgress(0, total);
-                            }
-                        }
+        batchExecutor.downloadSingleVerified(new GameDownloadBatchExecutor.DownloadTask(
+                clientUrl, clientJar, clientSha1, clientSize, "游戏主文件",
+                ECLConfig.getVersionsDir().toPath()), runListener, new HttpUtil.ProgressCallback() {
+                    @Override public void onStart(long total) {
+                        if (runListener != null) runListener.onProgress(0, total);
+                    }
 
-                        @Override
-                        public void onProgress(long downloaded, long total) {
-                            if (runListener != null) {
-                                runListener.onProgress(downloaded, total);
-                            }
-                        }
+                    @Override public void onProgress(long downloaded, long total) {
+                        if (runListener != null) runListener.onProgress(downloaded, total);
+                    }
 
-                        @Override
-                        public void onComplete(File file) {
-                        }
-                    }, batchExecutor.sourceCallback("游戏主文件", runListener), clientSize);
-            if (clientJar.length() != clientSize) {
-                throw new IOException("Minecraft client size does not match metadata");
-            }
-            assetVerifier.verifyDownloadedFile(clientJar, clientSha1);
-        } catch (IOException failure) {
-            Files.deleteIfExists(clientJar.toPath());
-            throw failure;
-        }
+                    @Override public void onComplete(File file) { }
+                });
     }
 
     private void checkCancelled() throws InterruptedException {
@@ -334,7 +318,8 @@ public class GameDownloader implements DownloadService {
         File target = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
         if (assetVerifier.needsDownload(target, sha1)) {
             tasks.add(new GameDownloadBatchExecutor.DownloadTask(
-                    url, target, sha1, size, sourceLabel));
+                    url, target, sha1, size, sourceLabel,
+                    ECLConfig.getLibrariesDir().toPath()));
         }
     }
 
@@ -352,18 +337,9 @@ public class GameDownloader implements DownloadService {
                 "asset index " + assetId);
         long indexSize = GameManifestParser.requiredPositiveSize(assetIndex, "size", "asset index " + assetId);
         if (assetVerifier.needsDownload(indexFile, indexSha1)) {
-            Files.createDirectories(indexFile.toPath().toAbsolutePath().getParent());
-            try {
-                HttpUtil.downloadFileWithProgress(assetUrl, indexFile, null,
-                        batchExecutor.sourceCallback("资源索引", runListener), indexSize);
-                if (indexFile.length() != indexSize) {
-                    throw new IOException("Asset index size does not match metadata: " + assetId);
-                }
-                assetVerifier.verifyDownloadedFile(indexFile, indexSha1);
-            } catch (IOException failure) {
-                Files.deleteIfExists(indexFile.toPath());
-                throw failure;
-            }
+            batchExecutor.downloadSingleVerified(new GameDownloadBatchExecutor.DownloadTask(
+                    assetUrl, indexFile, indexSha1, indexSize, "资源索引",
+                    ECLConfig.getAssetsDir().toPath()), runListener, null);
         }
         JsonObject objects = HttpUtil.readJson(indexFile).getAsJsonObject("objects");
         List<GameDownloadBatchExecutor.DownloadTask> tasks = new ArrayList<>();
@@ -379,7 +355,7 @@ public class GameDownloader implements DownloadService {
             if (assetVerifier.needsDownload(target, hash)) {
                 tasks.add(new GameDownloadBatchExecutor.DownloadTask(
                         "https://resources.download.minecraft.net/" + subPath,
-                        target, hash, size, "资源文件"));
+                        target, hash, size, "资源文件", assetDir.toPath()));
             }
         }
         batchExecutor.download(tasks, "资源文件", runListener);
@@ -411,7 +387,7 @@ public class GameDownloader implements DownloadService {
         private static NativePlatform current() {
             String architecture = System.getProperty("os.arch", "").toLowerCase();
             String bits = architecture.contains("64") || architecture.contains("aarch64") ? "64" : "32";
-            String osName = "windows";
+            String osName = com.ecl.util.OperatingSystem.minecraftName();
             return new NativePlatform(osName, bits,
                     osName + "-" + FileUtil.nativeArchitecture(architecture));
         }

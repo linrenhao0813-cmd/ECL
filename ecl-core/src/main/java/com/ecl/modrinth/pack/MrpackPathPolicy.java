@@ -14,7 +14,6 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.InvalidPathException;
-import java.util.Locale;
 import java.util.UUID;
 
 /** Centralizes MRPACK profile, instance and archive path safety rules. */
@@ -171,7 +170,7 @@ final class MrpackPathPolicy {
     }
 
     private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        return com.ecl.util.OperatingSystem.isWindows();
     }
 
     private static boolean isWindowsReservedName(String value) {

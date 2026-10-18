@@ -155,6 +155,10 @@ class LauncherUIView extends javafx.application.Application {
     boolean backupOnLaunch;
     int backupKeepCount;
     boolean backupIncludeMods;
+    /** User-visible "reduce animations" preference; the {@code ecl.reduceMotion} system property still wins for tests. */
+    static final com.ecl.config.SettingKey<Boolean> KEY_REDUCE_MOTION =
+            new com.ecl.config.SettingKey<>("reduceMotion", Boolean.class, false);
+    boolean reduceMotion;
     /** Last launch failure headline, cleared when a new launch starts. */
     volatile String launchFailure;
     final AtomicBoolean applicationStopping = new AtomicBoolean();
@@ -244,6 +248,8 @@ class LauncherUIView extends javafx.application.Application {
         backupKeepCount = Math.max(1, Math.min(100,
                 settingsManager.get(ECLConfig.KEY_BACKUP_KEEP_COUNT)));
         backupIncludeMods = settingsManager.get(ECLConfig.KEY_BACKUP_INCLUDE_MODS);
+        reduceMotion = settingsManager.get(KEY_REDUCE_MOTION);
+        progressController.setReduceMotion(() -> reduceMotion || Boolean.getBoolean("ecl.reduceMotion"));
         contentTargets = createContentTargets();
         instanceSelection.setLaunchTarget(settingsManager.get(ECLConfig.KEY_SELECTED_VERSION));
         instanceSelection.launchTargetProperty().addListener(
@@ -488,10 +494,6 @@ class LauncherUIView extends javafx.application.Application {
         return createSurface(Messages.get("content.mods.title"), versionManager.getVersionDisplayName(profileId),
                 createBodyText(Messages.format("content.loader.prompt", minecraftVersion)),
                 install);
-    }
-
-    Node createServerJarLibraryContent() {
-        return new ServerJarDownloadPage((LauncherUI) this).build();
     }
 
     Node createContentLibraryBrowser(ContentTarget target) {

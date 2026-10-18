@@ -1,15 +1,17 @@
 package com.ecl;
 
 import java.io.File;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import javax.management.JMException;
 import javax.management.ObjectName;
+import java.util.Properties;
 
 import com.ecl.config.SettingKey;
 
 public class ECLConfig {
     public static final String LAUNCHER_NAME = "ECL";
-    public static final String LAUNCHER_VERSION = "1.0.2beta";
+    public static final String LAUNCHER_VERSION = readLauncherVersion();
     public static final String VERSION_DOWNLOAD_COMPLETE_MARKER = ".ecl-download-complete";
     public static final String MC_VERSION_MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
     public static final int OFFICIAL_SOURCE_TIMEOUT_MS = 8000;
@@ -179,6 +181,19 @@ public class ECLConfig {
                     Integer.parseInt(configured.trim())));
         } catch (NumberFormatException ignored) {
             return defaultValue;
+        }
+    }
+
+    private static String readLauncherVersion() {
+        try (var input = ECLConfig.class.getResourceAsStream("/ecl-build.properties")) {
+            if (input == null) throw new IllegalStateException("Launcher build metadata is missing");
+            Properties build = new Properties();
+            build.load(input);
+            String version = build.getProperty("launcher.version", "").trim();
+            if (version.isBlank()) throw new IllegalStateException("Launcher version is missing");
+            return version;
+        } catch (IOException failure) {
+            throw new IllegalStateException("Cannot read launcher build metadata", failure);
         }
     }
 

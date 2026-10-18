@@ -74,6 +74,7 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
         send = button("server.local.send", "secondary-button", this::sendCommand);
         importJar = button("server.local.import", "secondary-button", this::importServer);
         buildView();
+        // Status polling must continue even when decorative animations are disabled.
         refreshTimer = new Timeline(new KeyFrame(Duration.seconds(2), event -> refreshState()));
         refreshTimer.setCycleCount(Timeline.INDEFINITE);
         refreshTimer.play();

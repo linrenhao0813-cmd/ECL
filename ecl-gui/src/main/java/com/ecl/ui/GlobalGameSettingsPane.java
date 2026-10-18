@@ -76,7 +76,7 @@ final class GlobalGameSettingsPane extends VBox {
         ui.applyFieldStyle(processorField);
         CheckBox closeAfterLaunchField = new CheckBox(Messages.get("settings.global.hide"));
         closeAfterLaunchField.setSelected(ui.closeAfterLaunch);
-
+        CheckBox reduceMotionField = reduceMotionCheckBox(ui);
 
         CheckBox backupOnLaunchField = new CheckBox(Messages.get("settings.global.backup"));
         backupOnLaunchField.setSelected(ui.backupOnLaunch);
@@ -100,7 +100,8 @@ final class GlobalGameSettingsPane extends VBox {
                 fullscreenField,
                 ui.createControlRow(Messages.get("settings.global.server"), serverField),
                 ui.createControlRow(Messages.get("settings.global.processors"), processorField),
-                closeAfterLaunchField);
+                closeAfterLaunchField,
+                reduceMotionField);
         getChildren().add(ui.createSurface(Messages.get("label.gameDir"),
                 Messages.get("settings.global.rootHint"), dirBox));
         if (inline) {
@@ -123,7 +124,8 @@ final class GlobalGameSettingsPane extends VBox {
         saveBtn.getStyleClass().addAll("app-button", "primary-button");
         values = () -> java.util.List.of(dirField.getText(), widthField.getText(), heightField.getText(),
                 fullscreenField.isSelected(), serverField.getText(), processorField.getText(),
-                closeAfterLaunchField.isSelected(), backupOnLaunchField.isSelected(),
+                closeAfterLaunchField.isSelected(), reduceMotionField.isSelected(),
+                backupOnLaunchField.isSelected(),
                 backupKeepCountField.getText(), backupIncludeModsField.isSelected());
         savedValues = values.get();
         saveAction = () -> {
@@ -165,12 +167,14 @@ final class GlobalGameSettingsPane extends VBox {
                 ui.settingsManager.set(ECLConfig.KEY_QUICK_SERVER, serverField.getText().trim());
                 ui.settingsManager.set(ECLConfig.KEY_PROCESSOR_COUNT, configuredProcessors);
                 ui.settingsManager.set(ECLConfig.KEY_CLOSE_AFTER_LAUNCH, closeAfterLaunchField.isSelected());
+                ui.settingsManager.set(LauncherUIView.KEY_REDUCE_MOTION, reduceMotionField.isSelected());
                 ui.settingsManager.set(ECLConfig.KEY_BACKUP_ON_LAUNCH, backupOnLaunchField.isSelected());
                 ui.settingsManager.set(ECLConfig.KEY_BACKUP_KEEP_COUNT, configuredBackupKeepCount);
                 ui.settingsManager.set(ECLConfig.KEY_BACKUP_INCLUDE_MODS, backupIncludeModsField.isSelected());
             }, ECLConfig.KEY_GAME_DIR, ECLConfig.KEY_GAME_WIDTH, ECLConfig.KEY_GAME_HEIGHT,
                     ECLConfig.KEY_GAME_FULLSCREEN, ECLConfig.KEY_QUICK_SERVER, ECLConfig.KEY_PROCESSOR_COUNT,
-                    ECLConfig.KEY_CLOSE_AFTER_LAUNCH, ECLConfig.KEY_BACKUP_ON_LAUNCH,
+                    ECLConfig.KEY_CLOSE_AFTER_LAUNCH, LauncherUIView.KEY_REDUCE_MOTION,
+                    ECLConfig.KEY_BACKUP_ON_LAUNCH,
                     ECLConfig.KEY_BACKUP_KEEP_COUNT, ECLConfig.KEY_BACKUP_INCLUDE_MODS);
             if (!saved) {
                 status.setText(Messages.get("status.settingsSaveFailed.detail"));
@@ -183,6 +187,7 @@ final class GlobalGameSettingsPane extends VBox {
             ui.quickServer = serverField.getText().trim();
             ui.processorCount = configuredProcessors;
             ui.closeAfterLaunch = closeAfterLaunchField.isSelected();
+            ui.reduceMotion = reduceMotionField.isSelected();
             ui.backupOnLaunch = backupOnLaunchField.isSelected();
             ui.backupKeepCount = configuredBackupKeepCount;
             ui.backupIncludeMods = backupIncludeModsField.isSelected();
@@ -200,6 +205,15 @@ final class GlobalGameSettingsPane extends VBox {
             getChildren().addAll(status, new HBox(10, saveBtn, discard));
         }
 
+    }
+
+    /** The reduce-animation preference shared by every animated or polled surface. */
+    private static CheckBox reduceMotionCheckBox(LauncherUI ui) {
+        CheckBox field = new CheckBox(Messages.get("settings.global.reduceMotion"));
+        field.setId("settings-reduce-motion");
+        field.setAccessibleText(Messages.get("settings.global.reduceMotion"));
+        field.setSelected(ui.reduceMotion);
+        return field;
     }
 
     boolean hasUnsavedChanges() {

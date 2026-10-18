@@ -1,5 +1,7 @@
 package com.ecl.modrinth.ui;
 
+import com.ecl.util.Messages;
+
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.DependencyType;
 import com.ecl.modrinth.model.ModProject;
@@ -39,7 +41,7 @@ final class ModDetailsPane {
     private final Supplier<ReleaseChannel> releaseChannel;
     private final Consumer<ModProject> projectSelected;
     private final Consumer<ModVersion> prepareInstall;
-    private final Label detailTitle = new Label("选择一个模组查看详情");
+    private final Label detailTitle = new Label(Messages.get("modDetails.empty"));
     private final Label detailMeta = new Label();
     private final TextArea detailBody = new TextArea();
     private final TextArea changelogBody = new TextArea();
@@ -48,10 +50,10 @@ final class ModDetailsPane {
     private final TitledPane changelogPane = new TitledPane();
     private final Label recommendationLabel = new Label();
     private final ComboBox<ModVersion> versionChoice = new ComboBox<>();
-    private final Button installButton = new Button("安装");
-    private final Button projectPageButton = new Button("项目主页");
-    private final Button sourceButton = new Button("源代码");
-    private final Button issuesButton = new Button("问题反馈");
+    private final Button installButton = new Button(Messages.get("modDetails.install"));
+    private final Button projectPageButton = new Button(Messages.get("modDetails.project"));
+    private final Button sourceButton = new Button(Messages.get("modDetails.source"));
+    private final Button issuesButton = new Button(Messages.get("modDetails.issues"));
     private final AtomicLong detailGeneration = new AtomicLong();
     private ModProject detailedProject;
     private String recommendedVersionId = "";
@@ -81,7 +83,7 @@ final class ModDetailsPane {
         detailBody.getStyleClass().add("mod-detail-body");
         detailBody.setMinHeight(110);
 
-        dependencyPane.setText("依赖");
+        dependencyPane.setText(Messages.get("modDetails.dependencies"));
         dependencyPane.setContent(dependencyContent);
         dependencyPane.setExpanded(true);
         dependencyPane.getStyleClass().add("mod-detail-section");
@@ -89,7 +91,7 @@ final class ModDetailsPane {
         changelogBody.setWrapText(false);
         changelogBody.setPrefRowCount(8);
         changelogBody.getStyleClass().addAll("mod-detail-body", "mod-changelog");
-        changelogPane.setText("更新日志");
+        changelogPane.setText(Messages.get("modDetails.changelog"));
         changelogPane.setContent(changelogBody);
         changelogPane.setExpanded(false);
         changelogPane.getStyleClass().add("mod-detail-section");
@@ -97,7 +99,7 @@ final class ModDetailsPane {
         recommendationLabel.setVisible(false);
         recommendationLabel.setManaged(false);
 
-        versionChoice.setPromptText("选择兼容版本");
+        versionChoice.setPromptText(Messages.get("modDetails.chooseVersion"));
         versionChoice.setMaxWidth(Double.MAX_VALUE);
         versionChoice.setCellFactory(list -> new ModVersionCell(() -> recommendedVersionId));
         versionChoice.setButtonCell(new ModVersionCell(() -> recommendedVersionId));
@@ -118,7 +120,7 @@ final class ModDetailsPane {
         detailsScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         detailsScroll.getStyleClass().add("mod-detail-scroll");
         VBox.setVgrow(detailsScroll, Priority.ALWAYS);
-        HBox versionHeading = new HBox(8, new Label("兼容版本"), recommendationLabel);
+        HBox versionHeading = new HBox(8, new Label(Messages.get("modDetails.versions")), recommendationLabel);
         versionHeading.setAlignment(Pos.CENTER_LEFT);
         VBox detail = new VBox(10, detailsScroll, versionHeading, versionChoice, actions);
         detail.setPadding(new Insets(4, 0, 0, 12));
@@ -134,7 +136,7 @@ final class ModDetailsPane {
         sourceButton.setDisable(true);
         issuesButton.setDisable(true);
         if (project == null) {
-            detailTitle.setText("选择一个模组查看详情");
+            detailTitle.setText(Messages.get("modDetails.empty"));
             detailMeta.setText("");
             detailBody.clear();
             dependencyContent.getChildren().clear();
@@ -142,7 +144,7 @@ final class ModDetailsPane {
             return;
         }
         detailTitle.setText(project.title());
-        detailMeta.setText(project.author() + " · 下载 " + project.downloads());
+        detailMeta.setText(Messages.format("modDetails.meta", project.author(), project.downloads()));
         showTranslatedDescription(project, null);
 
         CompletableFuture<ModProject> details = viewModel.loadProjectDetails(project);
@@ -198,13 +200,13 @@ final class ModDetailsPane {
         }
         long generation = showTranslatedDescription(project, version);
         boolean recommended = version != null && version.id().equals(recommendedVersionId);
-        recommendationLabel.setText(recommended ? "推荐" : "");
+        recommendationLabel.setText(recommended ? Messages.get("modDetails.recommended") : "");
         recommendationLabel.setVisible(recommended);
         recommendationLabel.setManaged(recommended);
         changelogBody.setText(MinimalMarkdown.format(version == null ? "" : version.changelog()));
         changelogBody.positionCaret(0);
         dependencyContent.getChildren().setAll(new Label(version == null
-                ? "请选择兼容版本查看依赖。" : "正在加载依赖…"));
+                ? Messages.get("modDetails.chooseDependencies") : Messages.get("modDetails.loadingDependencies")));
         if (version == null) {
             return;
         }
@@ -215,8 +217,8 @@ final class ModDetailsPane {
                     }
                     if (error != null) {
                         dependencyContent.getChildren().setAll(
-                                dependencyMessage("依赖加载失败："
-                                        + ModFailureMessages.errorMessage(error), true));
+                                dependencyMessage(Messages.format("modDetails.dependencyError",
+                                        ModFailureMessages.errorMessage(error)), true));
                     } else {
                         renderDependencyGroups(groups);
                     }
@@ -225,7 +227,7 @@ final class ModDetailsPane {
 
     private long showTranslatedDescription(ModProject project, ModVersion version) {
         long generation = detailGeneration.incrementAndGet();
-        detailBody.setText("正在翻译中文简介…");
+        detailBody.setText(Messages.get("modDetails.loadingDescription"));
         ChineseDescriptionService.translate(project.description()).thenAccept(translated ->
                 Platform.runLater(() -> {
                     if (generation != detailGeneration.get() || detailedProject != project) {
@@ -234,7 +236,7 @@ final class ModDetailsPane {
                     String summary = translated == null || translated.isBlank()
                             ? project.description() : translated;
                     if (version != null) {
-                        summary += "\n\n版本 " + version.versionNumber() + " · " + version.versionType();
+                        summary += "\n\n" + Messages.format("modDetails.version", version.versionNumber(), version.versionType());
                     }
                     detailBody.setText(summary);
                     detailBody.positionCaret(0);
@@ -245,7 +247,7 @@ final class ModDetailsPane {
     private void renderDependencyGroups(List<ModBrowserViewModel.DependencyGroup> groups) {
         dependencyContent.getChildren().clear();
         if (groups.isEmpty()) {
-            dependencyContent.getChildren().add(dependencyMessage("此版本没有外部依赖。", false));
+            dependencyContent.getChildren().add(dependencyMessage(Messages.get("modDetails.noDependencies"), false));
             return;
         }
         for (ModBrowserViewModel.DependencyGroup group : groups) {

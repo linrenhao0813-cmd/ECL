@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+    <define name="ECL_LOG_DIR" class="com.ecl.util.LogDirectoryProperty"/>
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder><pattern>%date{HH:mm:ss.SSS} %-5level [%thread%X{task}] %logger{36} - %msg%n</pattern></encoder>
     </appender>
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${user.home}/.ecl/logs/ecl.log</file>
+        <file>${ECL_LOG_DIR}/ecl.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <fileNamePattern>${user.home}/.ecl/logs/ecl.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <fileNamePattern>${ECL_LOG_DIR}/ecl.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
             <maxFileSize>5MB</maxFileSize>
             <maxHistory>7</maxHistory>
         </rollingPolicy>

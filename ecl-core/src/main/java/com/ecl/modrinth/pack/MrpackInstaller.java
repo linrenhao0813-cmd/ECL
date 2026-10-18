@@ -4,14 +4,24 @@ import com.ecl.ECLConfig;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
+import com.ecl.util.FileUtil;
 import com.google.gson.JsonObject;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.List;
+import java.util.HexFormat;
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.zip.ZipFile;
 
@@ -26,6 +36,42 @@ public final class MrpackInstaller {
     public record InstallResult(String profileId, String name, String version,
                                 String minecraftVersion, String loader, Path instanceDirectory,
                                 int downloadedFiles) {
+    }
+
+    public enum FileChangeKind {
+        ADDED, REPLACED, OVERWRITTEN_USER_FILE, DELETED, PRESERVED_USER_FILE
+    }
+
+    public record FileChange(String path, FileChangeKind kind) { }
+
+    /** Downloaded and parsed pack contents kept outside the instance until final confirmation. */
+    public record UpdatePreview(Path workingDirectory, String profileId,
+                                String sourceProjectId, String sourceVersionId,
+                                String minecraftVersion, String packVersion,
+                                String loader, String loaderVersion, String parentProfile,
+                                Path archive, Path stagedFiles, Path stagedVersions,
+                                Path stagedLibraries, String initialProfileSha256,
+                                Map<String, String> initialTargetSha512,
+                                List<FileChange> changes, int downloadedFiles) implements AutoCloseable {
+        public UpdatePreview {
+            initialTargetSha512 = Map.copyOf(initialTargetSha512);
+            changes = List.copyOf(changes);
+        }
+
+        @Override
+        public void close() throws IOException {
+            Path normalized = workingDirectory.toAbsolutePath().normalize();
+            Path base = ECLConfig.getBaseDir().toPath().toAbsolutePath().normalize();
+            if (!Objects.equals(normalized.getParent(), base)
+                    || !normalized.getFileName().toString().startsWith(PREVIEW_DIRECTORY_PREFIX)
+                    || normalized.startsWith(ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize())) {
+                throw new IOException("Prepared modpack cleanup path is outside the temporary data root");
+            }
+            FileUtil.validateExistingAncestors(base, normalized);
+            if (Files.exists(normalized) && !MrpackPathPolicy.deleteRecursively(normalized)) {
+                throw new IOException("Unable to clean prepared modpack update files");
+            }
+        }
     }
 
     @FunctionalInterface
@@ -59,6 +105,55 @@ public final class MrpackInstaller {
     private final StagedLoaderInstallation stagedLoaderInstallation;
     private final TransactionFactory transactionFactory;
     private final java.util.Set<String> trustedDownloadHosts;
+
+    /** Prefix of the temporary preview/update directories created next to the data root. */
+    public static final String PREVIEW_DIRECTORY_PREFIX = "ecl-modpack-preview-";
+    /** Default age after which an abandoned preview directory is considered stale. */
+    public static final java.time.Duration STALE_PREVIEW_AGE = java.time.Duration.ofHours(24);
+
+    /**
+     * Removes preview directories left behind by a crashed or force-killed process.
+     *
+     * <p>Only direct children of the ECL data root whose names start with
+     * {@link #PREVIEW_DIRECTORY_PREFIX} are considered, so managed instance and version trees are
+     * never touched. Directories modified more recently than {@code maxAge} are skipped because a
+     * running update may still own them.</p>
+     *
+     * @return the number of removed directories; {@code 0} when none were stale
+     */
+    public static int cleanStalePreviews(java.time.Duration maxAge) {
+        java.time.Duration age = maxAge == null || maxAge.isNegative() ? STALE_PREVIEW_AGE : maxAge;
+        Path base = ECLConfig.getBaseDir().toPath().toAbsolutePath().normalize();
+        Path versions = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
+        if (!Files.isDirectory(base, LinkOption.NOFOLLOW_LINKS)) {
+            return 0;
+        }
+        long cutoff = System.currentTimeMillis() - age.toMillis();
+        int removed = 0;
+        try (var children = Files.list(base)) {
+            for (Path child : children.toList()) {
+                if (!Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)
+                        || !child.getFileName().toString().startsWith(PREVIEW_DIRECTORY_PREFIX)
+                        || child.startsWith(versions)) {
+                    continue;
+                }
+                try {
+                    FileUtil.validateExistingAncestors(base, child);
+                    if (Files.getLastModifiedTime(child, LinkOption.NOFOLLOW_LINKS).toMillis() > cutoff) {
+                        continue;
+                    }
+                    if (MrpackPathPolicy.deleteRecursively(child)) {
+                        removed++;
+                    }
+                } catch (IOException | RuntimeException unsafeOrBusy) {
+                    // A live preview or an unreadable entry is not our cleanup's problem.
+                }
+            }
+        } catch (IOException | RuntimeException unavailable) {
+            return removed;
+        }
+        return removed;
+    }
 
     public MrpackInstaller() {
         this(new ModLoaderInstaller()::install,
@@ -141,6 +236,239 @@ public final class MrpackInstaller {
             installed += MrpackOverrideExtractor.extract(zip, "overrides/", root, budget);
             installed += MrpackOverrideExtractor.extract(zip, "client-overrides/", root, budget);
             return installed;
+        }
+    }
+
+    /** Resolves and verifies all pack file changes in temporary storage without touching the instance. */
+    public UpdatePreview prepareUpdate(File archive, File gameRoot, String profileId,
+                                       String sourceProjectId, String sourceVersionId,
+                                       Path workingDirectory, Listener listener) throws IOException {
+        if (archive == null || !archive.isFile() || gameRoot == null) {
+            throw new IOException("MRPACK update inputs are missing");
+        }
+        String safeProfileId = profileId == null ? "" : profileId.trim();
+        FileUtil.requireSafeVersionId(safeProfileId);
+        Path instanceRoot = MrpackPathPolicy.safeInstanceDirectory(gameRoot.toPath(), safeProfileId);
+        Path profileFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), safeProfileId).toPath();
+        if (!Files.isDirectory(instanceRoot) || !Files.isRegularFile(profileFile)) {
+            throw new IOException("Modpack instance metadata is missing");
+        }
+        if (PackUpdateTransaction.hasIncompleteTransactions(instanceRoot)) {
+            throw new IOException("An interrupted modpack transaction must be recovered before preview");
+        }
+        FileUtil.validateExistingAncestors(instanceRoot.getParent(), instanceRoot);
+        FileUtil.validateExistingAncestors(ECLConfig.getVersionsDir().toPath(), profileFile);
+        Listener safeListener = listener == null ? message -> { } : listener;
+        JsonObject index = readIndex(archive);
+        JsonObject dependencies = MrpackDependencyResolver.requireDependencies(
+                index, "MRPACK index is missing dependencies");
+        String minecraftVersion = MrpackDependencyResolver.requireMinecraftVersion(
+                dependencies, "MRPACK does not declare a Minecraft version");
+        LoaderDependency requestedLoader = MrpackDependencyResolver.findLoader(dependencies);
+        String packVersion = JsonUtil.getString(index, "versionId", sourceVersionId);
+        JsonObject currentProfile = HttpUtil.readJson(profileFile.toFile());
+        String currentMinecraft = JsonUtil.getString(currentProfile, "eclMinecraftVersion",
+                JsonUtil.getString(currentProfile, "inheritsFrom", ""));
+        if (!currentMinecraft.equals(minecraftVersion)) {
+            throw new IOException("Modpack update cannot change the Minecraft version");
+        }
+        String currentLoader = JsonUtil.getString(currentProfile, "eclModLoader", "");
+        String requestedLoaderId = requestedLoader == null ? "" : requestedLoader.loader().id();
+        if (!currentLoader.equalsIgnoreCase(requestedLoaderId)) {
+            throw new IOException("Modpack update cannot change the loader type");
+        }
+        Path oldManifestPath = PackManifest.resolve(instanceRoot, PackManifest.FILE_NAME);
+        if (!Files.isRegularFile(oldManifestPath, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("The installed pack manifest is missing; update preview cannot guarantee rollback");
+        }
+        PackManifest oldManifest = PackManifest.read(oldManifestPath);
+        for (String path : oldManifest.files().keySet()) validateUpdateScope(path);
+        Path work = workingDirectory.toAbsolutePath().normalize();
+        Path dataRoot = ECLConfig.getBaseDir().toPath().toAbsolutePath().normalize();
+        if (!Objects.equals(work.getParent(), dataRoot)
+                || !work.getFileName().toString().startsWith(PREVIEW_DIRECTORY_PREFIX)
+                || work.startsWith(instanceRoot)
+                || work.startsWith(ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize())) {
+            throw new IOException("Modpack preview files must be outside managed instance and version roots");
+        }
+        FileUtil.validateExistingAncestors(dataRoot, work);
+        Files.createDirectories(work);
+        Path stagedFiles = Files.createDirectory(work.resolve("files"));
+        int fileCount = installContents(archive, stagedFiles, safeListener);
+        Path stagedArchive = stagedFiles.resolve(safeProfileId + ".mrpack");
+        Files.copy(archive.toPath(), stagedArchive, StandardCopyOption.REPLACE_EXISTING);
+        PackManifest newManifest = PackManifest.capture(stagedFiles, packVersion);
+        for (String path : newManifest.files().keySet()) validateUpdateScope(path);
+        newManifest.write(stagedFiles.resolve(PackManifest.FILE_NAME));
+
+        Path stagedVersions = Files.createDirectory(work.resolve("versions"));
+        Path stagedLibraries = Files.createDirectory(work.resolve("libraries"));
+        MrpackInstallSupport.LoaderState loader = prepareLoaderPreview(currentProfile, minecraftVersion, requestedLoader,
+                safeListener, stagedVersions, stagedLibraries);
+        List<FileChange> changes = describePackChanges(instanceRoot, oldManifest, newManifest);
+        Map<String, String> initialHashes = capturePackTargetHashes(instanceRoot, oldManifest, newManifest);
+        return new UpdatePreview(work, safeProfileId,
+                sourceProjectId == null ? "" : sourceProjectId,
+                sourceVersionId == null ? "" : sourceVersionId,
+                minecraftVersion, packVersion, loader.loaderId(), loader.loaderVersion(),
+                loader.parentProfile(), stagedArchive, stagedFiles, stagedVersions, stagedLibraries,
+                sha256(profileFile), initialHashes, changes, fileCount);
+    }
+
+    private JsonObject readIndex(File archive) throws IOException {
+        try (ZipFile zip = new ZipFile(archive, StandardCharsets.UTF_8)) {
+            JsonObject index = MrpackIndexReader.read(zip,
+                    "MRPACK index is missing or exceeds the safety limit",
+                    "MRPACK index is missing or exceeds the safety limit",
+                    "MRPACK index is invalid");
+            if (!"1".equals(JsonUtil.getString(index, "formatVersion", ""))) {
+                throw new IOException("Unsupported MRPACK format version");
+            }
+            return index;
+        }
+    }
+
+    private static void validateUpdateScope(String relative) throws IOException {
+        FileUtil.safeArchiveEntry(Path.of(".").toAbsolutePath().normalize(), relative);
+        String first = Path.of(relative).getName(0).toString().toLowerCase(java.util.Locale.ROOT);
+        if (java.util.Set.of("saves", "screenshots", "logs", "crash-reports", ".ecl",
+                "versions", "libraries", "assets", "servers.dat", "usercache.json")
+                .contains(first)) {
+            throw new IOException("Modpack update references user or shared data outside its rollback scope: "
+                    + relative);
+        }
+    }
+
+    private MrpackInstallSupport.LoaderState prepareLoaderPreview(
+            JsonObject profile, String minecraftVersion, LoaderDependency requested,
+            Listener listener, Path stagedVersions, Path stagedLibraries) throws IOException {
+        if (requested == null) return new MrpackInstallSupport.LoaderState(minecraftVersion, "", "");
+        String currentMinecraft = JsonUtil.getString(profile, "eclMinecraftVersion", "");
+        String currentLoader = JsonUtil.getString(profile, "eclModLoader", "");
+        String currentLoaderVersion = JsonUtil.getString(profile, "eclModLoaderVersion", "");
+        String currentParent = JsonUtil.getString(profile, "inheritsFrom", "");
+        boolean changed = !minecraftVersion.equals(currentMinecraft)
+                || !requested.loader().id().equalsIgnoreCase(currentLoader)
+                || !requested.version().equals(currentLoaderVersion)
+                || currentParent.isBlank();
+        if (!changed) {
+            return new MrpackInstallSupport.LoaderState(
+                    currentParent, requested.loader().id(), requested.version());
+        }
+        listener.onStatus("正在解析整合包需要的 " + requested.loader().displayName()
+                + " " + requested.version() + "...");
+        ModLoaderInstaller.InstallResult prepared = stagedLoaderInstallation.install(
+                stagedVersions, stagedLibraries, minecraftVersion, requested.loader(),
+                requested.version(), listener);
+        return new MrpackInstallSupport.LoaderState(
+                prepared.profileId(), prepared.loader().id(), prepared.loaderVersion());
+    }
+
+    private static List<FileChange> describePackChanges(Path instanceRoot,
+                                                        PackManifest oldManifest,
+                                                        PackManifest newManifest) throws IOException {
+        List<FileChange> changes = new ArrayList<>();
+        for (Map.Entry<String, String> file : newManifest.files().entrySet()) {
+            String oldHash = oldManifest.files().get(file.getKey());
+            Path target = PackManifest.resolve(instanceRoot, file.getKey());
+            boolean exists = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
+            if (exists && !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("Pack update target is not a regular file: " + file.getKey());
+            }
+            boolean userModified = exists && oldHash != null
+                    && !PackManifest.sha512(target).equalsIgnoreCase(oldHash);
+            if (oldHash == null) {
+                changes.add(new FileChange(file.getKey(), exists
+                        ? FileChangeKind.OVERWRITTEN_USER_FILE : FileChangeKind.ADDED));
+            } else if (userModified) {
+                changes.add(new FileChange(file.getKey(), FileChangeKind.OVERWRITTEN_USER_FILE));
+            } else if (!oldHash.equalsIgnoreCase(file.getValue())) {
+                changes.add(new FileChange(file.getKey(), FileChangeKind.REPLACED));
+            }
+        }
+        for (Map.Entry<String, String> old : oldManifest.files().entrySet()) {
+            if (newManifest.files().containsKey(old.getKey())) continue;
+            Path target = PackManifest.resolve(instanceRoot, old.getKey());
+            if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) continue;
+            if (Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)
+                    && PackManifest.sha512(target).equalsIgnoreCase(old.getValue())) {
+                changes.add(new FileChange(old.getKey(), FileChangeKind.DELETED));
+            } else {
+                changes.add(new FileChange(old.getKey(), FileChangeKind.PRESERVED_USER_FILE));
+            }
+        }
+        return List.copyOf(changes);
+    }
+
+    private static Map<String, String> capturePackTargetHashes(Path instanceRoot,
+                                                               PackManifest oldManifest,
+                                                               PackManifest newManifest) throws IOException {
+        Map<String, String> hashes = new LinkedHashMap<>();
+        java.util.Set<String> paths = new java.util.TreeSet<>();
+        paths.addAll(oldManifest.files().keySet());
+        paths.addAll(newManifest.files().keySet());
+        paths.add(PackManifest.FILE_NAME);
+        for (String relative : paths) {
+            Path target = PackManifest.resolve(instanceRoot, relative);
+            if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                hashes.put(relative, "");
+            } else if (Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+                hashes.put(relative, PackManifest.sha512(target));
+            } else {
+                throw new IOException("Pack update target is not a regular file: " + relative);
+            }
+        }
+        return Map.copyOf(hashes);
+    }
+
+    private static String sha256(Path file) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (var input = Files.newInputStream(file)) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    if (read > 0) digest.update(buffer, 0, read);
+                }
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IOException("SHA-256 is unavailable", impossible);
+        }
+    }
+
+    private static void copyFiles(Path sourceRoot, Path targetRoot) throws IOException {
+        if (!Files.isDirectory(sourceRoot, LinkOption.NOFOLLOW_LINKS)) return;
+        try (var paths = Files.walk(sourceRoot)) {
+            for (Path source : paths.toList()) {
+                if (Files.isSymbolicLink(source)) {
+                    throw new IOException("Prepared pack contains a symbolic link");
+                }
+                if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) continue;
+                Path relative = sourceRoot.relativize(source).normalize();
+                Path target = targetRoot.resolve(relative).normalize();
+                if (!target.startsWith(targetRoot)) throw new IOException("Prepared pack path escapes staging");
+                Files.createDirectories(target.getParent());
+                Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+    }
+
+    private void requirePreparedFresh(UpdatePreview prepared, Path instanceRoot,
+                                      Path profileFile) throws IOException {
+        if (!sha256(profileFile).equals(prepared.initialProfileSha256())) {
+            throw new IOException("Modpack profile changed after preview; inspect the update again");
+        }
+        for (Map.Entry<String, String> expected : prepared.initialTargetSha512().entrySet()) {
+            Path target = PackManifest.resolve(instanceRoot, expected.getKey());
+            if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                if (!expected.getValue().isBlank()) {
+                    throw new IOException("Pack file changed after preview: " + expected.getKey());
+                }
+            } else if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)
+                    || !PackManifest.sha512(target).equalsIgnoreCase(expected.getValue())) {
+                throw new IOException("Pack file changed after preview: " + expected.getKey());
+            }
         }
     }
 
@@ -332,6 +660,82 @@ public final class MrpackInstaller {
                     JsonUtil.getString(profile, "eclModpackName", safeProfileId),
                     packVersion, minecraftVersion, loaderState.loaderId(),
                     instanceRoot, fileCount);
+        }
+    }
+
+    /** Applies the archive and file plan that the user reviewed before any instance files changed. */
+    public InstallResult applyPreparedUpdate(UpdatePreview prepared, File gameRoot,
+                                             BooleanSupplier instanceRunning,
+                                             Listener listener) throws IOException {
+        java.util.Objects.requireNonNull(prepared, "prepared");
+        String profileId = prepared.profileId();
+        FileUtil.requireSafeVersionId(profileId);
+        if (!prepared.archive().startsWith(prepared.workingDirectory())
+                || !Files.isRegularFile(prepared.archive())
+                || !prepared.stagedFiles().startsWith(prepared.workingDirectory())
+                || !prepared.stagedVersions().startsWith(prepared.workingDirectory())
+                || !prepared.stagedLibraries().startsWith(prepared.workingDirectory())) {
+            throw new IOException("Prepared modpack update files are missing or unsafe");
+        }
+        Path dataRoot = ECLConfig.getBaseDir().toPath().toAbsolutePath().normalize();
+        FileUtil.validateExistingAncestors(dataRoot, prepared.workingDirectory());
+        FileUtil.validateExistingAncestors(prepared.workingDirectory(), prepared.archive());
+        FileUtil.validateExistingAncestors(prepared.workingDirectory(), prepared.stagedFiles());
+        FileUtil.validateExistingAncestors(prepared.workingDirectory(), prepared.stagedVersions());
+        FileUtil.validateExistingAncestors(prepared.workingDirectory(), prepared.stagedLibraries());
+        Path gameRootPath = java.util.Objects.requireNonNull(gameRoot, "gameRoot")
+                .toPath().toAbsolutePath().normalize();
+        Path instanceRoot = MrpackPathPolicy.safeInstanceDirectory(gameRootPath, profileId);
+        Path profileFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), profileId)
+                .toPath().toAbsolutePath().normalize();
+        if (PackUpdateTransaction.hasIncompleteTransactions(instanceRoot)) {
+            throw new IOException("An interrupted modpack transaction must be recovered before update");
+        }
+        FileUtil.validateExistingAncestors(instanceRoot.getParent(), instanceRoot);
+        FileUtil.validateExistingAncestors(ECLConfig.getVersionsDir().toPath(), profileFile);
+        requirePreparedFresh(prepared, instanceRoot, profileFile);
+        Listener safeListener = listener == null ? message -> { } : listener;
+        BooleanSupplier runningGuard = instanceRunning == null ? () -> false : instanceRunning;
+        JsonObject profile = HttpUtil.readJson(profileFile.toFile());
+        PackManifest oldManifest = PackManifest.read(PackManifest.resolve(instanceRoot, PackManifest.FILE_NAME));
+
+        try (PackUpdateTransaction transaction = transactionFactory.create(instanceRoot, profileFile)) {
+            Path staging = transaction.stagingDirectory();
+            copyFiles(prepared.stagedFiles(), staging);
+            Path loaderStaging = staging.resolve(".ecl-loader");
+            Path stagedVersions = loaderStaging.resolve("versions");
+            Path stagedLibraries = loaderStaging.resolve("libraries");
+            copyFiles(prepared.stagedVersions(), stagedVersions);
+            copyFiles(prepared.stagedLibraries(), stagedLibraries);
+            transaction.stageExternalDirectory(stagedVersions, ECLConfig.getVersionsDir().toPath());
+            transaction.stageExternalDirectory(stagedLibraries, ECLConfig.getLibrariesDir().toPath());
+
+            Path stagedManifest = staging.resolve(PackManifest.FILE_NAME);
+            PackManifest newManifest = PackManifest.read(stagedManifest);
+            if (!prepared.packVersion().equals(newManifest.packVersion())) {
+                throw new IOException("Prepared modpack manifest does not match its preview");
+            }
+            MrpackProfileWriter.update(profile, profileId, prepared.parentProfile(),
+                    prepared.minecraftVersion(), prepared.packVersion(), prepared.loader(),
+                    prepared.loaderVersion(), prepared.sourceProjectId(), prepared.sourceVersionId());
+            Path stagedProfile = staging.resolve(".ecl-profile-update.json");
+            Files.writeString(stagedProfile, profile.toString(), StandardCharsets.UTF_8);
+            int warnings = MrpackInstallSupport.stagePackChanges(transaction, instanceRoot, staging,
+                    oldManifest, newManifest, safeListener);
+            transaction.stageReplacement(stagedManifest, instanceRoot.resolve(PackManifest.FILE_NAME));
+            transaction.stageReplacement(stagedProfile, profileFile);
+            if (runningGuard.getAsBoolean()) {
+                throw new IOException("Instance is running; update was cancelled before commit");
+            }
+            requirePreparedFresh(prepared, instanceRoot, profileFile);
+            transaction.commit();
+            safeListener.onStatus(warnings == 0
+                    ? "整合包更新完成: " + profileId
+                    : "整合包更新完成，已保留 " + warnings + " 个用户修改过的旧文件");
+            return new InstallResult(profileId,
+                    JsonUtil.getString(profile, "eclModpackName", profileId),
+                    prepared.packVersion(), prepared.minecraftVersion(), prepared.loader(),
+                    instanceRoot, prepared.downloadedFiles());
         }
     }
 

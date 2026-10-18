@@ -14,6 +14,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.FileSystemException;
 import java.nio.file.Path;
+import java.nio.file.LinkOption;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -313,6 +314,21 @@ public final class PackUpdateTransaction implements AutoCloseable {
             if (remaining.findAny().isEmpty()) {
                 Files.deleteIfExists(root);
             }
+        }
+    }
+
+    /** Read-only check used by update preview to avoid recovering journals as a side effect. */
+    public static boolean hasIncompleteTransactions(Path instanceRoot) throws IOException {
+        Path normalized = Objects.requireNonNull(instanceRoot, "instanceRoot")
+                .toAbsolutePath().normalize();
+        Path root = normalized.getParent() == null ? null
+                : normalized.getParent().resolve(TRANSACTIONS_DIRECTORY).normalize();
+        if (root == null || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) return false;
+        MrpackPathPolicy.validateExistingAncestors(normalized.getParent(), root);
+        String prefix = normalized.getFileName() + "-";
+        try (var entries = Files.list(root)) {
+            return entries.anyMatch(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+                    && path.getFileName().toString().startsWith(prefix));
         }
     }
 

@@ -60,7 +60,8 @@ public final class NativeLibraryExtractor {
                                File instanceDirectory) throws IOException {
         Path nativesDir = instanceDirectory == null
                 ? environment.nativesDirectory(versionId).toPath()
-                : instanceDirectory.toPath().resolve("natives-windows");
+                : instanceDirectory.toPath().resolve(
+                        "natives-" + com.ecl.util.OperatingSystem.minecraftName());
         Path nativesParent = nativesDir.getParent();
         if (nativesParent != null) {
             FileUtil.validateExistingAncestors(nativesParent, nativesDir);

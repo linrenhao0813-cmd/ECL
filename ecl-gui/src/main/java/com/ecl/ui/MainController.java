@@ -4,6 +4,7 @@ import com.ecl.ECLConfig;
 import com.ecl.config.SettingsManager;
 import com.ecl.download.DownloadService;
 import com.ecl.download.GameDownloader;
+import com.ecl.download.GameInstallationRepairService;
 import com.ecl.download.ContentDownloader;
 import com.ecl.download.DownloadTaskCenter;
 import com.ecl.modrinth.download.ModrinthDownloader;
@@ -38,6 +39,7 @@ import com.ecl.modrinth.service.ModInstallationService;
 import com.ecl.modrinth.service.ModManagementService;
 import com.ecl.modrinth.service.ModUpdateService;
 import com.ecl.modrinth.service.InstanceUpdateService;
+import com.ecl.modrinth.service.InstanceUpgradeRecoveryService;
 import com.ecl.modrinth.service.ModVersionSelector;
 import com.ecl.modrinth.pack.DefaultModpackUpdateService;
 import com.ecl.modrinth.pack.ModpackUpdateService;
@@ -82,10 +84,12 @@ public final class MainController implements AutoCloseable {
     private final LocalModScanner localModScanner;
     private final ModUpdateService modUpdateService;
     private final InstanceUpdateService instanceUpdateService;
+    private final GameInstallationRepairService gameInstallationRepairService;
     private final ModpackUpdateService modpackUpdateService;
     private final InstallationPlanBuilder installationPlanBuilder;
     private final InstanceLaunchProfileStore instanceLaunchProfiles;
     private final InstanceOperationCoordinator instanceOperations;
+    private final InstanceUpgradeRecoveryService instanceUpgradeRecovery;
     private final InstanceDisplayMetadataStore instanceDisplayMetadata;
     private final LocalServerManager localServers = new LocalServerManager(ECLConfig.getBaseDir().toPath());
     private final Map<UUID, ModInstanceContext> modInstances = new ConcurrentHashMap<>();
@@ -110,6 +114,11 @@ public final class MainController implements AutoCloseable {
                 instanceLaunchProfiles, "instanceLaunchProfiles");
         this.instanceOperations = java.util.Objects.requireNonNull(
                 instanceOperations, "instanceOperations");
+        instanceUpgradeRecovery = new InstanceUpgradeRecoveryService(
+                ECLConfig.getBaseDir().toPath().resolve("upgrade-recovery"),
+                instanceOperations, this::isInstanceRunning);
+        gameInstallationRepairService = new GameInstallationRepairService(
+                instanceOperations, this::isInstanceRunning);
         this.settingsManager.load();
         migrateLegacySecrets();
         settingsManager.enableAutoSave(); // GUI 设置变更自动落盘（防抖 500ms）
@@ -177,7 +186,8 @@ public final class MainController implements AutoCloseable {
                                     @Override public void onError(String message) { }
                                     @Override public void onComplete() { }
                                 })),
-                localModScanner, modUpdateService, this::isInstanceRunning);
+                localModScanner, modUpdateService, this::isInstanceRunning, backgroundExecutor,
+                instanceUpgradeRecovery);
         modpackUpdateService = new DefaultModpackUpdateService(
                 metadataProvider, backgroundExecutor, instanceOperations,
                 this::isInstanceRunning);
@@ -201,6 +211,10 @@ public final class MainController implements AutoCloseable {
     public LocalModScanner localModScanner() { return localModScanner; }
     public ModUpdateService modUpdateService() { return modUpdateService; }
     public InstanceUpdateService instanceUpdateService() { return instanceUpdateService; }
+    public InstanceUpgradeRecoveryService instanceUpgradeRecovery() { return instanceUpgradeRecovery; }
+    public GameInstallationRepairService gameInstallationRepairService() {
+        return gameInstallationRepairService;
+    }
     public ModpackUpdateService modpackUpdateService() { return modpackUpdateService; }
     public InstanceLaunchProfileStore instanceLaunchProfiles() { return instanceLaunchProfiles; }
     public InstanceOperationCoordinator instanceOperations() { return instanceOperations; }

@@ -13,7 +13,6 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
@@ -74,9 +73,9 @@ public class SettingsManager {
                 // 兼容迁移：旧键 "versionCategory" → "versionCategory2"
                 migrateSettingKey("versionCategory", "versionCategory2");
             } catch (IOException | RuntimeException e) {
-                Path corrupt = settingsFile.toPath().resolveSibling(settingsFile.getName() + ".corrupt");
+                Path corrupt = uniqueCorruptBackup(settingsFile.toPath());
                 try {
-                    Files.move(settingsFile.toPath(), corrupt, StandardCopyOption.REPLACE_EXISTING);
+                    Files.move(settingsFile.toPath(), corrupt);
                     LOGGER.warn("Moved unreadable settings file to {}", corrupt, e);
                 } catch (IOException backupFailure) {
                     e.addSuppressed(backupFailure);
@@ -338,5 +337,26 @@ public class SettingsManager {
         if (!loadAttempted) {
             load();
         }
+    }
+
+    /**
+     * Chooses a backup name that does not overwrite an earlier damaged-settings copy. Keeping every
+     * copy lets the user recover settings from a backup that a later corrupt write did not replace.
+     */
+    static Path uniqueCorruptBackup(Path settingsFile) {
+        String base = settingsFile.getFileName().toString() + ".corrupt";
+        Path directory = settingsFile.toAbsolutePath().getParent();
+        Path candidate = directory.resolve(base);
+        if (!Files.exists(candidate)) {
+            return candidate;
+        }
+        String timestamp = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS"));
+        candidate = directory.resolve(base + "-" + timestamp);
+        int suffix = 1;
+        while (Files.exists(candidate)) {
+            candidate = directory.resolve(base + "-" + timestamp + "-" + suffix++);
+        }
+        return candidate;
     }
 }

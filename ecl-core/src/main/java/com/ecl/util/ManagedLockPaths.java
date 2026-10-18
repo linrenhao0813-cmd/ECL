@@ -19,7 +19,7 @@ public final class ManagedLockPaths {
             return normalized.resolve(".ecl").resolve("lifecycle.lock");
         }
         String identity = normalized.toString();
-        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+        if (OperatingSystem.isWindows()) {
             identity = identity.toLowerCase(Locale.ROOT);
         }
         return parent.resolve(".ecl-instance-locks")
@@ -31,6 +31,16 @@ public final class ManagedLockPaths {
         FileUtil.requireSafeVersionId(versionId);
         return versionsDirectory.toAbsolutePath().normalize()
                 .resolve(".ecl-version-locks").resolve(versionId + ".lock");
+    }
+
+    /** Stable sidecar location for publishing one verified shared artifact at a time. */
+    public static Path filePublication(Path lockRoot, Path target) {
+        Path normalized = target.toAbsolutePath().normalize();
+        String identity = normalized.toString();
+        if (OperatingSystem.isWindows()) {
+            identity = identity.toLowerCase(Locale.ROOT);
+        }
+        return lockRoot.toAbsolutePath().normalize().resolve(sha256(identity) + ".lock");
     }
 
     private static String sha256(String value) {

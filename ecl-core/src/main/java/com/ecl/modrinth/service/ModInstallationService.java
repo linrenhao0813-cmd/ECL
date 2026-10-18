@@ -166,6 +166,9 @@ public final class ModInstallationService {
             InstalledMod previous = existingByProject.get(planned.version().projectId());
             Path oldPath = previous == null ? null
                     : plan.instance().gameDirectory().resolve(previous.relativePath()).toAbsolutePath().normalize();
+            if (oldPath == null || !Files.exists(oldPath)) {
+                oldPath = planned.replacedPath();
+            }
             if (Files.exists(target) && (oldPath == null || !oldPath.equals(target))) {
                 throw new ModInstallationException("目标文件已存在且不属于当前模组项目: " + target);
             }

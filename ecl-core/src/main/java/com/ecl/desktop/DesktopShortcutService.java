@@ -2,16 +2,21 @@ package com.ecl.desktop;
 
 import com.ecl.util.TextUtil;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 /** Creates Windows launcher shortcuts without adding a native library dependency. */
 public final class DesktopShortcutService {
     private static final int MAX_POWERSHELL_OUTPUT_BYTES = 64 * 1024;
+    private static final int POWERSHELL_TIMEOUT_SECONDS = 30;
+
     public Path createDesktopShortcut(Path executable, String shortcutName, List<String> arguments)
             throws IOException {
         return createShortcut(desktopDirectory(), executable, shortcutName, arguments);
@@ -41,14 +46,8 @@ public final class DesktopShortcutService {
                     + "';$s.Arguments='" + psLiteral(argumentLine) + "';$s.Save()";
             Process process = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive",
                     "-Command", script).redirectErrorStream(true).start();
-            byte[] outputBytes = process.getInputStream()
-                    .readNBytes(MAX_POWERSHELL_OUTPUT_BYTES + 1);
-            String output = new String(outputBytes, 0,
-                    Math.min(outputBytes.length, MAX_POWERSHELL_OUTPUT_BYTES), StandardCharsets.UTF_8);
-            if (outputBytes.length > MAX_POWERSHELL_OUTPUT_BYTES) {
-                output += "…(output truncated)";
-            }
-            if (process.waitFor() != 0 || !Files.isRegularFile(shortcut)) {
+            String output = runPowerShell(process);
+            if (process.exitValue() != 0 || !Files.isRegularFile(shortcut)) {
                 throw new IOException("PowerShell 创建快捷方式失败: " + output.trim());
             }
             return shortcut;
@@ -58,6 +57,53 @@ public final class DesktopShortcutService {
         } catch (IOException error) {
             return createBatchFallback(directory, name, target, argumentLine, error);
         }
+    }
+
+    /**
+     * Waits for the helper PowerShell process with a hard timeout while draining its output in a
+     * background thread, so a hung or chatty process cannot block the caller indefinitely.
+     */
+    private static String runPowerShell(Process process) throws IOException, InterruptedException {
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        Thread drain = Thread.ofVirtual().name("ecl-shortcut-output").start(
+                () -> drainBounded(process.getInputStream(), captured));
+        try {
+            if (!process.waitFor(POWERSHELL_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                throw new IOException("PowerShell 创建快捷方式超时（" + POWERSHELL_TIMEOUT_SECONDS
+                        + " 秒）");
+            }
+            drain.join(2_000);
+            return capturedOutput(captured);
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+
+    private static void drainBounded(InputStream input, ByteArrayOutputStream captured) {
+        byte[] buffer = new byte[4096];
+        try (input) {
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read == 0) {
+                    continue;
+                }
+                int remaining = MAX_POWERSHELL_OUTPUT_BYTES + 1 - captured.size();
+                if (remaining > 0) {
+                    captured.write(buffer, 0, Math.min(read, remaining));
+                }
+            }
+        } catch (IOException ignored) {
+            // The process ended or was destroyed; the captured prefix is still useful.
+        }
+    }
+
+    private static String capturedOutput(ByteArrayOutputStream captured) {
+        byte[] bytes = captured.toByteArray();
+        String output = new String(bytes, 0, Math.min(bytes.length, MAX_POWERSHELL_OUTPUT_BYTES),
+                StandardCharsets.UTF_8);
+        return bytes.length > MAX_POWERSHELL_OUTPUT_BYTES ? output + "…(output truncated)" : output;
     }
 
     private Path createBatchFallback(Path directory, String name, Path target, String arguments,

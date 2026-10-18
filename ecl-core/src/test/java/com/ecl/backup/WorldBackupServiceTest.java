@@ -164,6 +164,10 @@ class WorldBackupServiceTest {
 
     private void assertNoRestoreWorkspace(Path parent) throws IOException {
         try (var children = Files.list(parent)) {
+            assertFalse(children.filter(Files::isDirectory)
+                    .anyMatch(path -> Files.exists(path.resolve(".ecl/world-restore"))));
+        }
+        try (var children = Files.list(parent)) {
             assertFalse(children.anyMatch(path -> path.getFileName().toString()
                     .startsWith(".ecl-restore-")));
         }

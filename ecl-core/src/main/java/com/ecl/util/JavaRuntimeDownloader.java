@@ -38,7 +38,7 @@ final class JavaRuntimeDownloader {
 
     static String download(int featureVersion, Consumer<String> status,
                            BiConsumer<Long, Long> progress) throws IOException {
-        String os = "windows";
+        String os = OperatingSystem.adoptiumName();
         String arch = apiArch();
         String key = featureVersion + "-" + os + "-" + arch;
         synchronized (DOWNLOAD_LOCKS.computeIfAbsent(key, ignored -> new Object())) {
@@ -190,9 +190,10 @@ final class JavaRuntimeDownloader {
         if (!Files.isDirectory(root)) {
             return null;
         }
+        String executable = OperatingSystem.javaExecutableName();
         try (var stream = Files.walk(root, 5)) {
             return stream.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().equalsIgnoreCase("java.exe"))
+                    .filter(path -> path.getFileName().toString().equalsIgnoreCase(executable))
                     .filter(path -> path.getParent() != null
                             && "bin".equalsIgnoreCase(path.getParent().getFileName().toString()))
                     .findFirst().orElse(null);

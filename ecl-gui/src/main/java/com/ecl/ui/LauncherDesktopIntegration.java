@@ -1,5 +1,6 @@
 package com.ecl.ui;
 
+import javafx.application.Platform;
 import javafx.scene.image.Image;
 import javafx.stage.Stage;
 
@@ -64,18 +65,20 @@ final class LauncherDesktopIntegration {
                     com.ecl.util.Messages.get("shortcut.error.packagedExe"));
             return;
         }
-        try {
-            com.ecl.desktop.DesktopShortcutService shortcuts = new com.ecl.desktop.DesktopShortcutService();
-            String name = "ECL - " + profileId;
-            Path created = startMenu
-                    ? shortcuts.createStartMenuShortcut(executable, name,
-                            List.of("--instance", profileId))
-                    : shortcuts.createDesktopShortcut(executable, name,
-                            List.of("--instance", profileId));
-            ui.setStatus(com.ecl.util.Messages.get("shortcut.created"), created.toString());
-        } catch (IOException error) {
-            ui.setStatus(com.ecl.util.Messages.get("shortcut.failed"), ui.cleanMessage(error));
-        }
+        ui.runAsync("ecl-create-shortcut", () -> {
+            try {
+                com.ecl.desktop.DesktopShortcutService shortcuts = new com.ecl.desktop.DesktopShortcutService();
+                String name = "ECL - " + profileId;
+                Path created = startMenu
+                        ? shortcuts.createStartMenuShortcut(executable, name,
+                                List.of("--instance", profileId))
+                        : shortcuts.createDesktopShortcut(executable, name,
+                                List.of("--instance", profileId));
+                Platform.runLater(() -> ui.setStatus(com.ecl.util.Messages.get("shortcut.created"), created.toString()));
+            } catch (IOException error) {
+                Platform.runLater(() -> ui.setStatus(com.ecl.util.Messages.get("shortcut.failed"), ui.cleanMessage(error)));
+            }
+        });
     }
 
     void applyWindowIcon(Stage stage) {

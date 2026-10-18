@@ -9,7 +9,6 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
-import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.sun.jna.platform.win32.Kernel32;
@@ -136,7 +135,8 @@ public class FileUtil {
     }
 
     public static String getNativeClassifier() {
-        return "windows-" + nativeArchitecture(System.getProperty("os.arch", ""));
+        return OperatingSystem.minecraftName() + "-" + nativeArchitecture(
+                System.getProperty("os.arch", ""));
     }
 
     /** Normalize JVM architecture names to the suffixes used by Minecraft native classifiers. */
@@ -257,7 +257,7 @@ public class FileUtil {
     }
 
     private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        return OperatingSystem.isWindows();
     }
 
     /**

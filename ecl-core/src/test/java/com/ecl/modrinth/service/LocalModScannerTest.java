@@ -60,6 +60,18 @@ class LocalModScannerTest {
     }
 
     @Test
+    void readOnlyInspectionDoesNotCreateInstanceDirectoriesOrWriteIndexes() throws Exception {
+        ModInstanceContext empty = TestFixtures.instance(temp.resolve("not-created-yet"));
+
+        LocalModScanResult result = scanner().inspect(empty).join();
+
+        assertTrue(result.items().isEmpty());
+        assertFalse(Files.exists(empty.gameDirectory()));
+        assertFalse(Files.exists(empty.gameDirectory().resolve("launcher-mods.json")));
+        assertFalse(Files.exists(empty.gameDirectory().resolve("launcher-mod-scan.json")));
+    }
+
+    @Test
     void scanningRebuildsLegacySharedDependenciesFromAlreadyFetchedVersionMetadata() throws Exception {
         for (String project : List.of("first", "second", "shared")) {
             Path file = instance.modsDirectory().resolve(project + ".jar");

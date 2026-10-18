@@ -27,6 +27,8 @@ import java.util.UUID;
 /** Detects and downloads compatible Modrinth pack updates for a selected instance. */
 public final class DefaultModpackUpdateService implements ModpackUpdateService {
     private static final long MAX_PACK_ARCHIVE_BYTES = 2L * 1024 * 1024 * 1024;
+    private static final java.util.concurrent.atomic.AtomicBoolean STALE_PREVIEWS_CLEANED =
+            new java.util.concurrent.atomic.AtomicBoolean();
     private final ModMetadataProvider metadataProvider;
     private final Executor executor;
     private final InstanceOperationLock operationLock;
@@ -45,6 +47,22 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
         this.executor = Objects.requireNonNull(executor, "executor");
         this.operationLock = Objects.requireNonNull(operationLock, "operationLock");
         this.instanceRunning = Objects.requireNonNull(instanceRunning, "instanceRunning");
+        cleanStalePreviewsOnce();
+    }
+
+    /**
+     * Best-effort startup cleanup of preview directories abandoned by a crashed update. Runs once
+     * per JVM; failures must never prevent update checks from working.
+     */
+    private static void cleanStalePreviewsOnce() {
+        if (!STALE_PREVIEWS_CLEANED.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            MrpackInstaller.cleanStalePreviews(MrpackInstaller.STALE_PREVIEW_AGE);
+        } catch (RuntimeException ignored) {
+            // Stale previews are a disk-space nuisance, never a functional requirement.
+        }
     }
 
     @Override
@@ -89,6 +107,62 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
                 .sorted(Comparator.comparing(ModFile::primary).reversed())
                 .findFirst()
                 .orElse(null);
+    }
+
+    @Override
+    public CompletableFuture<PreparedUpdate> prepareUpdate(ModpackUpdate update, Path gameRoot,
+                                                           MrpackInstaller.Listener listener) {
+        Objects.requireNonNull(update, "update");
+        Path root = normalizeGameRoot(gameRoot);
+        return CompletableFuture.supplyAsync(() -> {
+            Path work = null;
+            try {
+                if (instanceRunning.test(update.instance().instanceId())) {
+                    throw new IOException("Instance is running and cannot be inspected for update");
+                }
+                work = Files.createTempDirectory(ECLConfig.getBaseDir().toPath(),
+                        MrpackInstaller.PREVIEW_DIRECTORY_PREFIX);
+                Path archive = downloadArchive(update, work.resolve("update.mrpack"), listener);
+                MrpackInstaller.UpdatePreview preview = installer.prepareUpdate(archive.toFile(),
+                        root.toFile(), update.instance().profileId(), update.instance().projectId(),
+                        update.availableVersion().id(), work, listener);
+                if (instanceRunning.test(update.instance().instanceId())) {
+                    preview.close();
+                    throw new IOException("Instance started while its modpack update was being prepared");
+                }
+                return new PreparedUpdate(update, preview);
+            } catch (Exception error) {
+                if (work != null) MrpackPathPolicy.deleteRecursively(work);
+                throw new java.util.concurrent.CompletionException(error);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<MrpackInstaller.InstallResult> applyPreparedUpdate(
+            PreparedUpdate prepared, Path gameRoot, MrpackInstaller.Listener listener) {
+        Objects.requireNonNull(prepared, "prepared");
+        Path root = normalizeGameRoot(gameRoot);
+        ModpackUpdate update = prepared.update();
+        return CompletableFuture.supplyAsync(() -> {
+            UUID instanceId = update.instance().instanceId();
+            if (instanceRunning.test(instanceId)) {
+                prepared.closeQuietly();
+                throw new java.util.concurrent.CompletionException(
+                        new IOException("Instance is running and cannot be updated"));
+            }
+            try (AutoCloseable ignored = operationLock.acquire(instanceId)) {
+                if (instanceRunning.test(instanceId)) {
+                    throw new IOException("Instance is running and cannot be updated");
+                }
+                return installer.applyPreparedUpdate(prepared.preview(), root.toFile(),
+                        () -> instanceRunning.test(instanceId), listener);
+            } catch (Exception error) {
+                throw new java.util.concurrent.CompletionException(error);
+            } finally {
+                prepared.closeQuietly();
+            }
+        }, executor);
     }
 
     @Override
@@ -165,5 +239,38 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
 
     private static Path normalizeGameRoot(Path gameRoot) {
         return Objects.requireNonNull(gameRoot, "gameRoot").toAbsolutePath().normalize();
+    }
+
+    private Path downloadArchive(ModpackUpdate update, Path target,
+                                 MrpackInstaller.Listener listener) throws IOException {
+        ModFile file = update.selectedFile();
+        if (!HashVerifier.hasUsableExpectedHash(file.hashes())) {
+            throw new IOException("Modpack update is missing SHA-512 or SHA-1");
+        }
+        if (file.size() <= 0 || file.size() > MAX_PACK_ARCHIVE_BYTES) {
+            throw new IOException("Modpack update has an invalid declared size");
+        }
+        java.net.URI downloadUri = NetworkUriPolicy.requireAllowedDownload(
+                file.url(), MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS,
+                "Modpack update URL");
+        HttpUtil.downloadFileWithProgress(downloadUri.toString(), target.toFile(),
+                new HttpUtil.ProgressCallback() {
+                    @Override public void onStart(long total) {
+                        if (listener != null) listener.onProgress(0, total);
+                    }
+
+                    @Override public void onProgress(long downloaded, long total) {
+                        if (listener != null) listener.onProgress(downloaded, total);
+                    }
+
+                    @Override public void onComplete(java.io.File ignored) {
+                        if (listener != null) listener.onProgress(1, 1);
+                    }
+                }, null, file.size(), MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS);
+        if (Files.size(target) != file.size()) {
+            throw new IOException("Modpack update size does not match metadata");
+        }
+        hashVerifier.verify(target, file.hashes());
+        return target;
     }
 }

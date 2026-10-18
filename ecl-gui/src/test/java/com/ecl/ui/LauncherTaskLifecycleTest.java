@@ -53,6 +53,57 @@ class LauncherTaskLifecycleTest extends ApplicationTest {
     }
 
     @Test
+    void preparationTimeoutCancelsDownloadAndRestoresControls() throws Exception {
+        com.ecl.download.DownloadService previousDownloader = launcher.downloader;
+        VersionManager previousManager = launcher.versionManager;
+        AtomicInteger launches = new AtomicInteger();
+        CompletableFuture<Void> stalled = new CompletableFuture<>() {
+            @Override
+            public Void get(long timeout, TimeUnit unit) throws java.util.concurrent.TimeoutException {
+                assertEquals(600, unit.toSeconds(timeout));
+                throw new java.util.concurrent.TimeoutException("Stalled download");
+            }
+        };
+        try (com.ecl.download.GameDownloader downloader = new com.ecl.download.GameDownloader() {
+            @Override
+            public synchronized java.util.concurrent.Future<?> downloadVersionAsync(String id, String url, String sha1) {
+                return stalled;
+            }
+        }) {
+            java.lang.reflect.Method download = GameLaunchPreparation.class.getDeclaredMethod(
+                    "downloadAndLaunch", String.class, java.util.function.Consumer.class);
+            download.setAccessible(true);
+            interact(() -> {
+                launcher.downloader = downloader;
+                launcher.versionManager = new VersionManager() {
+                    @Override
+                    public VersionDownloadTarget resolveDownloadTarget(String version) {
+                        return new VersionDownloadTarget(version, version, "https://piston-meta.mojang.com/test.json", "");
+                    }
+                };
+                try {
+                    download.invoke(new GameLaunchPreparation(launcher, null), "timeout-test",
+                            (java.util.function.Consumer<String>) version -> launches.incrementAndGet());
+                } catch (ReflectiveOperationException error) {
+                    throw new AssertionError(error);
+                }
+            });
+            WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> stalled.isCancelled());
+            WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> WaitForAsyncUtils.asyncFx(() ->
+                    !launcher.versionCombo.isDisabled()
+                            && launcher.downloadTaskCenter.snapshots().getLast().status() == DownloadTaskCenter.Status.FAILED).get());
+            assertEquals(0, launches.get());
+            assertTrue(launcher.downloadTaskCenter.snapshots().getLast().errorMessage()
+                    .contains(GuiMessages.get("launch.downloadTimeout")));
+        } finally {
+            interact(() -> {
+                launcher.downloader = previousDownloader;
+                launcher.versionManager = previousManager;
+            });
+        }
+    }
+
+    @Test
     void refreshRestoresTheStateTargetBeforeTheSelectorHasLoaded(@TempDir Path root) throws Exception {
         String first = "a-target-" + UUID.randomUUID();
         String target = "z-target-" + UUID.randomUUID();
@@ -189,47 +240,6 @@ class LauncherTaskLifecycleTest extends ApplicationTest {
             });
             WaitForAsyncUtils.waitForFxEvents();
             interact(() -> assertFalse(launcher.versionCombo.isDisabled()));
-        } finally {
-            release.countDown();
-            interact(() -> launcher.downloadTaskCenter = previousCenter);
-        }
-    }
-
-    @Test
-    void queuedServerDownloadCancellationRestoresThePageControls(@TempDir Path root) throws Exception {
-        DownloadTaskCenter previousCenter = launcher.downloadTaskCenter;
-        CountDownLatch release = new CountDownLatch(1);
-        var download = ServerJarDownloadPage.class.getDeclaredMethod("download", ServerJarDownloader.ServerArtifact.class,
-                java.io.File.class, Label.class, ProgressBar.class, Button.class, Button.class, ComboBox.class,
-                ComboBox.class, Button.class, AtomicLong.class);
-        download.setAccessible(true);
-        try (DownloadTaskCenter center = blockedCenter(release)) {
-            Button button = new Button();
-            Button folder = new Button();
-            ComboBox<String> versions = new ComboBox<>();
-            ComboBox<VersionManager.VersionCategory> categories = new ComboBox<>();
-            Button refresh = new Button();
-            interact(() -> {
-                launcher.downloadTaskCenter = center;
-                try {
-                    download.invoke(new ServerJarDownloadPage(launcher),
-                            new ServerJarDownloader.ServerArtifact("server-test", "", "", 1, List.of()), root.toFile(),
-                            new Label(), new ProgressBar(), button, folder, versions, categories, refresh, new AtomicLong());
-                } catch (ReflectiveOperationException error) {
-                    throw new AssertionError(error);
-                }
-                assertTrue(button.isDisabled());
-                center.snapshots().stream().filter(task -> task.title().startsWith("Server JAR"))
-                        .forEach(task -> center.cancel(task.id()));
-            });
-            WaitForAsyncUtils.waitForFxEvents();
-            interact(() -> {
-                assertFalse(button.isDisabled());
-                assertFalse(folder.isDisabled());
-                assertFalse(versions.isDisabled());
-                assertFalse(categories.isDisabled());
-                assertFalse(refresh.isDisabled());
-            });
         } finally {
             release.countDown();
             interact(() -> launcher.downloadTaskCenter = previousCenter);

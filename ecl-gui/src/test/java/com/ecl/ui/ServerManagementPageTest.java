@@ -20,6 +20,7 @@ import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ServerManagementPageTest extends ApplicationTest {
@@ -59,6 +60,21 @@ class ServerManagementPageTest extends ApplicationTest {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
             }
         }
+    }
+
+    @Test
+    void reducedMotionKeepsServerStatusPollingActive() throws Exception {
+        java.lang.reflect.Field timerField = ServerManagementPage.class.getDeclaredField("refreshTimer");
+        timerField.setAccessible(true);
+        interact(() -> {
+            assertTrue(Boolean.getBoolean("ecl.reduceMotion"));
+            try {
+                javafx.animation.Timeline timer = (javafx.animation.Timeline) timerField.get(page);
+                assertEquals(javafx.animation.Animation.Status.RUNNING, timer.getStatus());
+            } catch (IllegalAccessException error) {
+                throw new AssertionError(error);
+            }
+        });
     }
 
     @Test

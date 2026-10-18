@@ -3,6 +3,7 @@ package com.ecl.game;
 import com.ecl.ECLConfig;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.TextUtil;
+import com.ecl.util.FileUtil;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -37,10 +38,13 @@ public final class InstanceLaunchProfileStore {
      * The legacy settings are intentionally left untouched for compatibility with older releases.
      */
     public synchronized InstanceLaunchProfile load(Path instanceRoot) throws IOException {
-        Path file = profileFile(instanceRoot);
+        Path normalizedRoot = Objects.requireNonNull(instanceRoot, "instanceRoot")
+                .toAbsolutePath().normalize();
+        Path file = profileFile(normalizedRoot);
+        validateProfilePath(normalizedRoot, file);
         if (!Files.isRegularFile(file)) {
             InstanceLaunchProfile migrated = migrate(legacySettings.get());
-            save(instanceRoot, migrated);
+            save(normalizedRoot, migrated);
             return migrated;
         }
         try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
@@ -56,8 +60,17 @@ public final class InstanceLaunchProfileStore {
 
     public synchronized void save(Path instanceRoot, InstanceLaunchProfile profile) throws IOException {
         Objects.requireNonNull(profile, "profile");
-        Path file = profileFile(instanceRoot);
+        Path normalizedRoot = Objects.requireNonNull(instanceRoot, "instanceRoot")
+                .toAbsolutePath().normalize();
+        Path file = profileFile(normalizedRoot);
+        validateProfilePath(normalizedRoot, file);
         HttpUtil.writeJson(file.toFile(), toJson(profile));
+    }
+
+    private static void validateProfilePath(Path root, Path file) throws IOException {
+        Path filesystemRoot = root.getRoot();
+        FileUtil.validateExistingAncestors(filesystemRoot == null ? root : filesystemRoot,
+                file);
     }
 
     public Path profileFile(Path instanceRoot) {

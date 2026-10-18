@@ -10,6 +10,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InstanceOperationCoordinatorTest {
@@ -41,7 +43,7 @@ class InstanceOperationCoordinatorTest {
             first.get(2, TimeUnit.SECONDS);
             second.get(2, TimeUnit.SECONDS);
             assertTrue(secondEntered.await(1, TimeUnit.SECONDS));
-            assertFalse(coordinator.isLocked(instanceId));
+            assertCanAcquireImmediately(coordinator, instanceId);
         } finally {
             releaseFirst.countDown();
             executor.shutdownNow();
@@ -56,6 +58,7 @@ class InstanceOperationCoordinatorTest {
         AtomicBoolean interrupted = new AtomicBoolean();
 
         try (AutoCloseable first = coordinator.acquire(instanceId)) {
+            assertTrue(isHeldWhenProbedFromAnotherThread(coordinator, instanceId));
             Thread waiter = Thread.ofPlatform().start(() -> {
                 waiting.countDown();
                 try (AutoCloseable ignored = coordinator.acquireInterruptibly(instanceId)) {
@@ -73,9 +76,44 @@ class InstanceOperationCoordinatorTest {
             assertTrue(interrupted.get());
         }
 
-        assertFalse(coordinator.isLocked(instanceId));
+        assertCanAcquireImmediately(coordinator, instanceId);
+    }
+
+    @Test
+    void tryAcquireFailsWithoutWaitingAndSucceedsAfterRelease() throws Exception {
+        InstanceOperationCoordinator coordinator = new InstanceOperationCoordinator();
+        UUID instanceId = UUID.randomUUID();
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            try (AutoCloseable ignored = coordinator.acquire(instanceId)) {
+                Future<AutoCloseable> attempt = executor.submit(() -> coordinator.tryAcquire(instanceId));
+                assertNull(attempt.get(1, TimeUnit.SECONDS));
+            }
+            try (AutoCloseable acquired = coordinator.tryAcquire(instanceId)) {
+                assertNotNull(acquired);
+            }
+        }
+        assertCanAcquireImmediately(coordinator, instanceId);
+    }
+
+    /** A successful blocking acquire on the current thread proves the lock is free. */
+    private static void assertCanAcquireImmediately(InstanceOperationCoordinator coordinator,
+                                                    UUID instanceId) throws Exception {
         try (AutoCloseable ignored = coordinator.acquire(instanceId)) {
-            assertTrue(coordinator.isLocked(instanceId));
+            assertNotNull(ignored);
+        }
+    }
+
+    /** Probes the lock from another thread, where a reentrant acquire cannot hide contention. */
+    private static boolean isHeldWhenProbedFromAnotherThread(
+            InstanceOperationCoordinator coordinator, UUID instanceId) throws Exception {
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            Future<AutoCloseable> attempt = executor.submit(() -> coordinator.tryAcquire(instanceId));
+            AutoCloseable lease = attempt.get(2, TimeUnit.SECONDS);
+            if (lease == null) {
+                return true;
+            }
+            lease.close();
+            return false;
         }
     }
 

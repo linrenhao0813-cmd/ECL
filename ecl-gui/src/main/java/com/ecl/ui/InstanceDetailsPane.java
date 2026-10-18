@@ -1,11 +1,19 @@
 package com.ecl.ui;
 
+import com.ecl.util.FileUtil;
 import com.ecl.launcher.VersionManager;
+import com.ecl.util.InstanceOperationLease;
 import com.ecl.util.Messages;
+import javafx.application.Platform;
 import javafx.geometry.Pos;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuButton;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextField;
@@ -17,6 +25,8 @@ import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 
 /** Overview and display settings for the viewed instance; selection does not change the launch target. */
@@ -39,6 +49,15 @@ final class InstanceDetailsPane extends VBox {
     private final Label meta = new Label();
     private final Button openFolderButton;
     private final Label emptyHint = new Label(Messages.get("instances.detail.empty"));
+    private final Button launchSettingsButton;
+    private final Button checkRepairButton;
+    private final InstanceCheckRepairWorkflow checkRepairWorkflow;
+    private final Button restoreUpdateButton;
+    private final InstanceUpgradeRecoveryWorkflow upgradeRecoveryWorkflow;
+    private final MenuButton instanceMenu = new MenuButton();
+    private final MenuItem createShortcutButton;
+    private final MenuItem createStartMenuShortcutItem;
+    private final MenuItem deleteInstanceButton;
 
     private final VBox overviewRows = new VBox(8);
     private final Label runtimeStatus = new Label();
@@ -49,6 +68,8 @@ final class InstanceDetailsPane extends VBox {
     InstanceDetailsPane(LauncherUI ui, Runnable onDisplayChanged) {
         this.ui = ui;
         this.onDisplayChanged = onDisplayChanged;
+        checkRepairWorkflow = new InstanceCheckRepairWorkflow(ui);
+        upgradeRecoveryWorkflow = new InstanceUpgradeRecoveryWorkflow(ui);
         getStyleClass().add("instance-details");
         setSpacing(14);
         setMinWidth(0);
@@ -60,10 +81,37 @@ final class InstanceDetailsPane extends VBox {
         meta.setWrapText(true);
         openFolderButton = ui.createActionButton(Messages.get("local.instances.openFolder"),
                 "ghost-button", this::openInstanceFolder);
+        launchSettingsButton = ui.createActionButton(Messages.get("instances.launch.button"),
+                "secondary-button", this::openLaunchSettings);
+        launchSettingsButton.setId("instance-launch-settings");
+        checkRepairButton = ui.createActionButton(Messages.get("instanceRepair.button"),
+                "secondary-button", this::checkAndRepair);
+        checkRepairButton.setId("instance-check-repair");
+        checkRepairButton.setAccessibleText(Messages.get("instanceRepair.button"));
+        restoreUpdateButton = ui.createActionButton(Messages.get("instanceRecovery.button"),
+                "ghost-button", this::restoreLastUpdate);
+        restoreUpdateButton.setId("instance-restore-last-update");
+        restoreUpdateButton.setAccessibleText(Messages.get("instanceRecovery.button"));
+        createShortcutButton = new MenuItem(Messages.get("instances.shortcut.desktop"));
+        createShortcutButton.setId("instance-create-shortcut");
+        createShortcutButton.setOnAction(event -> createShortcut(false));
+        createStartMenuShortcutItem = new MenuItem(Messages.get("instances.shortcut.startMenu"));
+        createStartMenuShortcutItem.setId("instance-create-start-menu-shortcut");
+        createStartMenuShortcutItem.setOnAction(event -> createShortcut(true));
+        deleteInstanceButton = new MenuItem(Messages.get("instances.delete.button"));
+        deleteInstanceButton.setId("instance-delete");
+        deleteInstanceButton.setOnAction(event -> deleteInstance());
+        instanceMenu.getItems().addAll(createShortcutButton, createStartMenuShortcutItem,
+                new SeparatorMenuItem(), deleteInstanceButton);
+        instanceMenu.setText(Messages.get("instances.moreActions"));
+        instanceMenu.setId("instance-more-actions");
+        instanceMenu.setAccessibleText(Messages.get("instances.moreActions"));
+        instanceMenu.getStyleClass().add("instance-more-actions");
         Region headerSpacer = new Region();
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
         HBox header = new HBox(10, new VBox(3, title, meta), headerSpacer,
-                openFolderButton);
+                launchSettingsButton, checkRepairButton, restoreUpdateButton,
+                instanceMenu, openFolderButton);
         header.setAlignment(Pos.CENTER_LEFT);
 
         ui.applyFieldStyle(displayNameField);
@@ -122,9 +170,11 @@ final class InstanceDetailsPane extends VBox {
         emptyHint.setManaged(!present);
         body.setVisible(present);
         body.setManaged(present);
+        refreshActionButtons();
         if (!present) {
             return;
         }
+        loadDisplaySettings();
         refresh();
     }
 
@@ -148,7 +198,7 @@ final class InstanceDetailsPane extends VBox {
         return List.of(displayNameField.getText(), favoriteBox.isSelected(), coverPath);
     }
 
-    /** Reloads overview and display settings for the current instance. */
+    /** Refreshes status without overwriting unsaved display settings. */
     void refresh() {
         if (instanceId == null) {
             return;
@@ -162,7 +212,7 @@ final class InstanceDetailsPane extends VBox {
         title.setText(ui.versionManager.getVersionDisplayName(instanceId));
         meta.setText(Messages.format("instances.detail.meta", minecraftVersion, loader));
         updateOverviewRows(minecraftVersion, loader);
-        loadDisplaySettings();
+        refreshActionButtons();
     }
 
     private void loadDisplaySettings() {
@@ -227,6 +277,124 @@ final class InstanceDetailsPane extends VBox {
     private void openInstanceFolder() {
         ui.openLocalFolder(ui.resolveVersionGameDir(instanceId),
                 Messages.get("local.instances.folderTitle"));
+    }
+
+    private void openLaunchSettings() {
+        if (instanceId != null) {
+            InstanceLaunchProfileDialog.show(ui, instanceId, launchSettingsButton, this::refresh);
+        }
+    }
+
+    private void checkAndRepair() {
+        if (instanceId != null) {
+            checkRepairWorkflow.start(instanceId, this::refresh);
+            refreshActionButtons();
+        }
+    }
+
+    private void restoreLastUpdate() {
+        if (instanceId != null) {
+            upgradeRecoveryWorkflow.open(instanceId, this::refresh);
+            refreshActionButtons();
+        }
+    }
+
+    /** Shortcuts always describe the viewed instance, so it has to be the launch target. */
+    private void createShortcut(boolean startMenu) {
+        if (instanceId == null) {
+            return;
+        }
+        if (!instanceId.equals(ui.getSelectedVersion())) {
+            ui.setLaunchTarget(instanceId);
+        }
+        ui.createInstanceShortcut(startMenu);
+    }
+
+    private void deleteInstance() {
+        if (instanceId == null) {
+            return;
+        }
+        String profileId = instanceId;
+        if (ui.isVersionRunning(profileId)) {
+            ui.setStatus(Messages.get("instances.delete.runningTitle"),
+                    Messages.get("instances.delete.running"));
+            return;
+        }
+        if (ui.gameLaunch != null && ui.gameLaunch.isPreparingVersion(profileId)) {
+            ui.setStatus(Messages.get("instances.delete.busyTitle"),
+                    Messages.get("instances.delete.busy"));
+            return;
+        }
+        if (Alert.AlertType.CONFIRMATION != confirmDeletion(profileId)) {
+            return;
+        }
+        ui.setStatus(Messages.get("instances.delete.title"),
+                Messages.format("instances.delete.progress", profileId));
+        ui.runAsync("ecl-delete-instance", () -> deleteInstanceFiles(profileId));
+    }
+
+    private Alert.AlertType confirmDeletion(String profileId) {
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
+                Messages.format("instances.delete.body", profileId),
+                ButtonType.OK, ButtonType.CANCEL);
+        confirm.initOwner(ui.primaryStage);
+        confirm.setTitle(Messages.get("instances.delete.title"));
+        confirm.setHeaderText(Messages.get("instances.delete.header"));
+        return confirm.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK
+                ? Alert.AlertType.CONFIRMATION : Alert.AlertType.NONE;
+    }
+
+    /**
+     * Deletes only the version directory. The versions root is the walk root, so the bounded
+     * delete helper can never escape it, and both instance locks are held while it runs.
+     */
+    private void deleteInstanceFiles(String profileId) {
+        Path versionsRoot = ui.getConfiguredGameRootDir().toPath().toAbsolutePath().normalize().resolve("versions");
+        Path target = ui.resolveVersionInstanceRoot(profileId).toPath();
+        try (InstanceOperationLease lock = InstanceOperationLease.tryAcquire(target)) {
+            if (lock == null) {
+                reportDeletionFailure(profileId, Messages.get("instances.delete.busy"));
+                return;
+            }
+            Path runDirectory = ui.gameRepository().runDirectory(profileId);
+            if (ui.isVersionRunning(profileId) || com.ecl.launch.GameProcessMarker.isRunning(runDirectory)
+                    || ui.gameLaunch != null && ui.gameLaunch.isPreparingVersion(profileId)) {
+                throw new IOException(Messages.get("instances.delete.busy"));
+            }
+            FileUtil.validateExistingAncestors(versionsRoot, target);
+            VersionActions.deleteTreeWithin(versionsRoot, target, null);
+            Platform.runLater(() -> {
+                ui.controller.invalidateLaunchVersion(profileId);
+                ui.versionManager.invalidateLocalVersionProfiles();
+                if (profileId.equals(ui.getSelectedVersion())) {
+                    ui.setLaunchTarget(null);
+                }
+                ui.versionActions.restoreVersionComboItems(null, true);
+                ui.updateRuntimeSummary();
+                setInstance(null);
+                ui.setStatus(Messages.get("instances.delete.done"), profileId);
+            });
+        } catch (Exception error) {
+            reportDeletionFailure(profileId, ui.cleanMessage(error));
+        }
+    }
+
+    private void reportDeletionFailure(String profileId, String reason) {
+        Platform.runLater(() -> ui.setStatus(Messages.get("instances.delete.failedTitle"),
+                Messages.format("instances.delete.failed", reason)));
+    }
+
+    private void refreshActionButtons() {
+        boolean present = instanceId != null;
+        boolean busy = present && (checkRepairWorkflow.isBusy(instanceId)
+                || upgradeRecoveryWorkflow.isBusy());
+        launchSettingsButton.setDisable(!present);
+        checkRepairButton.setDisable(!present || checkRepairWorkflow.isBusy(instanceId));
+        restoreUpdateButton.setDisable(!present || upgradeRecoveryWorkflow.isBusy());
+        instanceMenu.setDisable(!present);
+        createShortcutButton.setDisable(!present);
+        createStartMenuShortcutItem.setDisable(!present);
+        deleteInstanceButton.setDisable(!present || busy || ui.isVersionRunning(instanceId));
     }
 
     private void updateOverviewRows(String minecraftVersion, String loader) {

@@ -89,6 +89,24 @@ class DefaultModUpdateServiceTest {
         assertEquals(1, provider.projectLookups);
     }
 
+    @Test
+    void preparedUpdateKeepsTheSelectedVersionAfterNewerMetadataAppears(@TempDir Path temp) {
+        ModInstanceContext instance = TestFixtures.instance(temp);
+        ModVersion selected = release("42:200", false, "2026-02-01T00:00:00Z");
+        ModVersion later = release("42:300", false, "2026-03-01T00:00:00Z");
+        ProjectVersionProvider provider = new ProjectVersionProvider(selected);
+        DefaultModUpdateService service = service(temp, provider);
+        InstalledMod installed = installed(temp, "hash");
+
+        com.ecl.modrinth.model.ModUpdate update = service.checkUpdates(instance,
+                List.of(installed), ReleaseChannel.RELEASE_ONLY).join().getFirst();
+        ModUpdateService.PreparedModUpdate prepared = service.prepareUpdate(update, java.util.Set.of()).join();
+        provider.available = List.of(later);
+
+        assertEquals("42:200", prepared.update().availableVersion().id());
+        assertEquals("42:200", prepared.installationPlan().files().getFirst().version().id());
+    }
+
     private static ModVersion release(String id, boolean featured, String published) {
         return TestFixtures.version(id, "42", "release", featured, List.of("1.21.1"), List.of("fabric"),
                 Instant.parse(published), List.of(TestFixtures.file("mod.jar", true)), List.of());

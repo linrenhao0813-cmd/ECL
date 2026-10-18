@@ -13,6 +13,7 @@ import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -125,6 +126,40 @@ class SettingsManagerTest {
         assertTrue(Files.exists(tempDir.resolve("settings.json.corrupt")));
         assertFalse(Files.exists(file));
         assertEquals("fallback", fileManager.getString("missing", "fallback"));
+    }
+
+    @Test
+    void repeatedCorruptionKeepsEveryBackupInsteadOfOverwritingTheFirst() throws Exception {
+        Path file = tempDir.resolve("settings.json");
+        Path firstBackup = tempDir.resolve("settings.json.corrupt");
+        Files.writeString(file, "{not-json");
+        new SettingsManager(file.toFile()).load();
+        assertEquals("{not-json", Files.readString(firstBackup));
+
+        Files.writeString(file, "{also-not-json");
+        new SettingsManager(file.toFile()).load();
+
+        assertEquals("{not-json", Files.readString(firstBackup),
+                "The earlier damaged copy must be preserved");
+        try (var entries = Files.list(tempDir)) {
+            List<Path> backups = entries.filter(path -> path.getFileName().toString()
+                    .startsWith("settings.json.corrupt")).toList();
+            assertEquals(2, backups.size(), "Each corruption gets its own backup file");
+            assertTrue(backups.stream().anyMatch(path -> path.equals(firstBackup)));
+            assertFalse(backups.stream().allMatch(path -> path.equals(firstBackup)),
+                    "The second corruption must create an additional backup");
+        }
+    }
+
+    @Test
+    void uniqueCorruptBackupFallsBackToATimestampedName() throws Exception {
+        Path file = tempDir.resolve("settings.json");
+        Files.writeString(tempDir.resolve("settings.json.corrupt"), "taken");
+
+        Path backup = SettingsManager.uniqueCorruptBackup(file);
+
+        assertFalse(backup.equals(tempDir.resolve("settings.json.corrupt")));
+        assertTrue(backup.getFileName().toString().startsWith("settings.json.corrupt-"));
     }
 
     // ---- Type-safe SettingKey API ----

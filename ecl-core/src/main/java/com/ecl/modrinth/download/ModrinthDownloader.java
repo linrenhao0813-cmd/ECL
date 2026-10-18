@@ -299,10 +299,6 @@ public class ModrinthDownloader implements ContentDownloader {
         return versions.isEmpty() ? null : versions.get(0);
     }
 
-    private boolean isAllowedFilename(String filename, String... allowedExtensions) {
-        return ModrinthFileSelector.isAllowedFilename(filename, allowedExtensions);
-    }
-
     static void ensureNoDependencyCycle(Deque<String> dependencyPath, String versionId)
             throws IOException {
         ModrinthDependencyGuard.ensureNoDependencyCycle(dependencyPath, versionId);

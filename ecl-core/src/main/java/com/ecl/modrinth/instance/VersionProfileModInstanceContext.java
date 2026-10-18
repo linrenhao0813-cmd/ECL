@@ -61,9 +61,7 @@ public final class VersionProfileModInstanceContext implements ModInstanceContex
         Path gameDirectory = resolvedRunDirectory == null ? instanceRoot
                 : resolvedRunDirectory.toAbsolutePath().normalize();
 
-        String identityPath = instanceRoot.toString().toLowerCase(Locale.ROOT);
-        UUID instanceId = UUID.nameUUIDFromBytes(("ecl-version-profile:" + identityPath)
-                .getBytes(StandardCharsets.UTF_8));
+        UUID instanceId = instanceIdFor(instanceRoot);
         return new VersionProfileModInstanceContext(instanceId, normalizedProfileId, minecraftVersion,
                 loader, gameDirectory);
     }
@@ -172,5 +170,12 @@ public final class VersionProfileModInstanceContext implements ModInstanceContex
     @Override
     public Path modsDirectory() {
         return gameDirectory.resolve("mods");
+    }
+
+    public static UUID instanceIdFor(Path instanceRoot) {
+        String identityPath = Objects.requireNonNull(instanceRoot, "instanceRoot")
+                .toAbsolutePath().normalize().toString().toLowerCase(Locale.ROOT);
+        return UUID.nameUUIDFromBytes(("ecl-version-profile:" + identityPath)
+                .getBytes(StandardCharsets.UTF_8));
     }
 }

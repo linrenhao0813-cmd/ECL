@@ -14,6 +14,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.util.StringConverter;
 
@@ -58,12 +59,19 @@ final class WorldSavesPage extends VBox {
         Label subtitle = new Label(GuiMessages.get("explorer.subtitle"));
         subtitle.getStyleClass().add("page-subtitle");
         subtitle.setWrapText(true);
+        Button backups = ui.createActionButton(GuiMessages.get("saves.backups.open"),
+                "secondary-button", ui::showBackupManagerDialog);
+        backups.setId("world-saves-open-backups");
+        backups.setAccessibleText(GuiMessages.get("saves.backups.open"));
         buildDetails();
         explorer = new WorldSaveExplorer(ui, detail, this::showDetails, this::refresh);
-        VBox heading = new VBox(6, title, subtitle);
-        heading.getStyleClass().add("content-library-heading");
+        Region headingSpacer = new Region();
+        HBox.setHgrow(headingSpacer, Priority.ALWAYS);
+        HBox headingRow = new HBox(12, new VBox(6, title, subtitle), headingSpacer, backups);
+        headingRow.setAlignment(Pos.CENTER_LEFT);
+        headingRow.getStyleClass().add("content-library-heading");
         VBox.setVgrow(explorer, Priority.ALWAYS);
-        getChildren().addAll(heading, explorer);
+        getChildren().addAll(headingRow, explorer);
     }
 
     private void buildDetails() {
@@ -132,7 +140,9 @@ final class WorldSavesPage extends VBox {
                         return;
                     }
                     if (error != null) {
-                        ui.setStatus("读取世界失败", ui.cleanMessage(error));
+                        String message = ui.cleanMessage(error);
+                        explorer.showLoadError(message);
+                        ui.setStatus("读取世界失败", message);
                         return;
                     }
                     applyScannedWorlds(scanned == null ? List.of() : scanned, groupId, worldName);

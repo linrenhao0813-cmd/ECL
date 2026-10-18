@@ -60,11 +60,6 @@ public class HttpUtil {
         return HttpRequestExecutor.getBytes(urlStr, maxBytes);
     }
 
-    public static String getWithMirrors(String urlStr, SourceCallback callback)
-            throws IOException {
-        return HttpJsonClient.getWithMirrors(urlStr, adapt(callback));
-    }
-
     public static String postJson(String urlStr, String body) throws IOException {
         return HttpJsonClient.postJson(urlStr, body);
     }
@@ -157,11 +152,6 @@ public class HttpUtil {
 
     public static JsonObject getJson(String urlStr) throws IOException {
         return HttpJsonClient.getJson(urlStr);
-    }
-
-    public static JsonObject getJsonWithMirrors(String urlStr, SourceCallback callback)
-            throws IOException {
-        return HttpJsonClient.getJsonWithMirrors(urlStr, adapt(callback));
     }
 
     public static void writeJson(File file, JsonObject obj) throws IOException {

@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -178,6 +180,48 @@ class LocalServerManagerTest {
         assertThrows(IOException.class, () -> manager.readLogTail(id, 10));
         Files.createSymbolicLink(directory.resolve("process.json"), temporary.resolve("outside.json"));
         assertThrows(IOException.class, () -> manager.isRunning(id));
+    }
+
+    @Test
+    void stopReportsConfirmedExitAfterTheServerSavesAndQuits() throws Exception {
+        LocalServerManager manager = manager();
+        String id = manager.importJar("Stop Outcome", fixtureJar(), javaExecutable(), 512).id();
+        manager.setEulaAccepted(id, true);
+        try {
+            manager.start(id);
+            await(() -> manager.readLogTail(id, 10).stream().anyMatch(line -> line.equals("READY nogui")));
+
+            assertEquals(LocalServerManager.StopOutcome.STOPPED, manager.stop(id));
+
+            await(() -> !manager.isRunning(id));
+            assertEquals("saved", Files.readString(manager.directory(id).resolve("world-saved.txt")));
+        } finally {
+            if (manager.isRunning(id) && manager.canControl(id)) {
+                manager.stop(id);
+                await(() -> !manager.isRunning(id));
+            }
+        }
+    }
+
+    @Test
+    void concurrentManagerLockFailsFastInsteadOfBlockingForever() throws Exception {
+        LocalServerManager manager = manager();
+        String id = manager.importJar("Locked", fixtureJar(), javaExecutable(), 256).id();
+        Path folder = manager.directory(id);
+        Path lockFile = folder.resolve("manager.lock");
+
+        try (FileChannel channel = FileChannel.open(lockFile,
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.WRITE);
+                FileLock competing = channel.lock()) {
+            assertTrue(competing.isValid());
+            assertTimeoutPreemptively(Duration.ofSeconds(30),
+                    () -> assertThrows(IOException.class,
+                            () -> manager.saveSettings(id, "Renamed", javaExecutable(), 256)));
+        }
+
+        assertEquals("Locked", manager.list().getFirst().name());
+        assertEquals("Renamed", manager.saveSettings(id, "Renamed", javaExecutable(), 256).name());
     }
 
     private LocalServerManager manager() {

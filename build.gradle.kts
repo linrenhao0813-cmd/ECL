@@ -1,4 +1,5 @@
 import com.github.spotbugs.snom.Confidence
+import com.github.spotbugs.snom.Effort
 import com.github.spotbugs.snom.SpotBugsTask
 import org.gradle.testing.jacoco.tasks.JacocoCoverageVerification
 
@@ -7,9 +8,22 @@ plugins {
     alias(libs.plugins.spotbugs) apply false
 }
 
+val launcherVersion = providers.gradleProperty("version").get()
+
 allprojects {
     group = "com.ecl"
-    version = "1.0.2beta"
+    version = launcherVersion
+}
+
+tasks.register("validateReleaseVersion") {
+    group = "verification"
+    val releaseTag = providers.gradleProperty("releaseTag")
+    doLast {
+        val tag = releaseTag.orNull ?: throw GradleException("releaseTag is required")
+        if (tag.replaceFirst(Regex("^[vV]"), "") != launcherVersion) {
+            throw GradleException("Release tag $tag does not match launcher version $launcherVersion")
+        }
+    }
 }
 
 subprojects {
@@ -73,7 +87,14 @@ subprojects {
         }
 
         tasks.withType<SpotBugsTask>().configureEach {
+            // Keep the gate at HIGH confidence so it stays actionable, but raise the analysis
+            // effort to MAX: SpotBugs then runs its full detector set and interprocedural checks
+            // instead of the default subset. Lowering the level to MEDIUM was evaluated and
+            // rejected: it surfaces 156 mostly-noisy findings (96 NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE
+            // from Path#getParent-style calls plus EI_EXPOSE_REP records) that would need blanket
+            // suppressions and stop catching anything new.
             reportLevel.set(Confidence.HIGH)
+            effort.set(Effort.MAX)
             excludeFilter.set(rootProject.layout.projectDirectory.file("config/spotbugs/exclude.xml"))
             reports.maybeCreate("html").required.set(true)
         }

@@ -2,10 +2,12 @@ package com.ecl.modrinth.transaction;
 
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.ModVersion;
+import com.ecl.modrinth.model.InstalledMod;
 import com.ecl.modrinth.service.ModConflict;
 import com.ecl.modrinth.service.ResolvedMod;
 
 import java.util.List;
+import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -44,5 +46,19 @@ public record ModInstallationPlan(
 
     public boolean installable() {
         return conflicts.isEmpty();
+    }
+
+    public ModInstallationPlan withReplacements(Collection<InstalledMod> installedMods) {
+        Map<String, InstalledMod> byProject = installedMods.stream()
+                .collect(Collectors.toMap(InstalledMod::projectId, mod -> mod));
+        List<PlannedModFile> replacements = files.stream().map(file -> {
+            InstalledMod previous = byProject.get(file.version().projectId());
+            return new PlannedModFile(file.version(), file.file(), file.targetPath(),
+                    previous == null ? file.replacedPath()
+                            : instance.gameDirectory().resolve(previous.relativePath()).toAbsolutePath().normalize(),
+                    file.dependency(), file.requiredByProjectId());
+        }).toList();
+        return new ModInstallationPlan(instance, rootVersion, replacements, optionalDependencies,
+                conflicts, warnings, totalDownloadSize, requiresConfirmation, requiredByProjects);
     }
 }

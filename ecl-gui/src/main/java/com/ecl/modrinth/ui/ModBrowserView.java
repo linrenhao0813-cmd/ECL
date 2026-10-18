@@ -1,5 +1,7 @@
 package com.ecl.modrinth.ui;
 
+import com.ecl.util.Messages;
+
 import com.ecl.modrinth.api.ModSearchIndex;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.model.InstalledMod;
@@ -51,7 +53,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     private final ModInstallWorkflow installWorkflow;
     private final Consumer<String> statusConsumer;
     private final Label instanceLabel = new Label();
-    private final Label emptyLabel = new Label("输入关键词或直接浏览兼容模组");
+    private final Label emptyLabel = new Label(Messages.get("modBrowser.empty"));
     private final ListView<ModProject> resultList = new ListView<>();
     private final PauseTransition searchDebounce = new PauseTransition(Duration.millis(400));
     private final ModExternalActions externalActions;
@@ -83,7 +85,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                 viewModel, this::preferredReleaseChannel);
         this.detailsPane = new ModDetailsPane(controller, viewModel, externalActions,
                 this::preferredReleaseChannel, this::showProject,
-                version -> installWorkflow.prepare(version, "无法准备安装计划"));
+                version -> installWorkflow.prepare(version, Messages.get("modBrowser.prepareFailed")));
         controller.registerModInstance(initialInstance);
         viewModel.setInstance(initialInstance);
         buildView(initialInstance);
@@ -101,14 +103,14 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         eyebrow.getStyleClass().add("eyebrow");
         instanceLabel.setText(ModUiFormatter.instanceText(context));
         instanceLabel.getStyleClass().add("mod-instance-badge");
-        Label scope = new Label("搜索与安装始终锁定当前实例的 Minecraft 版本和加载器");
+        Label scope = new Label(Messages.get("modBrowser.scope"));
         scope.getStyleClass().add("status-detail");
         scope.setWrapText(true);
         VBox heading = new VBox(4, eyebrow, instanceLabel, scope);
 
-        Tab browserTab = new Tab("浏览模组", createBrowserPane());
-        installedTab = new Tab("已安装", createInstalledPane());
-        updatesTab = new Tab("更新", createUpdatesPane());
+        Tab browserTab = new Tab(Messages.get("modBrowser.browse"), createBrowserPane());
+        installedTab = new Tab(Messages.get("modBrowser.installed"), createInstalledPane());
+        updatesTab = new Tab(Messages.get("modBrowser.updates"), createUpdatesPane());
         browserTab.setClosable(false);
         installedTab.setClosable(false);
         updatesTab.setClosable(false);
@@ -137,7 +139,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         error.managedProperty().bind(error.visibleProperty());
         error.getStyleClass().add("mod-error");
         error.setWrapText(true);
-        Button cancel = ModUiControls.button("取消", "ghost-button");
+        Button cancel = ModUiControls.button(Messages.get("modBrowser.cancel"), "ghost-button");
         cancel.visibleProperty().bind(viewModel.operationCancellableProperty());
         cancel.managedProperty().bind(cancel.visibleProperty());
         cancel.setOnAction(event -> viewModel.cancelActiveRequest());
@@ -151,7 +153,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
 
     private Node createBrowserPane() {
         TextField search = new TextField();
-        search.setPromptText("搜索模组，例如 sodium、journeymap");
+        search.setPromptText(Messages.get("modBrowser.searchPrompt"));
         search.textProperty().bindBidirectional(viewModel.searchTextProperty());
         HBox.setHgrow(search, Priority.ALWAYS);
 
@@ -164,13 +166,13 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
 
         ComboBox<ModCategoryChoice> category = new ComboBox<>();
         category.getItems().setAll(
-                new ModCategoryChoice("全部分类", ""),
-                new ModCategoryChoice("性能优化", "optimization"),
-                new ModCategoryChoice("科技", "technology"),
-                new ModCategoryChoice("冒险", "adventure"),
-                new ModCategoryChoice("魔法", "magic"),
-                new ModCategoryChoice("实用工具", "utility"),
-                new ModCategoryChoice("装饰", "decoration"));
+                new ModCategoryChoice(Messages.get("modBrowser.category.all"), ""),
+                new ModCategoryChoice(Messages.get("modBrowser.category.optimization"), "optimization"),
+                new ModCategoryChoice(Messages.get("modBrowser.category.technology"), "technology"),
+                new ModCategoryChoice(Messages.get("modBrowser.category.adventure"), "adventure"),
+                new ModCategoryChoice(Messages.get("modBrowser.category.magic"), "magic"),
+                new ModCategoryChoice(Messages.get("modBrowser.category.utility"), "utility"),
+                new ModCategoryChoice(Messages.get("modBrowser.category.decoration"), "decoration"));
         category.getSelectionModel().selectFirst();
         category.setPrefWidth(126);
         category.setOnAction(event -> {
@@ -179,7 +181,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             viewModel.search(false);
         });
 
-        Button searchButton = ModUiControls.button("搜索", "primary-button");
+        Button searchButton = ModUiControls.button(Messages.get("modBrowser.search"), "primary-button");
         searchButton.setMinWidth(64);
         searchButton.setOnAction(event -> viewModel.search(false));
         HBox searchBar = new HBox(8, search, searchButton);
@@ -199,10 +201,10 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                 (observable, oldValue, newValue) -> showProject(newValue));
         VBox.setVgrow(resultList, Priority.ALWAYS);
 
-        Button loadMore = ModUiControls.button("加载更多", "ghost-button");
+        Button loadMore = ModUiControls.button(Messages.get("modBrowser.more"), "ghost-button");
         loadMore.setMaxWidth(Double.MAX_VALUE);
         loadMore.setOnAction(event -> viewModel.search(true));
-        Button retry = ModUiControls.button("重试", "secondary-button");
+        Button retry = ModUiControls.button(Messages.get("modBrowser.retry"), "secondary-button");
         retry.visibleProperty().bind(viewModel.errorMessageProperty().isNotEmpty());
         retry.managedProperty().bind(retry.visibleProperty());
         retry.setOnAction(event -> viewModel.search(false));
@@ -257,8 +259,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                         .map(ModProject::iconUrl).filter(java.util.Objects::nonNull).toList()));
         viewModel.updateCountProperty().addListener((observable, oldValue, newValue) -> {
             int count = newValue == null ? 0 : newValue.intValue();
-            installedTab.setText(count > 0 ? "已安装 (" + count + ")" : "已安装");
-            updatesTab.setText(count > 0 ? "更新 (" + count + ")" : "更新");
+            installedTab.setText(Messages.get("modBrowser.installed") + (count > 0 ? " (" + count + ")" : ""));
+            updatesTab.setText(Messages.get("modBrowser.updates") + (count > 0 ? " (" + count + ")" : ""));
             updatesPane.refreshItems();
             installedPane.refresh();
             resultList.refresh();
@@ -291,9 +293,9 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             return;
         }
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                "将卸载 " + ids.size() + " 个模组。配置文件会保留。",
+                Messages.format("modBrowser.uninstallBody", ids.size()),
                 ButtonType.OK, ButtonType.CANCEL);
-        confirm.setHeaderText("确认卸载");
+        confirm.setHeaderText(Messages.get("modBrowser.uninstall"));
         if (confirm.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK) {
             viewModel.uninstall(ids);
         }
@@ -320,7 +322,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
     private void runUpdates(List<ModUpdate> requestedUpdates) {
         List<ModUpdate> updates = requestedUpdates == null ? List.of() : List.copyOf(requestedUpdates);
         if (updates.isEmpty()) {
-            statusConsumer.accept("没有可用更新");
+            statusConsumer.accept(Messages.get("modBrowser.noUpdates"));
             return;
         }
         updateBatchRunning = true;
@@ -337,16 +339,16 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                         return;
                     }
                     if (result.failures().isEmpty()) {
-                        statusConsumer.accept("全部更新完成：" + result.succeeded() + " 个成功");
+                        statusConsumer.accept(Messages.format("modBrowser.allUpdated", result.succeeded()));
                         return;
                     }
                     String failedNames = result.failures().stream()
                             .map(failure -> failure.item().installedMod().displayName())
                             .distinct()
-                            .reduce((left, right) -> left + "、" + right)
-                            .orElse("未知模组");
-                    statusConsumer.accept("批量更新完成：" + result.succeeded() + " 个成功，"
-                            + result.failures().size() + " 个失败（" + failedNames + "）");
+                            .reduce((left, right) -> left + ", " + right)
+                            .orElse(Messages.get("modBrowser.unknown"));
+                    statusConsumer.accept(Messages.format("modBrowser.batchUpdated", result.succeeded(),
+                            result.failures().size(), failedNames));
                 }));
     }
 
@@ -376,9 +378,9 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                         .toList();
                 ChoiceDialog<String> choice = new ChoiceDialog<>(
                         labels.isEmpty() ? null : labels.getFirst(), labels);
-                choice.setTitle("选择历史版本");
+                choice.setTitle(Messages.get("modBrowser.history"));
                 choice.setHeaderText(selected.displayName());
-                choice.setContentText("兼容版本:");
+                choice.setContentText(Messages.get("modBrowser.compatible"));
                 choice.showAndWait().ifPresent(label -> {
                     int index = labels.indexOf(label);
                     if (index < 0) {
@@ -388,7 +390,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                     viewModel.preparePlan(
                             version, Set.of(), preferredReleaseChannel()).whenComplete((plan, failure) -> {
                             Platform.runLater(() -> installWorkflow.handlePreparedPlan(
-                                    version, plan, failure, "无法准备安装计划"));
+                                    version, plan, failure, Messages.get("modBrowser.prepareFailed")));
                         });
                 });
             });
@@ -413,8 +415,8 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
 
     private void importLocalJar() {
         FileChooser chooser = new FileChooser();
-        chooser.setTitle("导入本地模组 JAR");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Minecraft 模组 (*.jar)", "*.jar"));
+        chooser.setTitle(Messages.get("modBrowser.import"));
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(Messages.get("modBrowser.jar"), "*.jar"));
         File file = chooser.showOpenDialog(getScene() == null ? null : getScene().getWindow());
         if (file != null) {
             viewModel.importLocalJar(file.toPath());

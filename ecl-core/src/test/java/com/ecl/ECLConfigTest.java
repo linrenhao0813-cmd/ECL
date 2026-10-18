@@ -7,6 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ECLConfigTest {
     @Test
+    void runtimeVersionMatchesTheBuildVersion() {
+        assertEquals(System.getProperty("ecl.expectedVersion"), ECLConfig.LAUNCHER_VERSION);
+        assertTrue(!ECLConfig.LAUNCHER_VERSION.contains("${"));
+    }
+
+    @Test
     void automaticMemoryIsBoundedAndAligned() {
         int memoryMb = ECLConfig.calculateAutoMemoryMb();
 

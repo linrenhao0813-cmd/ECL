@@ -60,6 +60,25 @@ class InstanceLaunchProfileStoreTest {
     }
 
     @Test
+    void keepsLaunchProfilesIndependentPerInstance() throws Exception {
+        InstanceLaunchProfileStore store = new InstanceLaunchProfileStore();
+        Path firstRoot = tempDir.resolve("first");
+        Path secondRoot = tempDir.resolve("second");
+        InstanceLaunchProfile first = new InstanceLaunchProfile(1,
+                InstanceLaunchProfile.JavaMode.AUTO, "", InstanceLaunchProfile.MemoryMode.CUSTOM,
+                4096, List.of("-Dinstance=first"));
+        InstanceLaunchProfile second = new InstanceLaunchProfile(1,
+                InstanceLaunchProfile.JavaMode.CUSTOM, "C:\\JDK\\bin\\java.exe",
+                InstanceLaunchProfile.MemoryMode.AUTO, 0, List.of("-Dinstance=second"));
+
+        store.save(firstRoot, first);
+        store.save(secondRoot, second);
+
+        assertEquals(first, store.load(firstRoot));
+        assertEquals(second, store.load(secondRoot));
+    }
+
+    @Test
     void readsLegacyProfileWithRetiredFieldsWithoutRewritingIt() throws Exception {
         InstanceLaunchProfileStore store = new InstanceLaunchProfileStore();
         Path file = store.profileFile(tempDir);

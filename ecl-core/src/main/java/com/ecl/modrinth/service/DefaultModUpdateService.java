@@ -13,6 +13,7 @@ import com.ecl.modrinth.model.ReleaseChannel;
 import com.ecl.modrinth.provider.ModMetadataProvider;
 import com.ecl.modrinth.provider.ModrinthMetadataProvider;
 import com.ecl.modrinth.transaction.InstallationPlanBuilder;
+import com.ecl.modrinth.transaction.ModInstallationPlan;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -176,6 +177,12 @@ public final class DefaultModUpdateService implements ModUpdateService {
 
     @Override
     public CompletableFuture<ModInstallationResult> applyUpdate(ModUpdate update, Set<String> protectedProjects) {
+        return prepareUpdate(update, protectedProjects).thenCompose(this::applyPreparedUpdate);
+    }
+
+    @Override
+    public CompletableFuture<PreparedModUpdate> prepareUpdate(
+            ModUpdate update, Set<String> protectedProjects) {
         Objects.requireNonNull(update, "update");
         Set<String> protectedIds = Set.copyOf(protectedProjects);
         ModInstanceContext instance = instanceResolver.apply(update.installedMod().instanceId());
@@ -191,8 +198,19 @@ public final class DefaultModUpdateService implements ModUpdateService {
                             throw new ModConflictException("依赖更新需要修改已跳过或禁用的模组: " + resolved.version().projectId());
                         }
                     }
-                    return planBuilder.build(instance, update.availableVersion(), resolution);
-                })
-                .thenCompose(plan -> installationService.install(plan, null));
+                    ModInstallationPlan plan = planBuilder.build(instance,
+                            update.availableVersion(), resolution)
+                            .withReplacements(List.of(update.installedMod()));
+                    if (!plan.installable()) {
+                        throw new ModConflictException("依赖更新计划包含无法解决的冲突");
+                    }
+                    return new PreparedModUpdate(update, plan);
+                });
+    }
+
+    @Override
+    public CompletableFuture<ModInstallationResult> applyPreparedUpdate(PreparedModUpdate prepared) {
+        Objects.requireNonNull(prepared, "prepared");
+        return installationService.install(prepared.installationPlan(), null);
     }
 }
