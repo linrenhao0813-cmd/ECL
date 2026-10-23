@@ -1,5 +1,7 @@
 package com.ecl.modrinth.service;
 
+import com.ecl.launch.GameProcessMarker;
+
 import com.ecl.modrinth.api.ModInstallationException;
 import com.ecl.modrinth.api.ModrinthApiClient;
 import com.ecl.modrinth.download.HashVerifier;
@@ -95,6 +97,9 @@ public final class DefaultLocalModScanner implements LocalModScanner {
                              InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
                     if (processLock == null) {
                         throw new IOException("Instance is running or busy in another launcher process");
+                    }
+                    if (instanceRunning.test(instance.instanceId()) || GameProcessMarker.isRunning(instance.gameDirectory())) {
+                        throw new ModInstallationException("实例正在运行，不能修复模组索引");
                     }
                     return scanFiles(instance, true);
                 }

@@ -61,17 +61,15 @@ final class GameManifestParser {
             if (lib.has("rules") && !RuleEvaluator.isAllowed(lib.getAsJsonArray("rules"))) {
                 continue;
             }
-            if (lib.has("downloads")) {
-                JsonObject downloads = lib.getAsJsonObject("downloads");
-                if (downloads.has("artifact")) {
-                    JsonObject artifact = downloads.getAsJsonObject("artifact");
-                    String path = artifact.get("path").getAsString();
-                    File target = safeLibraryTarget(path);
-                    if (target != null && !target.exists()) {
-                        missing.add(lib.has("name") ? lib.get("name").getAsString() : path);
-                    }
+            JsonObject downloads = lib.has("downloads") ? lib.getAsJsonObject("downloads") : null;
+            if (downloads != null && downloads.has("artifact")) {
+                JsonObject artifact = downloads.getAsJsonObject("artifact");
+                String path = artifact.get("path").getAsString();
+                File target = safeLibraryTarget(path);
+                if (target != null && !target.exists()) {
+                    missing.add(lib.has("name") ? lib.get("name").getAsString() : path);
                 }
-            } else {
+            } else if (downloads == null || downloads.has("classifiers")) {
                 String name = lib.has("name") ? lib.get("name").getAsString() : "";
                 String repository = lib.has("url") ? lib.get("url").getAsString() : "";
                 if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {

@@ -59,4 +59,15 @@ class ResourceBundleI18nTest {
         }
         return properties;
     }
+
+    @Test
+    void clientLoggingRepairCategoryIsTranslated() {
+        String key = "instanceRepair.category.logging";
+        ResourceBundleI18n i18n = new ResourceBundleI18n(ResourceBundleI18n.SIMPLIFIED_CHINESE);
+        assertEquals("客户端日志配置", i18n.text(key));
+        i18n.setLocale(ResourceBundleI18n.ENGLISH);
+        assertEquals("Client logging configuration", i18n.text(key));
+        i18n.setLocale(ResourceBundleI18n.TRADITIONAL_CHINESE);
+        assertEquals("用戶端日誌設定", i18n.text(key));
+    }
 }

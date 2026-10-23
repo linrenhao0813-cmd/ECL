@@ -1,5 +1,7 @@
 package com.ecl.modrinth.service;
 
+import com.ecl.launch.GameProcessMarker;
+
 import com.ecl.modrinth.api.ModConflictException;
 import com.ecl.modrinth.api.ModInstallationException;
 import com.ecl.modrinth.download.DownloadedModFile;
@@ -78,6 +80,9 @@ public final class ModInstallationService {
             throw new ModInstallationException("实例正在运行，不能修改模组文件");
         }
         try (AutoCloseable ignored = operationLock.acquire(instance.instanceId())) {
+            if (instanceRunning.test(instance.instanceId()) || GameProcessMarker.isRunning(instance.gameDirectory())) {
+                throw new ModInstallationException("实例正在运行，不能修改模组文件");
+            }
             checkCancelled();
             prepareDirectoriesAndSpace(plan);
             FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory());

@@ -57,6 +57,64 @@ class GameInstallationVerifierTest {
     }
 
     @Test
+    void reportsTheLegacyClientLoggingConfigAsItsOwnCategory() throws Exception {
+        Fixture fixture = createInstallation();
+
+        GameInstallationVerifier.Report healthy = fixture.verifier().inspect("fabric-profile");
+        assertEquals(0, healthy.checks().stream()
+                .filter(check -> check.category() == Category.LOGGING).count(),
+                "versions without a logging block must not gain a LOGGING check");
+
+        byte[] config = "log-config".getBytes(StandardCharsets.UTF_8);
+        String configHash = sha1(config);
+        var profile = com.google.gson.JsonParser.parseString(Files.readString(fixture.profile()))
+                .getAsJsonObject();
+        profile.add("logging", com.google.gson.JsonParser.parseString("""
+                {"client":{"argument":"-Dlog4j.configurationFile=${path}",
+                 "file":{"id":"client-1.7.2.xml","sha1":"%s","size":%d,
+                  "url":"https://launcher.example/client-1.7.2.xml"}}}
+                """.formatted(configHash, config.length)).getAsJsonObject());
+        Files.writeString(fixture.profile(), profile.toString());
+
+        GameInstallationVerifier.Report missing = fixture.verifier().inspect("fabric-profile");
+        GameInstallationVerifier.Check missingConfig = missing.checks().stream()
+                .filter(check -> check.category() == Category.LOGGING).findFirst()
+                .orElseThrow(() -> new AssertionError(missing.checks().toString()));
+        assertEquals(Status.MISSING, missingConfig.status());
+        assertTrue(missingConfig.repairable());
+        assertTrue(missingConfig.path().replace('\\', '/').endsWith("log_configs/client-1.7.2.xml"),
+                missingConfig.path());
+
+        Path configFile = fixture.assets().resolve("log_configs/client-1.7.2.xml");
+        Files.createDirectories(configFile.getParent());
+        Files.write(configFile, config);
+        GameInstallationVerifier.Report verified = fixture.verifier().inspect("fabric-profile");
+        assertEquals(Status.VERIFIED, verified.checks().stream()
+                .filter(check -> check.category() == Category.LOGGING).findFirst().orElseThrow().status());
+
+        Files.write(configFile, "tampered".getBytes(StandardCharsets.UTF_8));
+        GameInstallationVerifier.Report corrupt = fixture.verifier().inspect("fabric-profile");
+        GameInstallationVerifier.Check corruptConfig = corrupt.checks().stream()
+                .filter(check -> check.category() == Category.LOGGING).findFirst().orElseThrow();
+        assertEquals(Status.CORRUPT, corruptConfig.status());
+        assertTrue(corruptConfig.repairable());
+
+        Files.writeString(configFile, "different-size");
+        profile.remove("logging");
+        profile.add("logging", com.google.gson.JsonParser.parseString("""
+                {"client":{"argument":"-Dlog4j.configurationFile=${path}",
+                 "file":{"id":"client-1.7.2.xml","sha1":"not-a-sha1","size":0,
+                  "url":"https://launcher.example/client-1.7.2.xml"}}}
+                """).getAsJsonObject());
+        Files.writeString(fixture.profile(), profile.toString());
+        GameInstallationVerifier.Report unverifiable = fixture.verifier().inspect("fabric-profile");
+        assertFalse(unverifiable.complete());
+        assertTrue(unverifiable.checks().stream().anyMatch(check ->
+                check.category() == Category.METADATA && check.status() == Status.UNVERIFIABLE));
+        assertTrue(unverifiable.checks().stream().noneMatch(check -> check.category() == Category.LOGGING));
+    }
+
+    @Test
     void malformedInheritanceIsReportedInsteadOfPassing() throws Exception {
         Path versions = temp.resolve("versions");
         Files.createDirectories(versions.resolve("bad-profile"));

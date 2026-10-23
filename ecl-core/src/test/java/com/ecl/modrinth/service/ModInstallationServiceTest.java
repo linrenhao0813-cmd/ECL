@@ -54,6 +54,15 @@ class ModInstallationServiceTest {
     private ModInstallationService installer;
     private DefaultModManagementService management;
 
+    @Test
+    void runningMarkerPreventsInstallationAfterLauncherRestart() throws Exception {
+        com.ecl.launch.GameProcessMarker.record(instance.gameDirectory(), ProcessHandle.current());
+
+        assertThrows(CompletionException.class, () -> install(version("a-v1", "a", "a.jar")));
+        assertFalse(Files.exists(instance.modsDirectory().resolve("a.jar")));
+        assertFalse(Files.exists(repository.indexPath(instance)));
+    }
+
     @BeforeEach
     void setUp() throws Exception {
         downloadPolicy = TestNetworkPolicy.allowLoopbackArtifactDownloads();

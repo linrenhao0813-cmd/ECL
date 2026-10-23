@@ -12,10 +12,23 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DefaultAccountServiceTest {
     @TempDir
     Path temp;
+
+    @Test
+    void rejectsInvalidRootWithoutOverwritingAccountFile() throws Exception {
+        Path file = temp.resolve("accounts.json");
+        DefaultAccountService service = new DefaultAccountService(file);
+        for (String original : new String[] {"{\"accounts\":[\"preserve\"]}", "null", "42", "\"accounts\"", ""}) {
+            Files.writeString(file, original);
+            assertThrows(com.ecl.exception.AuthException.class, service::list);
+            assertThrows(com.ecl.exception.AuthException.class, () -> service.addOffline("Steve"));
+            assertEquals(original, Files.readString(file));
+        }
+    }
 
     @AfterEach
     void clearCryptoKeyOverride() {

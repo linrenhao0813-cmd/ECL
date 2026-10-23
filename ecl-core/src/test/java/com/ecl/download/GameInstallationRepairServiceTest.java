@@ -56,6 +56,7 @@ class GameInstallationRepairServiceTest {
     void repairsMissingVerifiedClientAndAssetsWithoutTouchingUserFiles() throws Exception {
         byte[] client = "repaired-client".getBytes(StandardCharsets.UTF_8);
         byte[] index = "{\"objects\":{}}".getBytes(StandardCharsets.UTF_8);
+        byte[] logging = "patched logging config".getBytes(StandardCharsets.UTF_8);
         String clientSha1 = sha1(client);
         String indexSha1 = sha1(index);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -70,11 +71,19 @@ class GameInstallationRepairServiceTest {
             exchange.getResponseBody().write(index);
             exchange.close();
         });
+        server.createContext("/logging.xml", exchange -> {
+            exchange.sendResponseHeaders(200, logging.length);
+            exchange.getResponseBody().write(logging);
+            exchange.close();
+        });
         String metadata = "{\"id\":\"repair-test\",\"downloads\":{\"client\":{"
                 + "\"url\":\"" + origin + "/client.jar\",\"sha1\":\"" + clientSha1
                 + "\",\"size\":" + client.length + "}},\"assetIndex\":{\"id\":\"test\","
                 + "\"url\":\"" + origin + "/index.json\",\"sha1\":\"" + indexSha1
-                + "\",\"size\":" + index.length + "},\"libraries\":[]}";
+                + "\",\"size\":" + index.length + "},\"libraries\":[],"
+                + "\"logging\":{\"client\":{\"argument\":\"-Dlog4j.configurationFile=${path}\",\"file\":{"
+                + "\"id\":\"client.xml\",\"sha1\":\"" + sha1(logging) + "\",\"size\":" + logging.length
+                + ",\"url\":\"" + origin + "/logging.xml\"}}}}";
         byte[] metadataBytes = metadata.getBytes(StandardCharsets.UTF_8);
         String metadataSha1 = sha1(metadataBytes);
         server.createContext("/version.json", exchange -> {
@@ -121,6 +130,8 @@ class GameInstallationRepairServiceTest {
                     ECLConfig.getAssetsDir().toPath(), gameRoot);
 
             assertTrue(result.after().complete());
+            assertEquals("patched logging config", Files.readString(
+                    ECLConfig.getAssetsDir().toPath().resolve("log_configs/client.xml")));
             assertTrue(result.repaired().size() >= 2);
             assertEquals("user mod", Files.readString(mod));
             assertEquals("user save", Files.readString(save));

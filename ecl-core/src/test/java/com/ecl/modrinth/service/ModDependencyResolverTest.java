@@ -287,8 +287,191 @@ class ModDependencyResolverTest {
                 result.installOrder().stream().map(mod -> mod.version().id()).toList());
     }
 
+    @Test
+    void doesNotReuseInstalledDependencyBuiltForAnotherMinecraftVersion() throws Exception {
+        createModFile("dependency");
+        ModVersion dependency = version("dependency-v1", "dependency");
+        ModVersion root = version("root-v1", "root", depProject("dependency", DependencyType.REQUIRED));
+        api.projectVersions.put("dependency", List.of(dependency));
+        InstalledMod stale = installedRecord("dependency", "dependency-v1", "1.20.1", "fabric", "release");
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(stale), 16, 32);
+
+        DependencyResolutionResult result = resolver.resolve(instance, root).join();
+
+        assertEquals(List.of("dependency-v1", "root-v1"),
+                result.installOrder().stream().map(mod -> mod.version().id()).toList());
+        assertTrue(result.conflicts().isEmpty(), "已安装版本对实例不兼容时应重装而不是报冲突");
+    }
+
+    @Test
+    void doesNotReuseInstalledDependencyWhoseReleaseChannelIsNotAllowed() throws Exception {
+        createModFile("dependency");
+        ModVersion dependency = version("dependency-v1", "dependency");
+        ModVersion root = version("root-v1", "root", depProject("dependency", DependencyType.REQUIRED));
+        api.projectVersions.put("dependency", List.of(dependency));
+        InstalledMod alpha = installedRecord("dependency", "dependency-v1", "1.21.1", "fabric", "alpha");
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(alpha), 16, 32);
+
+        DependencyResolutionResult result = resolver.resolve(instance, root).join();
+
+        assertEquals(List.of("dependency-v1", "root-v1"),
+                result.installOrder().stream().map(mod -> mod.version().id()).toList());
+        assertTrue(result.conflicts().isEmpty(), "版本通道不允许时应重装而不是报冲突");
+    }
+
+    @Test
+    void doesNotReuseInstalledDependencyBuiltForAnotherLoader() throws Exception {
+        createModFile("dependency");
+        ModVersion dependency = version("dependency-v1", "dependency");
+        ModVersion root = version("root-v1", "root", depProject("dependency", DependencyType.REQUIRED));
+        api.projectVersions.put("dependency", List.of(dependency));
+        InstalledMod forgeRecord = installedRecord("dependency", "dependency-v1", "1.21.1", "forge", "release");
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(forgeRecord), 16, 32);
+
+        DependencyResolutionResult result = resolver.resolve(instance, root).join();
+
+        assertEquals(List.of("dependency-v1", "root-v1"),
+                result.installOrder().stream().map(mod -> mod.version().id()).toList());
+    }
+
+    @Test
+    void reusesInstalledDependencyWhoseLoaderIsRecordedAsEnumName() throws Exception {
+        createModFile("dependency");
+        ModVersion root = version("root-v1", "root", depProject("dependency", DependencyType.REQUIRED));
+        InstalledMod fabricRecord = installedRecord("dependency", "dependency-v1", "1.21.1", "FABRIC", "release");
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(fabricRecord), 16, 32);
+
+        DependencyResolutionResult result = resolver.resolve(instance, root).join();
+
+        assertEquals(List.of("root-v1"),
+                result.installOrder().stream().map(mod -> mod.version().id()).toList());
+        assertEquals(Set.of("root"), result.requiredByProjects().get("dependency"));
+        assertTrue(result.conflicts().isEmpty());
+    }
+
+    @Test
+    void doesNotReuseInstalledVersionOfAnotherProject() throws Exception {
+        createModFile("other");
+        ModVersion shared = version("shared-v1", "shared");
+        api.versions.put("shared-v1", shared);
+        ModVersion root = version("root-v1", "root",
+                depVersion("shared-v1", "shared", DependencyType.REQUIRED));
+        InstalledMod otherProject = installedRecord("other", "shared-v1", "1.21.1", "fabric", "release");
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(otherProject), 16, 32);
+
+        DependencyResolutionResult result = resolver.resolve(instance, root).join();
+
+        assertEquals(List.of("shared-v1", "root-v1"),
+                result.installOrder().stream().map(mod -> mod.version().id()).toList());
+    }
+
+    @Test
+    void detectsPinnedVersionConflictAgainstReusedInstalledDependency() throws Exception {
+        createModFile("dependency");
+        ModVersion first = version("first-v1", "first", depProject("dependency", DependencyType.REQUIRED));
+        ModVersion second = version("second-v1", "second",
+                depVersion("dependency-v2", "dependency", DependencyType.REQUIRED));
+        ModVersion pinned = version("dependency-v2", "dependency");
+        ModVersion root = version("root-v1", "root",
+                depProject("first", DependencyType.REQUIRED), depProject("second", DependencyType.REQUIRED));
+        api.projectVersions.put("first", List.of(first));
+        api.projectVersions.put("second", List.of(second));
+        api.versions.put("dependency-v2", pinned);
+        InstalledMod reused = installedRecord("dependency", "dependency-v1", "1.21.1", "fabric", "release");
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(reused), 16, 32);
+
+        DependencyResolutionResult result = resolver.resolve(instance, root).join();
+
+        assertEquals(1, result.conflicts().size(), "复用已安装依赖后仍须检测同一项目的不同版本要求");
+        ModConflict conflict = result.conflicts().getFirst();
+        assertTrue(conflict.message().contains("dependency-v1"));
+        assertTrue(conflict.message().contains("dependency-v2"));
+        assertEquals(List.of("root", "second", "dependency"), conflict.dependencyPath());
+        assertFalse(new InstallationPlanBuilder().build(instance, root, result).installable());
+    }
+
+    @Test
+    void pinnedInstalledVersionUpgradeIsNotReportedAsConflict() throws Exception {
+        createModFile("dependency");
+        ModVersion pinned = version("dependency-v2", "dependency");
+        ModVersion root = version("root-v1", "root",
+                depVersion("dependency-v2", "dependency", DependencyType.REQUIRED));
+        api.versions.put("dependency-v2", pinned);
+        InstalledMod outdated = installedRecord("dependency", "dependency-v1", "1.21.1", "fabric", "release");
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(outdated), 16, 32);
+
+        DependencyResolutionResult result = resolver.resolve(instance, root).join();
+
+        assertEquals(List.of("dependency-v2", "root-v1"),
+                result.installOrder().stream().map(mod -> mod.version().id()).toList());
+        assertTrue(result.conflicts().isEmpty(), "显式升级已安装依赖属于正常重装，不应误判为冲突");
+    }
+
     private DefaultModDependencyResolver resolver() {
         return new DefaultModDependencyResolver(api, new DefaultModVersionSelector());
+    }
+
+    @Test
+    void disabledRequiredDependencyIsIncludedInTheInstallPlan() throws Exception {
+        Files.createDirectories(instance.modsDirectory());
+        Files.writeString(instance.modsDirectory().resolve("dependency.jar.disabled"), "x");
+        Instant now = Instant.now();
+        InstalledMod disabled = new InstalledMod(instance.instanceId(), "dependency", "dependency-v1", "", "Dependency",
+                "1", "dependency.jar", Path.of("mods/dependency.jar.disabled"), "", "", 1,
+                instance.minecraftVersion(), "fabric", "release", false, true, "", now, now);
+        ModVersion root = version("root-v1", "root", depProject("dependency", DependencyType.REQUIRED));
+        api.projectVersions.put("dependency", List.of(version("dependency-v1", "dependency")));
+
+        DependencyResolutionResult result = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(disabled), 16, 32).resolve(instance, root).join();
+
+        assertEquals(List.of("dependency", "root"),
+                result.installOrder().stream().map(mod -> mod.version().projectId()).toList());
+        assertTrue(result.conflicts().isEmpty());
+        ModVersion incompatible = version("root-v1", "root", depProject("dependency", DependencyType.INCOMPATIBLE));
+        assertTrue(new DefaultModDependencyResolver(api, new DefaultModVersionSelector(),
+                ignored -> List.of(disabled), 16, 32).resolve(instance, incompatible).join().conflicts().isEmpty());
+    }
+
+    @Test
+    void versionSpecificIncompatibilityAllowsOtherInstalledAndPlannedVersions() {
+        ModVersion root = version("root-v1", "root", depVersion("dependency-v1", "dependency", DependencyType.INCOMPATIBLE));
+        InstalledMod installed = installedRecord("dependency", "dependency-v2", "1.21.1", "fabric", "release");
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(installed), 16, 32);
+        assertTrue(resolver.resolve(instance, root).join().conflicts().isEmpty());
+
+        api.versions.put("dependency-v2", version("dependency-v2", "dependency"));
+        ModVersion replacing = version("root-v1", "root",
+                depVersion("dependency-v2", "dependency", DependencyType.REQUIRED),
+                depVersion("dependency-v1", "dependency", DependencyType.INCOMPATIBLE));
+        InstalledMod previous = installedRecord("dependency", "dependency-v1", "1.21.1", "fabric", "release");
+        DefaultModDependencyResolver upgrade = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(previous), 16, 32);
+        assertTrue(upgrade.resolve(instance, replacing).join().conflicts().isEmpty());
+
+        ModVersion matching = version("root-v1", "root", depVersion("dependency-v2", "dependency", DependencyType.INCOMPATIBLE));
+        assertEquals(1, resolver.resolve(instance, matching).join().conflicts().size());
+    }
+
+    private void createModFile(String project) throws Exception {
+        Files.createDirectories(instance.modsDirectory());
+        Files.writeString(instance.modsDirectory().resolve(project + ".jar"), "x");
+    }
+
+    private InstalledMod installedRecord(String project, String versionId, String minecraftVersion,
+                                         String loader, String versionType) {
+        Instant now = Instant.now();
+        return new InstalledMod(instance.instanceId(), project, versionId, project, project,
+                "1", project + ".jar", Path.of("mods", project + ".jar"), "", "", 1,
+                minecraftVersion, loader, versionType, true, true, "", now, now);
     }
 
     private static ModVersion version(String id, String project, ModDependency... dependencies) {

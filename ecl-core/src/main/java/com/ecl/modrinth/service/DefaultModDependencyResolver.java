@@ -154,6 +154,16 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
             }
             return CompletableFuture.completedFuture(null);
         }
+        if (context.isReusedInstalledProject(projectId)) {
+            // An earlier branch reused the installed file, so a different planned version would overwrite it silently.
+            String reusedVersionId = context.reusedInstalledVersionId(projectId);
+            if (reusedVersionId != null && !reusedVersionId.equals(version.id())) {
+                context.conflicts.add(new ModConflict(projectId, projectId,
+                        "已安装版本不满足依赖约束: " + reusedVersionId + " / " + version.id(),
+                        appendPath(path, projectId)));
+            }
+            return CompletableFuture.completedFuture(null);
+        }
         if (++context.dependencyCount > maxDependencies) {
             return CompletableFuture.failedFuture(new DependencyResolutionException(
                     "依赖数量超过限制 " + maxDependencies));
@@ -198,8 +208,22 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
             ResolutionContext context, ModVersion owner, ModDependency dependency, Deque<String> path, int depth) {
         InstalledMod installed = findInstalledDependency(context, dependency);
         if (installed != null) {
-            context.requireDependency(installed.projectId(), projectIdentity(owner));
-            return CompletableFuture.completedFuture(null);
+            String installedProjectId = text(installed.projectId());
+            String selectedVersionId = context.selectedVersionId(installedProjectId);
+            if (selectedVersionId != null) {
+                // This project already has a planned or reused selection; an unpinned requirement is satisfied by it.
+                reportPinnedReuseConflict(context, dependency, installedProjectId, selectedVersionId, path);
+                context.requireDependency(installedProjectId, projectIdentity(owner));
+                return CompletableFuture.completedFuture(null);
+            }
+            if (satisfiesInstalledConstraints(installed, dependency, context.compatibility, context.releaseChannel)) {
+                context.requireDependency(installedProjectId, projectIdentity(owner));
+                // Reused files must stay visible to later branches, otherwise version conflicts are silently missed.
+                context.reuseInstalledDependency(installed);
+                return CompletableFuture.completedFuture(null);
+            }
+            // The installed file does not satisfy the instance (Minecraft version, loader or channel): reinstall the
+            // correct version without a conflict, so a normal repair or upgrade is never blocked as a conflict.
         }
         return resolveDependencyVersion(context, dependency, path)
                 .thenCompose(version -> {
@@ -208,6 +232,22 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
                             .orElseThrow(() -> missingDependency(path, dependency, "没有可安装文件"));
                     return visit(context, version, file, true, projectIdentity(owner), path, depth);
                 });
+    }
+
+    /**
+     * Records a conflict only when the dependency pins a version that differs from the version already selected for
+     * that project. Unpinned requirements and plain instance mismatches are not conflicts.
+     */
+    private static void reportPinnedReuseConflict(
+            ResolutionContext context, ModDependency dependency, String projectId,
+            String selectedVersionId, Deque<String> path) {
+        String pinnedVersionId = text(dependency.versionId());
+        if (pinnedVersionId.isBlank() || pinnedVersionId.equals(selectedVersionId)) {
+            return;
+        }
+        context.conflicts.add(new ModConflict(projectId, projectId,
+                "已安装版本不满足依赖约束: " + selectedVersionId + " / " + pinnedVersionId,
+                appendPath(path, projectId)));
     }
 
     private CompletableFuture<Void> resolveOptionalDependency(
@@ -244,7 +284,44 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         Collection<InstalledMod> candidates = requiredVersionId.isBlank()
                 ? context.installedByProjectId.getOrDefault(requiredProjectId, List.of())
                 : context.installedByVersionId.getOrDefault(requiredVersionId, List.of());
-        return candidates.stream().filter(context::isUsableInstalledFile).findFirst().orElse(null);
+        return candidates.stream().filter(InstalledMod::enabled)
+                .filter(context::isUsableInstalledFile).findFirst().orElse(null);
+    }
+
+    /**
+     * An installed file may only be reused when it satisfies the dependency constraint and still matches the instance.
+     * Instance mismatches (Minecraft version, loader, release channel) are reinstalled silently, because that is a
+     * normal repair/upgrade; only an explicit pinned version difference is treated as a user-visible conflict.
+     */
+    private static boolean satisfiesInstalledConstraints(
+            InstalledMod installed, ModDependency dependency, ModCompatibility compatibility,
+            ReleaseChannel releaseChannel) {
+        String requiredProjectId = text(dependency.projectId());
+        if (!requiredProjectId.isBlank() && !requiredProjectId.equals(text(installed.projectId()))) {
+            return false;
+        }
+        String requiredVersionId = text(dependency.versionId());
+        if (!requiredVersionId.isBlank() && !requiredVersionId.equals(text(installed.versionId()))) {
+            return false;
+        }
+        String installedMinecraftVersion = text(installed.minecraftVersion());
+        if (!installedMinecraftVersion.isBlank()
+                && !installedMinecraftVersion.equals(text(compatibility.minecraftVersion()))) {
+            return false;
+        }
+        String installedLoader = text(installed.loader());
+        if (!installedLoader.isBlank() && !sameLoader(installedLoader, compatibility)) {
+            return false;
+        }
+        String installedVersionType = text(installed.versionType());
+        return installedVersionType.isBlank() || releaseChannel.allows(installedVersionType);
+    }
+
+    /** Accepts records written as the Modrinth API name ("fabric") and records written as the enum name ("FABRIC"). */
+    private static boolean sameLoader(String recordedLoader, ModCompatibility compatibility) {
+        return recordedLoader.equalsIgnoreCase(compatibility.loader().apiName())
+                || recordedLoader.equalsIgnoreCase(compatibility.loader().name())
+                || com.ecl.modrinth.instance.ModLoader.fromApiName(recordedLoader) == compatibility.loader();
     }
 
     private static boolean isUsableInstalledFile(
@@ -299,15 +376,11 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
 
     private void detectIncompatible(
             ResolutionContext context, ModVersion owner, ModDependency dependency, List<String> path) {
-        String targetProject = dependency.projectId();
-        String targetVersion = dependency.versionId();
-        boolean planned = targetProject != null && !targetProject.isBlank()
-                && context.selectedVersions.containsKey(targetProject);
-        planned |= targetVersion != null && !targetVersion.isBlank()
-                && context.selectedVersions.values().stream().anyMatch(version -> targetVersion.equals(version.id()));
-        boolean installed = context.installedMods.stream().anyMatch(mod ->
-                (targetProject != null && !targetProject.isBlank() && targetProject.equals(mod.projectId()))
-                        || (targetVersion != null && !targetVersion.isBlank() && targetVersion.equals(mod.versionId())));
+        boolean planned = context.selectedVersions.values().stream().anyMatch(version ->
+                matchesDependency(dependency, version.projectId(), version.id()));
+        boolean installed = context.installedMods.stream().filter(InstalledMod::enabled)
+                .filter(mod -> !context.selectedVersions.containsKey(mod.projectId()))
+                .anyMatch(mod -> matchesDependency(dependency, mod.projectId(), mod.versionId()));
         if (planned || installed) {
             context.conflicts.add(new ModConflict(
                     projectIdentity(owner),
@@ -315,6 +388,12 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
                     "存在 incompatible 冲突",
                     appendPath(path, dependencyIdentity(dependency))));
         }
+    }
+
+    private static boolean matchesDependency(ModDependency dependency, String projectId, String versionId) {
+        return !text(dependency.versionId()).isBlank()
+                ? text(dependency.versionId()).equals(versionId)
+                : !text(dependency.projectId()).isBlank() && text(dependency.projectId()).equals(projectId);
     }
 
     private static NoCompatibleVersionException missingDependency(
@@ -368,6 +447,8 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
         private final Set<String> selectedOptionalProjects;
         private final ReleaseChannel releaseChannel;
         private final Map<String, ModVersion> selectedVersions = new LinkedHashMap<>();
+        // Installed dependencies reused as-is, keyed like selectedVersions, so later branches still detect conflicts.
+        private final Map<String, InstalledMod> reusedInstalledDependencies = new LinkedHashMap<>();
         private final List<ResolvedMod> installOrder = new ArrayList<>();
         private final List<ResolvedMod> optionalDependencies = new ArrayList<>();
         private final List<ModConflict> conflicts = new ArrayList<>();
@@ -401,6 +482,41 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
 
         private void requireDependency(String projectId, String owner) {
             requiredByProjects.computeIfAbsent(projectId, ignored -> new HashSet<>()).add(owner);
+        }
+
+        private void reuseInstalledDependency(InstalledMod installed) {
+            String project = text(installed.projectId());
+            String version = text(installed.versionId());
+            // A record without a version ID cannot be compared against later pinned requirements, so it is not tracked.
+            if (!project.isBlank() && !version.isBlank()) {
+                reusedInstalledDependencies.putIfAbsent(project, installed);
+            }
+        }
+
+        /**
+         * Version ID already fixed for this project in the current pass: either planned through {@code visit} or reused
+         * from the installed index. Returns {@code null} when nothing has been decided yet.
+         */
+        private String selectedVersionId(String projectId) {
+            if (projectId == null || projectId.isBlank()) {
+                return null;
+            }
+            ModVersion planned = selectedVersions.get(projectId);
+            if (planned != null) {
+                return text(planned.id());
+            }
+            InstalledMod reused = reusedInstalledDependencies.get(projectId);
+            return reused == null ? null : text(reused.versionId());
+        }
+
+        /** Version ID of the installed file reused for this project by an earlier branch, or {@code null}. */
+        private String reusedInstalledVersionId(String projectId) {
+            InstalledMod reused = reusedInstalledDependencies.get(projectId);
+            return reused == null ? null : text(reused.versionId());
+        }
+
+        private boolean isReusedInstalledProject(String projectId) {
+            return reusedInstalledDependencies.containsKey(projectId);
         }
 
         private Map<String, List<InstalledMod>> indexInstalledMods(

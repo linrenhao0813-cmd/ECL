@@ -1,9 +1,11 @@
 package com.ecl.launch;
 
 import com.ecl.auth.AuthProvider;
+import com.ecl.download.LegacyAssetMaterializer;
 import com.ecl.game.VersionMetadata;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -17,7 +19,7 @@ final class LaunchVariables {
     }
 
     /** Compute the token map for {@code version}. */
-    static Map<String, String> of(LaunchOptions options, VersionMetadata version) {
+    static Map<String, String> of(LaunchOptions options, VersionMetadata version) throws IOException {
         File gameDir = options.gameDirectory();
         File assetsRoot = options.environment().assetsDirectory();
         File librariesDir = options.environment().librariesDirectory();
@@ -32,6 +34,8 @@ final class LaunchVariables {
         variables.put("${version_type}", options.environment().launcherName());
         variables.put("${game_directory}", gameDir == null ? "" : gameDir.getAbsolutePath());
         variables.put("${assets_root}", assetsRoot.getAbsolutePath());
+        variables.put("${game_assets}", LegacyAssetMaterializer.gameAssetsDirectory(
+                version == null ? null : version.assetIndex(), assetsRoot, gameDir).getAbsolutePath());
         variables.put("${assets_index_name}", assetIndexName(version));
         variables.put("${user_properties}", "{}");
         variables.put("${user_type}", auth.getType().name().toLowerCase());

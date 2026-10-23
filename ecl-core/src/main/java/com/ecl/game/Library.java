@@ -62,7 +62,7 @@ public final class Library {
             }
         }
 
-        if (artifact == null && classifiers.isEmpty()) {
+        if (artifact == null) {
             // Fabric/Quilt profile JSONs declare dependencies as bare Maven coordinates
             // (name + repository url, no downloads block). Resolve the jar so it can be
             // downloaded and placed on the launch classpath.
@@ -74,7 +74,7 @@ public final class Library {
                 String fileName = slash >= 0 ? path.substring(slash + 1) : path;
                 artifact = new DownloadObject(path, fileName,
                         MavenCoordinates.repositoryUrl(repository, coordinate), "", -1L);
-            } else {
+            } else if (classifiers.isEmpty()) {
                 // A library with neither artifact nor classifiers cannot be downloaded.
                 return null;
             }

@@ -28,13 +28,14 @@ class LaunchCommandBuilderTest {
     private LaunchEnvironment environment;
     private Path versionsDir;
     private Path librariesDir;
+    private Path assetsDir;
     private File gameDir;
 
     @BeforeEach
     void setUp() throws Exception {
         versionsDir = Files.createDirectories(tempDir.resolve("versions"));
         librariesDir = Files.createDirectories(tempDir.resolve("libraries"));
-        Path assetsDir = Files.createDirectories(tempDir.resolve("assets"));
+        assetsDir = Files.createDirectories(tempDir.resolve("assets"));
         gameDir = Files.createDirectories(tempDir.resolve("game")).toFile();
         environment = new LaunchEnvironment(versionsDir.toFile(), librariesDir.toFile(),
                 assetsDir.toFile(), "ECL", "1.0.0");
@@ -70,6 +71,26 @@ class LaunchCommandBuilderTest {
         Files.write(file, new byte[]{4, 5, 6});
     }
 
+    private static byte[] logConfigBytes() {
+        return "<Configuration/>".getBytes(StandardCharsets.UTF_8);
+    }
+
+    private String writeLoggingConfig(String fileName, byte[] content) throws Exception {
+        Path target = assetsDir.resolve("log_configs").resolve(fileName);
+        Files.createDirectories(target.getParent());
+        Files.write(target, content);
+        return java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-1").digest(content));
+    }
+
+    private static String loggingVersionJson(String fileName, String sha1, String url) {
+        return """
+                {"mainClass":"net.minecraft.client.main.Main",
+                 "logging":{"client":{"argument":"-Dlog4j.configurationFile=${path}",
+                   "file":{"id":"%s","sha1":"%s","size":%d,"url":"%s"}}}}
+                """.formatted(fileName, sha1, logConfigBytes().length, url);
+    }
+
     @Test
     void legacyMinecraftArgumentsReceiveNativePathAndUserProperties() throws Exception {
         writeVersion("1.7.10", """
@@ -87,6 +108,81 @@ class LaunchCommandBuilderTest {
         assertTrue(command.arguments().contains("-Djava.library.path=" + options.nativesDirectory().getAbsolutePath()));
         assertEquals("{}", command.arguments().get(command.arguments().indexOf("--userProperties") + 1));
         assertTrue(command.arguments().stream().noneMatch(argument -> argument.contains("${")));
+    }
+
+    @Test
+    void virtualAssetIndexExpandsGameAssetsToTheVirtualDirectory() throws Exception {
+        byte[] index = "{\"virtual\":true,\"objects\":{}}".getBytes(StandardCharsets.UTF_8);
+        Files.createDirectories(assetsDir.resolve("indexes"));
+        Files.write(assetsDir.resolve("indexes/legacy.json"), index);
+        writeVersion("1.7.2", """
+                {"mainClass":"net.minecraft.client.main.Main",
+                 "assetIndex":{"id":"legacy","url":"https://example/legacy.json","sha1":"%s"},
+                 "minecraftArguments":"%s"}
+                """.formatted(com.ecl.util.FileUtil.sha1(index), "--assetsDir ${assets_root} --gameAssets ${game_assets}"));
+        writeClientJar("1.7.2");
+        LaunchOptions options = options().versionId("1.7.2").build();
+
+        LaunchCommand command = new LaunchCommandBuilder().build(options, repository.resolve("1.7.2"), "java");
+
+        List<String> args = command.arguments();
+        assertEquals(assetsDir.toAbsolutePath().toString(),
+                args.get(args.indexOf("--assetsDir") + 1), "assets_root keeps the shared assets root");
+        assertEquals(assetsDir.resolve("virtual/legacy").toAbsolutePath().toString(),
+                args.get(args.indexOf("--gameAssets") + 1));
+    }
+
+    @Test
+    void modernAssetIndexExpandsGameAssetsToTheAssetsRoot() throws Exception {
+        writeVersion("1.21-game-assets", """
+                {"mainClass":"net.minecraft.client.main.Main",
+                 "assetIndex":{"id":"1.21","url":"https://example/1.21.json","sha1":"aa"},
+                 "minecraftArguments":"%s"}
+                """.formatted("--gameAssets ${game_assets}"));
+        writeClientJar("1.21-game-assets");
+        LaunchOptions options = options().versionId("1.21-game-assets").build();
+
+        LaunchCommand command = new LaunchCommandBuilder().build(
+                options, repository.resolve("1.21-game-assets"), "java");
+
+        List<String> args = command.arguments();
+        assertEquals(assetsDir.toAbsolutePath().toString(),
+                args.get(args.indexOf("--gameAssets") + 1));
+    }
+
+    @Test
+    void injectsTheLegacyLog4jConfigurationArgumentBeforeTheClasspath() throws Exception {
+        String sha1 = writeLoggingConfig("client-1.7.2.xml", logConfigBytes());
+        writeVersion("1.7.2-logging", loggingVersionJson("client-1.7.2.xml", sha1,
+                "https://launcher.example/client-1.7.2.xml"));
+        writeClientJar("1.7.2-logging");
+        LaunchOptions options = options().versionId("1.7.2-logging").build();
+
+        LaunchCommand command = new LaunchCommandBuilder().build(
+                options, repository.resolve("1.7.2-logging"), "java");
+
+        List<String> args = command.arguments();
+        String expected = "-Dlog4j.configurationFile="
+                + assetsDir.resolve("log_configs/client-1.7.2.xml").toAbsolutePath();
+        int loggingIndex = args.indexOf(expected);
+        assertTrue(loggingIndex >= 0, args.toString());
+        assertTrue(loggingIndex < args.indexOf("-cp"), "the log config must be a JVM argument before -cp");
+        assertTrue(args.stream().noneMatch(argument -> argument.contains("${path}")));
+    }
+
+    @Test
+    void missingLogConfigProducesMISSING_FILESInsteadOfAnUnsubstitutedArgument() throws Exception {
+        writeVersion("1.7.2-missing-logging", loggingVersionJson("client-1.7.2.xml", "a".repeat(40),
+                "https://launcher.example/client-1.7.2.xml"));
+        writeClientJar("1.7.2-missing-logging");
+        LaunchOptions options = options().versionId("1.7.2-missing-logging").build();
+
+        LaunchException error = assertThrows(LaunchException.class,
+                () -> new LaunchCommandBuilder().build(
+                        options, repository.resolve("1.7.2-missing-logging"), "java"));
+
+        assertEquals(LaunchException.Kind.MISSING_FILES, error.kind());
+        assertTrue(error.getMessage().contains("client-1.7.2.xml"), error.getMessage());
     }
 
     @Test

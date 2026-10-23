@@ -256,6 +256,40 @@ class DefaultModrinthApiClientTest {
         return new DefaultModrinthApiClient(configuration, mapper, transport, scheduler);
     }
 
+    @Test
+    void immediatelyCompletedGetExpiresAndRefreshes() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        ModrinthApiConfiguration configuration = new ModrinthApiConfiguration(
+                baseUri, "ECL-Test", Duration.ofSeconds(1), Duration.ofMillis(10), 1, Duration.ofMillis(1));
+        try (DefaultModrinthApiClient immediate = new DefaultModrinthApiClient(configuration, new ObjectMapper(),
+                (method, uri, body, headers, timeout) -> {
+                    int call = calls.incrementAndGet();
+                    return CompletableFuture.completedFuture(new HttpUtil.Response(200,
+                            "{\"id\":\"p\",\"title\":\"response-" + call + "\"}", uri.toString(), Map.of()));
+                }, scheduler)) {
+            assertEquals("response-1", immediate.getProject("p").join().title());
+            Thread.sleep(25);
+            assertEquals("response-2", immediate.getProject("p").join().title());
+            assertEquals(2, calls.get());
+        }
+    }
+
+    @Test
+    void immediatelyFailedGetDoesNotPoisonLaterRequests() {
+        AtomicInteger calls = new AtomicInteger();
+        ModrinthApiConfiguration configuration = new ModrinthApiConfiguration(
+                baseUri, "ECL-Test", Duration.ofSeconds(1), Duration.ofSeconds(30), 1, Duration.ofMillis(1));
+        try (DefaultModrinthApiClient immediate = new DefaultModrinthApiClient(configuration, new ObjectMapper(),
+                (method, uri, body, headers, timeout) -> CompletableFuture.completedFuture(new HttpUtil.Response(
+                        calls.incrementAndGet() == 1 ? 404 : 200, "{\"id\":\"p\",\"title\":\"recovered\"}",
+                        uri.toString(), Map.of())), scheduler)) {
+            org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.CompletionException.class,
+                    () -> immediate.getProject("p").join());
+            assertEquals("recovered", immediate.getProject("p").join().title());
+            assertEquals(2, calls.get());
+        }
+    }
+
     private static String projectJson() {
         return """
                 {

@@ -1,6 +1,6 @@
 # 源码阅读指南
 
-> 最后同步：2026-10-18 · 对应版本 `1.0.2beta`（提交基线 `b4d6a6d` 之后的检查与修复、启动设置、升级恢复点改动）。
+> 最后同步：2026-10-22 · 对应版本 `1.0.2beta`（包含旧版资源、日志配置与依赖解析修复）。
 > 新增或调整功能时，请同步更新本文件、“数据格式说明”（`docs/data-formats.md`）与 README 对应章节。
 
 ## 从入口开始
@@ -121,8 +121,31 @@ Mod 拖入事件在窗口框架建成后安装。
 最后将当前版本追加到安装顺序。`handleDependency` 按类型分派，`resolveRequiredDependency` 处理必需依赖，
 `resolveOptionalDependency` 区分已选与未选的可选依赖，并保留对应的失败或警告行为。
 `ResolutionContext` 保存一次解析的选择、路径校验缓存与结果集合，各次解析互不共享这些状态。
+必需依赖仅复用启用的记录；禁用依赖会进入安装计划。`detectIncompatible` 有 `versionId` 时按具体版本匹配，否则按项目匹配，并排除禁用及已被计划替换的旧记录。
+
+### 旧版资源与日志配置
+
+`AssetIndex` 只解析版本 JSON 的 `id/url/sha1/totalSize` 描述；`virtual` 与 `map_to_resources` 由
+`download/LegacyAssetMaterializer` 读取并校验磁盘上的 `assets/indexes/<id>.json`。下载时生成共享虚拟资源，
+`DefaultLauncher.prepare` 在启动前按实际运行目录补齐虚拟资源或 `resources/`，已有安装也走此流程。
+`gameAssetsDirectory` 只解析路径供命令构建使用，`preview` 不生成文件；同大小的已有资源仍比较内容，替换经临时文件发布。
+
+`game/ClientLoggingConfig.parse` 校验 `logging.client` 的参数、文件 ID、URL、SHA-1 和大小；
+`ensureDownloaded` 在安装、修复和启动准备阶段复用有效配置或限量下载、校验并原子发布。
+`GameInstallationVerifier` 以 `LOGGING` 类别报告结果，非法配置按无法验证的元数据处理。
+`VersionRepository.mergeLibrary` 在完整 Maven 坐标变化时移除父 artifact，保留平台分类信息；
+`Library`、`GameDownloader` 与校验器的 Maven 回退均支持仅继承了 classifiers 的条目。
+
+`DefaultModrinthApiClient.get` 先登记请求，再注册完成处理；缓存写入和移除在同一键的原子更新中执行，立即完成的响应也能过期或重试。
 
 ### 下载任务结束
+
+`GameDownloadBatchExecutor.downloadSingleVerified` 在文件发布锁内使用目标根目录下 `.ecl-downloads/` 中的稳定暂存文件，
+名称取自规范化目标路径对应的发布锁文件名，附加 `.download`。该目录保留给断点状态，不能作为正式文件目标，
+与目标在同一文件系统以保持原子发布，也避免暂存文件与其他正常目标的文件名冲突。
+`HttpUtil` / `ResumableFileDownloader` 将传输断点与来源校验信息保存在其 `.part` / `.part.meta` 文件中；
+传输失败保留断点，重试复用同源的 ETag / Last-Modified，完成后仍检查元数据大小与 SHA-1 才发布最终文件。
+已传完但校验失败的暂存文件会删除，原目标保持不变。
 
 `finishSuccess`、`finishFailure`、`finishCancelled` 都进入 `finish`。该方法在调度器锁内
 确定最终状态、释放并发名额并裁剪历史；锁外完成 future、通知监听器并调度后续任务。
@@ -137,6 +160,12 @@ Mod 拖入事件在窗口框架建成后安装。
 - `recognizeFiles` 封装在线查询及失败时的本地回退。
 - `reconcileRecords` 整理已识别、未知、损坏、缺失文件，并生成重复项目警告。
 - `LocalModScanCache` 保持 `launcher-mod-scan.json` 的读写格式，损坏缓存按空缓存处理。
+
+模组管理服务检查内存状态和 `GameProcessMarker`，取得进程内操作锁后再次检查；安装服务也在锁后检查两者。
+扫描写入在取得 `InstanceOperationLease` 后检查两者；`FileModInstallationTransaction` 的构造与中断恢复
+在取得跨进程操作锁后检查持久化标记，运行中或标记不可读时拒绝写入。只读 `inspect` 不保存索引和缓存。
+`DefaultAccountService.read` 在账户文件缺失时返回空列表；已存在文件的 JSON 根结构异常会抛出 `AuthException`，
+所有账户修改共用此读取路径，避免将异常结构覆盖成新账户数组。
 
 ### 整合包事务
 

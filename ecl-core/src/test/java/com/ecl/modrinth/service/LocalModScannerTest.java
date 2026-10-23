@@ -38,6 +38,19 @@ class LocalModScannerTest {
     }
 
     @Test
+    void runningMarkerPreventsScanFromWritingIndexOrCache() throws Exception {
+        TestFixtures.createJar(instance.modsDirectory().resolve("unknown.jar"), "unknown");
+        com.ecl.launch.GameProcessMarker.record(instance.gameDirectory(), ProcessHandle.current());
+        FileInstalledModRepository repository = new FileInstalledModRepository();
+        var scanner = new DefaultLocalModScanner(api, repository, hashes,
+                new InstanceOperationCoordinator(), Runnable::run, ignored -> false);
+
+        assertThrows(java.util.concurrent.CompletionException.class, () -> scanner.scan(instance).join());
+        assertFalse(Files.exists(repository.indexPath(instance)));
+        assertFalse(Files.exists(instance.gameDirectory().resolve("disabled-mods")));
+    }
+
+    @Test
     void recognizesModrinthFileAndPreservesUnknownJar() throws Exception {
         Path recognized = instance.modsDirectory().resolve("recognized.jar");
         Path unknown = instance.modsDirectory().resolve("unknown.jar");

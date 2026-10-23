@@ -42,7 +42,7 @@ class GameDownloaderTest {
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);
-        baseDirField.set(null, temp.resolve("ecl").toFile());
+        baseDirField.set(null, isolatedDataRoot().toFile());
     }
 
     @AfterEach
@@ -52,6 +52,18 @@ class GameDownloaderTest {
         } finally {
             loopbackDownloads.close();
         }
+    }
+
+    /**
+     * Logback points its file appender at {@code <baseDir>/logs} and keeps the handle open for the
+     * whole JVM, so the data root must not live inside the JUnit temp directory that is deleted
+     * after every test.
+     */
+    static Path isolatedDataRoot() throws IOException {
+        Path root = Path.of(System.getProperty("java.io.tmpdir"), "ecl-download-test",
+                java.util.UUID.randomUUID().toString());
+        Files.createDirectories(root);
+        return root;
     }
 
     @Test
@@ -324,6 +336,257 @@ class GameDownloaderTest {
             assertEquals("Maven library example:maven:1 URL must use HTTPS", failure.getMessage());
             assertFalse(Files.exists(ECLConfig.getLibrariesDir().toPath().resolve("example/maven/1/maven-1.jar")));
         }
+    }
+
+    @Test
+    void virtualAssetIndexMaterializesObjectsIntoTheVirtualDirectory() throws Exception {
+        byte[] object = "sound-object".getBytes(StandardCharsets.UTF_8);
+        String objectSha1 = sha1Hex(object);
+        byte[] index = ("""
+                {"virtual":true,"objects":{"minecraft/sounds/note.ogg":
+                 {"hash":"%s","size":%d}}}
+                """).formatted(objectSha1, object.length).getBytes(StandardCharsets.UTF_8);
+        String indexSha1 = sha1Hex(index);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+        byte[] client = "client".getBytes(StandardCharsets.UTF_8);
+        String clientSha1 = sha1Hex(client);
+        server.createContext("/client.jar", exchange -> {
+            exchange.sendResponseHeaders(200, client.length);
+            exchange.getResponseBody().write(client);
+            exchange.close();
+        });
+        server.createContext("/version.json", exchange -> {
+            byte[] metadata = ("""
+                    {"downloads":{"client":{"url":"%s/client.jar","sha1":"%s","size":%d}},
+                     "assetIndex":{"id":"legacy","url":"%s/index.json","sha1":"%s","size":%d},
+                     "libraries":[]}
+                    """).formatted(origin, clientSha1, client.length, origin, indexSha1,
+                    index.length).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, metadata.length);
+            exchange.getResponseBody().write(metadata);
+            exchange.close();
+        });
+        server.start();
+        try (GameDownloader downloader = new GameDownloader(1)) {
+            seedAssetIndexAndObject("legacy", index, object, objectSha1);
+            Path assets = ECLConfig.getAssetsDir().toPath();
+
+            downloader.downloadVersionAsync("legacy-virtual", origin + "/version.json").get();
+
+            Path virtualSound = assets.resolve("virtual/legacy/minecraft/sounds/note.ogg");
+            assertTrue(Files.isRegularFile(virtualSound), "virtual asset was not materialized");
+            assertArrayEquals(object, Files.readAllBytes(virtualSound));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void modernAssetIndexDoesNotCreateLegacyMaterializedDirectories() throws Exception {
+        byte[] object = "modern-object".getBytes(StandardCharsets.UTF_8);
+        String objectSha1 = sha1Hex(object);
+        byte[] index = ("""
+                {"objects":{"minecraft/sounds/note.ogg":{"hash":"%s","size":%d}}}
+                """).formatted(objectSha1, object.length).getBytes(StandardCharsets.UTF_8);
+        String indexSha1 = sha1Hex(index);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+        byte[] client = "client".getBytes(StandardCharsets.UTF_8);
+        String clientSha1 = sha1Hex(client);
+        server.createContext("/client.jar", exchange -> {
+            exchange.sendResponseHeaders(200, client.length);
+            exchange.getResponseBody().write(client);
+            exchange.close();
+        });
+        server.createContext("/version.json", exchange -> {
+            byte[] metadata = ("""
+                    {"downloads":{"client":{"url":"%s/client.jar","sha1":"%s","size":%d}},
+                     "assetIndex":{"id":"modern","url":"%s/index.json","sha1":"%s","size":%d},
+                     "libraries":[]}
+                    """).formatted(origin, clientSha1, client.length, origin, indexSha1,
+                    index.length).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, metadata.length);
+            exchange.getResponseBody().write(metadata);
+            exchange.close();
+        });
+        server.start();
+        try (GameDownloader downloader = new GameDownloader(1)) {
+            seedAssetIndexAndObject("modern", index, object, objectSha1);
+            Path assets = ECLConfig.getAssetsDir().toPath();
+
+            downloader.downloadVersionAsync("modern-assets", origin + "/version.json").get();
+
+            Path objectFile = assets.resolve("objects")
+                    .resolve(objectSha1.substring(0, 2)).resolve(objectSha1);
+            assertTrue(Files.isRegularFile(objectFile),
+                    "modern asset object must still be downloaded");
+            assertFalse(Files.exists(assets.resolve("virtual")),
+                    "modern assets must not materialize a virtual directory");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void duplicateLibraryTargetsAreDownloadedOnceAndSucceed() throws Exception {
+        byte[] library = "shared-library".getBytes(StandardCharsets.UTF_8);
+        String librarySha1 = sha1Hex(library);
+        java.util.concurrent.atomic.AtomicInteger requests = new java.util.concurrent.atomic.AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+        byte[] client = "client".getBytes(StandardCharsets.UTF_8);
+        String clientSha1 = sha1Hex(client);
+        server.createContext("/client.jar", exchange -> {
+            exchange.sendResponseHeaders(200, client.length);
+            exchange.getResponseBody().write(client);
+            exchange.close();
+        });
+        server.createContext("/shared.jar", exchange -> {
+            requests.incrementAndGet();
+            exchange.sendResponseHeaders(200, library.length);
+            exchange.getResponseBody().write(library);
+            exchange.close();
+        });
+        server.createContext("/version.json", exchange -> {
+            byte[] metadata = ("""
+                    {"downloads":{"client":{"url":"%s/client.jar","sha1":"%s","size":%d}},
+                     "libraries":[
+                       {"downloads":{"artifact":{"path":"example/shared.jar","url":"%s/shared.jar",
+                         "sha1":"%s","size":%d}}},
+                       {"downloads":{"artifact":{"path":"example/shared.jar","url":"%s/shared.jar",
+                         "sha1":"%s","size":%d}}}]}
+                    """).formatted(origin, clientSha1, client.length, origin, librarySha1,
+                    library.length, origin, librarySha1, library.length)
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, metadata.length);
+            exchange.getResponseBody().write(metadata);
+            exchange.close();
+        });
+        server.start();
+        try (GameDownloader downloader = new GameDownloader(2)) {
+            downloader.downloadVersionAsync("duplicate-libraries", origin + "/version.json").get();
+
+            Path target = ECLConfig.getLibrariesDir().toPath().resolve("example/shared.jar");
+            assertArrayEquals(library, Files.readAllBytes(target));
+            assertEquals(1, requests.get(),
+                    "one target enumerated twice must be downloaded exactly once");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void mapToResourcesIndexWaitsForTheActualRunDirectory() throws Exception {
+        byte[] object = "resource-object".getBytes(StandardCharsets.UTF_8);
+        String objectSha1 = sha1Hex(object);
+        byte[] index = ("""
+                {"map_to_resources":true,"objects":{"lang/en_US.lang":
+                 {"hash":"%s","size":%d}}}
+                """).formatted(objectSha1, object.length).getBytes(StandardCharsets.UTF_8);
+        String indexSha1 = sha1Hex(index);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+        byte[] client = "client".getBytes(StandardCharsets.UTF_8);
+        String clientSha1 = sha1Hex(client);
+        server.createContext("/client.jar", exchange -> {
+            exchange.sendResponseHeaders(200, client.length);
+            exchange.getResponseBody().write(client);
+            exchange.close();
+        });
+        server.createContext("/version.json", exchange -> {
+            byte[] metadata = ("""
+                    {"downloads":{"client":{"url":"%s/client.jar","sha1":"%s","size":%d}},
+                     "assetIndex":{"id":"resources","url":"%s/index.json","sha1":"%s","size":%d},
+                     "libraries":[]}
+                    """).formatted(origin, clientSha1, client.length, origin, indexSha1,
+                    index.length).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, metadata.length);
+            exchange.getResponseBody().write(metadata);
+            exchange.close();
+        });
+        server.start();
+        Path gameDir = ECLConfig.getGameDir().toPath();
+        Path materialized = gameDir.resolve("resources/lang/en_US.lang");
+        Files.deleteIfExists(materialized);
+        try (GameDownloader downloader = new GameDownloader(1)) {
+            seedAssetIndexAndObject("resources", index, object, objectSha1);
+
+            downloader.downloadVersionAsync("legacy-resources", origin + "/version.json").get();
+
+            assertFalse(Files.exists(materialized), "a shared download must not assume the default run directory");
+            Path customGame = temp.resolve("custom-game");
+            var metadata = new com.ecl.game.VersionRepository(ECLConfig.getVersionsDir()).resolve("legacy-resources");
+            LegacyAssetMaterializer.prepare(metadata.assetIndex(), ECLConfig.getAssetsDir(), customGame.toFile());
+            assertArrayEquals(object, Files.readAllBytes(customGame.resolve("resources/lang/en_US.lang")));
+            assertFalse(Files.exists(materialized));
+        } finally {
+            Files.deleteIfExists(materialized);
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void virtualIndexRejectsAssetNamesEscapingTheVirtualRoot() throws Exception {
+        byte[] object = "escape-object".getBytes(StandardCharsets.UTF_8);
+        String objectSha1 = sha1Hex(object);
+        byte[] index = ("""
+                {"virtual":true,"objects":{"../../../escape.txt":
+                 {"hash":"%s","size":%d}}}
+                """).formatted(objectSha1, object.length).getBytes(StandardCharsets.UTF_8);
+        String indexSha1 = sha1Hex(index);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+        byte[] client = "client".getBytes(StandardCharsets.UTF_8);
+        String clientSha1 = sha1Hex(client);
+        server.createContext("/client.jar", exchange -> {
+            exchange.sendResponseHeaders(200, client.length);
+            exchange.getResponseBody().write(client);
+            exchange.close();
+        });
+        server.createContext("/version.json", exchange -> {
+            byte[] metadata = ("""
+                    {"downloads":{"client":{"url":"%s/client.jar","sha1":"%s","size":%d}},
+                     "assetIndex":{"id":"escape","url":"%s/index.json","sha1":"%s","size":%d},
+                     "libraries":[]}
+                    """).formatted(origin, clientSha1, client.length, origin, indexSha1,
+                    index.length).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, metadata.length);
+            exchange.getResponseBody().write(metadata);
+            exchange.close();
+        });
+        server.start();
+        try (GameDownloader downloader = new GameDownloader(1)) {
+            seedAssetIndexAndObject("escape", index, object, objectSha1);
+
+            java.util.concurrent.ExecutionException failure =
+                    assertThrows(java.util.concurrent.ExecutionException.class,
+                            () -> downloader.downloadVersionAsync("legacy-escape",
+                                    origin + "/version.json").get());
+
+            assertTrue(failure.getCause() instanceof IOException);
+            assertFalse(Files.exists(ECLConfig.getAssetsDir().toPath().resolve("escape.txt")),
+                    "an escaping asset name must not be written");
+            assertFalse(Files.exists(temp.resolve("escape.txt")));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private void seedAssetIndexAndObject(String assetId, byte[] index, byte[] object,
+                                         String objectSha1) throws Exception {
+        Path assets = ECLConfig.getAssetsDir().toPath();
+        Path indexFile = assets.resolve("indexes").resolve(assetId + ".json");
+        Files.createDirectories(indexFile.getParent());
+        Files.write(indexFile, index);
+        Path objectFile = assets.resolve("objects")
+                .resolve(objectSha1.substring(0, 2)).resolve(objectSha1);
+        Files.createDirectories(objectFile.getParent());
+        Files.write(objectFile, object);
+    }
+
+    private static String sha1Hex(byte[] bytes) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(bytes));
     }
 
     private abstract static class DownloadListenerAdapter implements GameDownloader.DownloadListener {

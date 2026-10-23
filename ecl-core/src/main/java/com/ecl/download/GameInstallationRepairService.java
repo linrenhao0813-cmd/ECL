@@ -87,6 +87,10 @@ public final class GameInstallationRepairService {
             checkCancelled(cancelled);
             downloader.downloadLibrariesForVersion(instance.profileId(), listener);
             checkCancelled(cancelled);
+            VersionMetadata metadata = new VersionRepository(versions.toFile()).resolve(instance.profileId());
+            if (metadata.clientLogging() != null) metadata.clientLogging().ensureDownloaded(assets.toFile());
+            LegacyAssetMaterializer.prepare(metadata.assetIndex(), assets.toFile(), instance.gameDirectory().toFile());
+            checkCancelled(cancelled);
             GameInstallationVerifier.Report after = inspect(instance.profileId(), versions, libraries, assets);
             return new Result(expected, after);
         }

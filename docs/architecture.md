@@ -104,6 +104,8 @@
                  ├─ InstanceOperationLease.tryAcquire（生命周期锁 + 实例内 operation.lock）
                  ├─ InstanceLaunchProfileStore.load（Java/内存/JVM 参数）
                  ├─ LaunchOptions.builder … → DefaultLauncher.launch
+                 │     └─ prepare：解压原生库 → LegacyAssetMaterializer.prepare（实际运行目录）
+                 │                  → ClientLoggingConfig.ensureDownloaded → 构建命令
                  ├─ GameProcessMarker.record（写 .ecl/game-process.json）
                  └─ GameProcessMonitor.monitor（守护线程；退出时 CrashAnalyzer 分析）
 ```
@@ -116,7 +118,7 @@
        ├─ 启动准备中？→ 提示并返回
        ├─ DownloadTaskCenter 任务内 GameInstallationRepairService.inspect
        │     └─ GameInstallationVerifier.inspect(profileId)
-       │           ├─ METADATA / CLIENT / LIBRARY / NATIVE / ASSET_INDEX / ASSET_OBJECT / LOADER_DEPENDENCY
+       │           ├─ METADATA / CLIENT / LIBRARY / NATIVE / ASSET_INDEX / ASSET_OBJECT / LOADER_DEPENDENCY / LOGGING
        │           └─ 每个 Check = VERIFIED / MISSING / CORRUPT / UNVERIFIABLE + repairable
        ├─ 展示报告（可修复项才启用“修复”）
        └─ 用户确认 → GameInstallationRepairService.repair
@@ -125,10 +127,20 @@
              ├─ 重新 inspect，指纹变化 → 报“结果已过期”
              ├─ runBaseRepair：下载元数据（只允许官方 host）→ GameDownloader
              ├─ downloadLibrariesForVersion：补齐加载器依赖库
+             ├─ ClientLoggingConfig.ensureDownloaded：补齐当前有效 profile 的日志配置
+             ├─ LegacyAssetMaterializer.prepare：按实际运行目录生成旧版资源视图
              └─ 再次 inspect 生成 Result（before/after/repaired/failed/unverifiable）
 ```
 
 修复只写经官方摘要认证的 Minecraft 与加载器依赖文件；`UNVERIFIABLE` 项不会被推测补全，用户模组也不会被改动。
+
+`GameDownloader` 在完成标记写入前补齐版本声明的日志配置。旧版布局标记来自下载后的资源索引，
+与版本 JSON 的 `AssetIndex` 描述分开；共享 `virtual/` 可在下载时生成，实例专属 `resources/` 在启动或修复时生成。
+`preview` 只解析路径，不生成资源或发起日志配置下载。物化文件按内容比较，通过临时链接/副本原子替换。
+
+继承版本更换完整 Maven 坐标时，父 artifact 不会沿用；父平台原生库可独立保留，子 artifact 由子声明或 Maven 仓库解析。
+模组必需依赖只复用启用记录；版本级冲突只匹配该版本，已禁用或将被计划替换的旧记录不参与冲突。
+Modrinth GET 的请求登记先于完成回调，缓存发布和移除请求按键原子执行，避免立即完成响应永久留在请求表。
 
 ### 3. 升级事务（普通实例）
 
@@ -208,6 +220,17 @@
 | 服务端目录锁 | `<数据目录>/servers/<id>/manager.lock` | 服务端设置/进程操作互斥（`tryLock` 重试最长 5 秒，超时转 `IOException`） |
 
 ## 网络与信任边界
+
+模组文件及索引写入同时受内存状态、跨进程实例锁与 `GameProcessMarker` 保护。服务取得进程内操作锁后复查状态；
+事务构造、事务恢复及扫描持久化在取得跨进程实例锁后复查持久化运行标记，启动器重开也不能改写仍在运行的实例。
+标记损坏或不可读时阻止变更并保留文件。
+
+游戏下载在文件发布锁内复用目标根目录下专用 `.ecl-downloads/` 内的稳定暂存路径，该目录不接受正式文件目标。
+暂存文件与目标位于同一文件系统，名称按目标路径摘要区分，避免文件名后缀碰撞。网络失败保留 `.part` 和 `.part.meta`，由现有 HTTP 续传器校验来源及
+ETag / Last-Modified 后发送 Range；响应完整后再由批处理执行器校验声明大小和 SHA-1，最后原子发布。
+校验失败删除已完成的暂存文件，保留原目标。
+
+统一账户库要求 JSON 根节点为数组；非法根结构通过 `AuthException` 向调用方报错，禁止后续保存覆盖原内容。
 
 世界还原：获得实例生命周期锁并检查持久化游戏运行标记后，将压缩包解到 `.ecl/world-restore/content/`；写入并强制落盘 `APPLYING` 日志后才移动原目录至 `rollback/`。替换完成后写 `COMMITTED`，最后清理工作区；中断后回滚 `APPLYING`，`COMMITTED` 仅清理。启动游戏、再次备份或还原前执行恢复；日志损坏或缺失且仍有原始文件时拒绝继续，保留现场。
 版本来源为 `gradle.properties:version` → Gradle 资源展开 → `ecl-build.properties:launcher.version` → `ECLConfig.LAUNCHER_VERSION` → GUI / User-Agent / 打包。Release 工作流在构建前校验 tag 与该版本一致。

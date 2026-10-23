@@ -1,6 +1,7 @@
 package com.ecl.launch;
 
 import com.ecl.game.ArgumentToken;
+import com.ecl.game.ClientLoggingConfig;
 import com.ecl.game.DownloadObject;
 import com.ecl.game.Library;
 import com.ecl.game.VersionMetadata;
@@ -108,6 +109,7 @@ public final class LaunchCommandBuilder {
             }
         }
         args.addAll(jvmArgumentsFromVersion(version, variables));
+        addClientLoggingArgument(options, version, args);
         if (args.stream().noneMatch(argument -> argument.startsWith("-Djava.library.path="))) {
             args.add("-Djava.library.path=" + variables.get("${natives_directory}"));
         }
@@ -115,6 +117,36 @@ public final class LaunchCommandBuilder {
         args.add(buildClassPath(options, version));
         args.add(mainClass);
         return args;
+    }
+
+    /**
+     * Version metadata can declare a Log4j configuration argument containing {@code ${path}}.
+     * The file must already be present:
+     * this builder is pure logic and never downloads, so a missing config is a launch failure the
+     * caller can repair rather than silently launching with the vulnerable default configuration.
+     */
+    private void addClientLoggingArgument(LaunchOptions options, VersionMetadata version,
+                                          List<String> args) throws IOException {
+        ClientLoggingConfig logging = version.clientLogging();
+        if (logging == null) {
+            return;
+        }
+        File assetsDirectory = options.environment().assetsDirectory();
+        File config;
+        try {
+            config = logging.targetFile(assetsDirectory);
+        } catch (IOException invalidTarget) {
+            throw new LaunchException(LaunchException.Kind.VERSION_INVALID,
+                    "客户端日志配置路径无效: " + invalidTarget.getMessage(), invalidTarget);
+        }
+        if (!config.isFile()) {
+            throw new LaunchException(LaunchException.Kind.MISSING_FILES,
+                    "缺少客户端日志配置: " + config.getAbsolutePath()
+                            + "（版本 " + version.id() + "）");
+        }
+        String argument = logging.substitute(config.getAbsolutePath());
+        JvmArgumentPolicy.requireSafe(argument);
+        args.add(argument);
     }
 
     private List<String> jvmArgumentsFromVersion(VersionMetadata version,

@@ -1,6 +1,8 @@
 package com.ecl.launch;
 
 import com.ecl.auth.offline.OfflineSkinInjector;
+import com.ecl.download.LegacyAssetMaterializer;
+import com.ecl.game.ClientLoggingConfig;
 import com.ecl.game.VersionChainException;
 import com.ecl.game.VersionMetadata;
 import com.ecl.game.VersionRepository;
@@ -73,6 +75,8 @@ public final class DefaultLauncher implements Launcher {
 
             if (allowWrites) {
                 NativeLibraryExtractor.extract(metadata, options);
+                LegacyAssetMaterializer.prepare(metadata.assetIndex(), options.environment().assetsDirectory(), options.gameDirectory());
+                ensureClientLoggingConfig(metadata, options);
             }
             return commandBuilder.build(options, metadata, javaExecutable, extraJvmArgs);
         } catch (LaunchException alreadyClassified) {
@@ -82,6 +86,25 @@ public final class DefaultLauncher implements Launcher {
                     "版本元数据不可用: " + chainBroken.getMessage(), chainBroken);
         } catch (IOException ioFailure) {
             throw new LaunchException(LaunchException.Kind.UNKNOWN, ioFailure.getMessage(), ioFailure);
+        }
+    }
+
+    /**
+     * Fetch the legacy client Log4j configuration declared by the version metadata, if any. Only
+     * called with write permission: {@link #preview} must stay side-effect free and instead fails
+     * with {@link LaunchException.Kind#MISSING_FILES} from the command builder when it is absent.
+     */
+    private static void ensureClientLoggingConfig(VersionMetadata metadata, LaunchOptions options)
+            throws LaunchException {
+        ClientLoggingConfig logging = metadata.clientLogging();
+        if (logging == null) {
+            return;
+        }
+        try {
+            logging.ensureDownloaded(options.environment().assetsDirectory());
+        } catch (IOException downloadFailure) {
+            throw new LaunchException(LaunchException.Kind.MISSING_FILES,
+                    "无法准备客户端日志配置: " + downloadFailure.getMessage(), downloadFailure);
         }
     }
 

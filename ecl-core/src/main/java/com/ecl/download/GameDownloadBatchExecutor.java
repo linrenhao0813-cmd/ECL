@@ -12,9 +12,10 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.UUID;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
@@ -23,6 +24,7 @@ import java.util.concurrent.Future;
 /** Executes verified file downloads and aggregates progress for one download phase. */
 final class GameDownloadBatchExecutor {
     private static final long MAX_UNSIZED_LIBRARY_BYTES = 1024L * 1024 * 1024;
+    private static final String DOWNLOADS_DIRECTORY = ".ecl-downloads";
     private final ExecutorService executor;
     private final int maxWorkers;
 
@@ -40,15 +42,21 @@ final class GameDownloadBatchExecutor {
             return;
         }
 
+        // Repeated resource names may share one payload (the same hash under several names), and
+        // repair/install plans can enumerate one target twice. Such duplicates contend for the very
+        // same publication lock, so the second worker would always fail with "being repaired by
+        // another task". Collapse them before scheduling, and keep the reported totals honest.
+        List<DownloadTask> uniqueTasks = deduplicateByTarget(tasks);
+
         int threadCount = Math.min(Math.min(maxWorkers,
-                HttpUtil.getDownloadMaxConcurrent()), tasks.size());
+                HttpUtil.getDownloadMaxConcurrent()), uniqueTasks.size());
         if (listener != null) {
             listener.onStatus("使用 " + threadCount + " 个线程下载" + phase
-                    + "，共 " + tasks.size() + " 个文件...");
+                    + "，共 " + uniqueTasks.size() + " 个文件...");
         }
         ExecutorCompletionService<Void> completionService = new ExecutorCompletionService<>(executor);
-        List<Future<Void>> phaseTasks = new ArrayList<>(tasks.size());
-        for (DownloadTask task : tasks) {
+        List<Future<Void>> phaseTasks = new ArrayList<>(uniqueTasks.size());
+        for (DownloadTask task : uniqueTasks) {
             phaseTasks.add(completionService.submit(() -> {
                 try {
                     downloadAndVerify(task, listener);
@@ -63,7 +71,7 @@ final class GameDownloadBatchExecutor {
 
         int completed = 0;
         try {
-            while (completed < tasks.size()) {
+            while (completed < uniqueTasks.size()) {
                 try {
                     completionService.take().get();
                 } catch (ExecutionException error) {
@@ -75,8 +83,8 @@ final class GameDownloadBatchExecutor {
                     throw new IOException(phase + "下载失败: " + failure.getMessage(), failure);
                 }
                 completed++;
-                if (listener != null && (completed == tasks.size() || completed % 25 == 0)) {
-                    listener.onStatus("下载" + phase + ": " + completed + "/" + tasks.size());
+                if (listener != null && (completed == uniqueTasks.size() || completed % 25 == 0)) {
+                    listener.onStatus("下载" + phase + ": " + completed + "/" + uniqueTasks.size());
                 }
             }
         } catch (InterruptedException error) {
@@ -88,6 +96,34 @@ final class GameDownloadBatchExecutor {
             }
         }
 
+    }
+
+    /**
+     * Keeps the first declaration of every normalized target and rejects targets that were declared
+     * with different digests or sizes: one of those declarations must be wrong, and silently picking
+     * the first one would publish an unverified payload.
+     */
+    static List<DownloadTask> deduplicateByTarget(List<DownloadTask> tasks) throws IOException {
+        Map<Path, DownloadTask> byTarget = new LinkedHashMap<>(tasks.size());
+        for (DownloadTask task : tasks) {
+            Path target = normalizedTarget(task);
+            DownloadTask previous = byTarget.putIfAbsent(target, task);
+            if (previous != null && !sameDeclaration(previous, task)) {
+                throw new IOException("Conflicting declarations for one download target: " + target
+                        + " (SHA-1 " + previous.sha1() + "/" + task.sha1()
+                        + ", size " + previous.expectedSize() + "/" + task.expectedSize() + ")");
+            }
+        }
+        return List.copyOf(byTarget.values());
+    }
+
+    private static Path normalizedTarget(DownloadTask task) {
+        return task.target().toPath().toAbsolutePath().normalize();
+    }
+
+    private static boolean sameDeclaration(DownloadTask first, DownloadTask second) {
+        return first.sha1().equalsIgnoreCase(second.sha1())
+                && first.expectedSize() == second.expectedSize();
     }
 
     private void downloadAndVerify(DownloadTask task,
@@ -103,6 +139,10 @@ final class GameDownloadBatchExecutor {
                 ? task.expectedSize() : MAX_UNSIZED_LIBRARY_BYTES;
         Path target = task.target().toPath().toAbsolutePath().normalize();
         Path root = task.targetRoot().toAbsolutePath().normalize();
+        Path stagingRoot = root.resolve(DOWNLOADS_DIRECTORY);
+        if (target.startsWith(stagingRoot)) {
+            throw new IOException("Download target uses the reserved staging directory: " + target);
+        }
         FileUtil.validateExistingAncestors(root, target);
         Files.createDirectories(target.getParent());
         FileUtil.validateExistingAncestors(root, target);
@@ -113,10 +153,12 @@ final class GameDownloadBatchExecutor {
             if (ignored == null) {
                 throw new IOException("Shared artifact is being repaired by another task: " + target);
             }
-            Path staging = target.resolveSibling(target.getFileName() + ".ecl-"
-                    + UUID.randomUUID() + ".part");
+            Path staging = stagingRoot.resolve(lockPath.getFileName() + ".download");
             Path partial = staging.resolveSibling(staging.getFileName() + ".part");
             Path partialMetadata = partial.resolveSibling(partial.getFileName() + ".meta");
+            FileUtil.validateExistingAncestors(root, staging);
+            FileUtil.validateExistingAncestors(root, partial);
+            FileUtil.validateExistingAncestors(root, partialMetadata);
             try {
                 HttpUtil.downloadFileWithProgress(task.url(), staging.toFile(), progress,
                         sourceCallback(task.sourceLabel(), listener), maxBytes);
@@ -127,9 +169,8 @@ final class GameDownloadBatchExecutor {
                 FileUtil.validateExistingAncestors(root, target);
                 FileUtil.moveReplacing(staging, target);
             } finally {
+                // Keep HTTP partials and validators for retry; completed but invalid payloads are discarded.
                 Files.deleteIfExists(staging);
-                Files.deleteIfExists(partial);
-                Files.deleteIfExists(partialMetadata);
             }
         }
     }

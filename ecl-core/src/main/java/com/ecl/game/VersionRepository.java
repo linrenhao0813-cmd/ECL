@@ -202,13 +202,84 @@ public class VersionRepository {
         String key = getLibraryIdentity(library);
         Integer existingIndex = key == null ? null : keyedIndexes.get(key);
         if (existingIndex != null) {
-            merged.set(existingIndex, library);
+            merged.set(existingIndex, mergeLibrary(merged.get(existingIndex), library));
             return;
         }
         if (key != null) {
             keyedIndexes.put(key, merged.size());
         }
         merged.add(library);
+    }
+
+    /**
+     * Fold a child library into the parent entry that occupies the same classpath slot.
+     *
+     * <p>The child owns the version and every field it explicitly declares, but the parent's
+     * platform-specific native metadata must survive: legacy Forge profiles re-declare e.g.
+     * {@code org.lwjgl.lwjgl:lwjgl} with only their own platform while the base version carries the
+     * Windows classifier. Replacing the whole entry dropped those natives and made the game fail to
+     * start with LWJGL errors, so only the {@code natives} map and
+     * {@code downloads.classifiers} are merged per key. Everything else — in particular an
+     * {@code artifact} with its SHA-1 — is replaced wholesale so a URL is never paired with
+     * another file's checksum.</p>
+     */
+    private static JsonElement mergeLibrary(JsonElement parent, JsonElement child) {
+        if (!parent.isJsonObject() || !child.isJsonObject()) {
+            return child;
+        }
+        JsonObject merged = parent.getAsJsonObject().deepCopy();
+        if (!JsonUtil.getString(merged, "name", "").equals(
+                JsonUtil.getString(child.getAsJsonObject(), "name", ""))
+                && isObject(merged.get("downloads"))) {
+            JsonObject downloads = merged.getAsJsonObject("downloads");
+            downloads.remove("artifact");
+            if (downloads.isEmpty()) merged.remove("downloads");
+        }
+        for (Map.Entry<String, JsonElement> entry : child.getAsJsonObject().entrySet()) {
+            String key = entry.getKey();
+            JsonElement childValue = entry.getValue();
+            JsonElement parentValue = merged.get(key);
+            if ("natives".equals(key) && isObject(parentValue) && isObject(childValue)) {
+                merged.add(key, mergeNamedObjects(parentValue.getAsJsonObject(),
+                        childValue.getAsJsonObject()));
+            } else if ("downloads".equals(key) && isObject(parentValue) && isObject(childValue)) {
+                merged.add(key, mergeDownloads(parentValue.getAsJsonObject(),
+                        childValue.getAsJsonObject()));
+            } else {
+                merged.add(key, childValue.deepCopy());
+            }
+        }
+        return merged;
+    }
+
+    /** Merge the download object, keeping parent classifiers the child profile does not repeat. */
+    private static JsonObject mergeDownloads(JsonObject parent, JsonObject child) {
+        JsonObject merged = parent.deepCopy();
+        for (Map.Entry<String, JsonElement> entry : child.entrySet()) {
+            String key = entry.getKey();
+            JsonElement childValue = entry.getValue();
+            JsonElement parentValue = merged.get(key);
+            if ("classifiers".equals(key) && isObject(parentValue) && isObject(childValue)) {
+                merged.add(key, mergeNamedObjects(parentValue.getAsJsonObject(),
+                        childValue.getAsJsonObject()));
+            } else {
+                merged.add(key, childValue.deepCopy());
+            }
+        }
+        return merged;
+    }
+
+    /** Merge two string-keyed objects; the child wins on collisions, parent-only keys are kept. */
+    private static JsonObject mergeNamedObjects(JsonObject parent, JsonObject child) {
+        JsonObject merged = parent.deepCopy();
+        for (Map.Entry<String, JsonElement> entry : child.entrySet()) {
+            merged.add(entry.getKey(), entry.getValue().deepCopy());
+        }
+        return merged;
+    }
+
+    private static boolean isObject(JsonElement element) {
+        return element != null && element.isJsonObject();
     }
 
     /**
@@ -322,9 +393,24 @@ public class VersionRepository {
                 JsonUtil.getString(effective, "type", ""),
                 javaMajor,
                 assetIndex,
+                parseClientLogging(effective),
                 downloads,
                 List.copyOf(libraries),
                 VersionArguments.parse(effective));
+    }
+
+    /** The {@code logging.client} block, or null when the effective metadata declares none. */
+    private static ClientLoggingConfig parseClientLogging(JsonObject effective) throws IOException {
+        JsonElement logging = effective.get("logging");
+        if (logging == null || !logging.isJsonObject()) {
+            return null;
+        }
+        JsonObject loggingObject = logging.getAsJsonObject();
+        JsonElement client = loggingObject.get("client");
+        if (client == null || !client.isJsonObject()) {
+            return null;
+        }
+        return ClientLoggingConfig.parse(client.getAsJsonObject());
     }
 
     private static String firstNonBlank(String primary, String fallback) {

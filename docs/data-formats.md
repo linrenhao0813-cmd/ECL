@@ -349,6 +349,53 @@
 | `<运行目录>/launcher-mod-scan.json` | `modrinth/service/LocalModScanCache`（`ScanCache`/`Entry`） | 本地模组扫描缓存 |
 | `<数据目录>/backups/<实例 ID>/backup-*.zip` 与同名 `.json` | `backup/WorldBackupService`、`WorldBackupMetadata` | 世界备份压缩包与元数据（`schemaVersion`、`profileId`、`sourceVersion`、`createdAt`、`includedContent`、`uncompressedSize`、`files`） |
 
+## 账户文件读取规则
+
+`accounts.json` 的根节点必须为数组（`DefaultAccountService.read`）；对象、标量、`null` 或空文件均报错并保留原内容。
+文件不存在时可创建新账户列表；数组内无法解码的条目仍按现有规则保留。
+
+## 游戏下载断点
+
+`GameDownloadBatchExecutor.downloadSingleVerified` 使用 `<目标根目录>/.ecl-downloads/<sha256>.lock.download` 作为稳定暂存路径；
+`sha256` 来自 `ManagedLockPaths.filePublication` 对规范化目标路径的摘要（Windows 下先转小写）。
+`.ecl-downloads` 是保留目录，不接受正式下载目标。续传器保存暂存文件对应的 `.part` 和 `.part.meta`；
+网络中断后保留，完成并校验后发布目标；成功后可能留下空的 `.ecl-downloads/` 目录。
+无可用校验标记或来源改变时从头下载；已完成但大小或 SHA-1 校验失败的暂存文件被删除。
+
+| `.part.meta` JSON 键 | 来源（`PartialDownloadMetadata` record 组件） | 含义 |
+| --- | --- | --- |
+| `source` | `source` | 实际下载候选 URL，仅向相同来源请求续传 |
+| `etag` | `etag` | 响应 ETag，优先用作 If-Range 校验标记 |
+| `lastModified` | `lastModified` | 没有 ETag 时使用的 Last-Modified 校验标记 |
+
+## 旧版资源与客户端日志配置
+
+资源布局来源是 `<数据目录>/assets/indexes/<id>.json`，由 `LegacyAssetMaterializer.readIndex` 读取并校验。
+版本 JSON 中的 `assetIndex` 只描述索引位置，`AssetIndex` record 组件为 `id`、`url`、`sha1`、`totalSize`。
+
+| 索引 JSON 键 | 源码 | 含义及生成路径 |
+| --- | --- | --- |
+| `virtual` | `LegacyAssetMaterializer.isVirtual` | 命名资源生成于 `<数据目录>/assets/virtual/<id>/<资源名>` |
+| `map_to_resources` | `LegacyAssetMaterializer.mapsToResources` | 命名资源生成于 `<实际运行目录>/resources/<资源名>` |
+| `objects.<资源名>.hash` | `LegacyAssetMaterializer.requireHash` | SHA-1；对象位于 `assets/objects/<前两位>/<hash>` |
+| `objects.<资源名>.size` | `GameDownloader.downloadAssets` | 下载对象的预期字节数 |
+
+虚拟资源与 `resources/` 是对象缓存的硬链接或副本；同大小文件仍比较内容，替换时先准备临时文件。
+启动准备会补齐旧安装的视图，自定义运行目录不会写入默认 `.minecraft/resources/`。
+
+版本 JSON 的 `logging.client` 由 `ClientLoggingConfig.parse` 读取：
+
+| 元数据 JSON 键 | record 组件或解析位置 | 含义 |
+| --- | --- | --- |
+| `logging.client.argument` | `ClientLoggingConfig.argument` | 含 `${path}` 的安全 JVM 参数 |
+| `logging.client.file.id` | `ClientLoggingConfig.parse` → `DownloadObject.fileName` | 单段文件名；生成 `ClientLoggingConfig.relativePath = log_configs/<id>` |
+| `logging.client.file.url` | `ClientLoggingConfig.file` → `DownloadObject.url` | 配置下载地址 |
+| `logging.client.file.sha1` | `ClientLoggingConfig.file` → `DownloadObject.sha1` | 配置 SHA-1 |
+| `logging.client.file.size` | `ClientLoggingConfig.file` → `DownloadObject.size` | 正数；下载上限和预期字节数 |
+
+配置保存在 `<数据目录>/assets/log_configs/<id>`，内容由版本元数据指定，并非启动器设置 JSON。
+安装、修复和启动准备均可补齐；大小与 SHA-1 正确时离线复用，损坏文件仅在新内容校验成功后替换。
+
 ## 日志
 
 `ecl-core/src/main/resources/logback.xml` 通过 `LogDirectoryProperty.getPropertyValue()` 获取 `ECLConfig.getBaseDir()` 下的 `logs/`，写入 `ecl.log`，并按 `ecl.<日期>.<序号>.log.gz` 滚动（单文件 5 MB、保留 7 天）。通常为 `%APPDATA%\.ecl\logs`；`APPDATA` 缺失或为空时与数据目录一起回退到 `${user.home}/.ecl/logs`。旧版用户主目录下的历史日志不自动迁移或删除。

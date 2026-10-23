@@ -199,16 +199,15 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
             cache.remove(key, cached);
         }
 
-        CompletableFuture<HttpUtil.Response> shared = inFlightGets.computeIfAbsent(key, ignored -> {
-            CompletableFuture<HttpUtil.Response> request = sendWithRetry("GET", uri, null, 1);
-            request.whenComplete((response, error) -> {
-                inFlightGets.remove(key, request);
-                if (error == null && response != null && response.isSuccess()) {
-                    cache.put(key, new CacheEntry(response, Instant.now().plus(configuration.cacheTtl())));
-                }
-            });
-            return request;
-        });
+        CompletableFuture<HttpUtil.Response> shared = inFlightGets.computeIfAbsent(key,
+                ignored -> sendWithRetry("GET", uri, null, 1));
+        shared.whenComplete((response, error) -> inFlightGets.computeIfPresent(key, (ignored, current) -> {
+            if (current != shared) return current;
+            if (error == null && response != null && response.isSuccess()) {
+                cache.put(key, new CacheEntry(response, Instant.now().plus(configuration.cacheTtl())));
+            }
+            return null;
+        }));
         return shared;
     }
 

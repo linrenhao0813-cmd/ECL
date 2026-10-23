@@ -1,5 +1,7 @@
 package com.ecl.modrinth.service;
 
+import com.ecl.launch.GameProcessMarker;
+
 import com.ecl.modrinth.api.ModConflictException;
 import com.ecl.modrinth.api.ModInstallationException;
 import com.ecl.modrinth.download.HashVerifier;
@@ -68,6 +70,7 @@ public final class DefaultModManagementService implements ModManagementService {
     private List<InstalledMod> changeEnabled(ModInstanceContext instance, Set<String> selected, boolean enabled) {
         ensureWritable(instance);
         try (AutoCloseable ignored = operationLock.acquire(instance.instanceId())) {
+            ensureWritable(instance);
             FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory());
             List<InstalledMod> records = repository.findAll(instance);
             if (!enabled) {
@@ -131,6 +134,7 @@ public final class DefaultModManagementService implements ModManagementService {
     private List<InstalledMod> uninstallBlocking(ModInstanceContext instance, Set<String> selected) {
         ensureWritable(instance);
         try (AutoCloseable ignored = operationLock.acquire(instance.instanceId())) {
+            ensureWritable(instance);
             FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory());
             List<InstalledMod> records = repository.findAll(instance);
             verifyNotRequired(records, selected, "卸载");
@@ -184,6 +188,7 @@ public final class DefaultModManagementService implements ModManagementService {
              AutoCloseable ignored = operationLock.acquire(instance.instanceId());
              FileModInstallationTransaction transaction =
                      new FileModInstallationTransaction(instance.gameDirectory())) {
+            ensureWritable(instance);
             try {
                 FileUtil.validateExistingAncestors(instance.gameDirectory(), instance.modsDirectory());
             } catch (IOException error) {
@@ -223,8 +228,12 @@ public final class DefaultModManagementService implements ModManagementService {
     }
 
     private void ensureWritable(ModInstanceContext instance) {
-        if (instanceRunning.test(instance.instanceId())) {
-            throw new ModInstallationException("实例正在运行，不能修改模组文件");
+        try {
+            if (instanceRunning.test(instance.instanceId()) || GameProcessMarker.isRunning(instance.gameDirectory())) {
+                throw new ModInstallationException("实例正在运行，不能修改模组文件");
+            }
+        } catch (IOException failure) {
+            throw new ModInstallationException("无法确认实例运行状态", failure);
         }
     }
 

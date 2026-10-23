@@ -168,8 +168,6 @@ public final class PackUpdateTransaction implements AutoCloseable {
                 }
             }
             writeJournal(new Journal("APPLIED", entries));
-            committed = true;
-            cleanupDirectory(transactionDirectory);
         } catch (IOException | RuntimeException error) {
             IOException rollbackFailure = rollbackEntries(entries);
             if (rollbackFailure != null) {
@@ -177,8 +175,33 @@ public final class PackUpdateTransaction implements AutoCloseable {
             }
             throw error;
         }
-        releaseDirectoryLock();
-        cleanupTransactionRoot();
+        committed = true;
+        cleanupAfterCommit();
+        releaseAfterCommit();
+    }
+
+    /**
+     * Cleanup after a durable APPLIED journal. A journal directory that another process still
+     * holds open must not turn an already applied pack update into a failure; recovery removes
+     * the leftovers later because {@code APPLIED} is authoritative.
+     */
+    private void cleanupAfterCommit() {
+        try {
+            cleanupDirectory(transactionDirectory);
+            cleanupTransactionRoot();
+        } catch (IOException | RuntimeException failure) {
+            LOGGER.warn("Committed pack transaction could not remove its journal directory {}; "
+                    + "it will be cleaned up by recovery", transactionDirectory, failure);
+        }
+    }
+
+    private void releaseAfterCommit() {
+        try {
+            releaseDirectoryLock();
+        } catch (IOException failure) {
+            LOGGER.warn("Failed to release committed pack transaction lock {}",
+                    transactionDirectory, failure);
+        }
     }
 
     private List<JournalEntry> prepareEntries() {
@@ -236,20 +259,23 @@ public final class PackUpdateTransaction implements AutoCloseable {
                 return;
             }
         } else {
-            LOGGER.warn("Preserving pack transaction without a journal: {}", transactionDirectory);
-            try {
-                releaseDirectoryLock();
-            } catch (IOException error) {
-                LOGGER.warn("Failed to release pack transaction lock {}", transactionDirectory, error);
-            }
-            return;
+            // commit() writes the PREPARED journal before it touches any target file, so a
+            // transaction directory without a journal cannot describe applied changes. Removing
+            // it is required: keeping it would make hasIncompleteTransactions() block every
+            // later pack update of this instance forever.
+            LOGGER.info("Discarding pack transaction directory without a journal: {}",
+                    transactionDirectory);
         }
         try {
             cleanupDirectory(transactionDirectory);
+        } catch (IOException error) {
+            LOGGER.warn("Failed to clean pack transaction directory {}", transactionDirectory, error);
+        }
+        try {
             releaseDirectoryLock();
             cleanupTransactionRoot();
         } catch (IOException error) {
-            LOGGER.warn("Failed to clean pack transaction directory {}", transactionDirectory, error);
+            LOGGER.warn("Failed to release pack transaction lock {}", transactionDirectory, error);
         }
     }
 
@@ -373,9 +399,12 @@ public final class PackUpdateTransaction implements AutoCloseable {
             throws IOException {
         Path journalPath = directory.resolve(JOURNAL_FILE);
         if (!Files.isRegularFile(journalPath)) {
-            // A crash can happen after a backup move and before the first journal rename. Keep
-            // the directory for inspection/recovery instead of deleting possible rollback data.
-            LOGGER.warn("Preserving pack transaction without a journal: {}", directory);
+            // commit() writes PREPARED before moving any target file, so a directory without a
+            // journal cannot hold applied changes. Preserving it would block every later pack
+            // update through hasIncompleteTransactions(); the directory lock is held here, which
+            // makes the removal safe against a concurrent writer.
+            LOGGER.info("Discarding pack transaction directory without a journal: {}", directory);
+            cleanupDirectory(directory);
             return;
         }
         Journal journal = MAPPER.readValue(journalPath.toFile(), Journal.class);

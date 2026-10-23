@@ -122,7 +122,10 @@ public final class DefaultAccountService {
         if (!Files.isRegularFile(file)) return new JsonArray();
         try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
             JsonElement root = JsonParser.parseReader(reader);
-            return root.isJsonArray() ? root.getAsJsonArray() : new JsonArray();
+            if (!root.isJsonArray()) {
+                throw new IOException("账户文件根节点必须是 JSON 数组");
+            }
+            return root.getAsJsonArray();
         } catch (IOException | RuntimeException failure) {
             throw new AuthException("无法读取账户文件", failure);
         }

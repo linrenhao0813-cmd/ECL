@@ -27,6 +27,7 @@ public final class VersionMetadata {
     private final String type;
     private final int javaMajorVersion;
     private final AssetIndex assetIndex;
+    private final ClientLoggingConfig clientLogging;
     private final Map<String, DownloadObject> downloads;
     private final List<Library> libraries;
     private final VersionArguments arguments;
@@ -34,7 +35,8 @@ public final class VersionMetadata {
     VersionMetadata(String id, String inheritsFrom, String mainClass, String jar,
                     String minecraftVersion, String explicitModLoader, String loaderVersion,
                     boolean modpack, String type, int javaMajorVersion,
-                    AssetIndex assetIndex, Map<String, DownloadObject> downloads,
+                    AssetIndex assetIndex, ClientLoggingConfig clientLogging,
+                    Map<String, DownloadObject> downloads,
                     List<Library> libraries, VersionArguments arguments) {
         this.id = id;
         this.inheritsFrom = inheritsFrom;
@@ -47,6 +49,7 @@ public final class VersionMetadata {
         this.type = type;
         this.javaMajorVersion = javaMajorVersion;
         this.assetIndex = assetIndex;
+        this.clientLogging = clientLogging;
         this.downloads = downloads;
         this.libraries = libraries;
         this.arguments = arguments == null ? VersionArguments.empty() : arguments;
@@ -111,6 +114,13 @@ public final class VersionMetadata {
     /** The asset index this version uses, or null when it has none. */
     public AssetIndex assetIndex() {
         return assetIndex;
+    }
+
+    /**
+     * The version-declared {@code logging.client} Log4j configuration, or null when none is declared.
+     */
+    public ClientLoggingConfig clientLogging() {
+        return clientLogging;
     }
 
     /** Download targets by key ({@code client}, {@code server}, …); never null. */

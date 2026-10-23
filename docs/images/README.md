@@ -13,6 +13,8 @@
 | `launcher-settings.png` | `settings-page` | 设置页“通用”标签，窗口与启动区域折叠 |
 
 实例维护入口另以 `local-versions` 模式核对，临时快照输出到 `ecl-gui/build/visual-qa/ecl-instances.png`。该模式展示启动设置、检查与修复、恢复上次升级和更多操作。
+2026-10-22 的旧版资源、日志配置与依赖修复另用 `local-versions` 模式生成并查看
+`ecl-gui/build/visual-qa/ecl-review-fixes.png`，核对实例维护入口与现有布局；客户端日志配置分类的简体、英文和繁体文案由 `ResourceBundleI18nTest` 验证。
 本轮文案变更另用 `backups-en` 与 `modrinth-en` 核对英文布局，输出 `ecl-gui/build/visual-qa/ecl-backups-en.png` 和 `ecl-modrinth-en.png`。
 
 ## 重新生成

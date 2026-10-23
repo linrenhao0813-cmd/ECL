@@ -4,14 +4,18 @@ import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -99,6 +103,143 @@ class VersionRepositoryTest {
                 merged.getAsJsonArray("libraries").get(1).getAsJsonObject().get("name").getAsString());
         assertEquals("example:native:2.0:natives-windows-arm64",
                 merged.getAsJsonArray("libraries").get(2).getAsJsonObject().get("name").getAsString());
+    }
+
+    @Test
+    void legacyForgeProfileKeepsParentPlatformNativeLibraries() throws Exception {
+        writeVersion("1.7.10", """
+                {"libraries":[{"name":"org.lwjgl.lwjgl:lwjgl:2.9.1",
+                  "natives":{"windows":"natives-windows"},
+                  "downloads":{
+                    "artifact":{"url":"https://x/lwjgl.jar","path":"org/lwjgl/lwjgl/2.9.1/lwjgl.jar"},
+                    "classifiers":{"natives-windows":{
+                      "url":"https://x/lwjgl-natives-windows.jar",
+                      "path":"org/lwjgl/lwjgl/2.9.1/lwjgl-natives-windows.jar"}}}}]}
+                """);
+        writeVersion("Forge10.13.4.1614", """
+                {"inheritsFrom":"1.7.10","mainClass":"net.minecraft.launchwrapper.Launch",
+                 "libraries":[{"name":"org.lwjgl.lwjgl:lwjgl:2.9.1-nightly-20140828",
+                  "natives":{"linux":"natives-linux"},
+                  "downloads":{"artifact":{"url":"https://x/lwjgl-nightly.jar",
+                    "path":"org/lwjgl/lwjgl/2.9.1-nightly-20140828/lwjgl.jar"}}}]}
+                """);
+
+        VersionRepository repository = repository();
+        VersionMetadata metadata = repository.resolve("Forge10.13.4.1614");
+
+        List<Library> lwjglLibraries = metadata.libraries().stream()
+                .filter(library -> library.name().startsWith("org.lwjgl.lwjgl:lwjgl:"))
+                .toList();
+        assertEquals(1, lwjglLibraries.size(), "the Forge profile overrides the same classpath slot");
+        Library lwjgl = lwjglLibraries.getFirst();
+        assertEquals("org.lwjgl.lwjgl:lwjgl:2.9.1-nightly-20140828", lwjgl.name(),
+                "the Forge profile still wins the artifact version");
+        assertEquals("org/lwjgl/lwjgl/2.9.1-nightly-20140828/lwjgl.jar", lwjgl.artifact().path());
+        assertTrue(lwjgl.classifiers().containsKey("natives-windows"),
+                "the parent Windows native classifier must survive the Forge profile override");
+        assertEquals("natives-windows", lwjgl.natives().get("windows"),
+                "the parent Windows natives mapping must survive the Forge profile override");
+        assertEquals("natives-linux", lwjgl.natives().get("linux"),
+                "the Forge profile's own natives mapping is kept");
+    }
+
+    @Test
+    void bareChildCoordinateUsesItsOwnArtifactAndKeepsParentNatives() throws Exception {
+        writeVersion("base", """
+                {"libraries":[{"name":"example:lib:1","url":"https://repo.example/",
+                  "natives":{"windows":"natives-windows"},
+                  "downloads":{"artifact":{"path":"example/lib/1/lib-1.jar","sha1":"old-digest"},
+                    "classifiers":{"natives-windows":{"path":"example/lib/1/native.jar"}}}}]}
+                """);
+        writeVersion("child", """
+                {"inheritsFrom":"base","libraries":[{"name":"example:lib:2","url":"https://repo.example/"}]}
+                """);
+
+        VersionRepository repository = repository();
+        Library library = repository.resolve("child").libraries().getFirst();
+
+        assertEquals("example/lib/2/lib-2.jar", library.artifact().path());
+        assertEquals("https://repo.example/example/lib/2/lib-2.jar", library.artifact().url());
+        assertEquals("", library.artifact().sha1());
+        assertTrue(library.classifiers().containsKey("natives-windows"));
+        JsonObject raw = repository.resolveRaw("child").getAsJsonArray("libraries").get(0).getAsJsonObject();
+        assertFalse(raw.getAsJsonObject("downloads").has("artifact"));
+    }
+
+    @Test
+    void parsesTheLegacyClientLog4jLoggingConfigWithAFixedAssetsTarget() throws Exception {
+        writeVersion("1.7.2", """
+                {"mainClass":"net.minecraft.client.main.Main",
+                 "assetIndex":{"id":"legacy","url":"https://example/legacy.json","sha1":"aa"},
+                 "logging":{"client":{"argument":"-Dlog4j.configurationFile=${path}",
+                   "file":{"id":"client-1.7.2.xml","sha1":"%s","size":%d,
+                     "url":"https://launcher.example/client-1.7.2.xml"}}},
+                 "downloads":{"client":{"url":"https://example/client.jar","path":"1.7.2/1.7.2.jar"}}}
+                """.formatted("a".repeat(40), 1_507));
+
+        ClientLoggingConfig logging = repository().resolve("1.7.2").clientLogging();
+
+        assertNotNull(logging);
+        assertEquals("-Dlog4j.configurationFile=${path}", logging.argument());
+        assertEquals("log_configs/client-1.7.2.xml", logging.relativePath());
+        assertEquals("client-1.7.2.xml", logging.file().fileName());
+        assertEquals("a".repeat(40), logging.file().sha1());
+        assertEquals(1_507L, logging.file().size());
+        assertEquals("https://launcher.example/client-1.7.2.xml", logging.file().url());
+        File assetsDir = new File(tempDir.toFile(), "assets");
+        assertEquals(new File(assetsDir, "log_configs/client-1.7.2.xml"),
+                logging.targetFile(assetsDir));
+    }
+
+    @Test
+    void versionsWithoutLoggingExposeNoClientLoggingConfig() throws Exception {
+        writeVersion("1.21", """
+                {"mainClass":"net.minecraft.client.main.Main",
+                 "downloads":{"client":{"url":"https://example/client.jar","path":"1.21/1.21.jar"}}}
+                """);
+
+        assertNull(repository().resolve("1.21").clientLogging());
+    }
+
+    @Test
+    void rejectsUnsafeOrIncompleteLoggingConfigurations() throws Exception {
+        String sha1 = "b".repeat(40);
+        List<String> invalidDefinitions = List.of(
+                // argument without the ${path} placeholder
+                logging("{\"id\":\"client.xml\",\"sha1\":\"" + sha1
+                        + "\",\"size\":10,\"url\":\"https://example/client.xml\"}", "-Dlog4j.configurationFile"),
+                // argument with an additional unknown placeholder
+                logging("{\"id\":\"client.xml\",\"sha1\":\"" + sha1
+                        + "\",\"size\":10,\"url\":\"https://example/client.xml\"}",
+                        "-Dlog4j.configurationFile=${path}${version_name}"),
+                // file id that could escape the log_configs directory
+                logging("{\"id\":\"../escape.xml\",\"sha1\":\"" + sha1
+                        + "\",\"size\":10,\"url\":\"https://example/client.xml\"}",
+                        "-Dlog4j.configurationFile=${path}"),
+                // wrong SHA-1 length
+                logging("{\"id\":\"client.xml\",\"sha1\":\"abc\",\"size\":10,"
+                        + "\"url\":\"https://example/client.xml\"}",
+                        "-Dlog4j.configurationFile=${path}"),
+                // non-positive size
+                logging("{\"id\":\"client.xml\",\"sha1\":\"" + sha1
+                        + "\",\"size\":0,\"url\":\"https://example/client.xml\"}",
+                        "-Dlog4j.configurationFile=${path}"),
+                // plaintext remote URL
+                logging("{\"id\":\"client.xml\",\"sha1\":\"" + sha1
+                        + "\",\"size\":10,\"url\":\"http://example/client.xml\"}",
+                        "-Dlog4j.configurationFile=${path}"));
+        for (int index = 0; index < invalidDefinitions.size(); index++) {
+            String versionId = "invalid-logging-" + index;
+            writeVersion(versionId, invalidDefinitions.get(index));
+            IOException error = assertThrows(IOException.class,
+                    () -> repository().resolve(versionId), "definition #" + index + " must be rejected");
+            assertNotNull(error.getMessage());
+        }
+    }
+
+    private static String logging(String file, String argument) {
+        return "{\"mainClass\":\"net.minecraft.client.main.Main\",\"logging\":{\"client\":{"
+                + "\"argument\":\"" + argument + "\",\"file\":" + file + "}}}";
     }
 
     @Test

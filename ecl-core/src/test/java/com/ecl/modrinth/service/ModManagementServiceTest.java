@@ -37,6 +37,41 @@ class ModManagementServiceTest {
     }
 
     @Test
+    void reopenedLauncherCannotDisableUninstallOrImportWhileGameRuns() throws Exception {
+        createModFile("example.jar", true);
+        repository.saveAll(instance, List.of(record("example", true, false, "")));
+        String index = Files.readString(repository.indexPath(instance));
+        Path local = temp.resolve("import.jar");
+        TestFixtures.createJar(local, "import");
+        com.ecl.launch.GameProcessMarker.record(instance.gameDirectory(), ProcessHandle.current());
+
+        assertThrows(CompletionException.class, () -> service.setEnabled(instance, List.of("example"), false).join());
+        assertThrows(CompletionException.class, () -> service.uninstall(instance, List.of("example")).join());
+        assertThrows(CompletionException.class, () -> service.importLocalJar(instance, local).join());
+        assertEquals("example.jar", Files.readString(instance.modsDirectory().resolve("example.jar")));
+        assertEquals(index, Files.readString(repository.indexPath(instance)));
+        assertFalse(Files.exists(instance.modsDirectory().resolve("import.jar")));
+    }
+
+    @Test
+    void rechecksRunningMarkerAfterAcquiringOperationLock() throws Exception {
+        createModFile("example.jar", true);
+        repository.saveAll(instance, List.of(record("example", true, false, "")));
+        service = new DefaultModManagementService(repository, id -> {
+            try {
+                com.ecl.launch.GameProcessMarker.record(instance.gameDirectory(), ProcessHandle.current());
+            } catch (java.io.IOException failure) {
+                throw new java.io.UncheckedIOException(failure);
+            }
+            return () -> { };
+        }, Runnable::run, ignored -> false, new HashVerifier());
+
+        assertThrows(CompletionException.class, () -> service.setEnabled(instance, List.of("example"), false).join());
+        assertTrue(Files.exists(instance.modsDirectory().resolve("example.jar")));
+        assertTrue(repository.findAll(instance).getFirst().enabled());
+    }
+
+    @Test
     void disablesAndEnablesUsingDedicatedDirectory() throws Exception {
         createModFile("example.jar", true);
         repository.saveAll(instance, List.of(record("example", true, false, "")));

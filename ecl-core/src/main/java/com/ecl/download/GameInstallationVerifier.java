@@ -1,6 +1,8 @@
 package com.ecl.download;
 
 import com.ecl.ECLConfig;
+import com.ecl.game.ClientLoggingConfig;
+import com.ecl.game.DownloadObject;
 import com.ecl.game.VersionMetadata;
 import com.ecl.game.VersionRepository;
 import com.ecl.util.FileUtil;
@@ -62,7 +64,56 @@ public final class GameInstallationVerifier {
         verifyClient(metadata, effective, checks);
         verifyLibraries(effective, checks);
         verifyAssets(effective, checks);
+        verifyClientLogging(metadata, checks);
         return report(profileId, checks);
+    }
+
+    /**
+     * Check the legacy {@code logging.client} Log4j configuration. The declared file is only
+     * repairable when the metadata carries a usable URL, SHA-1 and size, matching the other
+     * categories — the launcher never guesses a source for it.
+     */
+    private void verifyClientLogging(VersionMetadata metadata, List<Check> checks) {
+        ClientLoggingConfig logging = metadata.clientLogging();
+        if (logging == null) {
+            return;
+        }
+        Path file;
+        try {
+            file = logging.targetFile(assets.toFile()).toPath();
+        } catch (IOException invalidTarget) {
+            checks.add(new Check(Category.LOGGING, logging.relativePath(), Status.UNVERIFIABLE,
+                    message(invalidTarget), false));
+            return;
+        }
+        DownloadObject object = logging.file();
+        boolean repairable = usableUrl(object.url()) && object.hasChecksum() && object.size() > 0;
+        addVerifiedOrCorrupt(Category.LOGGING, file, object.sha1(), object.size(), repairable, checks);
+    }
+
+    private static void addVerifiedOrCorrupt(Category category, Path file, String sha1, long size,
+                                             boolean repairable, List<Check> checks) {
+        if (!sha1.matches("(?i)[0-9a-f]{40}") || size <= 0) {
+            checks.add(new Check(category, file.toString(), Status.UNVERIFIABLE,
+                    "Expected SHA-1 or size is missing", false));
+            return;
+        }
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            checks.add(new Check(category, file.toString(), Status.MISSING, "File is missing",
+                    repairable));
+            return;
+        }
+        try {
+            if (Files.size(file) != size || !FileUtil.verifySha1(file.toFile(), sha1)) {
+                checks.add(new Check(category, file.toString(), Status.CORRUPT,
+                        "File size or SHA-1 does not match metadata", repairable));
+                return;
+            }
+            checks.add(new Check(category, file.toString(), Status.VERIFIED, "", false));
+        } catch (IOException error) {
+            checks.add(new Check(category, file.toString(), Status.UNVERIFIABLE, message(error),
+                    false));
+        }
     }
 
     private Report report(String profileId, List<Check> checks) {
@@ -194,7 +245,7 @@ public final class GameInstallationVerifier {
                 JsonObject downloads = object(library, "downloads");
                 if (downloads != null && object(downloads, "artifact") != null) {
                     checks.add(checkManaged(category, object(downloads, "artifact"), libraries));
-                } else if (downloads == null) {
+                } else if (downloads == null || library.has("url") && downloads.has("classifiers")) {
                     checkMavenLibrary(library, category, checks);
                 }
                 JsonObject classifiers = object(downloads, "classifiers");
@@ -365,7 +416,8 @@ public final class GameInstallationVerifier {
         return Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
     }
 
-    public enum Category { METADATA, CLIENT, LIBRARY, NATIVE, ASSET_INDEX, ASSET_OBJECT, LOADER_DEPENDENCY }
+    public enum Category { METADATA, CLIENT, LIBRARY, NATIVE, ASSET_INDEX, ASSET_OBJECT,
+        LOADER_DEPENDENCY, LOGGING }
 
     public enum Status { VERIFIED, MISSING, CORRUPT, UNVERIFIABLE }
 

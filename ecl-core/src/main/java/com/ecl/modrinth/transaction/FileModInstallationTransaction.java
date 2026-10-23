@@ -1,5 +1,7 @@
 package com.ecl.modrinth.transaction;
 
+import com.ecl.launch.GameProcessMarker;
+
 import com.ecl.util.FileLockLease;
 import com.ecl.util.FileUtil;
 import com.ecl.util.InstanceOperationLease;
@@ -59,7 +61,7 @@ public final class FileModInstallationTransaction implements AutoCloseable {
         }
         try {
             this.gameOperationLock = InstanceOperationLease.tryAcquire(this.gameDirectory);
-            if (gameOperationLock == null) {
+            if (gameOperationLock == null || GameProcessMarker.isRunning(this.gameDirectory)) {
                 throw new IOException("Instance is running or busy in another launcher process: "
                         + this.gameDirectory);
             }
@@ -131,8 +133,8 @@ public final class FileModInstallationTransaction implements AutoCloseable {
         ensureOpen();
         if (stages.isEmpty()) {
             committed = true;
-            cleanupDirectory(temporaryDirectory);
-            releaseDirectoryLock();
+            cleanupAfterCommit();
+            releaseAfterCommit();
             return;
         }
         List<JournalEntry> entries = prepareEntries();
@@ -143,8 +145,6 @@ public final class FileModInstallationTransaction implements AutoCloseable {
                 applyEntry(entry);
             }
             writeJournal(new Journal("APPLIED", entries));
-            committed = true;
-            cleanupDirectory(temporaryDirectory);
         } catch (IOException | RuntimeException e) {
             IOException rollbackFailure = rollbackEntries(entries);
             if (rollbackFailure != null) {
@@ -155,7 +155,32 @@ public final class FileModInstallationTransaction implements AutoCloseable {
             }
             throw e;
         }
-        releaseDirectoryLock();
+        committed = true;
+        cleanupAfterCommit();
+        releaseAfterCommit();
+    }
+
+    /**
+     * Cleanup after a durable APPLIED journal. Deleting the journal directory is best effort:
+     * a file handle held by another process must never turn a committed transaction into a
+     * reported failure or trigger a rollback of files that were already published.
+     */
+    private void cleanupAfterCommit() {
+        try {
+            cleanupDirectory(temporaryDirectory);
+        } catch (IOException | RuntimeException failure) {
+            LOGGER.warn("Committed mod transaction could not remove its journal directory {}; "
+                    + "it will be cleaned up by recovery", temporaryDirectory, failure);
+        }
+    }
+
+    private void releaseAfterCommit() {
+        try {
+            releaseDirectoryLock();
+        } catch (IOException failure) {
+            LOGGER.warn("Failed to release committed mod transaction lock {}",
+                    temporaryDirectory, failure);
+        }
     }
 
     private List<JournalEntry> prepareEntries() {
@@ -276,6 +301,9 @@ public final class FileModInstallationTransaction implements AutoCloseable {
                      InstanceOperationLease.tryAcquire(gameRoot)) {
             if (gameLock == null) {
                 return;
+            }
+            if (GameProcessMarker.isRunning(gameRoot)) {
+                throw new IOException("Instance is running; cannot recover mod transactions: " + gameRoot);
             }
             recoverTransactionsLocked(gameRoot, transactionRoot);
         }

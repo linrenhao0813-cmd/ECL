@@ -1,7 +1,9 @@
 package com.ecl.download;
 
 import com.ecl.ECLConfig;
+import com.ecl.game.ClientLoggingConfig;
 import com.ecl.game.MavenCoordinates;
+import com.ecl.game.VersionRepository;
 import com.ecl.util.FileLockLease;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
@@ -19,6 +21,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -146,6 +149,10 @@ public class GameDownloader implements DownloadService {
                 if (runListener != null) runListener.onStatus("正在下载资源文件...");
                 downloadAssets(versionJson, runListener);
                 checkCancelled();
+                ClientLoggingConfig logging = new VersionRepository(ECLConfig.getVersionsDir())
+                        .resolve(versionId).clientLogging();
+                if (logging != null) logging.ensureDownloaded(ECLConfig.getAssetsDir());
+                checkCancelled();
                 Files.writeString(versionDir.toPath().resolve(
                         ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER), "complete",
                         java.nio.charset.StandardCharsets.UTF_8);
@@ -272,7 +279,7 @@ public class GameDownloader implements DownloadService {
 
     private void addLibraryArtifact(List<GameDownloadBatchExecutor.DownloadTask> tasks,
                                     JsonObject library, JsonObject downloads) throws IOException {
-        if (downloads != null) {
+        if (downloads != null && (downloads.has("artifact") || !downloads.has("classifiers"))) {
             if (downloads.has("artifact")) {
                 addDownloadIfNeeded(tasks, downloads.getAsJsonObject("artifact"), "依赖库");
             }
@@ -341,7 +348,8 @@ public class GameDownloader implements DownloadService {
                     assetUrl, indexFile, indexSha1, indexSize, "资源索引",
                     ECLConfig.getAssetsDir().toPath()), runListener, null);
         }
-        JsonObject objects = HttpUtil.readJson(indexFile).getAsJsonObject("objects");
+        JsonObject indexJson = HttpUtil.readJson(indexFile);
+        JsonObject objects = indexJson.getAsJsonObject("objects");
         List<GameDownloadBatchExecutor.DownloadTask> tasks = new ArrayList<>();
         for (String name : objects.keySet()) {
             JsonObject obj = objects.getAsJsonObject(name);
@@ -359,6 +367,23 @@ public class GameDownloader implements DownloadService {
             }
         }
         batchExecutor.download(tasks, "资源文件", runListener);
+        materializeLegacyAssets(indexJson, objects, assetId, runListener);
+    }
+
+    /**
+     * Old indexes ({@code virtual}, {@code map_to_resources}) expect the payloads under their asset
+     * name; the objects layout alone leaves 1.7.2-style versions without sounds.
+     */
+    private void materializeLegacyAssets(JsonObject indexJson, JsonObject objects, String assetId,
+                                         DownloadListener runListener) throws IOException {
+        boolean virtual = LegacyAssetMaterializer.isVirtual(indexJson);
+        if (!virtual) return;
+        Path objectsRoot = new File(ECLConfig.getAssetsDir(), "objects").toPath();
+        if (runListener != null) runListener.onStatus("正在生成旧版虚拟资源...");
+        Path virtualRoot = FileUtil.safeResolveUnder(ECLConfig.getAssetsDir(),
+                "virtual/" + assetId).toPath();
+        FileUtil.validateExistingAncestors(ECLConfig.getAssetsDir().toPath(), virtualRoot);
+        LegacyAssetMaterializer.materialize(objects, objectsRoot, virtualRoot);
     }
 
     public List<String> getMissingLibraries(JsonObject versionJson) {

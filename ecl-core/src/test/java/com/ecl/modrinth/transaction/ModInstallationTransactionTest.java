@@ -16,6 +16,49 @@ class ModInstallationTransactionTest {
     @TempDir Path game;
 
     @Test
+    void runningMarkerPreventsOpeningTransactionAndReleasesLock() throws Exception {
+        com.ecl.launch.GameProcessMarker.record(game, ProcessHandle.current());
+        assertThrows(IOException.class, () -> {
+            try (var ignored = new FileModInstallationTransaction(game)) {
+                fail("must reject a running game");
+            }
+        });
+        com.ecl.launch.GameProcessMarker.clear(game, ProcessHandle.current());
+        try (var transaction = new FileModInstallationTransaction(game)) {
+            transaction.commit();
+        }
+    }
+
+    @Test
+    void runningMarkerPreventsRecoveryFromChangingFiles() throws Exception {
+        Path target = game.resolve("mods/existing.jar");
+        Files.createDirectories(target.getParent());
+        Files.writeString(target, "installed");
+        Path transaction = game.resolve(".ecl-mod-transactions/crashed");
+        Files.createDirectories(transaction.resolve("backups"));
+        Files.writeString(transaction.resolve("backups/0-final.bak"), "previous");
+        String journal = """
+                {"status":"APPLYING","entries":[{
+                  "stagedFile":".ecl-mod-transactions/crashed/missing.part",
+                  "finalFile":"mods/existing.jar","oldFile":null,
+                  "finalBackup":".ecl-mod-transactions/crashed/backups/0-final.bak",
+                  "oldBackup":".ecl-mod-transactions/crashed/backups/0-old.bak",
+                  "finalFileExisted":true}]}
+                """;
+        Files.writeString(transaction.resolve("journal.json"), journal);
+        com.ecl.launch.GameProcessMarker.record(game, ProcessHandle.current());
+
+        assertThrows(IOException.class, () -> FileModInstallationTransaction.recoverIncompleteTransactions(game));
+        assertEquals("installed", Files.readString(target));
+        assertEquals(journal, Files.readString(transaction.resolve("journal.json")));
+        assertEquals("previous", Files.readString(transaction.resolve("backups/0-final.bak")));
+
+        com.ecl.launch.GameProcessMarker.clear(game, ProcessHandle.current());
+        FileModInstallationTransaction.recoverIncompleteTransactions(game);
+        assertEquals("previous", Files.readString(target));
+    }
+
+    @Test
     void commitsAllStagedFiles() throws Exception {
         Path target = game.resolve("mods/example.jar");
         try (FileModInstallationTransaction transaction = new FileModInstallationTransaction(game)) {
@@ -121,6 +164,58 @@ class ModInstallationTransactionTest {
 
         assertEquals("original", Files.readString(target));
         assertFalse(Files.exists(transaction));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void committedFilesSurviveFailureToCleanTemporaryDirectory() throws Exception {
+        Path existing = game.resolve("mods/existing.jar");
+        Files.createDirectories(existing.getParent());
+        Files.writeString(existing, "old");
+        Path added = game.resolve("mods/added.jar");
+        Path transactionDirectory;
+
+        try (FileModInstallationTransaction transaction = new FileModInstallationTransaction(game)) {
+            transactionDirectory = transaction.temporaryDirectory();
+            Path stagedAdded = Files.writeString(
+                    transactionDirectory.resolve("added.part"), "added");
+            Path stagedExisting = Files.writeString(
+                    transactionDirectory.resolve("existing.part"), "replaced");
+            transaction.stageDownloadedFile(stagedAdded, added);
+            transaction.stageReplacement(existing, stagedExisting, existing);
+            try (DirectoryInUse ignored = DirectoryInUse.acquire(transactionDirectory)) {
+                assertDoesNotThrow(transaction::commit);
+            }
+            assertTrue(Files.exists(transactionDirectory));
+        }
+
+        assertEquals("added", Files.readString(added));
+        assertEquals("replaced", Files.readString(existing));
+        FileModInstallationTransaction.recoverIncompleteTransactions(game);
+        assertFalse(Files.exists(transactionDirectory));
+        assertEquals("added", Files.readString(added));
+        assertEquals("replaced", Files.readString(existing));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void unfinishedTransactionIsDiscardedAfterCleanupFailure() throws Exception {
+        Path target = game.resolve("mods/example.jar");
+        Path transactionDirectory;
+        try (FileModInstallationTransaction transaction = new FileModInstallationTransaction(game)) {
+            transactionDirectory = transaction.temporaryDirectory();
+            Path staged = Files.writeString(transactionDirectory.resolve("download.part"), "new");
+            transaction.stageDownloadedFile(staged, target);
+            try (DirectoryInUse ignored = DirectoryInUse.acquire(transactionDirectory)) {
+                transaction.close();
+                assertTrue(Files.exists(transactionDirectory));
+            }
+        }
+
+        assertFalse(Files.exists(target));
+        FileModInstallationTransaction.recoverIncompleteTransactions(game);
+        assertFalse(Files.exists(transactionDirectory));
+        assertFalse(Files.exists(target));
     }
 
     @Test
