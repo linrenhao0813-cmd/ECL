@@ -13,6 +13,8 @@
 
 位置：`<数据目录>/settings.json`。实现：`ecl-core/src/main/java/com/ecl/config/SettingsManager.java`，键定义集中在 `ecl-core/src/main/java/com/ecl/ECLConfig.java`（`KEY_*` 常量，均为 `SettingKey`）。
 
+`SettingsManager.save` 使用同目录 `settings.json.lock` 的 `FileLockLease` 覆盖重读、合并和原子发布；只应用当前对象修改或删除的键。`savedSettings` / `dirtyKeys` 是内存基线与待保存集合，不是 JSON 键。成功后缓存与基线同步到合并结果；失败保留待保存内容，回滚为原值则撤销对应待保存键。损坏文件归档也在该锁内重新读取；锁忙时不归档、不假装加载成功，可稍后重试。锁文件释放后保留，不含设置值。
+
 **存储细节：**`SettingsManager.set(SettingKey<T>)` 实际调用 `setString(key.key(), value.toString())`，因此整数和布尔值也以 JSON 字符串形式保存（例如 `"downloadMaxConcurrent": "8"`、`"backupOnLaunch": "true"`）；读取时按 `SettingKey.type()` 解析，解析失败回退默认值。历史 `versionCategory` / `versionCategory2` 已无消费者；加载设置不再生成新的 `versionCategory2` 键。敏感值使用 `_enc_` 前缀键保存 AES-GCM 密文（`_enc_microsoftRefreshToken` 等），明文键在启动时迁移后删除（`MainController.migrateLegacySecrets`），密钥文件为 `<数据目录>/.secret.key`（Windows 下由 DPAPI 保护，`CryptoKeyStore`）。
 
 | 键 | 类型 | 默认值 | 来源（`ECLConfig`） | 说明 |
@@ -246,12 +248,12 @@
 
 ## `<运行目录>/.ecl-mod-transactions/<事务 ID>/journal.json`
 
-位置：运行目录下 `.ecl-mod-transactions/<UUID>/journal.json`（`FileModInstallationTransaction.TRANSACTIONS_DIRECTORY` / `JOURNAL_FILE`）。Mod 文件安装、启用、禁用、卸载的事务日志。Jackson 序列化 `Journal` record，未知字段忽略、缺失字段按可空处理。
+位置：运行目录下 `.ecl-mod-transactions/<UUID>/journal.json`（`FileModInstallationTransaction.TRANSACTIONS_DIRECTORY` / `JOURNAL_FILE`）。Mod 文件安装、启用、禁用、卸载的事务日志。Jackson 序列化 `Journal` record；恢复前验证状态、条目结构及路径，验证失败保留整个事务与备份，不能把缺失条目当成空回滚后清理。
 
 | 键 | 类型 | 来源（记录组件） | 说明 |
 | --- | --- | --- | --- |
-| `status` | String | `Journal.status` | `PREPARED` / `APPLYING` / `APPLIED`；`APPLIED` 表示已提交，恢复时直接清理目录 |
-| `entries` | object[] | `Journal.entries` | 事务条目，见下 |
+| `status` | String | `Journal.status` | 必须为 `PREPARED` / `APPLYING` / `APPLIED`；`APPLIED` 表示已提交，日志验证通过后才清理目录 |
+| `entries` | object[] | `Journal.entries` | 必须是非空数组；零条目的事务不生成日志 |
 
 `entries[]`（`JournalEntry`）：
 
@@ -262,7 +264,7 @@
 | `oldFile` | String/null | 需要一并移走的旧文件路径（无则为 `null`） |
 | `finalBackup` | String | 目标文件被覆盖前的备份路径（`backups/<n>-final.bak`） |
 | `oldBackup` | String | `oldFile` 的备份路径（`backups/<n>-old.bak`） |
-| `finalFileExisted` | Boolean | 事务开始前目标文件是否存在；回滚时据此决定是否删除新建文件 |
+| `finalFileExisted` | Boolean | 必需布尔值，表示事务开始前目标文件是否存在；回滚时据此决定是否删除新建文件 |
 
 同目录还有 `backups/` 备份目录和 `<事务 ID>.lock` 锁文件；没有可读日志的事务目录会被保留而不是删除，以便人工检查。
 
@@ -352,6 +354,7 @@
 ## 账户文件读取规则
 
 `accounts.json` 的根节点必须为数组（`DefaultAccountService.read`）；对象、标量、`null` 或空文件均报错并保留原内容。
+`DefaultAccountService.mutate` 使用同目录 `accounts.json.lock` 的 `FileLockLease` 覆盖重读、账户修改与原子发布，首次离线账户的默认值判断也在锁内。锁忙则拒绝修改；锁文件释放后保留，不含账户或凭据。JSON 字段没有变化。
 GUI 读取降级不会改写该文件；新增账户与迁移仍拒绝无效库。离线皮肤索引实际位于 `<数据目录>/skins.json`（`OfflineSkinStore.indexFile`），读坏库时不写入；下次导入前将原始字节复制到唯一的 `skins.json.corrupt-*.json`，备份失败停止导入，既有备份不覆盖。
 
 恢复点清单字段保持 `SCHEMA_VERSION = 1`。`Draft.session` / `Draft.ownership` 和 `UpdatePreview.preparedSha512` 都是进程内状态，不是 JSON 键；后者以 `files/`、`versions/`、`libraries/` 相对路径及归档为键记录准备时的 SHA-512。payload 与 `recovery.json` 写入后强制刷新，新 active 身份/摘要验证成功才移除 previous。pending 校验失败保留两个恢复点，不退回旧点继续写入。

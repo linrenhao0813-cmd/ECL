@@ -57,6 +57,25 @@ class ModInstallationServiceTest {
     private DefaultModManagementService management;
 
     @Test
+    void ordinaryInstallationHoldsPhysicalLockWhileReadingIndex() throws Exception {
+        var guarded = (com.ecl.modrinth.repository.InstalledModRepository) java.lang.reflect.Proxy.newProxyInstance(
+                com.ecl.modrinth.repository.InstalledModRepository.class.getClassLoader(),
+                new Class<?>[] { com.ecl.modrinth.repository.InstalledModRepository.class },
+                (proxy, method, arguments) -> {
+                    if ("findAll".equals(method.getName())) {
+                        try (var competing = com.ecl.util.InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
+                            assertNull(competing, "installation must own the physical lock before reading its index");
+                        }
+                    }
+                    return method.invoke(repository, arguments);
+                });
+        installer = new ModInstallationService(guarded, new ModFileDownloadService(executor, new HashVerifier()),
+                new InstanceOperationCoordinator(), Runnable::run, ignored -> false);
+        install(version("a-v1", "a", "a.jar"));
+        assertEquals(List.of("a"), repository.findAll(instance).stream().map(mod -> mod.projectId()).toList());
+    }
+
+    @Test
     void runningMarkerPreventsInstallationAfterLauncherRestart() throws Exception {
         com.ecl.launch.GameProcessMarker.record(instance.gameDirectory(), ProcessHandle.current());
 

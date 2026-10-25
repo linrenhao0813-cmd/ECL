@@ -8,6 +8,7 @@ import com.google.gson.JsonParser;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,6 +16,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DefaultAccountServiceTest {
+    @Test
+    void competingAccountMutationsCannotWriteWhileAnotherTransactionOwnsTheLock() throws Exception {
+        Path file = temp.resolve("shared-accounts.json");
+        DefaultAccountService first = new DefaultAccountService(file);
+        DefaultAccountService second = new DefaultAccountService(file);
+        AuthAccount steve = first.addOffline("Steve");
+        AuthAccount alex = new AuthAccount(AuthType.OFFLINE, "alex-id", "Alex", "Alex", "", "", 0, "", false);
+        String original = Files.readString(file);
+        try (var lease = com.ecl.util.FileLockLease.tryAcquire(file.resolveSibling(file.getFileName() + ".lock"))) {
+            assertThrows(com.ecl.exception.AuthException.class, () -> second.save(alex));
+            assertThrows(com.ecl.exception.AuthException.class, () -> second.remove(steve.identity()));
+            assertThrows(com.ecl.exception.AuthException.class, () -> second.setDefault(steve.identity()));
+            assertEquals(original, Files.readString(file));
+        }
+        second.save(alex);
+        first.setDefault(alex.identity());
+        assertEquals(2, second.list().size());
+        assertEquals(alex.identity(), second.defaultAccount().orElseThrow().identity());
+        assertTrue(first.remove(steve.identity()));
+        assertEquals(List.of(alex.identity()), second.list().stream().map(AuthAccount::identity).toList());
+    }
+
     @TempDir
     Path temp;
 

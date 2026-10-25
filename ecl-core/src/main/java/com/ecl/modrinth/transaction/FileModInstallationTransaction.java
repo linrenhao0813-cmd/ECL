@@ -5,6 +5,7 @@ import com.ecl.operation.InstanceOperationSession;
 
 import com.ecl.util.FileLockLease;
 import com.ecl.util.FileUtil;
+import com.ecl.util.Messages;
 import com.ecl.util.InstanceOperationLease;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,6 +22,8 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -247,7 +250,7 @@ public final class FileModInstallationTransaction implements AutoCloseable {
         Path journalPath = temporaryDirectory.resolve(JOURNAL_FILE);
         if (Files.isRegularFile(journalPath)) {
             try {
-                Journal journal = MAPPER.readValue(journalPath.toFile(), Journal.class);
+                Journal journal = readValidJournal(gameDirectory, temporaryDirectory);
                 IOException failure = rollbackEntries(journal.entries());
                 if (failure != null) {
                     LOGGER.warn("Failed to completely rollback mod transaction {}", temporaryDirectory, failure);
@@ -365,7 +368,7 @@ public final class FileModInstallationTransaction implements AutoCloseable {
             cleanupDirectory(directory);
             return;
         }
-        Journal journal = MAPPER.readValue(journalPath.toFile(), Journal.class);
+        Journal journal = readValidJournal(gameRoot, directory);
         if ("APPLIED".equals(journal.status())) {
             cleanupDirectory(directory);
             return;
@@ -377,27 +380,105 @@ public final class FileModInstallationTransaction implements AutoCloseable {
         cleanupDirectory(directory);
     }
 
+    private static Journal readValidJournal(Path gameRoot, Path directory) throws IOException {
+        try {
+            Path file = directory.resolve(JOURNAL_FILE);
+            FileUtil.validateExistingAncestors(gameRoot, file);
+            var json = MAPPER.readTree(file.toFile());
+            if (json == null || !json.isObject() || !json.path("status").isTextual()
+                    || !json.path("entries").isArray() || json.path("entries").isEmpty()) {
+                throw invalidJournal();
+            }
+            Journal journal = MAPPER.treeToValue(json, Journal.class);
+            if (!Set.of("PREPARED", "APPLYING", "APPLIED").contains(journal.status())) throw invalidJournal();
+            Set<Path> targets = new HashSet<>();
+            Set<Path> backups = new HashSet<>();
+            for (int index = 0; index < journal.entries().size(); index++) {
+                JournalEntry entry = journal.entries().get(index);
+                if (!json.path("entries").get(index).path("finalFileExisted").isBoolean()) throw invalidJournal();
+                Path target = validateJournalPath(gameRoot, entry.finalFile());
+                if (target.startsWith(gameRoot.resolve(TRANSACTIONS_DIRECTORY)) || !targets.add(target)) throw invalidJournal();
+                if (entry.oldFile() != null) {
+                    Path old = validateJournalPath(gameRoot, entry.oldFile());
+                    if (old.startsWith(gameRoot.resolve(TRANSACTIONS_DIRECTORY))) throw invalidJournal();
+                }
+                Path staged = validateJournalPath(gameRoot, entry.stagedFile());
+                if (!staged.startsWith(directory) || staged.equals(directory)) throw invalidJournal();
+                for (String backup : List.of(entry.finalBackup(), entry.oldBackup())) {
+                    Path path = validateJournalPath(gameRoot, backup);
+                    Path backupRoot = directory.resolve("backups");
+                    if (!path.startsWith(backupRoot) || path.equals(backupRoot) || !backups.add(path)) throw invalidJournal();
+                }
+                requireRestorableBackup(gameRoot, directory, entry);
+            }
+            Path backupRoot = directory.resolve("backups");
+            FileUtil.validateExistingAncestors(gameRoot, backupRoot);
+            if (Files.exists(backupRoot)) {
+                try (var files = Files.walk(backupRoot)) {
+                    for (Path backup : files.filter(path -> !Files.isDirectory(path)).toList()) {
+                        if (!backups.contains(backup)) throw invalidJournal();
+                    }
+                }
+            }
+            return journal;
+        } catch (RuntimeException invalid) {
+            throw new IOException(Messages.get("modInstall.invalidTransactionJournal"), invalid);
+        }
+    }
+
+    private static Path validateJournalPath(Path gameRoot, String relative) throws IOException {
+        if (relative == null || relative.isBlank() || Path.of(relative).isAbsolute()) throw invalidJournal();
+        Path result = safeResolve(gameRoot, relative);
+        if (result.equals(gameRoot)) throw invalidJournal();
+        return result;
+    }
+
+    /**
+     * Reject a journal that cannot explain the backups it left behind. An {@code oldBackup} that
+     * exists without an {@code oldFile} is the only copy of a previous file that rollback would
+     * silently ignore and then delete with the transaction directory, so it is refused before any
+     * file is touched.
+     */
+    private static void requireRestorableBackup(
+            Path gameRoot, Path directory, JournalEntry entry) throws IOException {
+        Path oldBackup = validateJournalPath(gameRoot, entry.oldBackup());
+        FileUtil.validateExistingAncestors(directory, oldBackup);
+        if (entry.oldFile() == null && Files.isRegularFile(oldBackup)) throw invalidJournal();
+    }
+
+    private static IOException invalidJournal() {
+        return new IOException(Messages.get("modInstall.invalidTransactionJournal"));
+    }
+
+    /**
+     * Roll back one entry. A target that existed before the transaction is only deleted when its
+     * backup was actually published; otherwise the file that is on disk may be the user's original.
+     */
+    private static void rollbackEntry(Path gameRoot, JournalEntry entry) throws IOException {
+        Path target = safeResolve(gameRoot, entry.finalFile());
+        Path old = entry.oldFile() == null ? null : safeResolve(gameRoot, entry.oldFile());
+        Path finalBackup = safeResolve(gameRoot, entry.finalBackup());
+        Path oldBackup = safeResolve(gameRoot, entry.oldBackup());
+        if (Files.exists(finalBackup)) {
+            Files.deleteIfExists(target);
+            Files.createDirectories(target.getParent());
+            FileUtil.moveReplacing(finalBackup, target);
+        } else if (Boolean.FALSE.equals(entry.finalFileExisted())) {
+            Files.deleteIfExists(target);
+        }
+        if (old != null && Files.exists(oldBackup)) {
+            Files.createDirectories(old.getParent());
+            FileUtil.moveReplacing(oldBackup, old);
+        }
+    }
+
     private static IOException rollbackJournal(Path gameRoot, List<JournalEntry> entries) {
         IOException failure = null;
         List<JournalEntry> reversed = new ArrayList<>(entries == null ? List.of() : entries);
         java.util.Collections.reverse(reversed);
         for (JournalEntry entry : reversed) {
             try {
-                Path target = safeResolve(gameRoot, entry.finalFile());
-                Path old = entry.oldFile() == null ? null : safeResolve(gameRoot, entry.oldFile());
-                Path finalBackup = safeResolve(gameRoot, entry.finalBackup());
-                Path oldBackup = safeResolve(gameRoot, entry.oldBackup());
-                if (Files.exists(finalBackup)) {
-                    Files.deleteIfExists(target);
-                    Files.createDirectories(target.getParent());
-                    FileUtil.moveReplacing(finalBackup, target);
-                } else if (Boolean.FALSE.equals(entry.finalFileExisted())) {
-                    Files.deleteIfExists(target);
-                }
-                if (old != null && Files.exists(oldBackup)) {
-                    Files.createDirectories(old.getParent());
-                    FileUtil.moveReplacing(oldBackup, old);
-                }
+                rollbackEntry(gameRoot, entry);
             } catch (IOException e) {
                 if (failure == null) {
                     failure = new IOException("Failed to recover incomplete mod transaction");

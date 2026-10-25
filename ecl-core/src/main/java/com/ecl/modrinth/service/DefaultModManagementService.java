@@ -1,6 +1,7 @@
 package com.ecl.modrinth.service;
 
 import com.ecl.launch.GameProcessMarker;
+import com.ecl.operation.InstanceOperationSession;
 
 import com.ecl.modrinth.api.ModConflictException;
 import com.ecl.modrinth.api.ModInstallationException;
@@ -69,9 +70,10 @@ public final class DefaultModManagementService implements ModManagementService {
 
     private List<InstalledMod> changeEnabled(ModInstanceContext instance, Set<String> selected, boolean enabled) {
         ensureWritable(instance);
-        try (AutoCloseable ignored = operationLock.acquire(instance.instanceId())) {
+        try (InstanceOperationSession session = operationLock.acquireSession(
+                instance.instanceId(), instance.gameDirectory())) {
             ensureWritable(instance);
-            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory());
+            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory(), session);
             List<InstalledMod> records = repository.findAll(instance);
             if (!enabled) {
                 verifyNotRequired(records, selected, "禁用");
@@ -79,7 +81,7 @@ public final class DefaultModManagementService implements ModManagementService {
                 verifyCanEnable(instance, records, selected);
             }
             try (FileModInstallationTransaction transaction =
-                         new FileModInstallationTransaction(instance.gameDirectory())) {
+                         new FileModInstallationTransaction(instance.gameDirectory(), session)) {
                 List<InstalledMod> updated = new ArrayList<>(records.size());
                 for (InstalledMod record : records) {
                     if (!selected.contains(record.projectId()) || record.enabled() == enabled) {
@@ -119,7 +121,7 @@ public final class DefaultModManagementService implements ModManagementService {
         } catch (ModInstallationException | ModConflictException e) {
             throw e;
         } catch (Exception e) {
-            // Broad catch is required: operationLock AutoCloseable.close() declares Exception.
+            // Broad catch is required: the session and borrow AutoCloseable close() declare Exception.
             throw new ModInstallationException((enabled ? "启用" : "禁用") + "模组失败", e);
         }
     }
@@ -133,13 +135,14 @@ public final class DefaultModManagementService implements ModManagementService {
 
     private List<InstalledMod> uninstallBlocking(ModInstanceContext instance, Set<String> selected) {
         ensureWritable(instance);
-        try (AutoCloseable ignored = operationLock.acquire(instance.instanceId())) {
+        try (InstanceOperationSession session = operationLock.acquireSession(
+                instance.instanceId(), instance.gameDirectory())) {
             ensureWritable(instance);
-            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory());
+            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory(), session);
             List<InstalledMod> records = repository.findAll(instance);
             verifyNotRequired(records, selected, "卸载");
             try (FileModInstallationTransaction transaction =
-                         new FileModInstallationTransaction(instance.gameDirectory())) {
+                         new FileModInstallationTransaction(instance.gameDirectory(), session)) {
                 Path trash = instance.gameDirectory().resolve("launcher-trash")
                         .resolve(transaction.temporaryDirectory().getFileName().toString());
                 List<InstalledMod> remaining = new ArrayList<>();
@@ -168,7 +171,7 @@ public final class DefaultModManagementService implements ModManagementService {
         } catch (ModInstallationException | ModConflictException e) {
             throw e;
         } catch (Exception e) {
-            // Broad catch is required: operationLock AutoCloseable.close() declares Exception.
+            // Broad catch is required: the session and borrow AutoCloseable close() declare Exception.
             throw new ModInstallationException("卸载模组失败", e);
         }
     }
@@ -185,44 +188,48 @@ public final class DefaultModManagementService implements ModManagementService {
             throw new ModInstallationException("请选择有效的 JAR 文件");
         }
         try (JarFile ignoredJar = new JarFile(source.toFile());
-             AutoCloseable ignored = operationLock.acquire(instance.instanceId());
-             FileModInstallationTransaction transaction =
-                     new FileModInstallationTransaction(instance.gameDirectory())) {
+             InstanceOperationSession session = operationLock.acquireSession(
+                     instance.instanceId(), instance.gameDirectory())) {
             ensureWritable(instance);
-            try {
-                FileUtil.validateExistingAncestors(instance.gameDirectory(), instance.modsDirectory());
-            } catch (IOException error) {
-                throw new ModInstallationException(error.getMessage(), error);
-            }
-            Files.createDirectories(instance.modsDirectory());
-            Path target = instance.modsDirectory().resolve(source.getFileName().toString()).normalize();
-            ensureInside(instance.modsDirectory(), target);
-            if (Files.exists(target)) {
-                throw new ModConflictException("mods 中已存在同名文件: " + target.getFileName());
-            }
-            Path staged = transaction.temporaryDirectory().resolve("import").resolve(source.getFileName());
-            Files.createDirectories(staged.getParent());
-            Files.copy(source, staged, StandardCopyOption.COPY_ATTRIBUTES);
-            HashVerifier.HashResult hashes = hashVerifier.calculate(staged);
-            transaction.stageDownloadedFile(staged, target);
+            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory(), session);
+            try (FileModInstallationTransaction transaction =
+                         new FileModInstallationTransaction(instance.gameDirectory(), session)) {
+                ensureWritable(instance);
+                try {
+                    FileUtil.validateExistingAncestors(instance.gameDirectory(), instance.modsDirectory());
+                } catch (IOException error) {
+                    throw new ModInstallationException(error.getMessage(), error);
+                }
+                Files.createDirectories(instance.modsDirectory());
+                Path target = instance.modsDirectory().resolve(source.getFileName().toString()).normalize();
+                ensureInside(instance.modsDirectory(), target);
+                if (Files.exists(target)) {
+                    throw new ModConflictException("mods 中已存在同名文件: " + target.getFileName());
+                }
+                Path staged = transaction.temporaryDirectory().resolve("import").resolve(source.getFileName());
+                Files.createDirectories(staged.getParent());
+                Files.copy(source, staged, StandardCopyOption.COPY_ATTRIBUTES);
+                HashVerifier.HashResult hashes = hashVerifier.calculate(staged);
+                transaction.stageDownloadedFile(staged, target);
 
-            List<InstalledMod> records = new ArrayList<>(repository.findAll(instance));
-            Instant now = Instant.now();
-            InstalledMod imported = new InstalledMod(
-                    instance.instanceId(), "local:" + hashes.sha1(), "", "",
-                    source.getFileName().toString(), "", source.getFileName().toString(),
-                    instance.gameDirectory().relativize(target), hashes.sha1(), hashes.sha512(),
-                    Files.size(source), instance.minecraftVersion(), instance.loaderName(), "local",
-                    true, false, "", now, now);
-            records.add(imported);
-            Path index = repository.createSnapshot(instance, records, transaction.temporaryDirectory());
-            transaction.stageDownloadedFile(index, repository.indexPath(instance));
-            transaction.commit();
-            return imported;
+                List<InstalledMod> records = new ArrayList<>(repository.findAll(instance));
+                Instant now = Instant.now();
+                InstalledMod imported = new InstalledMod(
+                        instance.instanceId(), "local:" + hashes.sha1(), "", "",
+                        source.getFileName().toString(), "", source.getFileName().toString(),
+                        instance.gameDirectory().relativize(target), hashes.sha1(), hashes.sha512(),
+                        Files.size(source), instance.minecraftVersion(), instance.loaderName(), "local",
+                        true, false, "", now, now);
+                records.add(imported);
+                Path index = repository.createSnapshot(instance, records, transaction.temporaryDirectory());
+                transaction.stageDownloadedFile(index, repository.indexPath(instance));
+                transaction.commit();
+                return imported;
+            }
         } catch (ModInstallationException | ModConflictException e) {
             throw e;
         } catch (Exception e) {
-            // Broad catch is required: JarFile + operationLock close() declare Exception.
+            // Broad catch is required: JarFile, the session and the borrow declare Exception.
             throw new ModInstallationException("导入本地模组失败", e);
         }
     }

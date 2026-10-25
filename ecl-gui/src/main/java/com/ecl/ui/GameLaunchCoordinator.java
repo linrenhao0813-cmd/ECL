@@ -73,10 +73,7 @@ final class GameLaunchCoordinator {
                     if (GameProcessMarker.isRunning(launchDir.toPath())) {
                         throw new IOException("实例中的游戏进程仍在运行: " + version);
                     }
-                    gameLock = InstanceOperationLease.tryAcquire(launchDir.toPath());
-                    if (gameLock == null) {
-                        throw new IOException("实例正在运行或被另一个启动器进程占用: " + version);
-                    }
+                    gameLock = acquireGameLock(launchDir.toPath(), version);
                     InstanceLaunchProfile launchProfile = ui.controller.instanceLaunchProfiles()
                             .load(instanceRoot.toPath());
                     String instanceJavaPath = launchProfile.javaMode() == InstanceLaunchProfile.JavaMode.AUTO
@@ -164,6 +161,27 @@ final class GameLaunchCoordinator {
 
     boolean isPreparingVersion(String profileId) {
         return preparation.isPreparingVersion(profileId);
+    }
+
+    static InstanceOperationLease acquireGameLock(java.nio.file.Path launchDirectory, String version) throws IOException {
+        InstanceOperationLease lease = InstanceOperationLease.tryAcquire(launchDirectory);
+        if (lease == null) {
+            throw new IOException("实例正在运行或被另一个启动器进程占用: " + version);
+        }
+        try {
+            // Another launcher can publish the process marker before releasing its lease on exit.
+            if (GameProcessMarker.isRunning(launchDirectory)) {
+                throw new IOException("实例中的游戏进程仍在运行: " + version);
+            }
+            return lease;
+        } catch (IOException | RuntimeException error) {
+            try {
+                lease.close();
+            } catch (IOException closeError) {
+                error.addSuppressed(closeError);
+            }
+            throw error;
+        }
     }
 
     private void createAutomaticBackupBeforeLaunch(String profileId, java.nio.file.Path instanceDirectory) {

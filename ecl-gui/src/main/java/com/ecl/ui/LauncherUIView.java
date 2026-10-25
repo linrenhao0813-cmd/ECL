@@ -418,12 +418,6 @@ class LauncherUIView extends javafx.application.Application {
         desktopIntegration.createInstanceShortcut(startMenu);
     }
 
-    static Path resolveLauncherExecutableCandidate(String configured, String runningCommand,
-                                                    Path workingDirectory, Path codeSource) {
-        return LauncherExecutableResolver.resolveCandidate(
-                configured, runningCommand, workingDirectory, codeSource);
-    }
-
     void showBackupManagerDialog() {
         showBackupManagerDialog(getSelectedVersion());
     }
@@ -803,10 +797,6 @@ class LauncherUIView extends javafx.application.Application {
 
     void ensureDirectory(File dir) throws IOException {
         pathService.ensureDirectory(dir);
-    }
-
-    private static String loaderDisplayName(String loader) {
-        return LauncherPathService.loaderDisplayName(loader);
     }
 
     File resolveModsDir(String gameVersion) {

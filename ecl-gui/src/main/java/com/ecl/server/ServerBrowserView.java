@@ -176,7 +176,11 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
         refreshStatusButton.getStyleClass().addAll(
                 "app-button", "secondary-button", "compact-button");
         refreshStatusButton.setOnAction(event -> {
-            probeMissingStatuses();
+            // Invalidate known statuses first: a manual refresh must re-query every address even
+            // when the directory request fails, otherwise a changed server keeps its old result.
+            statusMap.clear();
+            resultList.refresh();
+            probeStatuses(true);
             startDirectoryRefresh(true);
         });
 
@@ -281,12 +285,17 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
             return;
         }
         Platform.runLater(() -> {
+            if (closed) {
+                return;
+            }
             refreshStatusButton.setText(Messages.get("server.refresh"));
             refreshStatusButton.setDisable(false);
             if (error != null || snapshot == null || snapshot.servers().isEmpty()) {
                 resultList.refresh();
                 statusConsumer.accept(Messages.get("server.status.directoryUnavailable"));
-                probeMissingStatuses();
+                // The directory could not refresh, so it cannot vouch for the statuses it left in
+                // memory; re-query them instead of showing an outdated online state forever.
+                probeStatuses(true);
                 return;
             }
             catalogFilter.applyDirectorySnapshot(snapshot);
@@ -304,8 +313,12 @@ public final class ServerBrowserView extends VBox implements AutoCloseable {
     }
 
     private void probeMissingStatuses() {
+        probeStatuses(false);
+    }
+
+    private void probeStatuses(boolean reprobe) {
         statusProbeController.probe(catalogFilter.servers(), statusMap,
-                () -> closed, () -> resultList.refresh());
+                () -> closed, () -> resultList.refresh(), reprobe);
     }
 
     private void updateCategoryCounts() {

@@ -49,7 +49,7 @@
 | `launch` | 启动参数构建、进程与运行标记 | `DefaultLauncher`、`Launcher`、`LaunchCommandBuilder`、`LaunchOptions`、`LaunchEnvironment`、`NativeLibraryExtractor`、`GameProcess`、`GameProcessMarker`、`ProcessOutputPump`、`BoundedLogBuffer`、`ServerAddress` |
 | `launcher` | 版本管理、加载器安装、服务端安装、崩溃分析 | `VersionManager`、`VersionManifestStore`、`VersionCatalogService`、`VersionProfileResolver`、`LocalVersionProfileScanner`、`ModLoaderInstaller`、`LoaderMetadataClient`、`LoaderUpdateService`、`LoaderProfileWriter`、`ServerInstaller`、`CrashAnalyzer`、`InstallerProcessRunner`、`VersionDownloadTargetResolver` |
 | `modrinth.api` | Modrinth HTTP 客户端与缓存 | `DefaultModrinthApiClient`、`ModrinthApiClient`、`ModrinthApiConfiguration`、`ModrinthResponseMapper`、`ModSearchIndex`；DTO 在 `api/dto/` |
-| `modrinth.download` | 内容文件选择、哈希校验、下载 | `ModrinthDownloader`、`ModFileDownloadService`、`ModrinthFileSelector`、`HashVerifier`、`DownloadUriResolver`、`ModrinthDependencyGuard` |
+| `modrinth.download` | 内容模型适配、依赖环检测、文件选择、哈希校验、下载 | `ModrinthDownloader`、`ModFileDownloadService`、`ModrinthFileSelector`、`HashVerifier`、`DownloadUriResolver` |
 | `modrinth.instance` | 实例上下文抽象 | `ModInstanceContext`、`VersionProfileModInstanceContext`、`ModLoader` |
 | `modrinth.model` | 内容与模组模型 | `ModProject`、`ModVersion`、`ModFile`、`InstalledMod`、`ModUpdate`、`ContentProject`、`ContentVersion`、`ReleaseChannel` |
 | `modrinth.pack` | `.mrpack` 安装与更新事务 | `MrpackInstaller`、`MrpackFileInstaller`、`MrpackIndexReader`、`MrpackOverrideExtractor`、`PackManifest`、`PackUpdateTransaction`、`PackTransactionPaths`、`DefaultModpackUpdateService`、`ModpackUpdateService`、`ModpackInstance`、`ModpackUpdate` |
@@ -83,6 +83,16 @@
 同一职责的专用辅助实现归属其类型：`DownloadTaskEntry` 同时生成任务快照、判断终态和提取错误消息；下载直接复用 `HttpUtil.ProgressCallback` / `SourceCallback`，`ResumableFileDownloader` 负责空值安全通知；`ResumableFileDownloader.PartialDownloadMetadata` 只服务于断点传输；`ContentTarget.create` 与分类描述共同维护。`OfflineSkinServer.SharedLeases` 保留独立的类监视器，避免把共享租约锁混入实例注册锁；`HttpRequestExecutor.ResponseBodyInputStream` 保留正文超时调度器；`DefaultModrinthApiClient.ModrinthHttpTransport` 保留可注入传输契约；`InstalledModsPane.InstalledModCell` 和 `ModUpdatesPane.ModUpdateCell` 只渲染各自列表。合并不跨越调度、执行、传输、存储或 UI 工作流边界。
 
 ## 关键流程
+
+模组安装与管理从中断恢复、索引读取到文件及索引提交持续持有同一 `InstanceOperationSession` 的物理锁；恢复与事务显式借用该 session。`InstanceOperationLock.acquireSession` 是这条连续区间的唯一入口；`acquire` 只持有进程内锁，无法阻止另一个启动器在读取索引与提交之间改写索引，因此不再用于读改写序列。本地 JAR 导入也先恢复旧事务。Mod 日志在任何回滚或清理之前验证完整结构与路径，无效日志保留现场；`oldBackup` 存在而日志未记录 `oldFile` 时属于无法解释的备份，拒绝恢复以免唯一副本随事务目录被清理。
+
+设置保存和账户修改分别通过稳定的 `settings.json.lock` / `accounts.json.lock` 保护读改写。设置仅合并相对内存基线变化的键，避免整个旧缓存覆盖其他进程的修改；损坏设置归档前锁内复读。正常设置读取继续使用原子文件快照。
+
+游戏启动在取得实例物理锁后复查持久化进程标记；服务器目录结果在 FX 回调执行时复查页面生命周期，手动刷新先使旧状态失效再发起探测。
+
+内容库的模型适配与依赖环检测由 `ModrinthDownloader` 自身维护。已有文件复用统一走
+`ModrinthFileSelector.existingFileSatisfies(File, ModFile)`，同时检查声明大小与哈希；不再保留仅供测试使用的 SHA-1 重载。
+启动器可执行文件定位由 `LauncherExecutableResolver` 独立负责，测试直接调用该实现。
 
 ### 1. 启动准备
 

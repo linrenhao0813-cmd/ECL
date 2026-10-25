@@ -5,7 +5,6 @@ import com.ecl.modrinth.api.DefaultModrinthApiClient;
 import com.ecl.modrinth.api.ModSearchIndex;
 import com.ecl.modrinth.api.ModSearchQuery;
 import com.ecl.modrinth.api.ModrinthApiClient;
-import com.ecl.modrinth.download.HashVerifier;
 import com.ecl.modrinth.model.DependencyType;
 import com.ecl.modrinth.model.ContentDownloadResult;
 import com.ecl.modrinth.model.ContentProject;
@@ -15,6 +14,7 @@ import com.ecl.modrinth.model.ModFile;
 import com.ecl.modrinth.model.ModVersion;
 import com.ecl.modrinth.transaction.FileModInstallationTransaction;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.Messages;
 import com.ecl.util.NetworkUriPolicy;
 
 import java.io.File;
@@ -89,7 +89,9 @@ public class ModrinthDownloader implements ContentDownloader {
         ModSearchQuery request = new ModSearchQuery(query, gameVersion, loader, projectType,
                 Set.of(), index, 0, boundedLimit);
         return ModrinthDownloadSupport.await(apiClient.searchMods(request)).hits().stream()
-                .map(project -> ModrinthContentMapper.toProject(project, projectType))
+                .map(project -> new ContentProject(project.projectId(), project.slug(), project.title(), project.author(),
+                        project.description(), project.iconUrl() == null ? null : project.iconUrl().toString(),
+                        project.downloads(), project.follows(), projectType))
                 .toList();
     }
 
@@ -100,7 +102,8 @@ public class ModrinthDownloader implements ContentDownloader {
         List<ModVersion> versions = ModrinthDownloadSupport.await(apiClient.getProjectVersions(
                 project.getProjectId(), ModrinthDownloadSupport.requireText(
                         gameVersion, "请先选择游戏版本"), loader));
-        return versions.stream().map(ModrinthContentMapper::toProjectVersion).toList();
+        return versions.stream().map(version -> new ContentVersion(
+                version.id(), version.name(), version.versionNumber(), version.versionType())).toList();
     }
 
     public ContentDownloadResult downloadLatest(ContentProject project, String gameVersion, String loader,
@@ -171,7 +174,7 @@ public class ModrinthDownloader implements ContentDownloader {
         String versionId = version.id();
         boolean tracked = versionId != null && !versionId.isBlank();
         if (tracked) {
-            ModrinthDependencyGuard.ensureNoDependencyCycle(dependencyPath, versionId);
+            ensureNoDependencyCycle(dependencyPath, versionId);
             if (!visitedVersions.add(versionId)) {
                 return null;
             }
@@ -278,11 +281,16 @@ public class ModrinthDownloader implements ContentDownloader {
                 continue;
             }
             ModVersion dependencyVersion = resolveDependency(dependency, gameVersion, loader);
-            if (dependencyVersion != null) {
-                downloadVersion(dependencyVersion, gameVersion, loader, targetDir,
-                        downloadsDirectory, transaction, listener,
-                        visitedVersions, dependencyPath, files, plannedTargets, false, true, ".jar");
+            if (dependencyVersion == null) {
+                String identity = dependency.projectId() == null ? dependency.versionId() : dependency.projectId();
+                if (identity == null || identity.isBlank()) {
+                    identity = dependency.fileName() == null ? "?" : dependency.fileName();
+                }
+                throw new IOException(Messages.format("content.requiredDependencyUnavailable", identity));
             }
+            downloadVersion(dependencyVersion, gameVersion, loader, targetDir,
+                    downloadsDirectory, transaction, listener,
+                    visitedVersions, dependencyPath, files, plannedTargets, false, true, ".jar");
         }
     }
 
@@ -301,10 +309,20 @@ public class ModrinthDownloader implements ContentDownloader {
 
     static void ensureNoDependencyCycle(Deque<String> dependencyPath, String versionId)
             throws IOException {
-        ModrinthDependencyGuard.ensureNoDependencyCycle(dependencyPath, versionId);
-    }
-
-    static boolean existingFileSatisfies(File target, String sha1) {
-        return ModrinthFileSelector.existingFileSatisfies(target, sha1);
+        if (!dependencyPath.contains(versionId)) {
+            return;
+        }
+        List<String> cycle = new ArrayList<>();
+        boolean cycleStarted = false;
+        for (String current : dependencyPath) {
+            if (current.equals(versionId)) {
+                cycleStarted = true;
+            }
+            if (cycleStarted) {
+                cycle.add(current);
+            }
+        }
+        cycle.add(versionId);
+        throw new IOException("Detected circular Modrinth dependency chain: " + String.join(" -> ", cycle));
     }
 }

@@ -38,6 +38,13 @@
 同日扩大合并范围后，使用 `modrinth-en` 模式重新生成并查看
 `ecl-gui/build/visual-qa/file-consolidation-modrinth-en.png`，核对模组浏览页和 Installed / Updates 标签入口；该空列表快照不证明实际模组行或在线更新结果。
 
+同日全仓库审查与死代码清理后，运行默认 `home` 模式并查看 `ecl-gui/build/visual-qa/ecl-home.png`，
+核对首页、导航与启动入口。隔离预览目录保留的 `visual-fabric-instance` 正常展示；本次仅删除未调用及测试专用转发，无可见布局调整。
+
+同日修复事务日志校验、实例 session、设置合并与服务器状态刷新后，重新运行默认 `home` 模式查看首页，
+并用 `servers` 模式查看 `ecl-gui/build/visual-qa/servers.png`：服务器分类栏、“刷新列表”按钮与结果列表显示正常。
+本次未改动布局，服务器页改动只在手动刷新时清除旧状态并重新探测，快照不证明在线状态结果。
+
 在仓库根目录执行：
 
 ```powershell

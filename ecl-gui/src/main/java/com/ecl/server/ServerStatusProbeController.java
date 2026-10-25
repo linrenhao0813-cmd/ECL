@@ -26,13 +26,26 @@ final class ServerStatusProbeController implements AutoCloseable {
                Map<String, ServerStatus> statuses,
                BooleanSupplier closed,
                Runnable refreshView) {
+        probe(servers, statuses, closed, refreshView, false);
+    }
+
+    /**
+     * @param reprobe re-query addresses that already have a known status. A manual refresh sets
+     *                this so a server changing state is not masked by the cached result; the
+     *                60 second failure cooldown still applies.
+     */
+    void probe(Collection<PublicServer> servers,
+               Map<String, ServerStatus> statuses,
+               BooleanSupplier closed,
+               Runnable refreshView,
+               boolean reprobe) {
         if (closed.getAsBoolean() || Boolean.getBoolean("ecl.snapshot")) {
             return;
         }
         int scheduled = 0;
         for (PublicServer server : servers) {
             ServerStatus existing = statuses.get(server.address());
-            if ((existing != null && existing.state() != ServerStatusState.UNKNOWN)
+            if ((!reprobe && existing != null && existing.state() != ServerStatusState.UNKNOWN)
                     || server.address().isBlank()
                     || !ServerStatusService.shouldProbe(server)
                     || !probingAddresses.add(server.address())) {

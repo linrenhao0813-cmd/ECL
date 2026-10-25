@@ -1,6 +1,7 @@
 package com.ecl.config;
 
 import com.ecl.util.FileUtil;
+import com.ecl.util.FileLockLease;
 import com.ecl.util.GsonProvider;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -13,8 +14,10 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,6 +34,8 @@ public class SettingsManager {
     private final File settingsFile;
 
     private JsonObject settings = new JsonObject();
+    private JsonObject savedSettings = new JsonObject();
+    private final Set<String> dirtyKeys = new HashSet<>();
     private boolean loadAttempted;
     private final EncryptedSettingsStore encryptedStore = new EncryptedSettingsStore();
     private final SettingsAutoSaveScheduler autoSaveScheduler =
@@ -61,28 +66,46 @@ public class SettingsManager {
     }
 
     public synchronized void load() {
-        loadAttempted = true;
+        loadAttempted = false;
         if (settingsFile.exists()) {
             if (Files.isSymbolicLink(settingsFile.toPath())) {
                 LOGGER.warn("Ignoring unreadable symbolic-link settings file {}", settingsFile);
                 settings = new JsonObject();
+                savedSettings = settings.deepCopy();
+                dirtyKeys.clear();
+                loadAttempted = true;
                 return;
             }
             try (Reader reader = Files.newBufferedReader(settingsFile.toPath(), StandardCharsets.UTF_8)) {
                 settings = JsonParser.parseReader(reader).getAsJsonObject();
             } catch (IOException | RuntimeException e) {
-                Path corrupt = uniqueCorruptBackup(settingsFile.toPath());
-                try {
-                    Files.move(settingsFile.toPath(), corrupt);
-                    LOGGER.warn("Moved unreadable settings file to {}", corrupt, e);
-                } catch (IOException backupFailure) {
-                    e.addSuppressed(backupFailure);
-                    LOGGER.warn("Failed to back up unreadable settings file {}", settingsFile, e);
-                }
-                settings = new JsonObject();
+                settings = recoverUnreadableSettings();
             }
         } else {
             settings = new JsonObject();
+        }
+        savedSettings = settings.deepCopy();
+        dirtyKeys.clear();
+        loadAttempted = true;
+    }
+
+    private JsonObject recoverUnreadableSettings() {
+        Path target = settingsFile.toPath().toAbsolutePath().normalize();
+        Path lockPath = target.resolveSibling(target.getFileName() + ".lock");
+        try (FileLockLease lease = FileLockLease.tryAcquire(lockPath)) {
+            if (lease == null) throw new IOException("Settings recovery is busy in another process; retry loading settings");
+            try {
+                // Another process may have published a valid file since the initial failed read.
+                return readCurrentSettings(target);
+            } catch (IOException unreadable) {
+                if (Files.isSymbolicLink(target)) throw unreadable;
+                Path corrupt = uniqueCorruptBackup(target);
+                Files.move(target, corrupt);
+                LOGGER.warn("Moved unreadable settings file to {}", corrupt, unreadable);
+                return new JsonObject();
+            }
+        } catch (IOException failure) {
+            throw new IllegalStateException("Unable to recover launcher settings safely", failure);
         }
     }
 
@@ -90,21 +113,34 @@ public class SettingsManager {
         ensureLoaded();
         long savedVersion = autoSaveScheduler.currentVersion();
         Path tempFile = null;
-        try {
+        Path target = settingsFile.toPath().toAbsolutePath().normalize();
+        Path lockPath = target.resolveSibling(target.getFileName() + ".lock");
+        try (FileLockLease lease = FileLockLease.tryAcquire(lockPath)) {
+            if (lease == null) throw new IOException("Settings are busy in another process");
+            JsonObject merged = readCurrentSettings(target);
+            for (String key : dirtyKeys) {
+                if (settings.has(key)) {
+                    merged.add(key, settings.get(key).deepCopy());
+                } else {
+                    merged.remove(key);
+                }
+            }
             File parent = settingsFile.getParentFile();
             if (parent != null && !parent.exists()) {
                 Files.createDirectories(parent.toPath());
             }
-            Path target = settingsFile.toPath();
             Path parentPath = target.toAbsolutePath().getParent();
             tempFile = Files.createTempFile(parentPath, "settings-", ".json.tmp");
             try (Writer writer = Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8)) {
-                GSON.toJson(settings, writer);
+                GSON.toJson(merged, writer);
             }
             FileUtil.moveReplacing(tempFile, target);
+            settings = merged;
+            savedSettings = merged.deepCopy();
+            dirtyKeys.clear();
             autoSaveScheduler.markClean(savedVersion);
             return true;
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             LOGGER.error("Failed to save settings to {}", settingsFile, e);
             return false;
         } finally {
@@ -118,8 +154,23 @@ public class SettingsManager {
         }
     }
 
+    private static JsonObject readCurrentSettings(Path target) throws IOException {
+        if (Files.isSymbolicLink(target)) throw new IOException("Settings must not be a symbolic link");
+        if (!Files.exists(target)) return new JsonObject();
+        try (Reader reader = Files.newBufferedReader(target, StandardCharsets.UTF_8)) {
+            return JsonParser.parseReader(reader).getAsJsonObject();
+        } catch (RuntimeException invalid) {
+            throw new IOException("Settings file is unreadable", invalid);
+        }
+    }
+
     /** Mark the in-memory settings as changed and schedule a debounced disk write when enabled. */
-    private void markDirty() {
+    private void markDirty(String key) {
+        if (Objects.equals(settings.get(key), savedSettings.get(key))) {
+            dirtyKeys.remove(key);
+        } else {
+            dirtyKeys.add(key);
+        }
         autoSaveScheduler.markDirty();
     }
 
@@ -138,7 +189,7 @@ public class SettingsManager {
     public synchronized void setString(String key, String value) {
         ensureLoaded();
         settings.addProperty(key, value);
-        markDirty();
+        markDirty(key);
     }
 
     public synchronized int getInt(String key, int defaultValue) {
@@ -180,7 +231,7 @@ public class SettingsManager {
     public synchronized void setBoolean(String key, boolean value) {
         ensureLoaded();
         settings.addProperty(key, value);
-        markDirty();
+        markDirty(key);
     }
 
     /**
@@ -214,14 +265,14 @@ public class SettingsManager {
             } else if (value instanceof Boolean b) {
                 settings.addProperty(key, b);
             }
+            markDirty(key);
         }
-        markDirty();
     }
 
     public synchronized void remove(String key) {
         ensureLoaded();
         settings.remove(key);
-        markDirty();
+        markDirty(key);
     }
 
     // ---- Type-safe API via SettingKey ----
@@ -274,7 +325,7 @@ public class SettingsManager {
     public synchronized void setEncrypted(String key, String value) {
         ensureLoaded();
         if (encryptedStore.set(settings, key, value)) {
-            markDirty();
+            markDirty("_enc_" + key);
         }
     }
 
@@ -308,8 +359,10 @@ public class SettingsManager {
     public synchronized boolean removeEncryptedByPrefix(String keyPrefix) {
         ensureLoaded();
         Objects.requireNonNull(keyPrefix, "keyPrefix");
+        var matchingKeys = settings.keySet().stream()
+                .filter(key -> key.startsWith("_enc_" + keyPrefix)).toList();
         if (encryptedStore.removeByPrefix(settings, keyPrefix)) {
-            markDirty();
+            matchingKeys.forEach(this::markDirty);
             return true;
         }
         return false;

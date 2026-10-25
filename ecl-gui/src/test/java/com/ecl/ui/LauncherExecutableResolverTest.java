@@ -15,7 +15,7 @@ class LauncherExecutableResolverTest {
         Path java = Files.createFile(root.resolve("java.exe"));
         Path jar = Files.createFile(root.resolve("ecl-gui.jar"));
 
-        assertNull(LauncherUI.resolveLauncherExecutableCandidate(
+        assertNull(LauncherExecutableResolver.resolveCandidate(
                 "", java.toString(), root.resolve("working"), jar));
     }
 
@@ -23,14 +23,14 @@ class LauncherExecutableResolverTest {
     void resolvesExplicitOrAdjacentPackagedLauncher(@TempDir Path root) throws Exception {
         Path explicit = Files.createFile(root.resolve("CustomEcl.exe"));
         assertEquals(explicit.toAbsolutePath().normalize(),
-                LauncherUI.resolveLauncherExecutableCandidate(
+                LauncherExecutableResolver.resolveCandidate(
                         explicit.toString(), "", root.resolve("working"), null));
 
         Path distribution = Files.createDirectories(root.resolve("distribution"));
         Path launcher = Files.createFile(distribution.resolve("ECL.exe"));
         Path jar = Files.createFile(distribution.resolve("ecl-gui.jar"));
         assertEquals(launcher.toAbsolutePath().normalize(),
-                LauncherUI.resolveLauncherExecutableCandidate(
+                LauncherExecutableResolver.resolveCandidate(
                         "", "", root.resolve("working"), jar));
     }
 }

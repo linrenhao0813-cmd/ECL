@@ -16,6 +16,82 @@ class ModInstallationTransactionTest {
     @TempDir Path game;
 
     @Test
+    void invalidStructuredJournalsPreserveUniqueBackups() throws Exception {
+        for (String json : java.util.List.of("{}", "{\"status\":\"APPLYING\"}",
+                "{\"status\":\"APPLYING\",\"entries\":null}",
+                "{\"status\":\"UNKNOWN\",\"entries\":[]}")) {
+            Path transaction = Files.createDirectories(game.resolve(".ecl-mod-transactions/crashed"));
+            Path backup = transaction.resolve("backups/only-copy.bak");
+            Files.createDirectories(backup.getParent());
+            Files.writeString(backup, "unique previous bytes");
+            Path journal = Files.writeString(transaction.resolve("journal.json"), json);
+            assertThrows(IOException.class, () -> FileModInstallationTransaction.recoverIncompleteTransactions(game), json);
+            assertEquals("unique previous bytes", Files.readString(backup));
+            assertEquals(json, Files.readString(journal));
+        }
+    }
+
+    @Test
+    void invalidEntriesAndUnlistedBackupsAreValidatedBeforeRollback() throws Exception {
+        String valid = """
+                {"status":"APPLYING","entries":[{
+                  "stagedFile":".ecl-mod-transactions/crashed/download.part",
+                  "finalFile":"mods/example.jar","oldFile":null,
+                  "finalBackup":".ecl-mod-transactions/crashed/backups/0-final.bak",
+                  "oldBackup":".ecl-mod-transactions/crashed/backups/0-old.bak",
+                  "finalFileExisted":true}]}
+                """;
+        for (String json : java.util.List.of(
+                valid.replace("true", "null"),
+                valid.replace("mods/example.jar", "../outside.jar"),
+                valid.replace("crashed/download.part", "other/download.part"),
+                valid.replace("crashed/backups/0-final.bak", "other/backups/0-final.bak"),
+                valid.replace("APPLYING", "APPLIED"))) {
+            Path transaction = Files.createDirectories(game.resolve(".ecl-mod-transactions/crashed/backups")).getParent();
+            Path backup = Files.writeString(transaction.resolve("backups/0-final.bak"), "original");
+            Path unlisted = transaction.resolve("backups/unlisted.bak");
+            Files.deleteIfExists(unlisted);
+            if (json.contains("APPLIED")) Files.writeString(unlisted, "unique copy");
+            Path target = game.resolve("mods/example.jar");
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, "installed");
+            Path journal = Files.writeString(transaction.resolve("journal.json"), json);
+            assertThrows(IOException.class, () -> FileModInstallationTransaction.recoverIncompleteTransactions(game), json);
+            assertEquals("installed", Files.readString(target));
+            assertEquals("original", Files.readString(backup));
+            if (json.contains("APPLIED")) assertEquals("unique copy", Files.readString(unlisted));
+            assertEquals(json, Files.readString(journal));
+        }
+    }
+
+    @Test
+    void orphanOldBackupWithoutOldFileIsPreserved() throws Exception {
+        Path transaction = Files.createDirectories(game.resolve(".ecl-mod-transactions/crashed/backups")).getParent();
+        Path backup = Files.writeString(transaction.resolve("backups/0-old.bak"), "unique original");
+        String json = """
+                {"status":"APPLYING","entries":[{
+                  "stagedFile":".ecl-mod-transactions/crashed/download.part",
+                  "finalFile":"mods/example.jar","oldFile":null,
+                  "finalBackup":".ecl-mod-transactions/crashed/backups/0-final.bak",
+                  "oldBackup":".ecl-mod-transactions/crashed/backups/0-old.bak",
+                  "finalFileExisted":false}]}
+                """;
+        Files.writeString(transaction.resolve("journal.json"), json);
+        assertThrows(IOException.class, () -> FileModInstallationTransaction.recoverIncompleteTransactions(game));
+        assertEquals("unique original", Files.readString(backup));
+    }
+
+    @Test
+    void closingWithDamagedStructuredJournalPreservesUniqueBackup() throws Exception {
+        Path backup;
+        try (var transaction = new FileModInstallationTransaction(game)) {
+            backup = Files.writeString(transaction.temporaryDirectory().resolve("backups/only-copy.bak"), "only copy");
+            Files.writeString(transaction.temporaryDirectory().resolve("journal.json"), "{}");
+        }
+        assertEquals("only copy", Files.readString(backup));
+    }
+
+    @Test
     void closingWithoutJournalPreservesUniqueBackup() throws Exception {
         Path backup;
         try (var transaction = new FileModInstallationTransaction(game)) {

@@ -81,6 +81,9 @@ Gradle 依赖方向为 `ecl-boot` → `ecl-gui` → `ecl-core`（`ecl-boot` 同�
 - `util/HttpRequestExecutor.java`：请求执行和专用嵌套 `ResponseBodyInputStream`，维持正文空闲超时与关闭语义。
 - `modrinth/api/DefaultModrinthApiClient.java`：嵌套 `ModrinthHttpTransport` 只作为该客户端的传输注入点。
 - GUI `modrinth/ui/InstalledModsPane.java` / `ModUpdatesPane.java`：各自包含专用行渲染器，不合并两个列表或后台操作。
+- `modrinth/download/ModrinthDownloader.java`：内联内容模型适配并直接执行依赖环检测，替代 `ModrinthContentMapper`、`ModrinthDependencyGuard`；校验与异常信息保持原样。
+- `modrinth/download/ModrinthFileSelector.java`：已有文件复用只保留生产使用的大小与哈希联合校验；测试不再经过下载器转发或使用旧的 SHA-1 重载。
+- GUI `ui/LauncherExecutableResolver.java`：生产与测试共用 EXE 定位实现，移除 `LauncherUIView` 中仅供测试使用的转发及未调用的加载器名称转发。
 
 单一调用者不自动代表可以合并：加密存储与设置自动保存、微软会话状态与认证流程、整合包路径校验与文件事务、元数据解析与扫描缓存继续独立，分别承担不同规则。
 
@@ -184,6 +187,10 @@ Mod 拖入事件在窗口框架建成后安装。
 在取得跨进程操作锁后检查持久化标记，运行中或标记不可读时拒绝写入。只读 `inspect` 不保存索引和缓存。
 `DefaultAccountService.read` 在账户文件缺失时返回空列表；已存在文件的 JSON 根结构异常会抛出 `AuthException`，
 所有账户修改共用此读取路径，避免将异常结构覆盖成新账户数组。
+
+模组安装、启停、卸载与本地导入用同一 session 连续保护恢复、索引读取和提交；事务借用 session 而不重新获取物理锁。session 统一由 `InstanceOperationLock.acquireSession` 取得（`acquire` 只保护进程内互斥，不足以覆盖读改写）。`FileModInstallationTransaction` 先校验日志结构和全部目标／备份路径再恢复，损坏日志保留现场；`oldBackup` 存在但日志没有 `oldFile` 时拒绝恢复。
+账户修改入口 `DefaultAccountService.mutate` 在稳定侧车锁内重读和发布；`SettingsManager.save` 在自己的侧车锁内将 `dirtyKeys` 合并到磁盘最新对象，成功后更新 `savedSettings`。两者锁忙均拒绝写入，可重试；相关内存状态不是持久化字段。
+`GameLaunchCoordinator.acquireGameLock` 将物理锁获取与标记复查作为同一边界；`ServerBrowserView` 在 FX 线程执行目录结果时检查 `closed`，手动刷新清除旧状态后以 `reprobe` 重新探测，目录请求失败也走同一路径。
 
 ### 整合包事务
 

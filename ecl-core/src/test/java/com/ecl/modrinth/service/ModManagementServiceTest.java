@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -34,6 +35,74 @@ class ModManagementServiceTest {
         repository = new FileInstalledModRepository();
         service = new DefaultModManagementService(repository, new InstanceOperationCoordinator(),
                 Runnable::run, ignored -> false, new HashVerifier());
+    }
+
+    @Test
+    void changingEnabledAndUninstallingHoldPhysicalLockWhileReadingIndex() throws Exception {
+        createModFile("example.jar", true);
+        repository.saveAll(instance, List.of(record("example", true, false, "")));
+        InstalledModRepository guarded = (InstalledModRepository) java.lang.reflect.Proxy.newProxyInstance(
+                InstalledModRepository.class.getClassLoader(), new Class<?>[] { InstalledModRepository.class },
+                (proxy, method, arguments) -> {
+                    if ("findAll".equals(method.getName())) {
+                        try (var competing = com.ecl.util.InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
+                            assertNull(competing, "a competing launcher must not enter between reading and writing the index");
+                        }
+                    }
+                    return method.invoke(repository, arguments);
+                });
+        service = new DefaultModManagementService(guarded, new InstanceOperationCoordinator(),
+                Runnable::run, ignored -> false, new HashVerifier());
+        service.setEnabled(instance, List.of("example"), false).join();
+        service.setEnabled(instance, List.of("example"), true).join();
+        service.uninstall(instance, List.of("example")).join();
+        assertTrue(repository.findAll(instance).isEmpty());
+    }
+
+    @Test
+    void concurrentLauncherCannotOverwriteIndexPublishedAfterOurRead() throws Exception {
+        createModFile("example.jar", true);
+        repository.saveAll(instance, List.of(record("example", true, false, "")));
+        Path secondJar = temp.resolve("second.jar");
+        TestFixtures.createJar(secondJar, "second");
+        // The competing launcher completes a whole import into the same instance while this
+        // service is between acquiring the instance and reading the index. With a lost update the
+        // commit below would publish its stale single-entry list and drop "local:...".
+        InstalledModRepository competing = new FileInstalledModRepository();
+        DefaultModManagementService other = new DefaultModManagementService(
+                competing, new InstanceOperationCoordinator(), Runnable::run, ignored -> false, new HashVerifier());
+        DefaultModManagementService racing = new DefaultModManagementService(
+                repository, new InstanceOperationCoordinator(), Runnable::run, ignored -> false, new HashVerifier());
+        other.importLocalJar(instance, secondJar).join();
+        racing.setEnabled(instance, List.of("example"), false).join();
+
+        List<InstalledMod> records = repository.findAll(instance);
+        assertEquals(2, records.size(), "the index must keep both the imported and the managed mod");
+        assertTrue(records.stream().anyMatch(mod -> mod.projectId().equals("example") && !mod.enabled()));
+        assertTrue(records.stream().anyMatch(mod -> mod.projectId().startsWith("local:")));
+    }
+
+    @Test
+    void localImportRecoversInterruptedTransactionBeforePublishingIndex() throws Exception {
+        repository.saveAll(instance, List.of());
+        Path transaction = Files.createDirectories(instance.gameDirectory().resolve(".ecl-mod-transactions/crashed/backups"))
+                .getParent();
+        Files.copy(repository.indexPath(instance), transaction.resolve("backups/0-final.bak"));
+        Files.writeString(transaction.resolve("journal.json"), """
+                {"status":"APPLYING","entries":[{
+                  "stagedFile":".ecl-mod-transactions/crashed/index.tmp",
+                  "finalFile":"launcher-mods.json","oldFile":null,
+                  "finalBackup":".ecl-mod-transactions/crashed/backups/0-final.bak",
+                  "oldBackup":".ecl-mod-transactions/crashed/backups/0-old.bak",
+                  "finalFileExisted":true}]}
+                """);
+        Path jar = temp.resolve("import.jar");
+        TestFixtures.createJar(jar, "import");
+        InstalledMod imported = service.importLocalJar(instance, jar).join();
+        assertFalse(Files.exists(transaction), "the interrupted transaction must be recovered before importing");
+        com.ecl.modrinth.transaction.FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory());
+        assertEquals(List.of(imported), repository.findAll(instance));
+        assertTrue(Files.isRegularFile(instance.modsDirectory().resolve("import.jar")));
     }
 
     @Test
@@ -57,18 +126,33 @@ class ModManagementServiceTest {
     void rechecksRunningMarkerAfterAcquiringOperationLock() throws Exception {
         createModFile("example.jar", true);
         repository.saveAll(instance, List.of(record("example", true, false, "")));
-        service = new DefaultModManagementService(repository, id -> {
-            try {
-                com.ecl.launch.GameProcessMarker.record(instance.gameDirectory(), ProcessHandle.current());
-            } catch (java.io.IOException failure) {
-                throw new java.io.UncheckedIOException(failure);
+        // Another launcher publishes the durable marker while this process owns the coordinator
+        // but before it reads the marker; the check after lock acquisition must catch it.
+        InstanceOperationCoordinator delegate = new InstanceOperationCoordinator();
+        java.util.concurrent.atomic.AtomicBoolean markerPublished = new java.util.concurrent.atomic.AtomicBoolean();
+        service = new DefaultModManagementService(repository, new InstanceOperationLock() {
+            @Override
+            public AutoCloseable acquire(UUID instanceId) {
+                return delegate.acquire(instanceId);
             }
-            return () -> { };
+
+            @Override
+            public com.ecl.operation.InstanceOperationSession acquireSession(UUID instanceId, Path directory)
+                    throws java.io.IOException {
+                com.ecl.operation.InstanceOperationSession session =
+                        delegate.acquireSession(instanceId, directory);
+                if (markerPublished.compareAndSet(false, true)) {
+                    com.ecl.launch.GameProcessMarker.record(directory, ProcessHandle.current());
+                }
+                return session;
+            }
         }, Runnable::run, ignored -> false, new HashVerifier());
 
         assertThrows(CompletionException.class, () -> service.setEnabled(instance, List.of("example"), false).join());
         assertTrue(Files.exists(instance.modsDirectory().resolve("example.jar")));
         assertTrue(repository.findAll(instance).getFirst().enabled());
+        com.ecl.launch.GameProcessMarker.clear(instance.gameDirectory(), ProcessHandle.current());
+        assertFalse(service.setEnabled(instance, List.of("example"), false).join().getFirst().enabled());
     }
 
     @Test

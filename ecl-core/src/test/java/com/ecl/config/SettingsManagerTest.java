@@ -23,6 +23,137 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SettingsManagerTest {
+    @Test
+    void mergesIndependentChangesAndExplicitDeletesAcrossManagers() throws Exception {
+        Path file = tempDir.resolve("shared-settings.json");
+        Files.writeString(file, "{\"deleted\":\"old\",\"same\":\"old\"}");
+        SettingsManager first = new SettingsManager(file.toFile());
+        SettingsManager second = new SettingsManager(file.toFile());
+        first.load();
+        second.load();
+        first.setString("directory", "new-directory");
+        first.setString("same", "first");
+        assertTrue(first.save());
+        second.remove("deleted");
+        second.setString("same", "second");
+        assertTrue(second.save());
+        SettingsManager loaded = new SettingsManager(file.toFile());
+        assertEquals("new-directory", loaded.getString("directory", "missing"));
+        assertEquals("second", loaded.getString("same", "missing"));
+        assertEquals("missing", loaded.getString("deleted", "missing"));
+        assertTrue(first.save());
+        assertEquals("second", new SettingsManager(file.toFile()).getString("same", "missing"));
+    }
+
+    @Test
+    void lockedSaveRetainsChangesForRetryIncludingEncryptedMigration() throws Exception {
+        Path file = tempDir.resolve("locked-settings.json");
+        Files.writeString(file, "{\"legacy\":\"secret\"}");
+        SettingsManager first = new SettingsManager(file.toFile());
+        first.migrateToEncrypted("legacy");
+        try (var lease = com.ecl.util.FileLockLease.tryAcquire(file.resolveSibling(file.getFileName() + ".lock"))) {
+            assertFalse(first.save());
+        }
+        SettingsManager second = new SettingsManager(file.toFile());
+        second.setString("unrelated", "preserve");
+        assertTrue(second.save());
+        assertTrue(first.save());
+        SettingsManager loaded = new SettingsManager(file.toFile());
+        assertEquals("secret", loaded.getEncrypted("legacy"));
+        assertEquals("missing", loaded.getString("legacy", "missing"));
+        assertEquals("preserve", loaded.getString("unrelated", "missing"));
+    }
+
+    @Test
+    void encryptedPrefixRemovalPreservesOtherManagersSecrets() throws Exception {
+        Path file = tempDir.resolve("encrypted-settings.json");
+        SettingsManager first = new SettingsManager(file.toFile());
+        first.setEncrypted("old.token", "old");
+        assertTrue(first.save());
+        SettingsManager second = new SettingsManager(file.toFile());
+        second.load();
+        first.setEncrypted("new.token", "new");
+        assertTrue(first.save());
+        assertTrue(second.removeEncryptedByPrefix("old."));
+        assertTrue(second.save());
+        SettingsManager loaded = new SettingsManager(file.toFile());
+        assertNull(loaded.getEncrypted("old.token"));
+        assertEquals("new", loaded.getEncrypted("new.token"));
+    }
+
+    @Test
+    void revertingAFailedFormChangeDoesNotOverwriteAnotherManagersUpdate() throws Exception {
+        Path file = tempDir.resolve("rollback-settings.json");
+        Files.writeString(file, "{\"same\":\"old\"}");
+        SettingsManager first = new SettingsManager(file.toFile());
+        first.load();
+        first.setString("same", "unsaved");
+        try (var lease = com.ecl.util.FileLockLease.tryAcquire(file.resolveSibling(file.getFileName() + ".lock"))) {
+            assertFalse(first.save());
+        }
+        first.setString("same", "old");
+        SettingsManager second = new SettingsManager(file.toFile());
+        second.setString("same", "other-process");
+        assertTrue(second.save());
+        first.setBoolean("unrelated", true);
+        assertTrue(first.save());
+        assertEquals("other-process", new SettingsManager(file.toFile()).getString("same", "missing"));
+    }
+
+    @Test
+    void corruptionAfterLoadingIsPreservedAndPendingChangesCanRetry() throws Exception {
+        Path file = tempDir.resolve("corrupted-after-load.json");
+        Files.writeString(file, "{}");
+        SettingsManager first = new SettingsManager(file.toFile());
+        first.setString("pending", "keep");
+        Files.writeString(file, "{broken");
+        assertFalse(first.save());
+        assertEquals("{broken", Files.readString(file));
+        Files.writeString(file, "{\"external\":\"preserve\"}");
+        assertTrue(first.save());
+        SettingsManager loaded = new SettingsManager(file.toFile());
+        assertEquals("keep", loaded.getString("pending", "missing"));
+        assertEquals("preserve", loaded.getString("external", "missing"));
+    }
+
+    @Test
+    void corruptLoadWhileLockedCannotArchiveTheFileAndCanRetryAfterRelease() throws Exception {
+        Path file = tempDir.resolve("busy-corrupt.json");
+        Files.writeString(file, "{broken");
+        SettingsManager first = new SettingsManager(file.toFile());
+        try (var lease = com.ecl.util.FileLockLease.tryAcquire(file.resolveSibling(file.getFileName() + ".lock"))) {
+            assertThrows(IllegalStateException.class, first::load);
+            assertThrows(IllegalStateException.class, () -> first.setString("pending", "unsafe"));
+            assertEquals("{broken", Files.readString(file));
+            assertFalse(Files.exists(file.resolveSibling(file.getFileName() + ".corrupt")));
+        }
+        Files.writeString(file, "{\"external\":\"valid\"}");
+        first.setString("pending", "safe");
+        assertTrue(first.save());
+        assertEquals("valid", new SettingsManager(file.toFile()).getString("external", "missing"));
+    }
+
+    @Test
+    void savingOneKeyDoesNotRevertAnotherLaunchersUnrelatedKey() throws Exception {
+        Path file = tempDir.resolve("two-launchers.json");
+        Files.writeString(file, "{\"gameDir\":\"old-dir\",\"language\":\"zh_CN\"}");
+        SettingsManager launcherA = new SettingsManager(file.toFile());
+        SettingsManager launcherB = new SettingsManager(file.toFile());
+        launcherA.load();
+        launcherB.load();
+
+        launcherA.setString("gameDir", "new-dir");
+        assertTrue(launcherA.save());
+        // Launcher B only changes the language but still caches the stale directory it loaded.
+        launcherB.setString("language", "en");
+        assertTrue(launcherB.save());
+
+        SettingsManager reloaded = new SettingsManager(file.toFile());
+        assertEquals("new-dir", reloaded.getString("gameDir", "missing"),
+                "saving an unrelated key must not restore a stale cached directory");
+        assertEquals("en", reloaded.getString("language", "missing"));
+    }
+
     @TempDir
     Path tempDir;
 

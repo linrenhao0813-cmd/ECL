@@ -20,16 +20,32 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class InstanceOperationCoordinator implements InstanceOperationLock {
     private final Map<UUID, LockEntry> locks = new HashMap<>();
 
-    /** A dedicated virtual owner preserves legacy thread-bound locking while callers borrow explicitly. */
+    /** Returns {@code null} instead of waiting when another operation owns the instance. */
     public InstanceOperationSession tryAcquireSession(UUID id, Path gameDirectory) throws IOException {
+        return startSession(id, gameDirectory, false);
+    }
+
+    @Override
+    public InstanceOperationSession acquireSession(UUID id, Path gameDirectory) throws IOException {
+        return startSession(id, gameDirectory, true);
+    }
+
+    /**
+     * A dedicated virtual owner preserves legacy thread-bound locking while callers borrow
+     * explicitly. {@code wait} selects between queueing behind an in-process owner and reporting
+     * immediately; the inter-process lease is always tried once so a busy instance never blocks.
+     */
+    private InstanceOperationSession startSession(UUID id, Path gameDirectory, boolean wait)
+            throws IOException {
         Objects.requireNonNull(id, "instanceId");
-        Path directory = gameDirectory.toAbsolutePath().normalize();
+        Path directory = Objects.requireNonNull(gameDirectory, "gameDirectory").toAbsolutePath().normalize();
         FileUtil.validateExistingAncestors(directory.getRoot(), directory);
         CompletableFuture<InstanceOperationSession> ready = new CompletableFuture<>();
         CompletableFuture<Void> released = new CompletableFuture<>();
         CountDownLatch finish = new CountDownLatch(1);
         Thread.ofVirtual().name("ecl-instance-owner").start(() -> {
-            try (AutoCloseable local = tryAcquire(id)) {
+            boolean handedOff = false;
+            try (AutoCloseable local = wait ? acquire(id) : tryAcquire(id)) {
                 if (local == null) {
                     ready.complete(null);
                     return;
@@ -43,11 +59,13 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
                         finish.countDown();
                         released.join();
                     }));
+                    handedOff = true;
                     finish.await();
                 }
             } catch (Throwable failure) {
-                ready.completeExceptionally(failure);
-                released.completeExceptionally(failure);
+                if (!handedOff) {
+                    ready.completeExceptionally(failure);
+                }
             } finally {
                 released.complete(null);
             }
@@ -55,7 +73,9 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
         try {
             return ready.join();
         } catch (CompletionException failure) {
-            throw new IOException("Cannot acquire instance operation session", failure.getCause());
+            Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+            if (cause instanceof IOException io) throw io;
+            throw new IOException("Cannot acquire instance operation session", cause);
         }
     }
 

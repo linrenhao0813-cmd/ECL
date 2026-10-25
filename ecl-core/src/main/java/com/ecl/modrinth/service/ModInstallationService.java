@@ -2,6 +2,7 @@ package com.ecl.modrinth.service;
 
 import com.ecl.launch.GameProcessMarker;
 import com.ecl.operation.InstanceOperationSession;
+import com.ecl.util.Messages;
 
 import com.ecl.modrinth.api.ModConflictException;
 import com.ecl.modrinth.api.ModInstallationException;
@@ -85,18 +86,23 @@ public final class ModInstallationService {
         if (instanceRunning.test(instance.instanceId())) {
             throw new ModInstallationException("实例正在运行，不能修改模组文件");
         }
-        try (AutoCloseable ignored = session == null ? operationLock.acquire(instance.instanceId())
-                : session.borrow(instance.instanceId(), instance.gameDirectory())) {
+        // An upgrade already owns the instance through a session; a standalone install must own
+        // the whole recovery, index read and commit sequence itself.
+        InstanceOperationSession owned = session == null ? acquireSession(instance) : null;
+        InstanceOperationSession activeSession = session == null ? owned : session;
+        try (InstanceOperationSession ignored = owned;
+             InstanceOperationSession.Borrow borrowed = session == null ? null
+                     : activeSession.borrow(instance.instanceId(), instance.gameDirectory())) {
             if (instanceRunning.test(instance.instanceId()) || GameProcessMarker.isRunning(instance.gameDirectory())) {
                 throw new ModInstallationException("实例正在运行，不能修改模组文件");
             }
             checkCancelled();
             prepareDirectoriesAndSpace(plan);
-            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory(), session);
+            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory(), activeSession);
             List<InstalledMod> existing = repository.findAll(instance);
 
             try (FileModInstallationTransaction transaction =
-                         new FileModInstallationTransaction(instance.gameDirectory(), session)) {
+                         new FileModInstallationTransaction(instance.gameDirectory(), activeSession)) {
                 Path downloadsDirectory = transaction.temporaryDirectory().resolve("downloads");
                 Files.createDirectories(downloadsDirectory);
                 List<ModDownloadRequest> requests = createRequests(plan.files(), downloadsDirectory);
@@ -132,6 +138,14 @@ public final class ModInstallationService {
         } catch (Exception e) {
             // Broad catch is required: operationLock AutoCloseable.close() declares Exception.
             throw installationFailure(e);
+        }
+    }
+
+    private InstanceOperationSession acquireSession(ModInstanceContext instance) {
+        try {
+            return operationLock.acquireSession(instance.instanceId(), instance.gameDirectory());
+        } catch (IOException failure) {
+            throw new ModInstallationException(Messages.get("instanceRecovery.instanceBusy"), failure);
         }
     }
 

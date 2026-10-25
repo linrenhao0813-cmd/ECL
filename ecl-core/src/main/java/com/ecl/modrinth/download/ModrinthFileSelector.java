@@ -1,7 +1,6 @@
 package com.ecl.modrinth.download;
 
 import com.ecl.modrinth.model.ModFile;
-import com.ecl.util.FileUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -62,10 +61,5 @@ final class ModrinthFileSelector {
         } catch (IOException | RuntimeException invalid) {
             return false;
         }
-    }
-
-    static boolean existingFileSatisfies(File target, String sha1) {
-        return target.isFile() && sha1 != null && sha1.matches("(?i)[0-9a-f]{40}")
-                && FileUtil.verifySha1(target, sha1);
     }
 }

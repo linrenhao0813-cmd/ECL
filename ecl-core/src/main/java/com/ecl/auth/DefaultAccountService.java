@@ -4,6 +4,7 @@ import com.ecl.ECLConfig;
 import com.ecl.exception.AuthException;
 import com.ecl.util.CryptoUtil;
 import com.ecl.util.FileUtil;
+import com.ecl.util.FileLockLease;
 import com.ecl.util.GsonProvider;
 import com.ecl.util.JsonUtil;
 import com.google.gson.JsonArray;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,6 +70,10 @@ public final class DefaultAccountService {
         if (account == null || account.username().isBlank()) {
             throw new IllegalArgumentException("Account username is required");
         }
+        return mutate(() -> saveLocked(account));
+    }
+
+    private AuthAccount saveLocked(AuthAccount account) {
         AccountSnapshot snapshot = snapshot();
         List<AuthAccount> accounts = new ArrayList<>(snapshot.accounts());
         List<JsonElement> unreadable = new ArrayList<>(snapshot.unreadable());
@@ -83,12 +89,15 @@ public final class DefaultAccountService {
 
     public synchronized AuthAccount addOffline(String username) {
         OfflineAuth provider = new OfflineAuth(username);
-        AuthAccount account = new AuthAccount(AuthType.OFFLINE, provider.getUUID(), provider.getUsername(),
-                provider.getUsername(), "", "", 0, "", list().isEmpty());
-        return save(account);
+        return mutate(() -> saveLocked(new AuthAccount(AuthType.OFFLINE, provider.getUUID(), provider.getUsername(),
+                provider.getUsername(), "", "", 0, "", list().isEmpty())));
     }
 
     public synchronized boolean remove(String identity) {
+        return mutate(() -> removeLocked(identity));
+    }
+
+    private boolean removeLocked(String identity) {
         AccountSnapshot snapshot = snapshot();
         List<AuthAccount> accounts = new ArrayList<>(snapshot.accounts());
         List<JsonElement> unreadable = new ArrayList<>(snapshot.unreadable());
@@ -110,12 +119,30 @@ public final class DefaultAccountService {
     }
 
     public synchronized void setDefault(String identity) {
+        mutate(() -> {
+            setDefaultLocked(identity);
+            return null;
+        });
+    }
+
+    private void setDefaultLocked(String identity) {
         AccountSnapshot snapshot = snapshot();
         List<AuthAccount> accounts = new ArrayList<>(snapshot.accounts());
         boolean found = accounts.stream().anyMatch(account -> account.identity().equalsIgnoreCase(identity));
         if (!found) throw new IllegalArgumentException("Unknown account: " + identity);
         accounts.replaceAll(account -> withDefault(account, account.identity().equalsIgnoreCase(identity)));
         write(accounts, snapshot.unreadable());
+    }
+
+    private <T> T mutate(Supplier<T> operation) {
+        Path absolute = file.toAbsolutePath().normalize();
+        Path lockPath = absolute.resolveSibling(absolute.getFileName() + ".lock");
+        try (FileLockLease lease = FileLockLease.tryAcquire(lockPath)) {
+            if (lease == null) throw new IOException("Account repository is busy in another process");
+            return operation.get();
+        } catch (IOException failure) {
+            throw new AuthException("无法保存账户文件", failure);
+        }
     }
 
     private JsonArray read() {
