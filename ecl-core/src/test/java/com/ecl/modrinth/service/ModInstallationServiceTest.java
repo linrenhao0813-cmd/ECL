@@ -41,11 +41,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class ModInstallationServiceTest {
     @TempDir Path temp;
     private HttpServer server;
     private ExecutorService executor;
+    private ExecutorService orchestration;
     private AutoCloseable downloadPolicy;
     private ModInstanceContext instance;
     private FileInstalledModRepository repository;
@@ -94,6 +96,7 @@ class ModInstallationServiceTest {
 
     @AfterEach
     void tearDown() throws Exception {
+        if (orchestration != null) orchestration.shutdownNow();
         executor.shutdownNow();
         server.stop(0);
         downloadPolicy.close();
@@ -137,7 +140,9 @@ class ModInstallationServiceTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Timeout(20)
     void previewedUpgradeReplacesUnindexedDependenciesAndCanRestoreThem() throws Exception {
+        orchestration = Executors.newSingleThreadExecutor();
         for (String project : List.of("manual", "shared")) {
             Path jar = instance.modsDirectory().resolve(project + "-old.jar");
             TestFixtures.createJar(jar, project);
@@ -161,17 +166,28 @@ class ModInstallationServiceTest {
                                                                       String target, ModLoaderInstaller.Listener listener) {
                 throw new AssertionError("Loader is already current");
             }
-        }, lock, Runnable::run, ignored -> false);
-        var scanner = new DefaultLocalModScanner(api, repository, new HashVerifier(), lock, Runnable::run, ignored -> false);
+        }, lock, orchestration, ignored -> false);
+        var scanner = new DefaultLocalModScanner(api, repository, new HashVerifier(), lock, orchestration, ignored -> false);
+        var sessionInstaller = new ModInstallationService(repository,
+                new ModFileDownloadService(executor, new HashVerifier()), lock, orchestration, ignored -> false);
         var updates = new DefaultModUpdateService(api, new DefaultModVersionSelector(), resolver,
-                new InstallationPlanBuilder(), installer, ignored -> instance);
+                new InstallationPlanBuilder(), sessionInstaller, ignored -> instance);
         var recovery = new InstanceUpgradeRecoveryService(temp.resolve("recovery"), lock, ignored -> false);
-        var service = new InstanceUpdateService(loaders, scanner, updates, ignored -> false, Runnable::run, recovery);
+        var service = new InstanceUpdateService(loaders, scanner, updates, ignored -> false, orchestration, recovery);
         var preview = service.preview(instance, ReleaseChannel.RELEASE_ONLY, null, versions, temp.resolve("game-root"), null).join();
         var prepared = service.prepare(preview, Set.of("manual")).join();
         assertFalse(Files.exists(repository.indexPath(instance)));
 
-        var result = service.execute(prepared, null, null).join();
+        var result = service.execute(prepared, progress -> {
+            if (progress.stage() == InstanceUpdateService.Stage.MOD) {
+                assertNull(lock.tryAcquire(instance.instanceId()));
+                try (var physical = com.ecl.util.InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
+                    assertNull(physical, "the complete upgrade must retain the physical lifecycle lock");
+                } catch (java.io.IOException failure) {
+                    throw new java.io.UncheckedIOException(failure);
+                }
+            }
+        }, null).join();
 
         assertTrue(result.failures().isEmpty());
         assertFalse(Files.exists(instance.modsDirectory().resolve("manual-old.jar")));

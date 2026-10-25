@@ -27,6 +27,7 @@ class PackUpdateTransactionTest {
 
     @BeforeEach
     void isolateMetadata() throws Exception {
+        org.slf4j.LoggerFactory.getILoggerFactory();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);
@@ -36,6 +37,99 @@ class PackUpdateTransactionTest {
     @AfterEach
     void restoreMetadata() throws Exception {
         baseDirField.set(null, previousBaseDir);
+    }
+
+    @Test
+    void closingWithoutJournalPreservesUniqueBackup() throws Exception {
+        Path instance = Files.createDirectories(temp.resolve("versions/Pack"));
+        Path backup;
+        try (var transaction = new PackUpdateTransaction(instance, profile("Pack"))) {
+            backup = Files.writeString(transaction.stagingDirectory().getParent().resolve("backups/only-copy.bak"), "only copy");
+        }
+        assertEquals("only copy", Files.readString(backup));
+    }
+
+    @Test
+    void missingJournalPreservesUniqueBackupsAndUnknownContents() throws Exception {
+        Path instance = temp.resolve("versions/Pack");
+        Files.createDirectories(instance);
+        Path transaction = Files.createDirectories(instance.getParent().resolve(".ecl-pack-transactions")
+                .resolve("Pack-" + UUID.randomUUID()));
+        Path backup = transaction.resolve("backups/only-copy.bak");
+        Files.createDirectories(backup.getParent());
+        Files.writeString(backup, "unique previous bytes");
+        org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> PackUpdateTransaction.recoverIncompleteTransactions(instance, profile("Pack")));
+        assertEquals("unique previous bytes", Files.readString(backup));
+        Files.delete(backup);
+        Path unknown = Files.writeString(transaction.resolve("unknown.bin"), "unclassified bytes");
+        org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> PackUpdateTransaction.recoverIncompleteTransactions(instance, profile("Pack")));
+        assertEquals("unclassified bytes", Files.readString(unknown));
+    }
+
+    @Test
+    void explicitSessionBorrowsWithoutReleasingOwner() throws Exception {
+        Path instance = temp.resolve("versions/Pack");
+        Files.createDirectories(instance.resolve("config"));
+        Path target = Files.writeString(instance.resolve("config/options.txt"), "before");
+        var coordinator = new com.ecl.operation.InstanceOperationCoordinator();
+        UUID id = UUID.randomUUID();
+        try (var session = coordinator.tryAcquireSession(id, instance)) {
+            PackUpdateTransaction.recoverIncompleteTransactions(instance, profile("Pack"), session);
+            try (PackUpdateTransaction transaction = new PackUpdateTransaction(instance, profile("Pack"), session)) {
+                Path staged = Files.writeString(transaction.stagingDirectory().resolve("value"), "after");
+                transaction.stageReplacement(staged, target);
+                transaction.commit();
+            }
+            assertEquals("after", Files.readString(target));
+            org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                    () -> new PackUpdateTransaction(instance, profile("Pack")));
+            org.junit.jupiter.api.Assertions.assertNull(coordinator.tryAcquire(id));
+        }
+        try (PackUpdateTransaction transaction = new PackUpdateTransaction(instance, profile("Pack"))) {
+            assertTrue(Files.isDirectory(transaction.stagingDirectory()));
+        }
+    }
+
+    @Test
+    void persistentMarkerRejectsTransactionAndRecovery() throws Exception {
+        Path instance = temp.resolve("versions/Pack");
+        Files.createDirectories(instance);
+        Path transaction = writeInterruptedTransaction(instance);
+        com.ecl.launch.GameProcessMarker.record(instance, ProcessHandle.current());
+        org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> new PackUpdateTransaction(instance, profile("Pack")));
+        org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> PackUpdateTransaction.recoverIncompleteTransactions(instance, profile("Pack")));
+        assertTrue(Files.exists(transaction.resolve("journal.json")));
+    }
+
+    @Test
+    void previewIgnoresOtherInstancesAndValidAppliedJournal() throws Exception {
+        Path instance = temp.resolve("versions/Pack");
+        Files.createDirectories(instance);
+        writeInterruptedTransaction(temp.resolve("versions/Pack-2"));
+        assertFalse(PackUpdateTransaction.hasIncompleteTransactions(instance));
+        Path own = writeInterruptedTransaction(instance);
+        Path journal = own.resolve("journal.json");
+        Files.writeString(journal, Files.readString(journal).replace("APPLYING", "APPLIED"));
+        assertFalse(PackUpdateTransaction.hasIncompleteTransactions(instance));
+        Files.writeString(journal, "{\"status\":\"APPLIED\"}");
+        assertTrue(PackUpdateTransaction.hasIncompleteTransactions(instance));
+        org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> PackUpdateTransaction.recoverIncompleteTransactions(instance, profile("Pack")));
+        assertTrue(Files.exists(journal));
+    }
+
+    @Test
+    void packManifestRejectsUserDataAliases() throws Exception {
+        Path manifest = temp.resolve("manifest.json");
+        for (String path : java.util.List.of("mods/../saves/x", "./saves/x", "a/../.ecl/config/x")) {
+            Files.writeString(manifest, "{\"formatVersion\":1,\"files\":[{\"path\":\"" + path
+                    + "\",\"sha512\":\"" + "a".repeat(128) + "\"}]}");
+            org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class, () -> PackManifest.read(manifest));
+        }
     }
 
     @Test

@@ -130,6 +130,85 @@ class ClientLoggingConfigTest {
         assertEquals("log_configs/client-1.7.2.xml", logging.relativePath());
     }
 
+    @Test
+    void rejectsLoggingDeclarationsAboveSixteenMiB() throws Exception {
+        var json = com.google.gson.JsonParser.parseString("""
+                {"argument":"-Dlog4j.configurationFile=${path}",
+                 "file":{"id":"client.xml","sha1":"%s","size":16777217,"url":"https://example.com/client.xml"}}
+                """.formatted(sha1(LOG4J_CONFIG))).getAsJsonObject();
+        assertThrows(IOException.class, () -> ClientLoggingConfig.parse(json));
+        assertEquals(0, requests.get());
+    }
+
+    @Test
+    void failedDownloadCleansRandomPartialAndValidatorFiles() throws Exception {
+        server.createContext("/broken.xml", exchange -> {
+            exchange.getResponseHeaders().add("ETag", "\"v1\"");
+            exchange.sendResponseHeaders(200, LOG4J_CONFIG.length);
+            exchange.getResponseBody().write(LOG4J_CONFIG, 0, 4);
+            exchange.close();
+        });
+        ClientLoggingConfig logging = config("http://127.0.0.1:" + server.getAddress().getPort() + "/broken.xml");
+        Path assets = Files.createDirectories(tempDir.resolve("assets"));
+        assertThrows(IOException.class, () -> logging.ensureDownloaded(assets.toFile()));
+        try (var paths = Files.walk(assets)) {
+            assertEquals(0, paths.filter(Files::isRegularFile).count());
+        }
+    }
+
+    @Test
+    void cancellationCleansRandomPartialAndValidatorFiles() throws Exception {
+        var bodyStarted = new java.util.concurrent.CountDownLatch(1);
+        var releaseBody = new java.util.concurrent.CountDownLatch(1);
+        server.createContext("/cancel.xml", exchange -> {
+            try {
+                exchange.getResponseHeaders().add("ETag", "\"v1\"");
+                exchange.sendResponseHeaders(200, LOG4J_CONFIG.length);
+                exchange.getResponseBody().write(LOG4J_CONFIG, 0, 4);
+                exchange.getResponseBody().flush();
+                bodyStarted.countDown();
+                releaseBody.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                exchange.getResponseBody().write(LOG4J_CONFIG, 4, LOG4J_CONFIG.length - 4);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        ClientLoggingConfig logging = config("http://127.0.0.1:" + server.getAddress().getPort() + "/cancel.xml");
+        Path assets = Files.createDirectories(tempDir.resolve("assets"));
+        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        Thread worker = new Thread(() -> {
+            try {
+                logging.ensureDownloaded(assets.toFile());
+            } catch (Throwable error) {
+                failure.set(error);
+            }
+        });
+        worker.start();
+        try {
+            org.junit.jupiter.api.Assertions.assertTrue(bodyStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            boolean partialWritten = false;
+            while (!partialWritten && System.nanoTime() < deadline) {
+                try (var paths = Files.walk(assets)) {
+                    partialWritten = paths.anyMatch(path -> path.toString().endsWith(".part") && path.toFile().length() > 0);
+                }
+                if (!partialWritten) Thread.sleep(10);
+            }
+            org.junit.jupiter.api.Assertions.assertTrue(partialWritten);
+            worker.interrupt();
+        } finally {
+            releaseBody.countDown();
+            worker.join(5000);
+        }
+        assertFalse(worker.isAlive());
+        org.junit.jupiter.api.Assertions.assertNotNull(failure.get());
+        try (var paths = Files.walk(assets)) {
+            assertEquals(0, paths.filter(Files::isRegularFile).count());
+        }
+    }
+
     private static String sha1(byte[] bytes) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(bytes));
     }

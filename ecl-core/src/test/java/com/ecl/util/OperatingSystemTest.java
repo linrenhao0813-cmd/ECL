@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OperatingSystemTest {
     @Test
@@ -27,10 +28,22 @@ class OperatingSystemTest {
     }
 
     @Test
-    void unknownPlatformsKeepTheHistoricalWindowsAssumption() {
-        assertEquals("windows", OperatingSystem.minecraftName("Plan9"));
-        assertEquals("windows", OperatingSystem.minecraftName(null));
-        assertEquals("windows", OperatingSystem.minecraftName(""));
+    void unknownPlatformsCannotSelectWindowsDownloads() {
+        assertThrows(UnsupportedOperationException.class, () -> OperatingSystem.minecraftName("Plan9"));
+        assertThrows(UnsupportedOperationException.class, () -> OperatingSystem.minecraftName(null));
+        assertThrows(UnsupportedOperationException.class, () -> OperatingSystem.minecraftName(""));
+    }
+
+    @Test
+    void darwinIsNotDetectedAsWindows() {
+        String original = System.getProperty("os.name");
+        try {
+            System.setProperty("os.name", "Darwin");
+            assertFalse(OperatingSystem.isWindows());
+            assertEquals("java", OperatingSystem.javaExecutableName());
+        } finally {
+            System.setProperty("os.name", original);
+        }
     }
 
     @Test

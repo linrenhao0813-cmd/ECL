@@ -148,7 +148,7 @@ final class MicrosoftAccountCoordinator {
 
     private void refreshMicrosoftAccountChoices(String selectedUuid) {
         if (ui.microsoftAccountCombo == null) return;
-        List<MicrosoftAccountStore.Account> accounts = ui.microsoftAccountStore.list();
+        List<MicrosoftAccountStore.Account> accounts = ui.readMicrosoftAccounts();
         ui.microsoftAccountCombo.getItems().setAll(accounts);
         accounts.stream()
                 .filter(account -> account.uuid().equalsIgnoreCase(selectedUuid))

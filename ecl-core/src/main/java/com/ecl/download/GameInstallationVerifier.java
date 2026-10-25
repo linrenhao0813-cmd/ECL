@@ -3,7 +3,7 @@ package com.ecl.download;
 import com.ecl.ECLConfig;
 import com.ecl.game.ClientLoggingConfig;
 import com.ecl.game.DownloadObject;
-import com.ecl.game.VersionMetadata;
+import com.ecl.game.Library;
 import com.ecl.game.VersionRepository;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
@@ -35,8 +35,14 @@ public final class GameInstallationVerifier {
     private final Path versions;
     private final Path libraries;
     private final Path assets;
+    private final Path instancesRoot;
 
     public GameInstallationVerifier(Path versions, Path libraries, Path assets) {
+        this(versions, libraries, assets, versions);
+    }
+
+    public GameInstallationVerifier(Path versions, Path libraries, Path assets, Path instancesRoot) {
+        this.instancesRoot = normalize(instancesRoot);
         this.versions = normalize(versions);
         this.libraries = normalize(libraries);
         this.assets = normalize(assets);
@@ -44,7 +50,8 @@ public final class GameInstallationVerifier {
 
     public static GameInstallationVerifier configured() {
         return new GameInstallationVerifier(ECLConfig.getVersionsDir().toPath(),
-                ECLConfig.getLibrariesDir().toPath(), ECLConfig.getAssetsDir().toPath());
+                ECLConfig.getLibrariesDir().toPath(), ECLConfig.getAssetsDir().toPath(),
+                ECLConfig.getGameDir().toPath().resolve("versions"));
     }
 
     public Report inspect(String profileId) {
@@ -52,19 +59,17 @@ public final class GameInstallationVerifier {
         List<JsonObject> chain = readMetadataChain(profileId, checks);
         if (chain.isEmpty()) return report(profileId, checks);
         JsonObject effective;
-        VersionMetadata metadata;
         try {
             effective = new VersionRepository(versions.toFile()).resolveRaw(profileId);
-            metadata = new VersionRepository(versions.toFile()).resolve(profileId);
         } catch (IOException | RuntimeException invalid) {
             checks.add(new Check(Category.METADATA, versions.resolve(profileId).toString(),
                     Status.UNVERIFIABLE, invalid.getMessage(), false));
             return report(profileId, checks);
         }
-        verifyClient(metadata, effective, checks);
-        verifyLibraries(effective, checks);
+        verifyClient(profileId, effective, checks);
+        verifyLibraries(profileId, effective, checks);
         verifyAssets(effective, checks);
-        verifyClientLogging(metadata, checks);
+        verifyClientLogging(effective, checks);
         return report(profileId, checks);
     }
 
@@ -73,8 +78,14 @@ public final class GameInstallationVerifier {
      * repairable when the metadata carries a usable URL, SHA-1 and size, matching the other
      * categories — the launcher never guesses a source for it.
      */
-    private void verifyClientLogging(VersionMetadata metadata, List<Check> checks) {
-        ClientLoggingConfig logging = metadata.clientLogging();
+    private void verifyClientLogging(JsonObject effective, List<Check> checks) {
+        ClientLoggingConfig logging;
+        try {
+            logging = ClientLoggingConfig.parse(object(object(effective, "logging"), "client"));
+        } catch (IOException | RuntimeException invalid) {
+            checks.add(new Check(Category.LOGGING, "logging.client", Status.UNVERIFIABLE, message(invalid), false));
+            return;
+        }
         if (logging == null) {
             return;
         }
@@ -160,6 +171,7 @@ public final class GameInstallationVerifier {
     }
 
     private Path rootFor(Path file) {
+        if (file.startsWith(instancesRoot)) return instancesRoot;
         if (file.startsWith(versions)) return versions;
         if (file.startsWith(libraries)) return libraries;
         if (file.startsWith(assets)) return assets;
@@ -176,6 +188,7 @@ public final class GameInstallationVerifier {
         java.util.Set<String> seen = new java.util.HashSet<>();
         String current = profileId;
         while (current != null && !current.isBlank()) {
+            Path metadataFile = null;
             try {
                 FileUtil.requireSafeVersionId(current);
                 if (!seen.add(current)) {
@@ -184,6 +197,7 @@ public final class GameInstallationVerifier {
                     return List.of();
                 }
                 Path file = FileUtil.safeVersionJson(versions.toFile(), current).toPath();
+                metadataFile = file;
                 FileUtil.validateExistingAncestors(versions, file);
                 if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
                     checks.add(new Check(Category.METADATA, file.toString(), Status.MISSING,
@@ -195,7 +209,7 @@ public final class GameInstallationVerifier {
                 chain.add(json);
                 current = JsonUtil.getString(json, "inheritsFrom", "");
             } catch (IOException | RuntimeException invalid) {
-                checks.add(new Check(Category.METADATA, current, Status.CORRUPT,
+                checks.add(new Check(Category.METADATA, metadataFile == null ? current : metadataFile.toString(), Status.CORRUPT,
                         message(invalid), false));
                 return List.of();
             }
@@ -203,10 +217,11 @@ public final class GameInstallationVerifier {
         return chain;
     }
 
-    private void verifyClient(VersionMetadata metadata, JsonObject effective, List<Check> checks) {
+    private void verifyClient(String profileId, JsonObject effective, List<Check> checks) {
         JsonObject downloads = object(effective, "downloads");
         JsonObject client = object(downloads, "client");
-        String jarId = metadata.clientJarId();
+        String jarId = JsonUtil.getString(effective, "jar", profileId);
+        if (jarId.isBlank()) jarId = profileId;
         try {
             FileUtil.requireSafeVersionId(jarId);
             Path jar = FileUtil.safeVersionJar(versions.toFile(), jarId).toPath();
@@ -221,7 +236,7 @@ public final class GameInstallationVerifier {
         }
     }
 
-    private void verifyLibraries(JsonObject profile, List<Check> checks) {
+    private void verifyLibraries(String profileId, JsonObject profile, List<Check> checks) {
         JsonArray entries = profile.has("libraries") && profile.get("libraries").isJsonArray()
                 ? profile.getAsJsonArray("libraries") : new JsonArray();
         String architecture = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
@@ -242,18 +257,21 @@ public final class GameInstallationVerifier {
                 String name = JsonUtil.getString(library, "name", "");
                 Category category = isLoaderLibrary(name)
                         ? Category.LOADER_DEPENDENCY : Category.LIBRARY;
+                Library typed = Library.parse(library);
+                boolean local = typed != null && typed.isLocal();
+                Path libraryRoot = local ? instancesRoot.resolve(profileId).resolve("libraries") : libraries;
                 JsonObject downloads = object(library, "downloads");
                 if (downloads != null && object(downloads, "artifact") != null) {
-                    checks.add(checkManaged(category, object(downloads, "artifact"), libraries));
+                    checks.add(checkManaged(category, object(downloads, "artifact"), libraryRoot, !local));
                 } else if (downloads == null || library.has("url") && downloads.has("classifiers")) {
-                    checkMavenLibrary(library, category, checks);
+                    checkMavenLibrary(library, category, libraryRoot, checks);
                 }
                 JsonObject classifiers = object(downloads, "classifiers");
                 String key = classifiers == null ? null : GameDownloader.nativeClassifierKey(
                         library, classifiers, com.ecl.util.OperatingSystem.minecraftName(), bits,
                         nativeClassifier);
                 if (key != null) {
-                    checks.add(checkManaged(Category.NATIVE, object(classifiers, key), libraries));
+                    checks.add(checkManaged(Category.NATIVE, object(classifiers, key), libraryRoot, !local));
                 }
             } catch (IOException | RuntimeException invalid) {
                 checks.add(new Check(Category.LIBRARY, JsonUtil.getString(library, "name", ""),
@@ -262,7 +280,7 @@ public final class GameInstallationVerifier {
         }
     }
 
-    private void checkMavenLibrary(JsonObject library, Category category, List<Check> checks)
+    private void checkMavenLibrary(JsonObject library, Category category, Path libraryRoot, List<Check> checks)
             throws IOException {
         String coordinate = JsonUtil.getString(library, "name", "");
         String repository = JsonUtil.getString(library, "url", "");
@@ -271,14 +289,13 @@ public final class GameInstallationVerifier {
                     "No trusted artifact path or checksum is declared", false));
             return;
         }
-        Path file = FileUtil.safeResolveUnder(libraries.toFile(),
+        Path file = FileUtil.safeResolveUnder(libraryRoot.toFile(),
                 com.ecl.game.MavenCoordinates.repositoryPath(coordinate)).toPath();
-        boolean repairable = usableUrl(com.ecl.game.MavenCoordinates.repositoryUrl(repository, coordinate));
         checks.add(Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
                 ? new Check(category, file.toString(), Status.UNVERIFIABLE,
                         "Artifact has no declared checksum or size", false)
-                : new Check(category, file.toString(), Status.MISSING,
-                        "Artifact is missing and must be verified before repair", repairable));
+                : new Check(category, file.toString(), Status.UNVERIFIABLE,
+                        "Artifact is missing and has no declared checksum", false));
     }
 
     private void verifyAssets(JsonObject profile, List<Check> checks) {
@@ -341,7 +358,7 @@ public final class GameInstallationVerifier {
         }
     }
 
-    private Check checkManaged(Category category, JsonObject artifact, Path root) throws IOException {
+    private Check checkManaged(Category category, JsonObject artifact, Path root, boolean allowRepair) throws IOException {
         if (artifact == null) {
             return new Check(category, root.toString(), Status.UNVERIFIABLE,
                     "Artifact metadata is missing", false);
@@ -352,7 +369,7 @@ public final class GameInstallationVerifier {
                     "Artifact path is missing", false);
         }
         File file = FileUtil.safeResolveUnder(root.toFile(), path);
-        return check(category, file.toPath(), artifact, usableUrl(JsonUtil.getString(artifact, "url", "")));
+        return check(category, file.toPath(), artifact, allowRepair && usableUrl(JsonUtil.getString(artifact, "url", "")));
     }
 
     private static Check check(Category category, Path file, JsonObject metadata, boolean repairable) {

@@ -64,7 +64,7 @@ final class InstanceCheckRepairWorkflow {
                         requireActive(context);
                         GameInstallationVerifier.Report report = ui.controller
                                 .gameInstallationRepairService()
-                                .inspect(profileId, versions, libraries, assets);
+                                .inspect(profileId, versions, libraries, assets, gameRoot.resolve("versions"));
                         com.ecl.launcher.VersionManager.VersionDownloadTarget target = null;
                         String targetError = "";
                         try {
@@ -103,10 +103,8 @@ final class InstanceCheckRepairWorkflow {
     }
 
     private void showReport(Inspection inspection, Runnable onRefreshed) {
-        boolean canRepair = inspection.target() != null && inspection.instance() != null
-                && inspection.report().issues().stream().anyMatch(check -> (check.repairable()
-                || check.category() == GameInstallationVerifier.Category.METADATA)
-                && check.status() != GameInstallationVerifier.Status.VERIFIED);
+        boolean canRepair = inspection.instance() != null && GameInstallationRepairService.canRepair(
+                inspection.report(), inspection.target(), inspection.versions());
         TextArea details = new TextArea(formatReport(inspection));
         details.setEditable(false);
         details.setWrapText(true);
@@ -141,7 +139,7 @@ final class InstanceCheckRepairWorkflow {
             long count = inspection.report().checks().stream()
                     .filter(check -> check.category() == category).count();
             if (count > 0) output.append("\n").append(Messages.format("instanceRepair.categoryCount",
-                    Messages.get("instanceRepair.category." + category.name().toLowerCase()), count));
+                    Messages.get("instanceRepair.category." + category.name().toLowerCase(java.util.Locale.ROOT)), count));
         }
         if (!inspection.instanceError().isBlank()) {
             output.append("\n\n").append(Messages.format("instanceRepair.instanceUnavailable",
@@ -156,9 +154,9 @@ final class InstanceCheckRepairWorkflow {
             output.append("\n\n").append(Messages.get("instanceRepair.issues"));
             issues.stream().limit(40).forEach(check -> output.append("\n• ")
                     .append(Messages.get("instanceRepair.category."
-                            + check.category().name().toLowerCase()))
+                            + check.category().name().toLowerCase(java.util.Locale.ROOT)))
                     .append(" · ").append(Messages.get("instanceRepair.status."
-                            + check.status().name().toLowerCase()))
+                            + check.status().name().toLowerCase(java.util.Locale.ROOT)))
                     .append(" · ").append(check.path())
                     .append(check.reason().isBlank() ? "" : " — " + check.reason()));
             if (issues.size() > 40) {
@@ -243,7 +241,7 @@ final class InstanceCheckRepairWorkflow {
         }
         onRefreshed.run();
         ui.setStatus(Messages.get("instanceRepair.title"), message);
-        showMessage(profileId, message);
+        if (!Messages.get("instanceRepair.inspectComplete").equals(message)) showMessage(profileId, message);
     }
 
     private ModInstanceContext loadRepairContext(String profileId, Path versions, Path gameRoot,

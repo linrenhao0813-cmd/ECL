@@ -301,6 +301,11 @@ public class MicrosoftAuth implements AuthProvider {
 
     public record CachedSession(String refreshToken, String accessToken, long accessTokenExpiresAt,
                                 String username, String uuid) {
+        @Override
+        public String toString() {
+            return "CachedSession[redacted]";
+        }
+
         public static CachedSession empty() {
             return new CachedSession(null, null, 0, null, null);
         }

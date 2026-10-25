@@ -13,7 +13,7 @@
 
 位置：`<数据目录>/settings.json`。实现：`ecl-core/src/main/java/com/ecl/config/SettingsManager.java`，键定义集中在 `ecl-core/src/main/java/com/ecl/ECLConfig.java`（`KEY_*` 常量，均为 `SettingKey`）。
 
-**存储细节：**`SettingsManager.set(SettingKey<T>)` 实际调用 `setString(key.key(), value.toString())`，因此整数和布尔值也以 JSON 字符串形式保存（例如 `"downloadMaxConcurrent": "8"`、`"backupOnLaunch": "true"`）；读取时按 `SettingKey.type()` 解析，解析失败回退默认值。历史键 `versionCategory` 会在加载时迁移为 `versionCategory2`（`SettingsManager.load` → `SettingsMigration.migrateSettingKey`）。敏感值使用 `_enc_` 前缀键保存 AES-GCM 密文（`_enc_microsoftRefreshToken` 等），明文键在启动时迁移后删除（`MainController.migrateLegacySecrets`），密钥文件为 `<数据目录>/.secret.key`（Windows 下由 DPAPI 保护，`CryptoKeyStore`）。
+**存储细节：**`SettingsManager.set(SettingKey<T>)` 实际调用 `setString(key.key(), value.toString())`，因此整数和布尔值也以 JSON 字符串形式保存（例如 `"downloadMaxConcurrent": "8"`、`"backupOnLaunch": "true"`）；读取时按 `SettingKey.type()` 解析，解析失败回退默认值。历史 `versionCategory` / `versionCategory2` 已无消费者；加载设置不再生成新的 `versionCategory2` 键。敏感值使用 `_enc_` 前缀键保存 AES-GCM 密文（`_enc_microsoftRefreshToken` 等），明文键在启动时迁移后删除（`MainController.migrateLegacySecrets`），密钥文件为 `<数据目录>/.secret.key`（Windows 下由 DPAPI 保护，`CryptoKeyStore`）。
 
 | 键 | 类型 | 默认值 | 来源（`ECLConfig`） | 说明 |
 | --- | --- | --- | --- | --- |
@@ -338,7 +338,7 @@
 | --- | --- | --- |
 | `<数据目录>/accounts.json` | `auth/DefaultAccountService`（`AuthAccount`、编码见 `encode`/`decode`） | 统一账户列表；`accessToken`/`refreshToken` 字段保存 AES-GCM 密文 |
 | `<数据目录>/microsoft-accounts.json.migrated` | `auth/MicrosoftAccountStore.archiveMigratedStore` | 旧版 Microsoft 账号文件迁移后的存档 |
-| `<数据目录>/skins/skins.json` 与 `skins/<sha1>.png` | `auth/OfflineSkinStore` | 离线皮肤索引与图片 |
+| `<数据目录>/skins.json` 与 `skins/<sha1>.png` | `auth/OfflineSkinStore` | 离线皮肤索引与图片 |
 | `<数据目录>/cache/project-icons/` | `ecl-gui` `modrinth/ui/RemoteImageLoader` | Modrinth 图标磁盘缓存 |
 | `<数据目录>/cache/public-server-directory.json` | `ecl-gui` `server/ServerDirectoryService` | 公开服务器目录缓存（含 `fetchedAtEpochMillis`、`locale`、`data`） |
 | `<数据目录>/runtimes/temurin-<特性版本>-windows-<架构>/` | `util/JavaRuntimeDownloader` | 下载的 Temurin JRE；完整安装标记 `.ecl-runtime-complete` |
@@ -352,6 +352,9 @@
 ## 账户文件读取规则
 
 `accounts.json` 的根节点必须为数组（`DefaultAccountService.read`）；对象、标量、`null` 或空文件均报错并保留原内容。
+GUI 读取降级不会改写该文件；新增账户与迁移仍拒绝无效库。离线皮肤索引实际位于 `<数据目录>/skins.json`（`OfflineSkinStore.indexFile`），读坏库时不写入；下次导入前将原始字节复制到唯一的 `skins.json.corrupt-*.json`，备份失败停止导入，既有备份不覆盖。
+
+恢复点清单字段保持 `SCHEMA_VERSION = 1`。`Draft.session` / `Draft.ownership` 和 `UpdatePreview.preparedSha512` 都是进程内状态，不是 JSON 键；后者以 `files/`、`versions/`、`libraries/` 相对路径及归档为键记录准备时的 SHA-512。payload 与 `recovery.json` 写入后强制刷新，新 active 身份/摘要验证成功才移除 previous。pending 校验失败保留两个恢复点，不退回旧点继续写入。
 文件不存在时可创建新账户列表；数组内无法解码的条目仍按现有规则保留。
 
 ## 游戏下载断点
@@ -361,6 +364,7 @@
 `.ecl-downloads` 是保留目录，不接受正式下载目标。续传器保存暂存文件对应的 `.part` 和 `.part.meta`；
 网络中断后保留，完成并校验后发布目标；成功后可能留下空的 `.ecl-downloads/` 目录。
 无可用校验标记或来源改变时从头下载；已完成但大小或 SHA-1 校验失败的暂存文件被删除。
+升级前版本遗留的 `<正式目标>.part` / `.part.meta` 没有稳定的来源关联，不迁移、不复用，也不自动删除；新重试仅使用 `.ecl-downloads/` 下的受校验断点。客户端日志配置使用随机临时文件，失败、取消或完成后清理其 `.part` / `.part.meta`，不会将它们作为下一次续传来源。
 
 | `.part.meta` JSON 键 | 来源（`PartialDownloadMetadata` record 组件） | 含义 |
 | --- | --- | --- |
@@ -399,3 +403,5 @@
 ## 日志
 
 `ecl-core/src/main/resources/logback.xml` 通过 `LogDirectoryProperty.getPropertyValue()` 获取 `ECLConfig.getBaseDir()` 下的 `logs/`，写入 `ecl.log`，并按 `ecl.<日期>.<序号>.log.gz` 滚动（单文件 5 MB、保留 7 天）。通常为 `%APPDATA%\.ecl\logs`；`APPDATA` 缺失或为空时与数据目录一起回退到 `${user.home}/.ecl/logs`。旧版用户主目录下的历史日志不自动迁移或删除。
+
+模组与整合包事务的 journal.json 缺失且 backups/ 仍有内容时会保留现场并报错，未知事务内容也不会在显式恢复中删除。不要直接清理这些目录；它们可能包含唯一的升级前文件。

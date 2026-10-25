@@ -72,6 +72,17 @@ class ModDependencyResolverTest {
     }
 
     @Test
+    void selectedVersionOnlyOptionalFailureCannotBeDowngradedToWarning() {
+        ModVersion optional = version("optional-v1", "optional", depProject("missing", DependencyType.REQUIRED));
+        ModVersion root = version("root-v1", "root", depVersion("optional-v1", "", DependencyType.OPTIONAL));
+        api.versions.put("optional-v1", optional);
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> resolver().resolve(instance, root, Set.of("optional")).join());
+        assertInstanceOf(DependencyResolutionException.class, failure.getCause());
+        assertInstanceOf(NoCompatibleVersionException.class, failure.getCause().getCause());
+    }
+
+    @Test
     void selectedOptionalFailureIncludesItsRequiredDependencyCause() {
         ModVersion optional = version("optional-v1", "optional", depProject("missing", DependencyType.REQUIRED));
         ModVersion root = version("root-v1", "root", depProject("optional", DependencyType.OPTIONAL));

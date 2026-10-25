@@ -30,6 +30,165 @@ class InstanceUpgradeRecoveryServiceTest {
     Path tempDir;
 
     @Test
+    void ordinaryModRecoveryRejectsNormalizedUserDataAlias() throws Exception {
+        Path game = tempDir.resolve("game");
+        Path instanceRoot = game.resolve("versions/mods-only");
+        Path metadataRoot = tempDir.resolve("metadata");
+        Path metadata = metadataRoot.resolve("mods-only/mods-only.json");
+        Files.createDirectories(instanceRoot.resolve("logs"));
+        Files.createDirectories(metadata.getParent());
+        Files.writeString(metadata, "metadata");
+        Path index = Files.writeString(instanceRoot.resolve("launcher-mods.json"), "old index");
+        Path log = Files.writeString(instanceRoot.resolve("logs/latest.log"), "user log");
+        TestInstance instance = new TestInstance(UUID.randomUUID(), "mods-only", instanceRoot);
+        Path recoveryRoot = tempDir.resolve("recovery");
+        InstanceUpgradeRecoveryService service = new InstanceUpgradeRecoveryService(recoveryRoot);
+        var preview = new InstanceUpdateService.Preview(instance, Instant.now(), metadataRoot, game,
+                "fingerprint", null, List.of(), List.of(), Set.of(), List.of(), null, null);
+        var draft = service.begin(new InstanceUpdateService.PreparedExecution(preview, List.of()));
+        Files.writeString(index, "new index");
+        service.complete(draft);
+        Path file = recoveryRoot.resolve("mods-only/active/recovery.json");
+        JsonObject manifest = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+        manifest.getAsJsonArray("entries").get(0).getAsJsonObject().addProperty("path", "mods/../logs/latest.log");
+        Files.writeString(file, manifest.toString());
+        assertThrows(IOException.class, () -> service.inspect("mods-only", instance, metadataRoot, game));
+        assertThrows(IOException.class, () -> service.restore("mods-only", instance, metadataRoot, game, Set.of()));
+        assertEquals("user log", Files.readString(log));
+        assertEquals("new index", Files.readString(index));
+    }
+
+    @Test
+    void publicationCrashPreservesPreviousAndResumesPending() throws Exception {
+        Path game = tempDir.resolve("game");
+        Path instanceRoot = game.resolve("versions/crash");
+        Path metadataRoot = tempDir.resolve("metadata");
+        Path metadata = metadataRoot.resolve("crash/crash.json");
+        Files.createDirectories(instanceRoot);
+        Files.createDirectories(metadata.getParent());
+        Files.writeString(metadata, "first");
+        TestInstance instance = new TestInstance(UUID.randomUUID(), "crash", instanceRoot);
+        Path recoveryRoot = tempDir.resolve("recovery");
+        InstanceUpgradeRecoveryService service = new InstanceUpgradeRecoveryService(recoveryRoot);
+        var execution = new InstanceUpdateService.PreparedExecution(preview(instance, metadataRoot, game), List.of());
+        var first = service.begin(execution);
+        Files.writeString(metadata, "second");
+        service.complete(first);
+        InstanceUpgradeRecoveryService crashing = new InstanceUpgradeRecoveryService(recoveryRoot, null, ignored -> false,
+                phase -> { if (phase.equals("after-active-moved")) throw new AssertionError("power loss"); });
+        var second = crashing.begin(execution);
+        Files.writeString(metadata, "third");
+        assertThrows(AssertionError.class, () -> crashing.complete(second));
+        assertTrue(Files.exists(recoveryRoot.resolve("crash/previous/recovery.json")));
+        assertTrue(Files.exists(recoveryRoot.resolve("crash/pending/recovery.json")));
+        assertTrue(service.restore("crash", instance, metadataRoot, game, Set.of()).restored());
+        assertEquals("second", Files.readString(metadata));
+    }
+
+    @Test
+    void snapshotFailurePreservesPreviousPoint() throws Exception {
+        Path game = tempDir.resolve("game");
+        Path instanceRoot = game.resolve("versions/snapshot");
+        Path metadataRoot = tempDir.resolve("metadata");
+        Path metadata = metadataRoot.resolve("snapshot/snapshot.json");
+        Files.createDirectories(instanceRoot);
+        Files.createDirectories(metadata.getParent());
+        Files.writeString(metadata, "first");
+        TestInstance instance = new TestInstance(UUID.randomUUID(), "snapshot", instanceRoot);
+        Path recoveryRoot = tempDir.resolve("recovery");
+        InstanceUpgradeRecoveryService service = new InstanceUpgradeRecoveryService(recoveryRoot);
+        var execution = new InstanceUpdateService.PreparedExecution(preview(instance, metadataRoot, game), List.of());
+        var first = service.begin(execution);
+        Files.writeString(metadata, "second");
+        service.complete(first);
+        Path active = recoveryRoot.resolve("snapshot/active/recovery.json");
+        String before = Files.readString(active);
+        InstanceUpgradeRecoveryService failing = new InstanceUpgradeRecoveryService(recoveryRoot, null, ignored -> false,
+                phase -> { if (phase.equals("before-payload-copy")) throw new IOException("disk full"); });
+        assertThrows(IOException.class, () -> failing.begin(execution));
+        assertEquals(before, Files.readString(active));
+        assertEquals("second", Files.readString(metadata));
+        assertTrue(service.restore("snapshot", instance, metadataRoot, game, Set.of()).restored());
+        assertEquals("first", Files.readString(metadata));
+    }
+
+    @Test
+    void recoversInterruptedActivePreviousSwapAndResumesRestoring() throws Exception {
+        Path game = tempDir.resolve("game");
+        Path instanceRoot = game.resolve("versions/swap");
+        Path metadataRoot = tempDir.resolve("metadata");
+        Path metadata = metadataRoot.resolve("swap/swap.json");
+        Files.createDirectories(instanceRoot);
+        Files.createDirectories(metadata.getParent());
+        Files.writeString(metadata, "before");
+        TestInstance instance = new TestInstance(UUID.randomUUID(), "swap", instanceRoot);
+        Path recoveryRoot = tempDir.resolve("recovery");
+        InstanceUpgradeRecoveryService service = new InstanceUpgradeRecoveryService(recoveryRoot);
+        var execution = new InstanceUpdateService.PreparedExecution(preview(instance, metadataRoot, game), List.of());
+        var draft = service.begin(execution);
+        Files.writeString(metadata, "after");
+        service.complete(draft);
+        Path active = recoveryRoot.resolve("swap/active");
+        JsonObject manifest = JsonParser.parseString(Files.readString(active.resolve("recovery.json"))).getAsJsonObject();
+        manifest.addProperty("state", "RESTORING");
+        manifest.addProperty("conflictsConfirmed", true);
+        Files.writeString(active.resolve("recovery.json"), manifest.toString());
+        Files.move(active, active.resolveSibling("previous"));
+        assertTrue(service.restore("swap", instance, metadataRoot, game, Set.of()).restored());
+        assertEquals("before", Files.readString(metadata));
+        assertFalse(Files.exists(active.resolveSibling("previous")));
+    }
+
+    @Test
+    void invalidPendingPreservesActiveAndPending() throws Exception {
+        Path game = tempDir.resolve("game");
+        Path instanceRoot = game.resolve("versions/invalid-pending");
+        Path metadataRoot = tempDir.resolve("metadata");
+        Path metadata = metadataRoot.resolve("invalid-pending/invalid-pending.json");
+        Files.createDirectories(instanceRoot);
+        Files.createDirectories(metadata.getParent());
+        Files.writeString(metadata, "first");
+        TestInstance instance = new TestInstance(UUID.randomUUID(), "invalid-pending", instanceRoot);
+        Path recoveryRoot = tempDir.resolve("recovery");
+        InstanceUpgradeRecoveryService service = new InstanceUpgradeRecoveryService(recoveryRoot);
+        var execution = new InstanceUpdateService.PreparedExecution(preview(instance, metadataRoot, game), List.of());
+        var first = service.begin(execution);
+        Files.writeString(metadata, "second");
+        service.complete(first);
+        Path active = recoveryRoot.resolve("invalid-pending/active/recovery.json");
+        String before = Files.readString(active);
+        var pending = service.begin(execution);
+        Path pendingManifest = pending.directory().resolve("recovery.json");
+        Files.writeString(pendingManifest, "broken");
+        Files.writeString(metadata, "third");
+        pending.close();
+        assertThrows(IOException.class, () -> service.restore("invalid-pending", instance, metadataRoot, game, Set.of()));
+        assertEquals(before, Files.readString(active));
+        assertEquals("broken", Files.readString(pendingManifest));
+        assertEquals("third", Files.readString(metadata));
+    }
+
+    @Test
+    void directRestoreFinalizesPendingBeforeChoosingActive() throws Exception {
+        Path game = tempDir.resolve("game");
+        Path instanceRoot = game.resolve("versions/pending");
+        Path metadataRoot = tempDir.resolve("metadata");
+        Path metadata = metadataRoot.resolve("pending/pending.json");
+        Files.createDirectories(instanceRoot);
+        Files.createDirectories(metadata.getParent());
+        Files.writeString(metadata, "before");
+        TestInstance instance = new TestInstance(UUID.randomUUID(), "pending", instanceRoot);
+        InstanceUpgradeRecoveryService service = new InstanceUpgradeRecoveryService(tempDir.resolve("recovery"));
+        var execution = new InstanceUpdateService.PreparedExecution(preview(instance, metadataRoot, game), List.of());
+        var draft = service.begin(execution);
+        Files.writeString(metadata, "after");
+        draft.close();
+        assertTrue(service.restore("pending", instance, metadataRoot, game, Set.of()).restored());
+        assertEquals("before", Files.readString(metadata));
+        assertEquals("RESTORED", service.inspect("pending", instance, metadataRoot, game).state());
+    }
+
+    @Test
     void restoresPackManagedChangesAndMetadataButLeavesSavesAlone() throws Exception {
         Path recoveryRoot = tempDir.resolve("ecl/upgrade-recovery");
         Path metadataRoot = tempDir.resolve("ecl/versions");

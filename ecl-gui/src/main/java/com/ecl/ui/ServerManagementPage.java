@@ -73,6 +73,7 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
         stop.setId("local-server-stop");
         send = button("server.local.send", "secondary-button", this::sendCommand);
         importJar = button("server.local.import", "secondary-button", this::importServer);
+        status.setId("local-server-operation-status");
         buildView();
         // Status polling must continue even when decorative animations are disabled.
         refreshTimer = new Timeline(new KeyFrame(Duration.seconds(2), event -> refreshState()));
@@ -211,7 +212,7 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
         }
         busy = true;
         updateButtons();
-        ui.controller.runAsync("ecl-server-list", () -> {
+        Thread.ofVirtual().name("ecl-server-list").start(() -> {
             try {
                 List<LocalServerProfile> profiles = manager.list();
                 onUi(() -> {
@@ -238,7 +239,7 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
             return;
         }
         refreshPending = true;
-        ui.controller.runAsync("ecl-server-console", () -> {
+        Thread.ofVirtual().name("ecl-server-console").start(() -> {
             try {
                 boolean active = manager.isRunning(id);
                 boolean control = manager.canControl(id);
@@ -305,12 +306,31 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
             return;
         }
         String profileName = source.getName().replaceFirst("(?i)\\.jar$", "");
-        Path executable = resolveImportJava(JavaRuntimeUtil.resolveJavaExecutable(ui.javaPath), this::chooseJavaExecutable);
-        if (executable == null) {
-            return;
-        }
-        perform(() -> manager.importJar(profileName, source.toPath(), executable, 2048).id(),
-                "server.local.imported", true);
+        String configuredJava = ui.javaPath;
+        busy = true;
+        updateButtons();
+        Thread.ofVirtual().name("ecl-server-java").start(() -> {
+            try {
+                Path detected = resolveImportJava(JavaRuntimeUtil.resolveJavaExecutable(configuredJava), () -> null);
+                onUi(() -> {
+                    busy = false;
+                    Path executable = detected;
+                    if (executable == null) {
+                        File chosen = chooseJavaExecutable();
+                        if (chosen == null) {
+                            updateButtons();
+                            return;
+                        }
+                        executable = chosen.toPath();
+                    }
+                    Path selectedJava = executable;
+                    perform(() -> manager.importJar(profileName, source.toPath(), selectedJava, 2048).id(),
+                            "server.local.imported", true);
+                });
+            } catch (Exception error) {
+                fail(error);
+            }
+        });
     }
 
     static Path resolveImportJava(String detectedExecutable, java.util.function.Supplier<File> chooser) {
@@ -375,10 +395,22 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
             return;
         }
         String id = selected.id();
-        perform(() -> {
-            manager.stop(id);
-            return id;
-        }, "server.local.stopSent", false);
+        busy = true;
+        updateButtons();
+        Thread.ofVirtual().name("ecl-server-stop").start(() -> {
+            try {
+                LocalServerManager.StopOutcome outcome = manager.stop(id);
+                onUi(() -> {
+                    busy = false;
+                    status.setText(GuiMessages.get(outcome == LocalServerManager.StopOutcome.STOPPED
+                            ? "server.local.stopSent" : "server.local.stopTimedOut"));
+                    updateButtons();
+                    refreshState();
+                });
+            } catch (Exception error) {
+                fail(error);
+            }
+        });
     }
 
     private void sendCommand() {
@@ -398,7 +430,7 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
         if (id == null) {
             return;
         }
-        ui.controller.runAsync("ecl-server-folder", () -> {
+        Thread.ofVirtual().name("ecl-server-folder").start(() -> {
             try {
                 File folder = manager.directory(id).toFile();
                 onUi(() -> ui.openLocalFolder(folder, GuiMessages.get("server.local.openDirectory")));
@@ -415,7 +447,7 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
         busy = true;
         status.setText(GuiMessages.get("server.local.loading"));
         updateButtons();
-        ui.controller.runAsync("ecl-server-action", () -> {
+        Thread.ofVirtual().name("ecl-server-action").start(() -> {
             try {
                 String id = action.run();
                 onUi(() -> {

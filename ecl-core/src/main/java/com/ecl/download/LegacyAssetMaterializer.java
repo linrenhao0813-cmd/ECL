@@ -12,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -93,18 +95,27 @@ public final class LegacyAssetMaterializer {
             return;
         }
         Path root = destinationRoot.toAbsolutePath().normalize();
+        Map<String, Path> sources = new LinkedHashMap<>();
         for (String name : objects.keySet()) {
             JsonObject entry = objects.get(name) != null && objects.get(name).isJsonObject()
                     ? objects.getAsJsonObject(name) : null;
             if (entry == null) {
                 throw new IOException("资源索引条目无效: " + name);
             }
-            Path source = objectFile(objectsRoot, requireHash(entry, name));
+            String hash = requireHash(entry, name);
+            Path source = objectFile(objectsRoot, hash);
             FileUtil.validateExistingAncestors(objectsRoot, source);
             if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
                 throw new IOException("资源对象缺失: " + name);
             }
-            materializeOne(source, root, name);
+            if (!FileUtil.verifySha1(source.toFile(), hash)) {
+                throw new IOException("Asset object SHA-1 does not match its index: " + name);
+            }
+            FileUtil.safeArchiveEntry(root, name);
+            sources.put(name, source);
+        }
+        for (Map.Entry<String, Path> source : sources.entrySet()) {
+            materializeOne(source.getValue(), root, source.getKey());
         }
     }
 

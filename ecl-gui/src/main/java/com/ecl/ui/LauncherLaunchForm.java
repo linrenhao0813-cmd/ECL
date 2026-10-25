@@ -98,7 +98,7 @@ final class LauncherLaunchForm {
         LauncherUiFactory.setVisible(ui.offlineSkinRemoveBtn, false);
         ui.microsoftAccountCombo = new ComboBox<>();
         ui.microsoftAccountCombo.setPromptText("选择已保存账号");
-        ui.microsoftAccountCombo.getItems().setAll(ui.microsoftAccountStore.list());
+        ui.microsoftAccountCombo.getItems().setAll(ui.readMicrosoftAccounts());
         String selectedAccountUuid = ui.settingsManager.get(ECLConfig.KEY_MICROSOFT_PROFILE_UUID);
         ui.microsoftAccountCombo.getItems().stream()
                 .filter(account -> account.uuid().equalsIgnoreCase(selectedAccountUuid))

@@ -121,28 +121,33 @@ final class InstanceUpdateWorkflow {
         ui.setControlsBusy(true);
         progress.setVisible(true);
         status.setText(GuiMessages.get("instanceUpdate.preview.checking"));
-        ui.controller.instanceUpdateService().preview(instance,
-                ui.controller.preferredModReleaseChannel(), update -> Platform.runLater(() -> {
-                    if (isCurrent(currentGeneration)) {
-                        status.setText(GuiMessages.get("instanceUpdate." + update.stage()
-                                .name().toLowerCase(java.util.Locale.ROOT), update.detail()));
-                    }
-                }), ECLConfig.getVersionsDir().toPath(), ui.getConfiguredGameRootDir().toPath(),
-                ui.controller.modpackUpdateService())
-                .whenComplete((preview, error) -> Platform.runLater(() -> {
-                    if (!isCurrent(currentGeneration)) return;
-                    if (error != null) {
-                        finishWithoutMutation(currentGeneration,
-                                GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(unwrap(error))));
-                    } else if (!preview.hasUpdates()) {
-                        finishWithoutMutation(currentGeneration,
-                                GuiMessages.get("instanceUpdate.preview.none"));
-                    } else if (preview.packProfile()) {
-                        confirmPack(currentGeneration, preview);
-                    } else {
-                        chooseMods(currentGeneration, preview);
-                    }
-                }));
+        try {
+            ui.controller.instanceUpdateService().preview(instance,
+                    ui.controller.preferredModReleaseChannel(), update -> Platform.runLater(() -> {
+                        if (isCurrent(currentGeneration)) {
+                            status.setText(GuiMessages.get("instanceUpdate." + update.stage()
+                                    .name().toLowerCase(java.util.Locale.ROOT), update.detail()));
+                        }
+                    }), ECLConfig.getVersionsDir().toPath(), ui.getConfiguredGameRootDir().toPath(),
+                    ui.controller.modpackUpdateService())
+                    .whenComplete((preview, error) -> Platform.runLater(() -> {
+                        if (!isCurrent(currentGeneration)) return;
+                        if (error != null) {
+                            finishWithoutMutation(currentGeneration,
+                                    GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(unwrap(error))));
+                        } else if (!preview.hasUpdates()) {
+                            finishWithoutMutation(currentGeneration,
+                                    GuiMessages.get("instanceUpdate.preview.none"));
+                        } else if (preview.packProfile()) {
+                            confirmPack(currentGeneration, preview);
+                        } else {
+                            chooseMods(currentGeneration, preview);
+                        }
+                    }));
+        } catch (RuntimeException rejected) {
+            finishWithoutMutation(currentGeneration,
+                    GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(rejected)));
+        }
         updateButton();
     }
 
@@ -224,40 +229,62 @@ final class InstanceUpdateWorkflow {
     private void prepareExecution(long taskGeneration, InstanceUpdateService.Preview preview,
                                   Set<String> selected) {
         status.setText(GuiMessages.get("instanceUpdate.prepare"));
-        ui.controller.instanceUpdateService().prepare(preview, selected)
-                .whenComplete((execution, error) -> Platform.runLater(() -> {
-                    if (!isCurrent(taskGeneration)) {
-                        if (execution != null) execution.closeQuietly();
-                        return;
-                    }
-                    if (error != null) {
-                        finishWithoutMutation(taskGeneration,
-                                GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(unwrap(error))));
-                    } else {
-                        confirmExecution(taskGeneration, execution);
-                    }
-                }));
+        try {
+            ui.controller.instanceUpdateService().prepare(preview, selected)
+                    .whenComplete((execution, error) -> Platform.runLater(() -> {
+                        if (!isCurrent(taskGeneration)) {
+                            if (execution != null) execution.closeQuietly();
+                            return;
+                        }
+                        if (error != null) {
+                            finishWithoutMutation(taskGeneration,
+                                    GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(unwrap(error))));
+                        } else {
+                            try {
+                                confirmExecution(taskGeneration, execution);
+                            } catch (RuntimeException failure) {
+                                execution.closeQuietly();
+                                finishWithoutMutation(taskGeneration,
+                                        GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(failure)));
+                            }
+                        }
+                    }));
+        } catch (RuntimeException rejected) {
+            finishWithoutMutation(taskGeneration,
+                    GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(rejected)));
+        }
     }
 
     private void preparePackExecution(long taskGeneration, InstanceUpdateService.Preview preview) {
-        ui.controller.instanceUpdateService().prepare(preview, Set.of(),
-                ui.controller.modpackUpdateService(), update -> Platform.runLater(() -> {
-                    if (isCurrent(taskGeneration)) {
-                        status.setText(GuiMessages.get("instanceUpdate.prepare"));
-                    }
-                }))
-                .whenComplete((execution, error) -> Platform.runLater(() -> {
-                    if (!isCurrent(taskGeneration)) {
-                        if (execution != null) execution.closeQuietly();
-                        return;
-                    }
-                    if (error != null) {
-                        finishWithoutMutation(taskGeneration,
-                                GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(unwrap(error))));
-                    } else {
-                        confirmExecution(taskGeneration, execution);
-                    }
-                }));
+        try {
+            ui.controller.instanceUpdateService().prepare(preview, Set.of(),
+                    ui.controller.modpackUpdateService(), update -> Platform.runLater(() -> {
+                        if (isCurrent(taskGeneration)) {
+                            status.setText(GuiMessages.get("instanceUpdate.prepare"));
+                        }
+                    }))
+                    .whenComplete((execution, error) -> Platform.runLater(() -> {
+                        if (!isCurrent(taskGeneration)) {
+                            if (execution != null) execution.closeQuietly();
+                            return;
+                        }
+                        if (error != null) {
+                            finishWithoutMutation(taskGeneration,
+                                    GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(unwrap(error))));
+                        } else {
+                            try {
+                                confirmExecution(taskGeneration, execution);
+                            } catch (RuntimeException failure) {
+                                execution.closeQuietly();
+                                finishWithoutMutation(taskGeneration,
+                                        GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(failure)));
+                            }
+                        }
+                    }));
+        } catch (RuntimeException rejected) {
+            finishWithoutMutation(taskGeneration,
+                    GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(rejected)));
+        }
     }
 
     private void confirmExecution(long taskGeneration,
@@ -269,6 +296,10 @@ final class InstanceUpdateWorkflow {
         alert.setTitle(GuiMessages.get("instanceUpdate.preview.finalTitle"));
         alert.setHeaderText(GuiMessages.get("instanceUpdate.preview.finalHeader"));
         ButtonType choice = alert.showAndWait().orElse(ButtonType.CANCEL);
+        if (!isCurrent(taskGeneration)) {
+            execution.closeQuietly();
+            return;
+        }
         if (!GuiMessages.get("instanceUpdate.preview.apply").equals(choice.getText())) {
             execution.closeQuietly();
             finishCancelled(taskGeneration);
@@ -335,6 +366,7 @@ final class InstanceUpdateWorkflow {
         alert.setTitle(GuiMessages.get("instanceUpdate.preview.title"));
         alert.setHeaderText(GuiMessages.get("instanceUpdate.preview.packHeader"));
         ButtonType choice = alert.showAndWait().orElse(ButtonType.CANCEL);
+        if (!isCurrent(taskGeneration)) return;
         if (choice.getText().equals(GuiMessages.get("instanceUpdate.preview.continue"))) {
             preparePackExecution(taskGeneration, preview);
         } else {
@@ -363,16 +395,22 @@ final class InstanceUpdateWorkflow {
         cancellable = false;
         setCancelVisible(false);
         status.setText(GuiMessages.get("instanceUpdate.button"));
-        ui.controller.instanceUpdateService().execute(execution, update -> Platform.runLater(() -> {
-            if (isCurrent(taskGeneration)) {
-                status.setText(GuiMessages.get("instanceUpdate." + update.stage()
-                        .name().toLowerCase(java.util.Locale.ROOT), update.detail()));
-            }
-        }), ui.controller.modpackUpdateService())
-                .whenComplete((result, error) -> Platform.runLater(() -> {
-                    if (!isCurrent(taskGeneration)) return;
-                    finishExecution(taskGeneration, execution.preview().instance().profileId(), result, error);
-                }));
+        try {
+            ui.controller.instanceUpdateService().execute(execution, update -> Platform.runLater(() -> {
+                if (isCurrent(taskGeneration)) {
+                    status.setText(GuiMessages.get("instanceUpdate." + update.stage()
+                            .name().toLowerCase(java.util.Locale.ROOT), update.detail()));
+                }
+            }), ui.controller.modpackUpdateService())
+                    .whenComplete((result, error) -> Platform.runLater(() -> {
+                        if (!isCurrent(taskGeneration)) return;
+                        finishExecution(taskGeneration, execution.preview().instance().profileId(), result, error);
+                    }));
+        } catch (RuntimeException rejected) {
+            execution.closeQuietly();
+            finishWithoutMutation(taskGeneration,
+                    GuiMessages.get("instanceUpdate.failed", ui.cleanMessage(rejected)));
+        }
     }
 
     private void finishExecution(long taskGeneration, String profileId,

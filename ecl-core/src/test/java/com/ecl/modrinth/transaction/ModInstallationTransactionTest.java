@@ -16,6 +16,29 @@ class ModInstallationTransactionTest {
     @TempDir Path game;
 
     @Test
+    void closingWithoutJournalPreservesUniqueBackup() throws Exception {
+        Path backup;
+        try (var transaction = new FileModInstallationTransaction(game)) {
+            backup = Files.writeString(transaction.temporaryDirectory().resolve("backups/only-copy.bak"), "only copy");
+        }
+        assertEquals("only copy", Files.readString(backup));
+    }
+
+    @Test
+    void missingJournalPreservesUniqueBackupsAndUnknownContents() throws Exception {
+        Path transaction = Files.createDirectories(game.resolve(".ecl-mod-transactions/crashed"));
+        Path backup = transaction.resolve("backups/only-copy.bak");
+        Files.createDirectories(backup.getParent());
+        Files.writeString(backup, "unique previous bytes");
+        assertThrows(IOException.class, () -> FileModInstallationTransaction.recoverIncompleteTransactions(game));
+        assertEquals("unique previous bytes", Files.readString(backup));
+        Files.delete(backup);
+        Path unknown = Files.writeString(transaction.resolve("unknown.bin"), "unclassified bytes");
+        assertThrows(IOException.class, () -> FileModInstallationTransaction.recoverIncompleteTransactions(game));
+        assertEquals("unclassified bytes", Files.readString(unknown));
+    }
+
+    @Test
     void runningMarkerPreventsOpeningTransactionAndReleasesLock() throws Exception {
         com.ecl.launch.GameProcessMarker.record(game, ProcessHandle.current());
         assertThrows(IOException.class, () -> {

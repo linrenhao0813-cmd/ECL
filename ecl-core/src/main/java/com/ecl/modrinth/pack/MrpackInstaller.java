@@ -5,6 +5,7 @@ import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.JsonUtil;
 import com.ecl.util.FileUtil;
+import com.ecl.util.Messages;
 import com.google.gson.JsonObject;
 
 import java.io.File;
@@ -52,10 +53,12 @@ public final class MrpackInstaller {
                                 Path archive, Path stagedFiles, Path stagedVersions,
                                 Path stagedLibraries, String initialProfileSha256,
                                 Map<String, String> initialTargetSha512,
-                                List<FileChange> changes, int downloadedFiles) implements AutoCloseable {
+                                List<FileChange> changes, int downloadedFiles,
+                                Map<String, String> preparedSha512) implements AutoCloseable {
         public UpdatePreview {
             initialTargetSha512 = Map.copyOf(initialTargetSha512);
             changes = List.copyOf(changes);
+            preparedSha512 = Map.copyOf(preparedSha512);
         }
 
         @Override
@@ -253,6 +256,9 @@ public final class MrpackInstaller {
         if (!Files.isDirectory(instanceRoot) || !Files.isRegularFile(profileFile)) {
             throw new IOException("Modpack instance metadata is missing");
         }
+        if (com.ecl.launch.GameProcessMarker.isRunning(instanceRoot)) {
+            throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+        }
         if (PackUpdateTransaction.hasIncompleteTransactions(instanceRoot)) {
             throw new IOException("An interrupted modpack transaction must be recovered before preview");
         }
@@ -312,7 +318,38 @@ public final class MrpackInstaller {
                 sourceVersionId == null ? "" : sourceVersionId,
                 minecraftVersion, packVersion, loader.loaderId(), loader.loaderVersion(),
                 loader.parentProfile(), stagedArchive, stagedFiles, stagedVersions, stagedLibraries,
-                sha256(profileFile), initialHashes, changes, fileCount);
+                sha256(profileFile), initialHashes, changes, fileCount, capturePreparedHashes(work));
+    }
+
+    private static Map<String, String> capturePreparedHashes(Path work) throws IOException {
+        return capturePreparedHashes(work, work.resolve("files"), work.resolve("versions"), work.resolve("libraries"));
+    }
+
+    private static Map<String, String> capturePreparedHashes(Path work, Path files, Path versions, Path libraries)
+            throws IOException {
+        Map<String, String> hashes = new java.util.TreeMap<>();
+        Map<String, Path> roots = Map.of("files", files, "versions", versions, "libraries", libraries);
+        for (Map.Entry<String, Path> item : roots.entrySet()) {
+            Path root = item.getValue();
+            FileUtil.validateExistingAncestors(work, root);
+            try (var paths = Files.walk(root)) {
+                for (Path file : paths.toList()) {
+                    FileUtil.validateExistingAncestors(work, file);
+                    if (Files.isDirectory(file, LinkOption.NOFOLLOW_LINKS)) continue;
+                    if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+                        throw new IOException("Prepared modpack contains a non-regular file: " + file);
+                    }
+                    hashes.put(item.getKey() + "/" + root.relativize(file).toString().replace('\\', '/'), PackManifest.sha512(file));
+                }
+            }
+        }
+        return Map.copyOf(hashes);
+    }
+
+    private static void verifyPreparedHashes(UpdatePreview prepared) throws IOException {
+        if (!prepared.preparedSha512().equals(capturePreparedHashes(prepared.workingDirectory()))) {
+            throw new IOException(Messages.get("packUpdate.preparedChanged"));
+        }
     }
 
     private JsonObject readIndex(File archive) throws IOException {
@@ -329,14 +366,7 @@ public final class MrpackInstaller {
     }
 
     private static void validateUpdateScope(String relative) throws IOException {
-        FileUtil.safeArchiveEntry(Path.of(".").toAbsolutePath().normalize(), relative);
-        String first = Path.of(relative).getName(0).toString().toLowerCase(java.util.Locale.ROOT);
-        if (java.util.Set.of("saves", "screenshots", "logs", "crash-reports", ".ecl",
-                "versions", "libraries", "assets", "servers.dat", "usercache.json")
-                .contains(first)) {
-            throw new IOException("Modpack update references user or shared data outside its rollback scope: "
-                    + relative);
-        }
+        com.ecl.util.ManagedPackPathPolicy.requireManagedRelativePath(relative);
     }
 
     private MrpackInstallSupport.LoaderState prepareLoaderPreview(
@@ -439,6 +469,7 @@ public final class MrpackInstaller {
 
     private static void copyFiles(Path sourceRoot, Path targetRoot) throws IOException {
         if (!Files.isDirectory(sourceRoot, LinkOption.NOFOLLOW_LINKS)) return;
+        Files.createDirectories(targetRoot);
         try (var paths = Files.walk(sourceRoot)) {
             for (Path source : paths.toList()) {
                 if (Files.isSymbolicLink(source)) {
@@ -643,6 +674,11 @@ public final class MrpackInstaller {
             Path stagedProfile = staging.resolve(".ecl-profile-update.json");
             Files.writeString(stagedProfile, profile.toString(), StandardCharsets.UTF_8);
 
+            for (Map.Entry<String, String> file : newManifest.files().entrySet()) {
+                if (!file.getValue().equalsIgnoreCase(PackManifest.sha512(PackManifest.resolve(staging, file.getKey())))) {
+                    throw new IOException("Prepared pack file failed integrity verification: " + file.getKey());
+                }
+            }
             int warnings = MrpackInstallSupport.stagePackChanges(transaction, instanceRoot, staging,
                     oldManifest, newManifest, safeListener);
             transaction.stageReplacement(stagedManifest,
@@ -667,6 +703,12 @@ public final class MrpackInstaller {
     public InstallResult applyPreparedUpdate(UpdatePreview prepared, File gameRoot,
                                              BooleanSupplier instanceRunning,
                                              Listener listener) throws IOException {
+        return applyPreparedUpdate(prepared, gameRoot, instanceRunning, listener, null);
+    }
+
+    public InstallResult applyPreparedUpdate(UpdatePreview prepared, File gameRoot,
+                                             BooleanSupplier instanceRunning, Listener listener,
+                                             com.ecl.operation.InstanceOperationSession session) throws IOException {
         java.util.Objects.requireNonNull(prepared, "prepared");
         String profileId = prepared.profileId();
         FileUtil.requireSafeVersionId(profileId);
@@ -688,18 +730,23 @@ public final class MrpackInstaller {
         Path instanceRoot = MrpackPathPolicy.safeInstanceDirectory(gameRootPath, profileId);
         Path profileFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), profileId)
                 .toPath().toAbsolutePath().normalize();
+        if (com.ecl.launch.GameProcessMarker.isRunning(instanceRoot)) {
+            throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+        }
         if (PackUpdateTransaction.hasIncompleteTransactions(instanceRoot)) {
             throw new IOException("An interrupted modpack transaction must be recovered before update");
         }
         FileUtil.validateExistingAncestors(instanceRoot.getParent(), instanceRoot);
         FileUtil.validateExistingAncestors(ECLConfig.getVersionsDir().toPath(), profileFile);
         requirePreparedFresh(prepared, instanceRoot, profileFile);
+        verifyPreparedHashes(prepared);
         Listener safeListener = listener == null ? message -> { } : listener;
         BooleanSupplier runningGuard = instanceRunning == null ? () -> false : instanceRunning;
         JsonObject profile = HttpUtil.readJson(profileFile.toFile());
         PackManifest oldManifest = PackManifest.read(PackManifest.resolve(instanceRoot, PackManifest.FILE_NAME));
 
-        try (PackUpdateTransaction transaction = transactionFactory.create(instanceRoot, profileFile)) {
+        try (PackUpdateTransaction transaction = session == null ? transactionFactory.create(instanceRoot, profileFile)
+                : new PackUpdateTransaction(instanceRoot, profileFile, session)) {
             Path staging = transaction.stagingDirectory();
             copyFiles(prepared.stagedFiles(), staging);
             Path loaderStaging = staging.resolve(".ecl-loader");
@@ -707,19 +754,29 @@ public final class MrpackInstaller {
             Path stagedLibraries = loaderStaging.resolve("libraries");
             copyFiles(prepared.stagedVersions(), stagedVersions);
             copyFiles(prepared.stagedLibraries(), stagedLibraries);
+            if (!prepared.preparedSha512().equals(capturePreparedHashes(staging, staging, stagedVersions, stagedLibraries)
+                    .entrySet().stream().filter(entry -> !entry.getKey().startsWith("files/.ecl-loader/"))
+                    .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)))) {
+                throw new IOException(Messages.get("packUpdate.preparedChanged"));
+            }
             transaction.stageExternalDirectory(stagedVersions, ECLConfig.getVersionsDir().toPath());
             transaction.stageExternalDirectory(stagedLibraries, ECLConfig.getLibrariesDir().toPath());
 
             Path stagedManifest = staging.resolve(PackManifest.FILE_NAME);
             PackManifest newManifest = PackManifest.read(stagedManifest);
             if (!prepared.packVersion().equals(newManifest.packVersion())) {
-                throw new IOException("Prepared modpack manifest does not match its preview");
+                throw new IOException(Messages.get("packUpdate.preparedChanged"));
             }
             MrpackProfileWriter.update(profile, profileId, prepared.parentProfile(),
                     prepared.minecraftVersion(), prepared.packVersion(), prepared.loader(),
                     prepared.loaderVersion(), prepared.sourceProjectId(), prepared.sourceVersionId());
             Path stagedProfile = staging.resolve(".ecl-profile-update.json");
             Files.writeString(stagedProfile, profile.toString(), StandardCharsets.UTF_8);
+            for (Map.Entry<String, String> file : newManifest.files().entrySet()) {
+                if (!file.getValue().equalsIgnoreCase(PackManifest.sha512(PackManifest.resolve(staging, file.getKey())))) {
+                    throw new IOException("Prepared pack file failed integrity verification: " + file.getKey());
+                }
+            }
             int warnings = MrpackInstallSupport.stagePackChanges(transaction, instanceRoot, staging,
                     oldManifest, newManifest, safeListener);
             transaction.stageReplacement(stagedManifest, instanceRoot.resolve(PackManifest.FILE_NAME));
@@ -728,6 +785,7 @@ public final class MrpackInstaller {
                 throw new IOException("Instance is running; update was cancelled before commit");
             }
             requirePreparedFresh(prepared, instanceRoot, profileFile);
+            verifyPreparedHashes(prepared);
             transaction.commit();
             safeListener.onStatus(warnings == 0
                     ? "整合包更新完成: " + profileId

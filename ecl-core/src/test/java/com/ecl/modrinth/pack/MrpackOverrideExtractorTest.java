@@ -20,6 +20,44 @@ class MrpackOverrideExtractorTest {
     Path tempDir;
 
     @Test
+    void unixSymlinkMetadataNeverCreatesAFilesystemLink() throws Exception {
+        Path outside = Files.writeString(tempDir.resolve("outside.txt"), "user data");
+        Path archive = createArchive("overrides/config/link.txt", outside.toString());
+        byte[] bytes = Files.readAllBytes(archive);
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        boolean patched = false;
+        for (int offset = 0; offset + 46 <= bytes.length; offset++) {
+            if (buffer.getInt(offset) == 0x02014b50) {
+                buffer.putShort(offset + 4, (short) 0x0314);
+                buffer.putInt(offset + 38, 0120777 << 16);
+                patched = true;
+                break;
+            }
+        }
+        assertTrue(patched);
+        Files.write(archive, bytes);
+        Path instance = tempDir.resolve("instance");
+        try (ZipFile zip = new ZipFile(archive.toFile(), StandardCharsets.UTF_8)) {
+            MrpackOverrideExtractor.extract(zip, "overrides/", instance, new MrpackOverrideExtractor.ExtractionBudget());
+        }
+        Path extracted = instance.resolve("config/link.txt");
+        assertTrue(Files.isRegularFile(extracted, java.nio.file.LinkOption.NOFOLLOW_LINKS));
+        assertTrue(!Files.isSymbolicLink(extracted));
+        assertEquals("user data", Files.readString(outside));
+    }
+
+    @Test
+    void rejectsExcessiveCompressionRatioBeforeCreatingTarget() throws Exception {
+        Path archive = createArchive("overrides/config/bomb.txt", "0".repeat(1024 * 1024));
+        Path instance = tempDir.resolve("instance");
+        try (ZipFile zip = new ZipFile(archive.toFile(), StandardCharsets.UTF_8)) {
+            assertThrows(IOException.class, () -> MrpackOverrideExtractor.extract(zip, "overrides/", instance,
+                    new MrpackOverrideExtractor.ExtractionBudget()));
+        }
+        assertTrue(!Files.exists(instance.resolve("config/bomb.txt")));
+    }
+
+    @Test
     void extractsEntriesAndSharesBudgetAcrossOverridePrefixes() throws Exception {
         Path archive = createArchive(
                 "overrides/config/example.txt", "enabled=true",

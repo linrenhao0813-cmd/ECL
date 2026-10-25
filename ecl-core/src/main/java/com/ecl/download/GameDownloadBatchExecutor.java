@@ -9,6 +9,7 @@ import com.ecl.util.NetworkUriPolicy;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +21,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /** Executes verified file downloads and aggregates progress for one download phase. */
 final class GameDownloadBatchExecutor {
@@ -99,9 +101,8 @@ final class GameDownloadBatchExecutor {
     }
 
     /**
-     * Keeps the first declaration of every normalized target and rejects targets that were declared
-     * with different digests or sizes: one of those declarations must be wrong, and silently picking
-     * the first one would publish an unverified payload.
+     * Deduplicates normalized targets, retaining a known size over an unspecified one. Conflicting
+     * digests or two different known sizes cannot safely describe the same artifact.
      */
     static List<DownloadTask> deduplicateByTarget(List<DownloadTask> tasks) throws IOException {
         Map<Path, DownloadTask> byTarget = new LinkedHashMap<>(tasks.size());
@@ -113,6 +114,9 @@ final class GameDownloadBatchExecutor {
                         + " (SHA-1 " + previous.sha1() + "/" + task.sha1()
                         + ", size " + previous.expectedSize() + "/" + task.expectedSize() + ")");
             }
+            if (previous != null && previous.expectedSize() <= 0 && task.expectedSize() > 0) {
+                byTarget.put(target, task);
+            }
         }
         return List.copyOf(byTarget.values());
     }
@@ -123,7 +127,8 @@ final class GameDownloadBatchExecutor {
 
     private static boolean sameDeclaration(DownloadTask first, DownloadTask second) {
         return first.sha1().equalsIgnoreCase(second.sha1())
-                && first.expectedSize() == second.expectedSize();
+                && (first.expectedSize() <= 0 || second.expectedSize() <= 0
+                || first.expectedSize() == second.expectedSize());
     }
 
     private void downloadAndVerify(DownloadTask task,
@@ -149,10 +154,11 @@ final class GameDownloadBatchExecutor {
         Path dataRoot = ECLConfig.getBaseDir().toPath().toAbsolutePath().normalize();
         Path lockPath = ManagedLockPaths.filePublication(dataRoot.resolve(".ecl-download-locks"), target);
         FileUtil.validateExistingAncestors(dataRoot, lockPath);
-        try (FileLockLease ignored = FileLockLease.tryAcquire(lockPath)) {
-            if (ignored == null) {
-                throw new IOException("Shared artifact is being repaired by another task: " + target);
-            }
+        try (FileLockLease ignored = awaitPublicationLock(lockPath)) {
+            FileUtil.validateExistingAncestors(root, target);
+            if (Files.isRegularFile(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    && (task.expectedSize() <= 0 || Files.size(target) == task.expectedSize())
+                    && FileUtil.verifySha1(target.toFile(), task.sha1())) return;
             Path staging = stagingRoot.resolve(lockPath.getFileName() + ".download");
             Path partial = staging.resolveSibling(staging.getFileName() + ".part");
             Path partialMetadata = partial.resolveSibling(partial.getFileName() + ".meta");
@@ -171,6 +177,24 @@ final class GameDownloadBatchExecutor {
             } finally {
                 // Keep HTTP partials and validators for retry; completed but invalid payloads are discarded.
                 Files.deleteIfExists(staging);
+            }
+        }
+    }
+
+    private static FileLockLease awaitPublicationLock(Path lockPath) throws IOException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (true) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("Interrupted while waiting for artifact publication");
+            }
+            FileLockLease lease = FileLockLease.tryAcquire(lockPath);
+            if (lease != null) return lease;
+            if (System.nanoTime() >= deadline) throw new IOException("Timed out waiting for artifact publication: " + lockPath);
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new InterruptedIOException("Interrupted while waiting for artifact publication");
             }
         }
     }
@@ -197,9 +221,5 @@ final class GameDownloadBatchExecutor {
 
     record DownloadTask(String url, File target, String sha1, long expectedSize,
                         String sourceLabel, Path targetRoot) {
-        DownloadTask(String url, File target, String sha1, long expectedSize, String sourceLabel) {
-            this(url, target, sha1, expectedSize, sourceLabel,
-                    target.toPath().toAbsolutePath().normalize().getParent());
-        }
     }
 }

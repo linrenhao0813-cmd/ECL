@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -180,6 +181,25 @@ class LocalServerManagerTest {
         assertThrows(IOException.class, () -> manager.readLogTail(id, 10));
         Files.createSymbolicLink(directory.resolve("process.json"), temporary.resolve("outside.json"));
         assertThrows(IOException.class, () -> manager.isRunning(id));
+    }
+
+    @Test
+    void rejectsWindowsJunctionRedirectsWithoutSymlinkPrivileges() throws Exception {
+        assumeTrue(com.ecl.util.OperatingSystem.isWindows(), "Windows junction fixture");
+        Path outside = Files.createDirectory(temporary.resolve("outside-server-data"));
+        Path junction = temporary.resolve("redirected-data");
+        Process creation = new ProcessBuilder("cmd.exe", "/c", "mklink", "/J",
+                junction.toString(), outside.toString()).redirectErrorStream(true).start();
+        assertTrue(creation.waitFor(10, TimeUnit.SECONDS), "junction creation timed out");
+        assertEquals(0, creation.exitValue(), new String(creation.getInputStream().readAllBytes()));
+        try {
+            assertThrows(IOException.class, () -> new LocalServerManager(junction).list());
+            try (var files = Files.list(outside)) {
+                assertEquals(0, files.count(), "rejected path must not create server data outside root");
+            }
+        } finally {
+            Files.deleteIfExists(junction);
+        }
     }
 
     @Test

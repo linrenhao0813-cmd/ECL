@@ -48,6 +48,74 @@ class InstanceDetailsPaneTest extends ApplicationTest {
     }
 
     @Test
+    void profileReadLockDoesNotBlockFxAndEscapeClosesBeforeLateCompletion() throws Exception {
+        Path instanceRoot = gameRoot.resolve("versions/details-test-instance");
+        var store = launcher.controller.instanceLaunchProfiles();
+        store.save(instanceRoot, InstanceLaunchProfile.defaults());
+        byte[] original = Files.readAllBytes(store.profileFile(instanceRoot));
+        java.util.concurrent.atomic.AtomicInteger saved = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicReference<Window> opened = new AtomicReference<>();
+        interact(this::showDetails);
+        synchronized (store) {
+            Platform.runLater(() -> InstanceLaunchProfileDialog.show(launcher, "details-test-instance",
+                    (Button) stage.getScene().lookup("#instance-launch-settings"), saved::incrementAndGet));
+            assertTrue(WaitForAsyncUtils.asyncFx(() -> {
+                Window dialog = Window.getWindows().stream()
+                        .filter(window -> window != stage && window.isShowing() && window.getScene() != null
+                                && window.getScene().lookup("#instance-launch-profile-form") != null)
+                        .findFirst().orElseThrow();
+                opened.set(dialog);
+                dialog.getScene().getRoot().fireEvent(new javafx.scene.input.KeyEvent(
+                        javafx.scene.input.KeyEvent.KEY_PRESSED, "", "", javafx.scene.input.KeyCode.ESCAPE,
+                        false, false, false, false));
+                return !dialog.isShowing();
+            }).get(2, java.util.concurrent.TimeUnit.SECONDS));
+        }
+        WaitForAsyncUtils.waitForFxEvents();
+        interact(() -> assertFalse(opened.get().isShowing()));
+        assertEquals(0, saved.get());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(original, Files.readAllBytes(store.profileFile(instanceRoot)));
+    }
+
+    @Test
+    void repeatedDeleteActionQueuesOnlyOneConfirmedTask() throws Exception {
+        java.lang.reflect.Field executor = MainController.class.getDeclaredField("backgroundExecutor");
+        executor.setAccessible(true);
+        Object previous = executor.get(launcher.controller);
+        java.util.concurrent.atomic.AtomicInteger submissions = new java.util.concurrent.atomic.AtomicInteger();
+        var queue = new java.util.concurrent.AbstractExecutorService() {
+            @Override public void shutdown() { }
+            @Override public java.util.List<Runnable> shutdownNow() { return java.util.List.of(); }
+            @Override public boolean isShutdown() { return false; }
+            @Override public boolean isTerminated() { return false; }
+            @Override public boolean awaitTermination(long timeout, java.util.concurrent.TimeUnit unit) { return true; }
+            @Override public void execute(Runnable action) { submissions.incrementAndGet(); }
+        };
+        executor.set(launcher.controller, queue);
+        try {
+            interact(() -> {
+                InstanceDetailsPane pane = showDetails();
+                Platform.runLater(() -> Window.getWindows().stream()
+                        .filter(window -> window != stage && window.isShowing()).toList().forEach(window -> {
+                            javafx.scene.control.DialogPane dialog = (javafx.scene.control.DialogPane) window.getScene().getRoot();
+                            ((Button) dialog.lookupButton(javafx.scene.control.ButtonType.OK)).fire();
+                        }));
+                try {
+                    var deletion = InstanceDetailsPane.class.getDeclaredMethod("deleteInstance");
+                    deletion.setAccessible(true);
+                    deletion.invoke(pane);
+                    deletion.invoke(pane);
+                } catch (ReflectiveOperationException error) {
+                    throw new AssertionError(error);
+                }
+                assertEquals(1, submissions.get());
+            });
+        } finally {
+            executor.set(launcher.controller, previous);
+        }
+    }
+
+    @Test
     void overviewHasNoAdvancedMenusAndDoesNotRewriteLaunchConfiguration() throws Exception {
         Path instanceRoot = gameRoot.resolve("versions/details-test-instance");
         launcher.controller.instanceLaunchProfiles().save(instanceRoot, InstanceLaunchProfile.defaults());
@@ -174,31 +242,26 @@ class InstanceDetailsPaneTest extends ApplicationTest {
         launcher.controller.instanceLaunchProfiles().save(instanceRoot, profile);
         Path profileFile = launcher.controller.instanceLaunchProfiles().profileFile(instanceRoot);
         String before = Files.readString(profileFile);
-        AtomicReference<Throwable> failure = new AtomicReference<>();
         interact(() -> {
             InstanceDetailsPane pane = showDetails();
             launcher.setLaunchTarget("different-target");
-            Button settings = (Button) pane.lookup("#instance-launch-settings");
-            Platform.runLater(() -> {
-                Platform.runLater(() -> {
-                    try {
-                        Window dialog = Window.getWindows().stream()
-                                .filter(window -> window != stage && window.isShowing()
-                                        && window.getScene() != null
-                                        && window.getScene().lookup("#instance-launch-reset-defaults") != null)
-                                .findFirst().orElseThrow();
-                        ((Button) dialog.getScene().lookup("#instance-launch-reset-defaults")).fire();
-                        ((Button) dialog.getScene().lookup("#instance-launch-cancel")).fire();
-                    } catch (Throwable error) {
-                        failure.set(error);
-                    }
-                });
-                settings.fire();
-            });
+            Platform.runLater(() -> ((Button) pane.lookup("#instance-launch-settings")).fire());
+        });
+        WaitForAsyncUtils.waitFor(5, java.util.concurrent.TimeUnit.SECONDS, () ->
+                WaitForAsyncUtils.asyncFx(() -> Window.getWindows().stream()
+                        .filter(window -> window != stage && window.isShowing() && window.getScene() != null)
+                        .map(window -> window.getScene().lookup("#instance-launch-reset-defaults"))
+                        .anyMatch(node -> node != null && !node.isDisabled())).get());
+        interact(() -> {
+            Window dialog = Window.getWindows().stream()
+                    .filter(window -> window != stage && window.isShowing()
+                            && window.getScene().lookup("#instance-launch-reset-defaults") != null)
+                    .findFirst().orElseThrow();
+            ((Button) dialog.getScene().lookup("#instance-launch-reset-defaults")).fire();
+            ((Button) dialog.getScene().lookup("#instance-launch-cancel")).fire();
         });
         WaitForAsyncUtils.waitForFxEvents();
 
-        assertNull(failure.get());
         assertEquals(before, Files.readString(profileFile));
         assertEquals("different-target", launcher.getSelectedVersion());
     }

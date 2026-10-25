@@ -51,13 +51,11 @@ import com.ecl.util.HttpUtil;
 import java.io.IOException;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -139,12 +137,8 @@ public final class MainController implements AutoCloseable {
                 ECLConfig.getVersionsDir(), ECLConfig.getLibrariesDir(), ECLConfig.getAssetsDir(),
                 ECLConfig.LAUNCHER_NAME, ECLConfig.LAUNCHER_VERSION);
         gameLauncher = new DefaultLauncher(versionRepository, launchEnvironment);
-        int backgroundThreads = Math.min(16,
-                Math.max(2, Runtime.getRuntime().availableProcessors() * 2));
-        backgroundExecutor = new ThreadPoolExecutor(
-                backgroundThreads, backgroundThreads, 0L, TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(256), ThreadFactories.daemon("ecl-background"),
-                new ThreadPoolExecutor.CallerRunsPolicy());
+        backgroundExecutor = Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("ecl-background-", 0).factory());
         modDownloadExecutor = Executors.newFixedThreadPool(
                 configuredConcurrency, ThreadFactories.daemon("ecl-mod-download"));
         installedModRepository = new FileInstalledModRepository();

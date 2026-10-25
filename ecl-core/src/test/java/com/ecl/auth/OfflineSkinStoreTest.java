@@ -99,6 +99,32 @@ class OfflineSkinStoreTest {
                 MinecraftSkinService.Variant.CLASSIC);
 
         assertTrue(store.find(identity).isPresent());
+        try (var backups = Files.list(base)) {
+            Path backup = backups.filter(path -> path.getFileName().toString().startsWith("skins.json.corrupt-"))
+                    .findFirst().orElseThrow();
+            assertEquals("{broken-json", Files.readString(backup));
+        }
+    }
+
+    @Test
+    void invalidRootIsPreservedWithoutOverwritingPreviousBackup(@TempDir Path directory) throws Exception {
+        Files.writeString(directory.resolve("skins.json"), "[]");
+        Files.writeString(directory.resolve("skins.json.corrupt-previous"), "previous corruption");
+        OfflineSkinStore store = new OfflineSkinStore(directory);
+        assertTrue(store.find("OFFLINE:x").isEmpty());
+        assertEquals("[]", Files.readString(directory.resolve("skins.json")));
+        store.importSkin("OFFLINE:x", writeSkin(directory, "skin.png"), MinecraftSkinService.Variant.CLASSIC);
+        assertEquals("previous corruption", Files.readString(directory.resolve("skins.json.corrupt-previous")));
+        try (var backups = Files.list(directory)) {
+            assertTrue(backups.filter(path -> path.getFileName().toString().startsWith("skins.json.corrupt-"))
+                    .anyMatch(path -> {
+                        try {
+                            return "[]".equals(Files.readString(path));
+                        } catch (IOException failure) {
+                            throw new java.io.UncheckedIOException(failure);
+                        }
+                    }));
+        }
     }
 
     @Test

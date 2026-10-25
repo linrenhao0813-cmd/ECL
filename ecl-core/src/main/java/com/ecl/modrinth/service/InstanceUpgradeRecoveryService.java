@@ -6,11 +6,11 @@ import com.ecl.modrinth.pack.PackUpdateTransaction;
 import com.ecl.modrinth.transaction.FileModInstallationTransaction;
 import com.ecl.modrinth.transaction.PlannedModFile;
 import com.ecl.operation.InstanceOperationCoordinator;
+import com.ecl.operation.InstanceOperationSession;
 import com.ecl.launch.GameProcessMarker;
 import com.ecl.util.FileUtil;
 import com.ecl.util.FileLockLease;
 import com.ecl.util.HttpUtil;
-import com.ecl.util.InstanceOperationLease;
 import com.ecl.util.Messages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -49,6 +49,12 @@ public final class InstanceUpgradeRecoveryService {
     private final Path root;
     private final InstanceOperationCoordinator operations;
     private final Predicate<UUID> instanceRunning;
+    private final Checkpoint checkpoint;
+
+    @FunctionalInterface
+    interface Checkpoint {
+        void reached(String phase) throws IOException;
+    }
 
     public InstanceUpgradeRecoveryService() {
         this(ECLConfig.getBaseDir().toPath().resolve("upgrade-recovery"), null, ignored -> false);
@@ -60,34 +66,69 @@ public final class InstanceUpgradeRecoveryService {
 
     public InstanceUpgradeRecoveryService(Path root, InstanceOperationCoordinator operations,
                                           Predicate<UUID> instanceRunning) {
+        this(root, operations, instanceRunning, ignored -> { });
+    }
+
+    InstanceUpgradeRecoveryService(Path root, InstanceOperationCoordinator operations,
+                                    Predicate<UUID> instanceRunning, Checkpoint checkpoint) {
         this.root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
-        this.operations = operations;
+        this.operations = operations == null ? new InstanceOperationCoordinator() : operations;
         this.instanceRunning = Objects.requireNonNull(instanceRunning, "instanceRunning");
+        this.checkpoint = Objects.requireNonNull(checkpoint, "checkpoint");
+    }
+
+    public InstanceOperationSession tryAcquireSession(ModInstanceContext instance) throws IOException {
+        return operations.tryAcquireSession(instance.instanceId(), instance.gameDirectory());
     }
 
     public Draft begin(InstanceUpdateService.PreparedExecution execution) throws IOException {
-        FileLockLease lease = acquireRecoveryLock(execution.preview().instance().profileId());
+        ModInstanceContext instance = execution.preview().instance();
+        InstanceOperationSession session = operations.tryAcquireSession(instance.instanceId(), instance.gameDirectory());
+        if (session == null) throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
         try {
-            return beginLocked(execution, lease);
+            return beginOwned(execution, session, session);
         } catch (IOException | RuntimeException failure) {
-            try {
-                lease.close();
-            } catch (IOException closeFailure) {
-                failure.addSuppressed(closeFailure);
-            }
+            try { session.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
             throw failure;
         }
     }
 
-    private Draft beginLocked(InstanceUpdateService.PreparedExecution execution, FileLockLease lease) throws IOException {
+    public Draft begin(InstanceUpdateService.PreparedExecution execution, InstanceOperationSession session) throws IOException {
+        ModInstanceContext instance = execution.preview().instance();
+        InstanceOperationSession.Borrow borrow = session.borrow(instance.instanceId(), instance.gameDirectory());
+        try {
+            return beginOwned(execution, session, borrow);
+        } catch (IOException | RuntimeException failure) {
+            try { borrow.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+    }
+
+    private Draft beginOwned(InstanceUpdateService.PreparedExecution execution, InstanceOperationSession session,
+                             AutoCloseable ownership) throws IOException {
+        ModInstanceContext instance = execution.preview().instance();
+        if (instanceRunning.test(instance.instanceId()) || GameProcessMarker.isRunning(instance.gameDirectory())) {
+            throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+        }
+        FileLockLease lease = acquireRecoveryLock(instance.profileId());
+        try {
+            return beginLocked(execution, lease, session, ownership);
+        } catch (IOException | RuntimeException failure) {
+            try { lease.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+    }
+
+    private Draft beginLocked(InstanceUpdateService.PreparedExecution execution, FileLockLease lease,
+                              InstanceOperationSession session, AutoCloseable ownership) throws IOException {
         InstanceUpdateService.Preview preview = execution.preview();
         String profileId = preview.instance().profileId();
         FileUtil.requireSafeVersionId(profileId);
         Path profileDirectory = profileDirectory(profileId);
-        recoverSwap(profileDirectory);
+        recoverSwap(profileDirectory, roots(profileId, preview.instance(), preview.metadataRoot(), preview.gameRoot()));
         cleanupUnstartedStaging(profileDirectory);
         if (Files.exists(profileDirectory.resolve("pending"), LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("An interrupted update must be recovered before another update");
+            throw new IOException(Messages.get("instanceRecovery.interrupted"));
         }
         Files.createDirectories(profileDirectory);
         Path pending = profileDirectory.resolve("pending");
@@ -106,7 +147,7 @@ public final class InstanceUpgradeRecoveryService {
             writeManifest(staging, manifest);
             forceDirectory(staging);
             moveDirectory(staging, pending);
-            return new Draft(pending, execution, lease);
+            return new Draft(pending, execution, lease, session, ownership);
         } catch (IOException | RuntimeException failure) {
             cleanupDirectory(staging);
             throw failure;
@@ -125,44 +166,54 @@ public final class InstanceUpgradeRecoveryService {
     /** Completes an interrupted update snapshot and reports the latest safe restore point. */
     public RestorePoint inspect(String profileId, ModInstanceContext instance,
                                 Path metadataRoot, Path gameRoot) throws Exception {
-        try (FileLockLease recovery = acquireRecoveryLock(profileId)) {
-            return inspectExclusive(profileId, instance, metadataRoot, gameRoot);
+        PreviewRoots roots = roots(profileId, instance, metadataRoot, gameRoot);
+        try (InstanceOperationSession session = acquireSession(instance)) {
+            recoverTransactions(instance, roots, metadataRoot, session);
+            try (FileLockLease recovery = acquireRecoveryLock(profileId)) {
+                return inspectLocked(profileId, roots);
+            }
         }
     }
 
-    private RestorePoint inspectExclusive(String profileId, ModInstanceContext instance,
-                                          Path metadataRoot, Path gameRoot) throws Exception {
-        PreviewRoots roots = roots(profileId, instance, metadataRoot, gameRoot);
-        AutoCloseable operation = tryOperation(instance.instanceId());
-        if (operation == null) throw new IOException("Instance is busy with another operation");
-        try (operation) {
-            Path profileFile = FileUtil.safeVersionJson(metadataRoot.toFile(), profileId).toPath();
-            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory());
-            PackUpdateTransaction.recoverIncompleteTransactions(roots.instanceRoot(), profileFile);
-            if (PackUpdateTransaction.hasIncompleteTransactions(roots.instanceRoot())) {
-                throw new IOException("An incomplete pack transaction still requires recovery");
+    private InstanceOperationSession acquireSession(ModInstanceContext instance) throws IOException {
+        InstanceOperationSession session = operations.tryAcquireSession(instance.instanceId(), instance.gameDirectory());
+        if (session == null) throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+        try {
+            if (instanceRunning.test(instance.instanceId()) || GameProcessMarker.isRunning(instance.gameDirectory())) {
+                throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
             }
+            return session;
+        } catch (IOException | RuntimeException failure) {
+            try { session.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
         }
-        try (AutoCloseable inspectLock = tryOperation(instance.instanceId());
-             InstanceOperationLease process =
-                     InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
-            if (inspectLock == null || process == null || instanceRunning.test(instance.instanceId())
-                    || GameProcessMarker.isRunning(instance.gameDirectory())) {
-                throw new IOException("Instance is running or busy; inspect its restore point after it stops");
-            }
-            return inspectLocked(profileId, roots);
+    }
+
+    private void recoverTransactions(ModInstanceContext instance, PreviewRoots roots, Path metadataRoot,
+                                     InstanceOperationSession session) throws IOException {
+        Path profile = FileUtil.safeVersionJson(metadataRoot.toFile(), roots.profileId()).toPath();
+        FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory(), session);
+        PackUpdateTransaction.recoverIncompleteTransactions(roots.instanceRoot(), profile, session);
+        if (PackUpdateTransaction.hasIncompleteTransactions(roots.instanceRoot())) {
+            throw new IOException(Messages.get("instanceRecovery.interrupted"));
         }
+    }
+
+    private Path prepareRecovery(String profileId, PreviewRoots roots) throws IOException {
+        Path directory = profileDirectory(profileId);
+        Path pending = directory.resolve("pending");
+        if (Files.exists(pending, LinkOption.NOFOLLOW_LINKS)) {
+            Manifest manifest = readManifest(pending, roots);
+            verifyPayloads(pending, manifest);
+        }
+        recoverSwap(directory, roots);
+        cleanupUnstartedStaging(directory);
+        if (Files.isDirectory(pending, LinkOption.NOFOLLOW_LINKS)) finalizePending(pending, roots);
+        return directory.resolve("active");
     }
 
     private RestorePoint inspectLocked(String profileId, PreviewRoots roots) throws IOException {
-        Path directory = profileDirectory(profileId);
-        recoverSwap(directory);
-        cleanupUnstartedStaging(directory);
-        Path pending = directory.resolve("pending");
-        if (Files.isDirectory(pending, LinkOption.NOFOLLOW_LINKS)) {
-            finalizePending(pending, roots);
-        }
-        Path active = directory.resolve("active");
+        Path active = prepareRecovery(profileId, roots);
         if (!Files.isDirectory(active, LinkOption.NOFOLLOW_LINKS)) return null;
         Manifest manifest = readManifest(active, roots);
         verifyPayloads(active, manifest);
@@ -179,44 +230,39 @@ public final class InstanceUpgradeRecoveryService {
                                  Set<String> confirmedConflicts)
             throws Exception {
         PreviewRoots roots = roots(profileId, instance, metadataRoot, gameRoot);
-        AutoCloseable operation = tryOperation(instance.instanceId());
-        if (operation == null) throw new IOException("Instance is busy with another operation");
-        try (operation; FileLockLease recovery = acquireRecoveryLock(profileId);
-             InstanceOperationLease gameLock =
-                     InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
-            if (gameLock == null || instanceRunning.test(instance.instanceId())
-                    || GameProcessMarker.isRunning(instance.gameDirectory())) {
-                throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
-            }
-            Path active = profileDirectory(profileId).resolve("active");
-            Manifest manifest = readManifest(active, roots);
-            verifyPayloads(active, manifest);
-            if (manifest.state() == State.RESTORED) {
-                throw new IOException(Messages.get("instanceRecovery.alreadyRestored"));
-            }
-            if (manifest.state() == State.ACTIVE) {
-                List<String> currentConflicts = conflicts(manifest, roots);
-                Set<String> approved = confirmedConflicts == null ? Set.of() : Set.copyOf(confirmedConflicts);
-                if (!approved.containsAll(currentConflicts)) {
-                    return new RestoreResult(false, currentConflicts, manifest.createdAt());
+        try (InstanceOperationSession session = acquireSession(instance)) {
+            recoverTransactions(instance, roots, metadataRoot, session);
+            try (FileLockLease recovery = acquireRecoveryLock(profileId)) {
+                Path active = prepareRecovery(profileId, roots);
+                Manifest manifest = readManifest(active, roots);
+                verifyPayloads(active, manifest);
+                if (manifest.state() == State.RESTORED) {
+                    throw new IOException(Messages.get("instanceRecovery.alreadyRestored"));
                 }
-                manifest = manifest.with(State.RESTORING, true, manifest.entries());
-                writeManifest(active, manifest);
-            } else if (manifest.state() != State.RESTORING
-                    || !manifest.conflictsConfirmed()) {
-                throw new IOException("Restore point is not in a restorable state");
-            }
-            for (Entry entry : manifest.entries()) {
-                if (Thread.currentThread().isInterrupted()) {
-                    throw new java.util.concurrent.CancellationException("Rollback cancelled");
+                if (manifest.state() == State.ACTIVE) {
+                    List<String> currentConflicts = conflicts(manifest, roots);
+                    Set<String> approved = confirmedConflicts == null ? Set.of() : Set.copyOf(confirmedConflicts);
+                    if (!approved.containsAll(currentConflicts)) {
+                        return new RestoreResult(false, currentConflicts, manifest.createdAt());
+                    }
+                    manifest = manifest.with(State.RESTORING, true, manifest.entries());
+                    writeManifest(active, manifest);
+                } else if (manifest.state() != State.RESTORING
+                        || !manifest.conflictsConfirmed()) {
+                    throw new IOException(Messages.get("instanceRecovery.invalidState"));
                 }
-                restoreEntry(active, entry, roots, manifest.pack());
-                manifest = manifest.markRestored(entry.key());
+                for (Entry entry : manifest.entries()) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        throw new java.util.concurrent.CancellationException("Rollback cancelled");
+                    }
+                    restoreEntry(active, entry, roots, manifest.pack());
+                    manifest = manifest.markRestored(entry.key());
+                    writeManifest(active, manifest);
+                }
+                manifest = manifest.with(State.RESTORED, true, manifest.entries());
                 writeManifest(active, manifest);
+                return new RestoreResult(true, List.of(), manifest.createdAt());
             }
-            manifest = manifest.with(State.RESTORED, true, manifest.entries());
-            writeManifest(active, manifest);
-            return new RestoreResult(true, List.of(), manifest.createdAt());
         }
     }
 
@@ -236,6 +282,12 @@ public final class InstanceUpgradeRecoveryService {
 
     private void finalizePending(Path pending, PreviewRoots roots) throws IOException {
         Manifest manifest = readManifest(pending, roots);
+        verifyPayloads(pending, manifest);
+        if (manifest.state() == State.ACTIVE) {
+            publish(pending, profileDirectory(roots.profileId()), roots);
+            return;
+        }
+        if (manifest.state() != State.PREPARING) throw new IOException(Messages.get("instanceRecovery.invalidState"));
         Map<String, Entry> before = new LinkedHashMap<>();
         for (Entry entry : manifest.entries()) before.put(entry.key(), entry);
         if (manifest.pack()) {
@@ -248,8 +300,6 @@ public final class InstanceUpgradeRecoveryService {
             FileState after = state(resolve(entry.ref(), roots, manifest.pack()), rootFor(entry.ref(), roots));
             if (!same(entry.beforeExists(), entry.beforeSha256(), after.exists(), after.sha256())) {
                 changed.add(entry.after(after.exists(), after.sha256()));
-            } else {
-                deletePayload(pending, entry.payload());
             }
         }
         if (changed.isEmpty()) {
@@ -257,7 +307,7 @@ public final class InstanceUpgradeRecoveryService {
             return;
         }
         writeManifest(pending, manifest.with(State.ACTIVE, false, changed));
-        publish(pending, profileDirectory(roots.profileId()));
+        publish(pending, profileDirectory(roots.profileId()), roots);
     }
 
     private List<Ref> collectReferences(InstanceUpdateService.PreparedExecution execution)
@@ -306,7 +356,9 @@ public final class InstanceUpgradeRecoveryService {
             if (before.exists()) {
                 payload = index++ + ".bin";
                 Path backup = payloadRoot.resolve(payload);
+                checkpoint.reached("before-payload-copy");
                 Files.copy(target, backup);
+                forceFile(backup);
                 if (!sha256(backup).equals(before.sha256())) {
                     throw new IOException("Restore point copy failed verification: " + displayPath(ref));
                 }
@@ -462,9 +514,10 @@ public final class InstanceUpgradeRecoveryService {
             if (!profileId.equals(ref.path())) throw new IOException("Invalid profile metadata target");
             return;
         }
-        FileUtil.safeArchiveEntry(Path.of(".").toAbsolutePath().normalize(), ref.path());
+        Path normalized = com.ecl.util.ManagedPackPathPolicy.requireRelativePath(ref.path());
         if (ref.path().equals("launcher-mods.json") || ref.path().equals(".ecl-pack-manifest.json")) return;
-        if (ref.path().startsWith("mods/") || ref.path().startsWith("disabled-mods/")) return;
+        if (normalized.getNameCount() > 1 && (normalized.getName(0).toString().equals("mods")
+                || normalized.getName(0).toString().equals("disabled-mods"))) return;
         if (pack) {
             requireManagedPackPath(ref.path());
             return;
@@ -473,12 +526,7 @@ public final class InstanceUpgradeRecoveryService {
     }
 
     private static void requireManagedPackPath(String path) throws IOException {
-        FileUtil.safeArchiveEntry(Path.of(".").toAbsolutePath().normalize(), path);
-        String first = Path.of(path).getName(0).toString().toLowerCase(java.util.Locale.ROOT);
-        if (Set.of("saves", "screenshots", "logs", "crash-reports", ".ecl", "versions",
-                "libraries", "assets", "servers.dat", "usercache.json").contains(first)) {
-            throw new IOException("Pack update cannot manage user data: " + path);
-        }
+        com.ecl.util.ManagedPackPathPolicy.requireManagedRelativePath(path);
     }
 
     private static void add(Map<String, Ref> refs, Ref ref) {
@@ -518,8 +566,7 @@ public final class InstanceUpgradeRecoveryService {
             FileUtil.validateExistingAncestors(directory, payload);
             if (!Files.isRegularFile(payload, LinkOption.NOFOLLOW_LINKS)
                     || !sha256(payload).equals(entry.beforeSha256())) {
-                throw new IOException("Upgrade restore point payload is missing or damaged: "
-                        + displayPath(entry.ref()));
+                throw new IOException(Messages.get("instanceRecovery.damagedPayload") + ": " + displayPath(entry.ref()));
             }
         }
     }
@@ -537,39 +584,45 @@ public final class InstanceUpgradeRecoveryService {
         Path payload = directory.resolve("payload").resolve(entry.payload()).normalize();
         if (!Files.isRegularFile(payload, LinkOption.NOFOLLOW_LINKS)
                 || !sha256(payload).equals(entry.beforeSha256())) {
-            throw new IOException("Upgrade restore point payload failed integrity verification");
+            throw new IOException(Messages.get("instanceRecovery.damagedPayload"));
         }
+        FileUtil.validateExistingAncestors(targetRoot, target);
         Files.createDirectories(target.getParent());
         FileUtil.validateExistingAncestors(targetRoot, target);
         Path staged = Files.createTempFile(target.getParent(), ".ecl-restore-", ".part");
         try {
             Files.copy(payload, staged, StandardCopyOption.REPLACE_EXISTING);
             if (!sha256(staged).equals(entry.beforeSha256())) {
-                throw new IOException("Staged rollback file failed integrity verification");
+                throw new IOException(Messages.get("instanceRecovery.damagedPayload"));
             }
+            forceFile(staged);
             FileUtil.moveReplacing(staged, target);
         } finally {
             Files.deleteIfExists(staged);
         }
     }
 
-    private void publish(Path pending, Path profileDirectory) throws IOException {
+    private void publish(Path pending, Path profileDirectory, PreviewRoots roots) throws IOException {
+        verifyPayloads(pending, readManifest(pending, roots));
         Path active = profileDirectory.resolve("active");
         Path previous = profileDirectory.resolve("previous");
         if (Files.exists(previous, LinkOption.NOFOLLOW_LINKS)) cleanupDirectory(previous);
         boolean hadActive = Files.exists(active, LinkOption.NOFOLLOW_LINKS);
         if (hadActive) moveDirectory(active, previous);
+        checkpoint.reached("after-active-moved");
         try {
             moveDirectory(pending, active);
+            checkpoint.reached("after-pending-published");
         } catch (IOException failure) {
             if (hadActive && !Files.exists(active)) moveDirectory(previous, active);
             throw failure;
         }
+        verifyPayloads(active, readManifest(active, roots));
         if (hadActive) cleanupDirectory(previous);
         forceDirectory(profileDirectory);
     }
 
-    private void recoverSwap(Path profileDirectory) throws IOException {
+    private void recoverSwap(Path profileDirectory, PreviewRoots roots) throws IOException {
         if (!Files.isDirectory(profileDirectory, LinkOption.NOFOLLOW_LINKS)) return;
         Path active = profileDirectory.resolve("active");
         Path previous = profileDirectory.resolve("previous");
@@ -578,6 +631,7 @@ public final class InstanceUpgradeRecoveryService {
             moveDirectory(previous, active);
         } else if (Files.exists(active, LinkOption.NOFOLLOW_LINKS)
                 && Files.exists(previous, LinkOption.NOFOLLOW_LINKS)) {
+            verifyPayloads(active, readManifest(active, roots));
             cleanupDirectory(previous);
         }
     }
@@ -597,16 +651,12 @@ public final class InstanceUpgradeRecoveryService {
         return directory;
     }
 
-    private AutoCloseable tryOperation(UUID instanceId) {
-        return operations == null ? () -> { } : operations.tryAcquire(instanceId);
-    }
-
     private FileLockLease acquireRecoveryLock(String profileId) throws IOException {
         Path directory = profileDirectory(profileId);
         Path lockFile = directory.resolve("operation.lock");
         FileUtil.validateExistingAncestors(root, lockFile);
         FileLockLease lease = FileLockLease.tryAcquire(lockFile);
-        if (lease == null) throw new IOException("An upgrade or recovery is still active for this instance");
+        if (lease == null) throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
         return lease;
     }
 
@@ -636,7 +686,21 @@ public final class InstanceUpgradeRecoveryService {
             entries.add(item);
         }
         json.add("entries", entries);
-        HttpUtil.writeJson(directory.resolve(MANIFEST_FILE).toFile(), json);
+        Path temporary = Files.createTempFile(directory, "recovery-", ".tmp");
+        try {
+            Files.writeString(temporary, json.toString(), StandardCharsets.UTF_8);
+            forceFile(temporary);
+            FileUtil.moveReplacing(temporary, directory.resolve(MANIFEST_FILE));
+            forceDirectory(directory);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static void forceFile(Path file) throws IOException {
+        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.WRITE)) {
+            channel.force(true);
+        }
     }
 
     private static State readState(Path directory) throws IOException {
@@ -705,9 +769,6 @@ public final class InstanceUpgradeRecoveryService {
         }
     }
 
-    private static void deletePayload(Path directory, String payload) throws IOException {
-        if (!payload.isBlank()) Files.deleteIfExists(directory.resolve("payload").resolve(payload));
-    }
 
     private static void moveDirectory(Path source, Path target) throws IOException {
         try {
@@ -798,8 +859,17 @@ public final class InstanceUpgradeRecoveryService {
     private enum State { PREPARING, ACTIVE, RESTORING, RESTORED }
 
     public record Draft(Path directory, InstanceUpdateService.PreparedExecution execution,
-                        FileLockLease lease) implements AutoCloseable {
-        @Override public void close() throws IOException { lease.close(); }
+                        FileLockLease lease, InstanceOperationSession session,
+                        AutoCloseable ownership) implements AutoCloseable {
+        @Override public void close() throws IOException {
+            IOException failure = null;
+            try { lease.close(); } catch (IOException error) { failure = error; }
+            try { ownership.close(); } catch (Exception error) {
+                if (failure == null) failure = new IOException("Cannot release recovery ownership", error);
+                else failure.addSuppressed(error);
+            }
+            if (failure != null) throw failure;
+        }
     }
 
     public record RestorePoint(String profileId, Instant createdAt, String state,

@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ModBrowserViewTest {
     @Test
@@ -39,5 +40,29 @@ class ModBrowserViewTest {
         assertEquals(List.of("first", "second", "third"), started);
         assertEquals(3, result.succeeded());
         assertEquals(0, result.failures().size());
+    }
+
+    @Test
+    void selectedUpdateBatchKeepsSelectionSnapshotWhileFirstUpdateIsPending() {
+        List<String> selection = new ArrayList<>(List.of("first", "second"));
+        List<String> started = new ArrayList<>();
+        CompletableFuture<Void> firstUpdate = new CompletableFuture<>();
+
+        var batch = ModBrowserView.runSequentialUpdateBatch(selection, item -> {
+            started.add(item);
+            return "first".equals(item) ? firstUpdate : CompletableFuture.completedFuture(null);
+        });
+        assertEquals(List.of("first"), started);
+        selection.clear();
+        firstUpdate.complete(null);
+
+        assertEquals(2, batch.join().succeeded());
+        assertEquals(List.of("first", "second"), started);
+    }
+
+    @Test
+    void selectedUpdateBatchRejectsMissingSelection() {
+        assertThrows(NullPointerException.class, () -> ModBrowserView.runSequentialUpdateBatch(
+                null, item -> CompletableFuture.completedFuture(null)));
     }
 }

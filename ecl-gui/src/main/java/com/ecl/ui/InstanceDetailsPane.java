@@ -34,6 +34,7 @@ final class InstanceDetailsPane extends VBox {
     private final LauncherUI ui;
     private final Runnable onDisplayChanged;
     private String instanceId;
+    private boolean deleting;
     private List<Object> savedDisplay = List.of();
 
     private final TextField displayNameField = new TextField();
@@ -311,7 +312,7 @@ final class InstanceDetailsPane extends VBox {
     }
 
     private void deleteInstance() {
-        if (instanceId == null) {
+        if (instanceId == null || deleting) {
             return;
         }
         String profileId = instanceId;
@@ -325,12 +326,31 @@ final class InstanceDetailsPane extends VBox {
                     Messages.get("instances.delete.busy"));
             return;
         }
+        deleting = true;
+        refreshActionButtons();
         if (Alert.AlertType.CONFIRMATION != confirmDeletion(profileId)) {
+            deleting = false;
+            refreshActionButtons();
             return;
         }
         ui.setStatus(Messages.get("instances.delete.title"),
                 Messages.format("instances.delete.progress", profileId));
-        ui.runAsync("ecl-delete-instance", () -> deleteInstanceFiles(profileId));
+        try {
+            ui.runAsync("ecl-delete-instance", () -> {
+                try {
+                    deleteInstanceFiles(profileId);
+                } finally {
+                    Platform.runLater(() -> {
+                        deleting = false;
+                        refreshActionButtons();
+                    });
+                }
+            });
+        } catch (RuntimeException rejected) {
+            deleting = false;
+            refreshActionButtons();
+            reportDeletionFailure(profileId, ui.cleanMessage(rejected));
+        }
     }
 
     private Alert.AlertType confirmDeletion(String profileId) {
@@ -394,7 +414,7 @@ final class InstanceDetailsPane extends VBox {
         instanceMenu.setDisable(!present);
         createShortcutButton.setDisable(!present);
         createStartMenuShortcutItem.setDisable(!present);
-        deleteInstanceButton.setDisable(!present || busy || ui.isVersionRunning(instanceId));
+        deleteInstanceButton.setDisable(!present || busy || deleting || ui.isVersionRunning(instanceId));
     }
 
     private void updateOverviewRows(String minecraftVersion, String loader) {

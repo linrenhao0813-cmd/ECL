@@ -70,8 +70,6 @@ public class SettingsManager {
             }
             try (Reader reader = Files.newBufferedReader(settingsFile.toPath(), StandardCharsets.UTF_8)) {
                 settings = JsonParser.parseReader(reader).getAsJsonObject();
-                // 兼容迁移：旧键 "versionCategory" → "versionCategory2"
-                migrateSettingKey("versionCategory", "versionCategory2");
             } catch (IOException | RuntimeException e) {
                 Path corrupt = uniqueCorruptBackup(settingsFile.toPath());
                 try {
@@ -322,15 +320,15 @@ public class SettingsManager {
      * Used for one-time migration of existing stored tokens.
      */
     public synchronized boolean migrateToEncrypted(String key) {
-        return SettingsMigration.migrateToEncrypted(this, key);
-    }
-
-    /**
-     * 将旧键的值迁移到新键（若旧键存在而新键不存在），然后删除旧键。
-     * 用于 settings 键名变更时的平滑升级。
-     */
-    void migrateSettingKey(String oldKey, String newKey) {
-        SettingsMigration.migrateSettingKey(settings, oldKey, newKey);
+        String plaintext = getString(key, null);
+        if (plaintext == null) {
+            return false;
+        }
+        if (!plaintext.isBlank()) {
+            setEncrypted(key, plaintext);
+        }
+        remove(key);
+        return true;
     }
 
     private void ensureLoaded() {

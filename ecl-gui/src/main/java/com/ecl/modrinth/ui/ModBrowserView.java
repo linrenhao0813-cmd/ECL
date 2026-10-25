@@ -42,6 +42,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -354,7 +355,7 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
 
     static <T> CompletableFuture<SequentialBatchRunner.Result<T>> runSequentialUpdateBatch(
             List<T> updates, Function<T, ? extends CompletableFuture<?>> operation) {
-        return ModBatchUpdates.run(updates, operation);
+        return SequentialBatchRunner.run(Objects.requireNonNull(updates, "updates"), operation);
     }
 
     private void refreshUpdateButtons() {
@@ -447,6 +448,13 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             return;
         }
         viewModel.searchTextProperty().set(query);
+    }
+
+    private record ModCategoryChoice(String label, String id) {
+        @Override
+        public String toString() {
+            return label;
+        }
     }
 
     @Override

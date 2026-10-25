@@ -349,6 +349,11 @@ final class WorldSaveExplorer extends VBox {
         if (world != null) ui.openLocalFolder(world.directory().toFile(), GuiMessages.get("explorer.folder"));
     }
 
+    String backupProfileId() {
+        WorldSave selected = currentWorld() == null ? table.getSelectionModel().getSelectedItem() : currentWorld();
+        return selected == null ? null : selected.instanceId();
+    }
+
     private WorldSave currentWorld() {
         return worlds.stream().filter(world -> Objects.equals(world.directory(), location().worldPath())).findFirst().orElse(null);
     }

@@ -1,6 +1,9 @@
 package com.ecl.modrinth.pack;
 
 import com.ecl.util.FileLockLease;
+import com.ecl.util.Messages;
+import com.ecl.launch.GameProcessMarker;
+import com.ecl.operation.InstanceOperationSession;
 import com.ecl.util.InstanceOperationLease;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -49,15 +52,24 @@ public final class PackUpdateTransaction implements AutoCloseable {
     private final int failAfterAppliedEntries;
     private FileLockLease operationLock;
     private InstanceOperationLease gameOperationLock;
+    private InstanceOperationSession.Borrow sessionBorrow;
     private boolean committed;
     private boolean closed;
 
     public PackUpdateTransaction(Path instanceRoot, Path profileFile) throws IOException {
-        this(instanceRoot, profileFile, Integer.MAX_VALUE);
+        this(instanceRoot, profileFile, Integer.MAX_VALUE, (InstanceOperationSession) null);
     }
 
-    PackUpdateTransaction(Path instanceRoot, Path profileFile, int failAfterAppliedEntries)
-            throws IOException {
+    public PackUpdateTransaction(Path instanceRoot, Path profileFile, InstanceOperationSession session) throws IOException {
+        this(instanceRoot, profileFile, Integer.MAX_VALUE, session);
+    }
+
+    PackUpdateTransaction(Path instanceRoot, Path profileFile, int failAfterAppliedEntries) throws IOException {
+        this(instanceRoot, profileFile, failAfterAppliedEntries, (InstanceOperationSession) null);
+    }
+
+    private PackUpdateTransaction(Path instanceRoot, Path profileFile, int failAfterAppliedEntries,
+                                  InstanceOperationSession session) throws IOException {
         this.instanceRoot = Objects.requireNonNull(instanceRoot, "instanceRoot")
                 .toAbsolutePath().normalize();
         this.profileFile = Objects.requireNonNull(profileFile, "profileFile")
@@ -71,34 +83,24 @@ public final class PackUpdateTransaction implements AutoCloseable {
                 .toAbsolutePath().normalize();
         MrpackPathPolicy.validateExistingAncestors(this.instanceRoot.getParent(), this.transactionRoot);
         Files.createDirectories(transactionRoot);
-        this.operationLock = FileLockLease.tryAcquire(operationLockFile(this.instanceRoot));
-        if (operationLock == null) {
-            throw new IOException("Unable to lock pack instance operation: " + instanceRoot);
-        }
         try {
-            this.gameOperationLock = InstanceOperationLease.tryAcquire(this.instanceRoot);
-            if (gameOperationLock == null) {
-                throw new IOException("Unable to lock running game directory: " + instanceRoot);
+            if (session == null) {
+                this.gameOperationLock = InstanceOperationLease.tryAcquire(this.instanceRoot);
+                if (gameOperationLock == null) throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+            } else {
+                this.sessionBorrow = session.borrowMutation(session.instanceId(), this.instanceRoot);
             }
+            if (GameProcessMarker.isRunning(this.instanceRoot)) {
+                throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+            }
+            this.operationLock = FileLockLease.tryAcquire(operationLockFile(this.instanceRoot));
+            if (operationLock == null) throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
             this.transactionDirectory = Files.createDirectory(
                     transactionRoot.resolve(this.instanceRoot.getFileName() + "-" + UUID.randomUUID()));
             this.stagingDirectory = Files.createDirectory(transactionDirectory.resolve("staged"));
             this.backupDirectory = Files.createDirectory(transactionDirectory.resolve("backups"));
         } catch (IOException | RuntimeException failure) {
-            if (gameOperationLock != null) {
-                try {
-                    gameOperationLock.close();
-                } catch (IOException closeFailure) {
-                    failure.addSuppressed(closeFailure);
-                }
-                gameOperationLock = null;
-            }
-            try {
-                operationLock.close();
-            } catch (IOException closeFailure) {
-                failure.addSuppressed(closeFailure);
-            }
-            operationLock = null;
+            try { releaseDirectoryLock(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
             throw failure;
         }
     }
@@ -258,15 +260,11 @@ public final class PackUpdateTransaction implements AutoCloseable {
                 LOGGER.warn("Failed to read pack transaction journal {}", journalPath, error);
                 return;
             }
-        } else {
-            // commit() writes the PREPARED journal before it touches any target file, so a
-            // transaction directory without a journal cannot describe applied changes. Removing
-            // it is required: keeping it would make hasIncompleteTransactions() block every
-            // later pack update of this instance forever.
-            LOGGER.info("Discarding pack transaction directory without a journal: {}",
-                    transactionDirectory);
         }
         try {
+            if (!Files.isRegularFile(journalPath)) {
+                com.ecl.util.FileUtil.requireNoTransactionBackups(transactionDirectory);
+            }
             cleanupDirectory(transactionDirectory);
         } catch (IOException error) {
             LOGGER.warn("Failed to clean pack transaction directory {}", transactionDirectory, error);
@@ -323,23 +321,36 @@ public final class PackUpdateTransaction implements AutoCloseable {
         if (root == null || !Files.isDirectory(root)) {
             return;
         }
-        try (FileLockLease operationLock = FileLockLease.tryAcquire(
-                operationLockFile(normalizedInstance))) {
-            if (operationLock == null) {
-                return;
-            }
-            try (InstanceOperationLease gameLock =
-                         InstanceOperationLease.tryAcquire(normalizedInstance)) {
-                if (gameLock == null) {
-                    return;
-                }
-                recoverTransactionDirectories(normalizedInstance, normalizedProfile, root);
-            }
+        try (InstanceOperationLease gameLock = InstanceOperationLease.tryAcquire(normalizedInstance)) {
+            if (gameLock == null) return;
+            recoverExclusive(normalizedInstance, normalizedProfile, root);
         }
         try (var remaining = Files.list(root)) {
             if (remaining.findAny().isEmpty()) {
                 Files.deleteIfExists(root);
             }
+        }
+    }
+
+    public static void recoverIncompleteTransactions(Path instanceRoot, Path profileFile,
+                                                      InstanceOperationSession session) throws IOException {
+        Path normalized = instanceRoot.toAbsolutePath().normalize();
+        try (InstanceOperationSession.Borrow borrowed = session.borrowMutation(session.instanceId(), normalized)) {
+            Path transactions = normalized.getParent().resolve(TRANSACTIONS_DIRECTORY);
+            if (Files.isDirectory(transactions, LinkOption.NOFOLLOW_LINKS)) {
+                recoverExclusive(normalized, profileFile.toAbsolutePath().normalize(), transactions);
+            } else if (GameProcessMarker.isRunning(normalized)) {
+                throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+            }
+        }
+    }
+
+    private static void recoverExclusive(Path instance, Path profile, Path transactions) throws IOException {
+        if (GameProcessMarker.isRunning(instance)) throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+        MrpackPathPolicy.validateExistingAncestors(instance.getParent(), transactions);
+        try (FileLockLease operation = FileLockLease.tryAcquire(operationLockFile(instance))) {
+            if (operation == null) throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+            recoverTransactionDirectories(instance, profile, transactions);
         }
     }
 
@@ -353,9 +364,52 @@ public final class PackUpdateTransaction implements AutoCloseable {
         MrpackPathPolicy.validateExistingAncestors(normalized.getParent(), root);
         String prefix = normalized.getFileName() + "-";
         try (var entries = Files.list(root)) {
-            return entries.anyMatch(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
-                    && path.getFileName().toString().startsWith(prefix));
+            for (Path directory : entries.toList()) {
+                if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)
+                        || !isInstanceTransaction(directory, prefix)) continue;
+                Path journal = directory.resolve(JOURNAL_FILE);
+                MrpackPathPolicy.validateExistingAncestors(root, journal);
+                try {
+                    PackTransactionPaths targetPaths = new PackTransactionPaths(normalized,
+                            com.ecl.util.FileUtil.safeVersionJson(com.ecl.ECLConfig.getVersionsDir(),
+                                    normalized.getFileName().toString()).toPath().toAbsolutePath().normalize());
+                    if (!"APPLIED".equals(readValidJournal(directory, targetPaths).status())) return true;
+                } catch (IOException | RuntimeException invalid) {
+                    return true;
+                }
+            }
+            return false;
         }
+    }
+
+    private static Journal readValidJournal(Path directory, PackTransactionPaths targetPaths) throws IOException {
+        com.fasterxml.jackson.databind.JsonNode json = MAPPER.readTree(directory.resolve(JOURNAL_FILE).toFile());
+        if (json == null || !json.isObject() || !json.has("entries") || !json.get("entries").isArray()) {
+            throw new IOException("Invalid pack transaction journal");
+        }
+        Journal journal = MAPPER.treeToValue(json, Journal.class);
+        if (journal.status() == null || !List.of("PREPARED", "APPLYING", "APPLIED").contains(journal.status())) {
+            throw new IOException("Invalid pack transaction state");
+        }
+        for (JournalEntry entry : journal.entries()) {
+            if (entry.targetExisted() == null || entry.backupFile() == null
+                    || (!"REPLACE".equals(entry.operation()) && !"DELETE".equals(entry.operation()))
+                    || ("REPLACE".equals(entry.operation()) && entry.stagedFile() == null)) {
+                throw new IOException("Invalid pack transaction entry");
+            }
+            targetPaths.resolveTarget(entry.targetScope(), entry.targetPath());
+            validateJournalFile(directory, entry.backupFile(), "backups");
+            if (entry.stagedFile() != null) validateJournalFile(directory, entry.stagedFile(), "staged");
+        }
+        return journal;
+    }
+
+    private static void validateJournalFile(Path directory, String relative, String expectedRoot) throws IOException {
+        Path normalized = Path.of(relative.replace('\\', '/')).normalize();
+        if (normalized.isAbsolute() || !normalized.startsWith(expectedRoot) || normalized.getNameCount() < 2) {
+            throw new IOException("Invalid pack transaction payload path");
+        }
+        com.ecl.util.FileUtil.safeArchiveEntry(directory, relative);
     }
 
     private static void recoverTransactionDirectories(Path normalizedInstance, Path profileFile,
@@ -366,6 +420,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
                     .filter(Files::isDirectory)
                     .filter(path -> isInstanceTransaction(path, prefix))
                     .toList()) {
+                MrpackPathPolicy.validateExistingAncestors(root, directory);
                 recoverDirectory(normalizedInstance, profileFile, directory);
             }
         }
@@ -399,15 +454,12 @@ public final class PackUpdateTransaction implements AutoCloseable {
             throws IOException {
         Path journalPath = directory.resolve(JOURNAL_FILE);
         if (!Files.isRegularFile(journalPath)) {
-            // commit() writes PREPARED before moving any target file, so a directory without a
-            // journal cannot hold applied changes. Preserving it would block every later pack
-            // update through hasIncompleteTransactions(); the directory lock is held here, which
-            // makes the removal safe against a concurrent writer.
+            com.ecl.util.FileUtil.requireUnstartedTransaction(directory, java.util.Set.of("staged"));
             LOGGER.info("Discarding pack transaction directory without a journal: {}", directory);
             cleanupDirectory(directory);
             return;
         }
-        Journal journal = MAPPER.readValue(journalPath.toFile(), Journal.class);
+        Journal journal = readValidJournal(directory, new PackTransactionPaths(instanceRoot, profileFile));
         if ("APPLIED".equals(journal.status())) {
             cleanupDirectory(directory);
             return;
@@ -458,6 +510,7 @@ public final class PackUpdateTransaction implements AutoCloseable {
         if (!result.startsWith(transactionDirectory)) {
             throw new IOException("Pack transaction journal path escapes its directory");
         }
+        MrpackPathPolicy.validateExistingAncestors(transactionDirectory, result);
         return result;
     }
 
@@ -551,6 +604,16 @@ public final class PackUpdateTransaction implements AutoCloseable {
                 failure = error;
             } finally {
                 gameOperationLock = null;
+            }
+        }
+        if (sessionBorrow != null) {
+            try {
+                sessionBorrow.close();
+            } catch (IOException error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            } finally {
+                sessionBorrow = null;
             }
         }
         if (operationLock != null) {

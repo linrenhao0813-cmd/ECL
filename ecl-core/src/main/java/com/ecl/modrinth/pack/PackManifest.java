@@ -95,7 +95,7 @@ final class PackManifest {
             } catch (RuntimeException error) {
                 throw new IOException("Invalid pack manifest entry: " + manifestFile, error);
             }
-            validateRelative(relative);
+            relative = portable(com.ecl.util.ManagedPackPathPolicy.requireManagedRelativePath(relative));
             if (!hash.matches("(?i)[0-9a-f]{128}")) {
                 throw new IOException("Invalid SHA-512 in pack manifest: " + relative);
             }
@@ -153,19 +153,7 @@ final class PackManifest {
     }
 
     private static void validateRelative(String relative) throws IOException {
-        if (relative == null || relative.isBlank() || relative.indexOf('\\') >= 0
-                || relative.startsWith("/") || relative.matches("^[A-Za-z]:.*")) {
-            throw new IOException("Invalid pack manifest path: " + relative);
-        }
-        Path path;
-        try {
-            path = Path.of(relative).normalize();
-        } catch (RuntimeException error) {
-            throw new IOException("Invalid pack manifest path: " + relative, error);
-        }
-        if (path.isAbsolute() || path.startsWith("..") || ".".equals(path.toString())) {
-            throw new IOException("Invalid pack manifest path: " + relative);
-        }
+        com.ecl.util.ManagedPackPathPolicy.requireRelativePath(relative);
     }
 
     private static String portable(Path relative) {

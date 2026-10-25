@@ -53,6 +53,41 @@ class LauncherTaskLifecycleTest extends ApplicationTest {
     }
 
     @Test
+    void closedTaskCenterDoesNotLeaveDownloadPreparationBusy() throws Exception {
+        var original = launcher.downloadTaskCenter;
+        var manager = launcher.versionManager;
+        var closed = new DownloadTaskCenter();
+        closed.close();
+        var download = GameLaunchPreparation.class.getDeclaredMethod(
+                "downloadAndLaunch", String.class, java.util.function.Consumer.class);
+        download.setAccessible(true);
+        var preparation = new GameLaunchPreparation(launcher, null);
+        var preparing = GameLaunchPreparation.class.getDeclaredField("preparingVersion");
+        preparing.setAccessible(true);
+        preparing.set(preparation, "closed-center");
+        try {
+            interact(() -> {
+                launcher.downloadTaskCenter = closed;
+                launcher.versionManager = new VersionManager() {
+                    @Override public VersionDownloadTarget resolveDownloadTarget(String id) {
+                        return new VersionDownloadTarget(id, id, "https://example.com/version.json", "");
+                    }
+                };
+                try {
+                    download.invoke(preparation, "closed-center", (java.util.function.Consumer<String>) ignored -> { });
+                } catch (ReflectiveOperationException error) {
+                    throw new AssertionError(error);
+                }
+                assertFalse(preparation.isPreparingVersion("closed-center"));
+                assertFalse(launcher.versionCombo.isDisabled());
+            });
+        } finally {
+            launcher.downloadTaskCenter = original;
+            launcher.versionManager = manager;
+        }
+    }
+
+    @Test
     void preparationTimeoutCancelsDownloadAndRestoresControls() throws Exception {
         com.ecl.download.DownloadService previousDownloader = launcher.downloader;
         VersionManager previousManager = launcher.versionManager;

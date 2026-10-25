@@ -7,6 +7,12 @@ import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 
 public interface ModpackUpdateService {
+    default CompletableFuture<MrpackInstaller.InstallResult> applyPreparedUpdate(
+            PreparedUpdate prepared, Path gameRoot, MrpackInstaller.Listener listener,
+            com.ecl.operation.InstanceOperationSession session) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("Update sessions are not supported"));
+    }
+
     CompletableFuture<ModpackUpdate> checkUpdate(ModpackInstance instance, ReleaseChannel channel);
 
     /** Downloads and parses the exact selected archive without modifying the instance. */

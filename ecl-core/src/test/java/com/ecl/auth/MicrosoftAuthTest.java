@@ -21,6 +21,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MicrosoftAuthTest {
+    @Test
+    void cachedSessionDoesNotLogCredentials() {
+        MicrosoftAuth.CachedSession session = new MicrosoftAuth.CachedSession(
+                "secret-refresh", "secret-access", 123, "Steve", "uuid");
+        assertFalse(session.toString().contains("secret-refresh"));
+        assertFalse(session.toString().contains("secret-access"));
+        assertEquals("secret-refresh", session.refreshToken());
+    }
+
     @BeforeEach
     void configureMicrosoftClientId() {
         System.setProperty("ecl.microsoft.clientId", "test-client-id");

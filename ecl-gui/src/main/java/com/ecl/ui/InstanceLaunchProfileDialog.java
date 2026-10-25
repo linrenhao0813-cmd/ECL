@@ -51,6 +51,8 @@ final class InstanceLaunchProfileDialog {
     private final Label status = new Label();
     private List<Object> savedValues;
     private boolean skipClosePrompt;
+    private boolean closed;
+    private boolean saving;
     private boolean corruptProfileConfirmed;
 
     private InstanceLaunchProfileDialog(LauncherUI ui, String profileId, Button focusOwner,
@@ -68,39 +70,62 @@ final class InstanceLaunchProfileDialog {
     }
 
     private void show() {
-        InstanceLaunchProfile profile;
-        if (!Files.isRegularFile(profiles.profileFile(instanceRoot))) {
-            try {
-                profile = currentDefaults();
-            } catch (IllegalArgumentException invalidDefaults) {
-                showError(Messages.format("instances.launch.saveFailed", invalidDefaults.getMessage()));
-                return;
-            }
-        } else {
-            try {
-                profile = profiles.load(instanceRoot);
-            } catch (IOException damaged) {
-                if (!confirmRebuild(damaged)) return;
-                corruptProfileConfirmed = true;
-                try {
-                    profile = currentDefaults();
-                } catch (IllegalArgumentException invalidDefaults) {
-                    showError(Messages.format("instances.launch.saveFailed", invalidDefaults.getMessage()));
-                    return;
-                }
-            }
+        InstanceLaunchProfile defaults;
+        try {
+            defaults = currentDefaults();
+        } catch (IllegalArgumentException invalidDefaults) {
+            showError(Messages.format("instances.launch.saveFailed", invalidDefaults.getMessage()));
+            return;
         }
-        configure(profile, true);
+        configure(defaults, true);
         dialog.initOwner(ui.primaryStage);
         dialog.setTitle(Messages.get("instances.launch.title"));
         dialog.setResizable(true);
         dialog.getDialogPane().setContent(buildContent());
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
+        javafx.scene.Node defaultCancel = dialog.getDialogPane().lookupButton(ButtonType.CANCEL);
+        defaultCancel.setVisible(false);
+        defaultCancel.setManaged(false);
         dialog.setOnCloseRequest(event -> {
+            if (saving) return;
             if (skipClosePrompt || !hasUnsavedChanges()) return;
             event.consume();
             handleWindowClose();
         });
-        dialog.setOnHidden(event -> Platform.runLater(focusOwner::requestFocus));
+        dialog.setOnHidden(event -> {
+            closed = true;
+            Platform.runLater(focusOwner::requestFocus);
+        });
+        dialog.setOnShown(shown -> dialog.getDialogPane().getScene().addEventFilter(
+                javafx.scene.input.KeyEvent.KEY_PRESSED, event -> {
+                    if (event.getCode() == javafx.scene.input.KeyCode.ESCAPE) {
+                        if (saving || !hasUnsavedChanges()) cancel();
+                        else handleWindowClose();
+                        event.consume();
+                    }
+                }));
+        dialog.getDialogPane().setDisable(true);
+        Thread.ofVirtual().name("ecl-launch-profile-read").start(() -> {
+            try {
+                InstanceLaunchProfile loaded = Files.isRegularFile(profiles.profileFile(instanceRoot))
+                        ? profiles.load(instanceRoot) : defaults;
+                Platform.runLater(() -> {
+                    if (closed) return;
+                    configure(loaded, true);
+                    dialog.getDialogPane().setDisable(false);
+                });
+            } catch (IOException damaged) {
+                Platform.runLater(() -> {
+                    if (closed) return;
+                    if (!confirmRebuild(damaged)) {
+                        cancel();
+                        return;
+                    }
+                    corruptProfileConfirmed = true;
+                    dialog.getDialogPane().setDisable(false);
+                });
+            }
+        });
         dialog.showAndWait();
     }
 
@@ -249,41 +274,55 @@ final class InstanceLaunchProfileDialog {
             status.setText(error.getMessage());
             return;
         }
-        try {
-            VersionProfileModInstanceContext instance = VersionProfileModInstanceContext.load(profileId,
-                    ECLConfig.getVersionsDir().toPath(), ui.getConfiguredGameRootDir().toPath(),
-                    ui.gameRepository().runDirectory(profileId));
-            if (ui.gameLaunch != null && ui.gameLaunch.isPreparingVersion(profileId)
-                    || ui.isVersionRunning(profileId) || GameProcessMarker.isRunning(instance.gameDirectory())) {
-                throw new IOException(Messages.get("instances.launch.busy"));
-            }
-            AutoCloseable operation = ui.controller.instanceOperations().tryAcquire(instance.instanceId());
-            if (operation == null) throw new IOException(Messages.get("instances.launch.busy"));
-            try (operation; InstanceOperationLease gameLock =
-                         InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
-                if (gameLock == null || ui.gameLaunch != null && ui.gameLaunch.isPreparingVersion(profileId)
+        if (saving) return;
+        saving = true;
+        dialog.getDialogPane().setDisable(true);
+        Thread.ofVirtual().name("ecl-launch-profile-save").start(() -> {
+            try {
+                if (profile.javaMode() == InstanceLaunchProfile.JavaMode.CUSTOM
+                        && !JavaRuntimeUtil.isUsableJavaPath(profile.javaPath())) {
+                    throw new IOException(Messages.get("instances.config.javaInvalid"));
+                }
+                VersionProfileModInstanceContext instance = VersionProfileModInstanceContext.load(profileId,
+                        ECLConfig.getVersionsDir().toPath(), ui.getConfiguredGameRootDir().toPath(),
+                        ui.gameRepository().runDirectory(profileId));
+                if (ui.gameLaunch != null && ui.gameLaunch.isPreparingVersion(profileId)
                         || ui.isVersionRunning(profileId) || GameProcessMarker.isRunning(instance.gameDirectory())) {
                     throw new IOException(Messages.get("instances.launch.busy"));
                 }
-                profiles.save(instanceRoot, profile);
-            corruptProfileConfirmed = false;
+                AutoCloseable operation = ui.controller.instanceOperations().tryAcquire(instance.instanceId());
+                if (operation == null) throw new IOException(Messages.get("instances.launch.busy"));
+                try (operation; InstanceOperationLease gameLock = InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
+                    if (gameLock == null || ui.gameLaunch != null && ui.gameLaunch.isPreparingVersion(profileId)
+                            || ui.isVersionRunning(profileId) || GameProcessMarker.isRunning(instance.gameDirectory())) {
+                        throw new IOException(Messages.get("instances.launch.busy"));
+                    }
+                    profiles.save(instanceRoot, profile);
+                }
+                ui.controller.invalidateLaunchVersion(profileId);
+                Platform.runLater(() -> {
+                    if (closed) return;
+                    saving = false;
+                    corruptProfileConfirmed = false;
+                    ui.updateRuntimeSummary();
+                    onSaved.run();
+                    ui.setStatus(Messages.get("instances.config.saved"), profileId);
+                    skipClosePrompt = true;
+                    dialog.close();
+                });
+            } catch (Exception error) {
+                Platform.runLater(() -> {
+                    if (closed) return;
+                    saving = false;
+                    dialog.getDialogPane().setDisable(false);
+                    status.setText(Messages.format("instances.launch.saveFailed", ui.cleanMessage(error)));
+                });
             }
-            ui.controller.invalidateLaunchVersion(profileId);
-            ui.updateRuntimeSummary();
-            onSaved.run();
-            ui.setStatus(Messages.get("instances.config.saved"), profileId);
-            skipClosePrompt = true;
-            dialog.close();
-        } catch (Exception error) {
-            status.setText(Messages.format("instances.launch.saveFailed", ui.cleanMessage(error)));
-        }
+        });
     }
 
     private InstanceLaunchProfile readForm() {
         String selectedJava = javaCustom.isSelected() ? javaPath.getText().trim() : "";
-        if (javaCustom.isSelected() && !JavaRuntimeUtil.isUsableJavaPath(selectedJava)) {
-            throw new IllegalArgumentException(Messages.get("instances.config.javaInvalid"));
-        }
         int selectedMemory = ECLConfig.AUTO_MEMORY_MB;
         if (memoryCustom.isSelected()) {
             try {

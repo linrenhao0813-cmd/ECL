@@ -105,14 +105,14 @@ public class VersionRepository {
             return cached;
         }
         Chain chain = resolveChain(versionId, new LinkedHashSet<>());
-        VersionMetadata metadata = parseEffective(versionId, chain.effectiveJson(), chain.baseId());
+        VersionMetadata metadata = parseEffective(versionId, chain.effectiveJson(), chain.baseId(), chain.directParent());
         cache.put(versionId, metadata);
         return metadata;
     }
 
     // ------------------------------------------------------------------ chain resolution
 
-    private record Chain(JsonObject effectiveJson, String baseId) {
+    private record Chain(JsonObject effectiveJson, String baseId, String directParent) {
     }
 
     private Chain resolveChain(String versionId, Set<String> chain) throws IOException {
@@ -130,7 +130,7 @@ public class VersionRepository {
                         "Missing version JSON in inheritance chain: " + versionId);
             }
             if (!json.has("inheritsFrom") || !json.get("inheritsFrom").isJsonPrimitive()) {
-                return new Chain(json, versionId);
+                return new Chain(json, versionId, null);
             }
             String parentId = json.get("inheritsFrom").getAsString();
             Chain parent = resolveChain(parentId, chain);
@@ -142,7 +142,7 @@ public class VersionRepository {
                     json.addProperty("jar", parent.baseId());
                 }
             }
-            return new Chain(mergeJson(parent.effectiveJson(), json), parent.baseId());
+            return new Chain(mergeJson(parent.effectiveJson(), json), parent.baseId(), parentId);
         } finally {
             chain.remove(versionId);
         }
@@ -332,7 +332,7 @@ public class VersionRepository {
 
     // ------------------------------------------------------------------ typed conversion
 
-    private static VersionMetadata parseEffective(String requestedId, JsonObject effective, String baseId)
+    private static VersionMetadata parseEffective(String requestedId, JsonObject effective, String baseId, String directParent)
             throws IOException {
         int javaMajor = 0;
         JsonElement javaVersion = effective.get("javaVersion");
@@ -383,7 +383,7 @@ public class VersionRepository {
 
         return new VersionMetadata(
                 requestedId,
-                JsonUtil.getString(effective, "inheritsFrom", null),
+                directParent,
                 JsonUtil.getString(effective, "mainClass", ""),
                 clientJarId,
                 firstNonBlank(JsonUtil.getString(effective, "eclMinecraftVersion", null), baseId),

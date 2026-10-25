@@ -22,6 +22,28 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     private Stage stage;
 
     @Test
+    void malformedAccountsDoNotPreventHomeOrAccountConstruction(@org.junit.jupiter.api.io.TempDir java.nio.file.Path root)
+            throws Exception {
+        java.nio.file.Path file = root.resolve("accounts.json");
+        byte[] damaged = "{broken".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        java.nio.file.Files.write(file, damaged);
+        var constructor = com.ecl.auth.MicrosoftAccountStore.class.getDeclaredConstructor(java.nio.file.Path.class);
+        constructor.setAccessible(true);
+        var previous = launcher.microsoftAccountStore;
+        try {
+            launcher.microsoftAccountStore = constructor.newInstance(file);
+            interact(() -> {
+                new LauncherLaunchForm(launcher).initializeControls();
+                var page = new AccountManagementPage(launcher);
+                assertNotNull(page.lookup("#account-read-error"));
+            });
+            org.junit.jupiter.api.Assertions.assertArrayEquals(damaged, java.nio.file.Files.readAllBytes(file));
+        } finally {
+            launcher.microsoftAccountStore = previous;
+        }
+    }
+
+    @Test
     void packUpgradeCompletionKeepsWarningsVisible() throws Exception {
         String warning = "警告：旧版文件已被用户修改，更新时予以保留: mods/removed.jar";
         var result = new com.ecl.modrinth.service.InstanceUpdateService.Result(

@@ -252,8 +252,11 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
 
     private CompletableFuture<Void> resolveOptionalDependency(
             ResolutionContext context, ModVersion owner, ModDependency dependency, Deque<String> path, int depth) {
+        java.util.concurrent.atomic.AtomicBoolean selected = new java.util.concurrent.atomic.AtomicBoolean(
+                context.selectedOptionalProjects.contains(dependencyIdentity(dependency)));
         return resolveDependencyVersion(context, dependency, path)
                 .thenCompose(version -> {
+                    selected.set(context.selectedOptionalProjects.contains(projectIdentity(version)));
                     ModFile file = versionSelector.selectInstallFile(version)
                             .orElseThrow(() -> missingDependency(path, dependency, "没有可安装文件"));
                     if (context.selectedOptionalProjects.contains(projectIdentity(version))) {
@@ -265,7 +268,7 @@ public final class DefaultModDependencyResolver implements ModDependencyResolver
                     return CompletableFuture.completedFuture(null);
                 }).exceptionally(error -> {
                     // This also handles failures in the selected optional dependency's own dependency tree.
-                    if (context.selectedOptionalProjects.contains(dependencyIdentity(dependency))) {
+                    if (selected.get()) {
                         throw new DependencyResolutionException(
                                 "所选可选依赖无法解析: " + dependencyIdentity(dependency), unwrap(error));
                     }

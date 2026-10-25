@@ -27,21 +27,11 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 /** Checks one instance and repairs only authenticated Minecraft and loader dependency files. */
 public final class GameInstallationRepairService {
-    /**
-     * Upper bound for one base-metadata repair download. The downloader's own listeners report
-     * progress; this guard only stops a stalled transfer from blocking the repair task forever.
-     */
-    private static final int REPAIR_DOWNLOAD_TIMEOUT_SECONDS = 600;
     private final InstanceOperationCoordinator operations;
     private final Predicate<UUID> instanceRunning;
 
@@ -56,6 +46,11 @@ public final class GameInstallationRepairService {
         return new GameInstallationVerifier(versions, libraries, assets).inspect(profileId);
     }
 
+    public GameInstallationVerifier.Report inspect(String profileId, Path versions,
+                                                     Path libraries, Path assets, Path instancesRoot) {
+        return new GameInstallationVerifier(versions, libraries, assets, instancesRoot).inspect(profileId);
+    }
+
     public Result repair(ModInstanceContext instance, GameInstallationVerifier.Report expected,
                          VersionManager.VersionDownloadTarget target, GameDownloader downloader,
                          GameDownloader.DownloadListener listener, BooleanSupplier cancelled,
@@ -68,8 +63,7 @@ public final class GameInstallationRepairService {
                 || !instance.profileId().equals(target.requestedProfileId())) {
             throw new IOException("Repair plan belongs to a different instance");
         }
-        if (expected.issues().stream().noneMatch(check -> isRepairable(check, target)
-                && check.status() != GameInstallationVerifier.Status.VERIFIED)) {
+        if (!canRepair(expected, target, versions)) {
             throw new IOException(Messages.get("instanceRepair.noAutoFix"));
         }
         requireTarget(instance, target, versions);
@@ -78,76 +72,27 @@ public final class GameInstallationRepairService {
              InstanceOperationLease processLock = InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
             if (processLock == null) throw new IOException(Messages.get("instanceRepair.busy"));
             requireNoGameRunning(instance, gameRoot);
-            GameInstallationVerifier.Report current = inspect(instance.profileId(), versions, libraries, assets);
+            GameInstallationVerifier.Report current = inspect(instance.profileId(), versions, libraries, assets, gameRoot.resolve("versions"));
             if (!current.fingerprint().equals(expected.fingerprint())) {
                 throw new IOException(Messages.get("instanceRepair.stale"));
             }
             checkCancelled(cancelled);
-            runBaseRepair(target, downloader, listener, cancelled);
+            try {
+                if (current.issues().stream().anyMatch(check -> metadataRepairable(check, target, versions))) {
+                    downloader.repairMetadata(target.downloadVersionId(), target.versionUrl(), target.versionSha1(), versions);
+                }
+                checkCancelled(cancelled);
+                downloader.repairVerifiedFiles(instance.profileId(), versions, libraries, assets, gameRoot.resolve("versions"), listener);
+                checkCancelled(cancelled);
+                VersionMetadata metadata = new VersionRepository(versions.toFile()).resolve(instance.profileId());
+                LegacyAssetMaterializer.prepare(metadata.assetIndex(), assets.toFile(), instance.gameDirectory().toFile());
+            } catch (IOException failedDownload) {
+                checkCancelled(cancelled);
+                if (listener != null) listener.onError(failedDownload.getMessage());
+            }
             checkCancelled(cancelled);
-            downloader.downloadLibrariesForVersion(instance.profileId(), listener);
-            checkCancelled(cancelled);
-            VersionMetadata metadata = new VersionRepository(versions.toFile()).resolve(instance.profileId());
-            if (metadata.clientLogging() != null) metadata.clientLogging().ensureDownloaded(assets.toFile());
-            LegacyAssetMaterializer.prepare(metadata.assetIndex(), assets.toFile(), instance.gameDirectory().toFile());
-            checkCancelled(cancelled);
-            GameInstallationVerifier.Report after = inspect(instance.profileId(), versions, libraries, assets);
+            GameInstallationVerifier.Report after = inspect(instance.profileId(), versions, libraries, assets, gameRoot.resolve("versions"));
             return new Result(expected, after);
-        }
-    }
-
-    private static void runBaseRepair(VersionManager.VersionDownloadTarget target,
-                                      GameDownloader downloader,
-                                      GameDownloader.DownloadListener listener,
-                                      BooleanSupplier cancelled) throws Exception {
-        if (target.versionUrl().isBlank()) throw new IOException(Messages.get("instanceRepair.metadataUrlMissing"));
-        if (!target.versionSha1().matches("(?i)[0-9a-f]{40}")) {
-            throw new IOException(Messages.get("instanceRepair.metadataHashMissing"));
-        }
-        URI metadataUri = URI.create(target.versionUrl());
-        NetworkUriPolicy.requireArtifactDownload(metadataUri, "Minecraft metadata URL");
-        requireOfficialMetadataHost(metadataUri);
-        AtomicReference<String> failure = new AtomicReference<>();
-        downloader.setListener(new GameDownloader.DownloadListener() {
-            @Override public void onStatus(String message) {
-                if (listener != null) listener.onStatus(message);
-            }
-
-            @Override public void onProgress(long downloaded, long total) {
-                if (listener != null) listener.onProgress(downloaded, total);
-            }
-
-            @Override public void onError(String message) {
-                failure.set(message);
-                if (listener != null) listener.onError(message);
-            }
-
-            @Override public void onComplete() {
-                if (listener != null) listener.onComplete();
-            }
-        });
-        Future<?> task = downloader.downloadVersionAsync(
-                target.downloadVersionId(), target.versionUrl(), target.versionSha1());
-        if (cancelled != null && cancelled.getAsBoolean()) downloader.cancelDownload();
-        try {
-            task.get(REPAIR_DOWNLOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (ExecutionException error) {
-            Throwable cause = error.getCause();
-            if (cause instanceof Exception exception) throw exception;
-            throw new IOException("Game repair download failed", cause);
-        } catch (TimeoutException timedOut) {
-            downloader.cancelDownload();
-            throw new IOException(Messages.get("instanceRepair.downloadTimeout"), timedOut);
-        } catch (InterruptedException interrupted) {
-            downloader.cancelDownload();
-            Thread.currentThread().interrupt();
-            throw new CancellationException("Game repair cancelled");
-        } catch (CancellationException cancelledDownload) {
-            throw cancelledDownload;
-        }
-        checkCancelled(cancelled);
-        if (failure.get() != null && !failure.get().isBlank()) {
-            throw new IOException(failure.get());
         }
     }
 
@@ -184,7 +129,7 @@ public final class GameInstallationRepairService {
             JsonObject json;
             try {
                 json = HttpUtil.readJson(file.toFile());
-            } catch (IOException damaged) {
+            } catch (IOException | RuntimeException damaged) {
                 return current;
             }
             String jar = JsonUtil.getString(json, "jar", "");
@@ -210,13 +155,37 @@ public final class GameInstallationRepairService {
         throw new IOException("Version metadata inheritance is too deep");
     }
 
-    private static boolean isRepairable(GameInstallationVerifier.Check check,
-                                       VersionManager.VersionDownloadTarget target) {
-        if (check.repairable()) return true;
-        return check.category() == GameInstallationVerifier.Category.METADATA
-                && target != null && target.downloadVersionId() != null
-                && !target.downloadVersionId().isBlank()
-                && target.versionSha1().matches("(?i)[0-9a-f]{40}");
+    /** Shared repair eligibility used by the report UI and the execution boundary. */
+    public static boolean canRepair(GameInstallationVerifier.Report report,
+                                    VersionManager.VersionDownloadTarget target, Path versions) {
+        if (report == null || target == null || !report.profileId().equals(target.requestedProfileId())) return false;
+        try {
+            URI uri = URI.create(target.versionUrl());
+            requireOfficialMetadataHost(uri);
+            if (uri.getUserInfo() != null || !("https".equalsIgnoreCase(uri.getScheme())
+                    || "http".equalsIgnoreCase(uri.getScheme()) && NetworkUriPolicy.isLoopbackHostLiteral(uri.getHost()))) return false;
+            if (!target.versionSha1().matches("(?i)[0-9a-f]{40}")) return false;
+            FileUtil.requireSafeVersionId(target.downloadVersionId());
+            return report.issues().stream().anyMatch(check -> check.repairable()
+                    || metadataRepairable(check, target, versions));
+        } catch (IOException | RuntimeException invalidTarget) {
+            return false;
+        }
+    }
+
+    private static boolean metadataRepairable(GameInstallationVerifier.Check check,
+                                              VersionManager.VersionDownloadTarget target, Path versions) {
+        if (check.category() != GameInstallationVerifier.Category.METADATA
+                || check.status() != GameInstallationVerifier.Status.MISSING
+                && check.status() != GameInstallationVerifier.Status.CORRUPT) return false;
+        try {
+            FileUtil.requireSafeVersionId(target.downloadVersionId());
+            Path file = versions.toAbsolutePath().normalize().resolve(target.downloadVersionId())
+                    .resolve(target.downloadVersionId() + ".json");
+            return Path.of(check.path()).toAbsolutePath().normalize().equals(file);
+        } catch (IOException | RuntimeException invalidPath) {
+            return false;
+        }
     }
 
     private static void requireOfficialMetadataHost(URI uri) throws IOException {

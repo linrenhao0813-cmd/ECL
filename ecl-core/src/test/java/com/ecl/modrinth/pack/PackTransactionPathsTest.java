@@ -25,6 +25,7 @@ class PackTransactionPathsTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        org.slf4j.LoggerFactory.getILoggerFactory();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);
@@ -38,6 +39,13 @@ class PackTransactionPathsTest {
     @AfterEach
     void restoreBaseDirectory() throws Exception {
         baseDirField.set(null, previousBaseDir);
+    }
+
+    @Test
+    void instanceJournalCannotManageUserData() {
+        for (String path : List.of("saves/world/level.dat", "./logs/latest.log", "mods/../saves/world", ".ecl/config/x")) {
+            assertThrows(IOException.class, () -> paths.resolveTarget("INSTANCE", path));
+        }
     }
 
     @Test

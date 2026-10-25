@@ -16,6 +16,7 @@ final class MrpackInstallSupport {
                                 PackManifest newManifest, MrpackInstaller.Listener listener)
             throws IOException {
         for (String relative : newManifest.files().keySet()) {
+            com.ecl.util.ManagedPackPathPolicy.requireManagedRelativePath(relative);
             transaction.stageReplacement(
                     PackManifest.resolve(staging, relative),
                     PackManifest.resolve(instanceRoot, relative));
@@ -40,24 +41,8 @@ final class MrpackInstallSupport {
         return warnings;
     }
 
-    static PackManifest readInstalledManifest(Path instanceRoot, MrpackInstaller.Listener listener) {
-        Path manifestFile;
-        try {
-            manifestFile = PackManifest.resolve(instanceRoot, PackManifest.FILE_NAME);
-        } catch (IOException unsafePath) {
-            listener.onWarning("旧整合包文件清单路径不安全；本次更新不会删除旧版遗留文件");
-            return new PackManifest("", Map.of());
-        }
-        if (!Files.isRegularFile(manifestFile, LinkOption.NOFOLLOW_LINKS)) {
-            listener.onWarning("未找到旧整合包文件清单；本次更新不会删除旧版遗留文件");
-            return new PackManifest("", Map.of());
-        }
-        try {
-            return PackManifest.read(manifestFile);
-        } catch (IOException error) {
-            listener.onWarning("旧整合包文件清单无效；本次更新不会删除旧版遗留文件");
-            return new PackManifest("", Map.of());
-        }
+    static PackManifest readInstalledManifest(Path instanceRoot, MrpackInstaller.Listener listener) throws IOException {
+        return PackManifest.read(PackManifest.resolve(instanceRoot, PackManifest.FILE_NAME));
     }
 
     record LoaderState(String parentProfile, String loaderId, String loaderVersion) {

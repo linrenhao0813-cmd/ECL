@@ -46,6 +46,16 @@ class WorldSaveExplorerTest extends ApplicationTest {
     }
 
     @Test
+    void backupTargetFollowsTheBrowsedWorld() {
+        interact(() -> {
+            table.getSelectionModel().select(second);
+            assertEquals(second.instanceId(), explorer.backupProfileId());
+            table.fireEvent(key(KeyCode.ENTER, false));
+            assertEquals(second.instanceId(), explorer.backupProfileId());
+        });
+    }
+
+    @Test
     void navigationSupportsEnterUpBackAndForward() {
         interact(() -> {
             table.getSelectionModel().select(first);

@@ -4,6 +4,7 @@ import com.ecl.ECLConfig;
 import com.ecl.game.InstanceLaunchProfileStore;
 import com.ecl.game.VersionRepository;
 import com.ecl.launch.GameProcessMarker;
+import com.ecl.operation.InstanceOperationSession;
 import com.ecl.launcher.LoaderUpdateService;
 import com.ecl.launcher.ModLoaderInstaller;
 import com.ecl.modrinth.pack.ModpackInstance;
@@ -184,15 +185,15 @@ public final class InstanceUpdateService {
                 @Override public void onStatus(String message) {
                     progress.accept(new Progress(Stage.PREPARE, message));
                 }
-            }).thenApplyAsync(prepared -> {
+            }).thenApply(prepared -> {
                 try {
-                    requireFresh(preview);
+                    requireAcceptedFresh(preview);
                     return new PreparedExecution(preview, List.of(), prepared);
-                } catch (IOException stale) {
+                } catch (IOException | RuntimeException stale) {
                     prepared.closeQuietly();
                     throw new CompletionException(stale);
                 }
-            }, executor);
+            });
         }
         Map<String, ModUpdate> updatesByProject = preview.modUpdates().stream()
                 .collect(Collectors.toMap(update -> update.installedMod().projectId(), update -> update));
@@ -215,7 +216,7 @@ public final class InstanceUpdateService {
                                     .toList())))
                     .toList();
             validatePreparedPlans(prepared);
-            requireFreshUnchecked(preview);
+            requireAcceptedFreshUnchecked(preview);
             return new PreparedExecution(preview, prepared, null);
         }, executor);
     }
@@ -234,17 +235,29 @@ public final class InstanceUpdateService {
                         List.of(), List.of(), ""));
             }
         }
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                requireFresh(preview);
-                ensureStopped(preview.instance());
-                return recoveryPoints.begin(execution);
-            } catch (Exception error) {
-                execution.closeQuietly();
-                throw new CompletionException(error);
-            }
-        }, executor).thenCompose(restorePoint -> executeWithRestorePoint(
-                execution, progress, packs, restorePoint));
+        CompletableFuture<InstanceUpgradeRecoveryService.Draft> snapshot;
+        try {
+            snapshot = CompletableFuture.supplyAsync(() -> {
+                InstanceOperationSession session = null;
+                try {
+                    session = recoveryPoints.tryAcquireSession(preview.instance());
+                    if (session == null) throw new IOException(Messages.get("instanceRecovery.instanceBusy"));
+                    requireAcceptedFresh(preview);
+                    ensureStopped(preview.instance());
+                    return recoveryPoints.begin(execution, session);
+                } catch (Exception error) {
+                    if (session != null) {
+                        try { session.close(); } catch (IOException closeFailure) { error.addSuppressed(closeFailure); }
+                    }
+                    execution.closeQuietly();
+                    throw new CompletionException(error);
+                }
+            }, executor);
+        } catch (RuntimeException failure) {
+            execution.closeQuietly();
+            return CompletableFuture.failedFuture(failure);
+        }
+        return snapshot.thenCompose(restorePoint -> executeWithRestorePoint(execution, progress, packs, restorePoint)).copy();
     }
 
     private CompletableFuture<Result> executeWithRestorePoint(
@@ -267,7 +280,7 @@ public final class InstanceUpdateService {
                                 warnings.add(message);
                                 onStatus(message);
                             }
-                        }).thenApply(result -> new Result(null, 0, 0, List.of(),
+                        }, restorePoint.session()).thenApply(result -> new Result(null, 0, 0, List.of(),
                                 List.copyOf(warnings), result.version()));
             } else {
                 LoaderUpdateService.UpdatePlan loaderPlan = preview.loaderPlan();
@@ -276,36 +289,45 @@ public final class InstanceUpdateService {
                             @Override public void onStatus(String message) {
                                 progress.accept(new Progress(Stage.LOADER, message));
                             }
-                        });
+                        }, restorePoint.session());
                 operation = loader.thenCompose(loaderResult ->
-                        applyPreparedMods(execution, progress, loaderResult));
+                        applyPreparedMods(execution, progress, loaderResult, restorePoint.session()));
             }
         } catch (RuntimeException failure) {
-            try {
-                recoveryPoints.complete(restorePoint);
-            } catch (IOException recoveryFailure) {
-                failure.addSuppressed(recoveryFailure);
-            }
-            execution.closeQuietly();
-            return CompletableFuture.failedFuture(failure);
+            operation = CompletableFuture.failedFuture(failure);
         }
-        return operation.handleAsync((result, error) -> {
+        return operation.handle((result, error) -> {
+            Throwable failure = error == null ? null : unwrap(error);
             try {
                 recoveryPoints.complete(restorePoint);
-            } catch (IOException recoveryFailure) {
-                if (error != null) recoveryFailure.addSuppressed(unwrap(error));
-                execution.closeQuietly();
-                throw new CompletionException(recoveryFailure);
+            } catch (IOException | RuntimeException recoveryFailure) {
+                if (failure == null) failure = recoveryFailure;
+                else failure.addSuppressed(recoveryFailure);
             }
-            execution.closeQuietly();
-            if (error != null) throw new CompletionException(unwrap(error));
+            try {
+                closeExecution(execution, restorePoint.session());
+            } catch (RuntimeException closeFailure) {
+                if (failure == null) failure = closeFailure;
+                else failure.addSuppressed(closeFailure);
+            }
+            if (failure != null) throw new CompletionException(failure);
             return result;
-        }, executor);
+        });
+    }
+
+    private static void closeExecution(PreparedExecution execution, InstanceOperationSession session) {
+        try {
+            session.close();
+        } catch (IOException failure) {
+            throw new CompletionException(failure);
+        } finally {
+            execution.closeQuietly();
+        }
     }
 
     private CompletableFuture<Result> applyPreparedMods(PreparedExecution execution,
                                                          Consumer<Progress> progress,
-                                                         LoaderUpdateService.Result loader) {
+                                                         LoaderUpdateService.Result loader, InstanceOperationSession session) {
         List<Failure> failures = new ArrayList<>();
         CompletableFuture<Integer> chain = CompletableFuture.completedFuture(0);
         for (ModUpdateService.PreparedModUpdate prepared : execution.modUpdates()) {
@@ -313,7 +335,7 @@ public final class InstanceUpdateService {
                 ensureStoppedUnchecked(execution.preview().instance());
                 String name = prepared.update().installedMod().displayName();
                 progress.accept(new Progress(Stage.MOD, name));
-                return mods.applyPreparedUpdate(prepared).handle((result, error) -> {
+                return mods.applyPreparedUpdate(prepared, session).handle((result, error) -> {
                     if (error != null) {
                         failures.add(new Failure(name, unwrap(error)));
                         return succeeded;
@@ -512,8 +534,19 @@ public final class InstanceUpdateService {
         if (Instant.now().isAfter(preview.createdAt().plus(PLAN_LIFETIME))) {
             throw new IOException(Messages.get("instanceUpdate.planExpired"));
         }
-        requireFresh(preview.instance(), preview.metadataRoot(), preview.gameRoot(),
-                preview.fingerprint());
+        requireAcceptedFresh(preview);
+    }
+
+    private void requireAcceptedFresh(Preview preview) throws IOException {
+        requireFresh(preview.instance(), preview.metadataRoot(), preview.gameRoot(), preview.fingerprint());
+    }
+
+    private void requireAcceptedFreshUnchecked(Preview preview) {
+        try {
+            requireAcceptedFresh(preview);
+        } catch (IOException stale) {
+            throw new CompletionException(stale);
+        }
     }
 
     private void requireFreshUnchecked(ModInstanceContext instance, Path metadataRoot, Path gameRoot,

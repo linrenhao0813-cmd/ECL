@@ -53,6 +53,10 @@ final class WorldSavesPage extends VBox {
         refresh();
     }
 
+    private String backupProfileId() {
+        return selected == null ? explorer.backupProfileId() : selected.instanceId();
+    }
+
     private void build() {
         Label title = new Label(Messages.get("saves.title"));
         title.getStyleClass().add("page-title");
@@ -60,7 +64,7 @@ final class WorldSavesPage extends VBox {
         subtitle.getStyleClass().add("page-subtitle");
         subtitle.setWrapText(true);
         Button backups = ui.createActionButton(GuiMessages.get("saves.backups.open"),
-                "secondary-button", ui::showBackupManagerDialog);
+                "secondary-button", () -> ui.showBackupManagerDialog(backupProfileId()));
         backups.setId("world-saves-open-backups");
         backups.setAccessibleText(GuiMessages.get("saves.backups.open"));
         buildDetails();

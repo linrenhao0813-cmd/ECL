@@ -13,8 +13,35 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class InstanceOperationCoordinatorTest {
+    @Test
+    void sessionRetainsExclusiveOwnershipAcrossThreadsUntilLastBorrow(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+        InstanceOperationCoordinator coordinator = new InstanceOperationCoordinator();
+        UUID id = UUID.randomUUID();
+        InstanceOperationSession session = coordinator.tryAcquireSession(id, directory);
+        assertNotNull(session);
+        AutoCloseable borrow = session.borrow(id, directory);
+        assertThrows(java.io.IOException.class, () -> session.borrow(UUID.randomUUID(), directory));
+        assertThrows(java.io.IOException.class, () -> session.borrow(id, directory.resolve("other")));
+        try (var mutation = session.borrowMutation(id, directory)) {
+            assertThrows(java.io.IOException.class, () -> session.borrowMutation(id, directory));
+        }
+        assertNull(coordinator.tryAcquire(id), "even the acquiring caller cannot reenter a session");
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            executor.submit(() -> runUnchecked(session::close)).get(2, TimeUnit.SECONDS);
+        }
+        assertNull(coordinator.tryAcquire(id), "an active borrower retains the lifecycle lock");
+        assertThrows(java.io.IOException.class, () -> session.borrow(id, directory));
+        borrow.close();
+        assertCanAcquireImmediately(coordinator, id);
+        try (var physical = com.ecl.util.InstanceOperationLease.tryAcquire(directory)) {
+            assertNotNull(physical);
+        }
+    }
+
     @Test
     void serializesOperationsForTheSameInstance() throws Exception {
         InstanceOperationCoordinator coordinator = new InstanceOperationCoordinator();

@@ -61,6 +61,16 @@ class VersionRepositoryTest {
     }
 
     @Test
+    void typedMetadataPreservesDirectParentInMultiLevelChain() throws Exception {
+        writeVersion("base", "{}");
+        writeVersion("middle", "{\"inheritsFrom\":\"base\"}");
+        writeVersion("child", "{\"inheritsFrom\":\"middle\"}");
+        assertEquals("middle", repository().resolve("child").inheritsFrom());
+        assertNull(repository().resolve("base").inheritsFrom());
+        assertFalse(repository().resolveRaw("child").has("inheritsFrom"));
+    }
+
+    @Test
     void detectsCircularInheritance() throws Exception {
         writeVersion("a", "{\"inheritsFrom\":\"b\"}");
         writeVersion("b", "{\"inheritsFrom\":\"a\"}");

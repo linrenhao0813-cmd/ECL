@@ -110,8 +110,8 @@ class GameInstallationVerifierTest {
         GameInstallationVerifier.Report unverifiable = fixture.verifier().inspect("fabric-profile");
         assertFalse(unverifiable.complete());
         assertTrue(unverifiable.checks().stream().anyMatch(check ->
-                check.category() == Category.METADATA && check.status() == Status.UNVERIFIABLE));
-        assertTrue(unverifiable.checks().stream().noneMatch(check -> check.category() == Category.LOGGING));
+                check.category() == Category.LOGGING && check.status() == Status.UNVERIFIABLE));
+        assertTrue(unverifiable.checks().stream().anyMatch(check -> check.category() == Category.CLIENT));
     }
 
     @Test
@@ -127,6 +127,76 @@ class GameInstallationVerifierTest {
         assertFalse(report.complete());
         assertEquals(1, report.count(Status.CORRUPT));
         assertEquals(Category.METADATA, report.issues().getFirst().category());
+    }
+
+    @Test
+    void bareMavenMissingAndPresentAreNeverAutomaticallyRepairable() throws Exception {
+        Fixture fixture = createInstallation();
+        var child = com.google.gson.JsonParser.parseString(Files.readString(fixture.profile())).getAsJsonObject();
+        child.add("libraries", com.google.gson.JsonParser.parseString("""
+                [{"name":"net.fabricmc:fabric-loader:9","url":"https://maven.fabricmc.net/"}]
+                """));
+        Files.writeString(fixture.profile(), child.toString());
+        var missing = fixture.verifier().inspect("fabric-profile");
+        var check = missing.checks().stream().filter(c -> c.category() == Category.LOADER_DEPENDENCY).findFirst().orElseThrow();
+        assertFalse(check.repairable(), check.toString());
+        Files.createDirectories(Path.of(check.path()).getParent());
+        Files.writeString(Path.of(check.path()), "local");
+        assertFalse(fixture.verifier().inspect("fabric-profile").checks().stream()
+                .anyMatch(c -> c.category() == Category.LOADER_DEPENDENCY && c.repairable()));
+    }
+
+    @Test
+    void invalidLoggingDoesNotHideOtherDiagnostics() throws Exception {
+        Fixture fixture = createInstallation();
+        var child = com.google.gson.JsonParser.parseString(Files.readString(fixture.profile())).getAsJsonObject();
+        child.add("logging", com.google.gson.JsonParser.parseString("""
+                {"client":{"argument":"-javaagent:${path}","file":{}}}
+                """));
+        Files.writeString(fixture.profile(), child.toString());
+        Files.delete(fixture.library());
+        var report = fixture.verifier().inspect("fabric-profile");
+        assertTrue(report.checks().stream().anyMatch(c -> c.category() == Category.LOGGING
+                && c.status() == Status.UNVERIFIABLE && !c.repairable()));
+        assertTrue(report.checks().stream().anyMatch(c -> c.category() == Category.CLIENT && c.status() == Status.VERIFIED));
+        assertTrue(report.checks().stream().anyMatch(c -> c.category() == Category.LIBRARY && c.status() == Status.MISSING));
+        org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> new com.ecl.game.VersionRepository(fixture.versions().toFile()).resolve("fabric-profile"));
+    }
+
+    @Test
+    void localHintUsesInstanceLibraryDirectoryAndCannotRepairSharedFiles() throws Exception {
+        Fixture fixture = createInstallation();
+        var profile = com.google.gson.JsonParser.parseString(Files.readString(fixture.profile())).getAsJsonObject();
+        var library = profile.getAsJsonArray("libraries").get(0).getAsJsonObject();
+        library.addProperty("hint", "local");
+        Path instances = temp.resolve("actual-game/versions");
+        GameInstallationVerifier verifier = new GameInstallationVerifier(fixture.versions(), fixture.libraries(), fixture.assets(), instances);
+        Path local = instances.resolve("fabric-profile/libraries/net/fabricmc/fabric-loader/1/loader-1.jar");
+        Files.createDirectories(local.getParent());
+        Files.writeString(local, "loader");
+        Files.writeString(fixture.profile(), profile.toString());
+        var healthy = verifier.inspect("fabric-profile");
+        assertTrue(healthy.checks().stream().anyMatch(c -> c.path().equals(local.toString()) && c.status() == Status.VERIFIED));
+        Files.delete(local);
+        var missing = verifier.inspect("fabric-profile");
+        assertTrue(missing.checks().stream().anyMatch(c -> c.path().equals(local.toString())
+                && c.status() == Status.MISSING && !c.repairable()));
+    }
+
+    @Test
+    void repairEligibilityMatchesTheActualMetadataTarget() throws Exception {
+        Fixture fixture = createInstallation();
+        var target = new com.ecl.launcher.VersionManager.VersionDownloadTarget("fabric-profile", "1.20.1",
+                "https://piston-meta.mojang.com/version.json", "a".repeat(40));
+        Files.writeString(fixture.profile(), "{invalid");
+        assertFalse(GameInstallationRepairService.canRepair(fixture.verifier().inspect("fabric-profile"), target, fixture.versions()));
+        Files.writeString(fixture.profile(), "{\"inheritsFrom\":\"1.20.1\"}");
+        Files.writeString(fixture.versions().resolve("1.20.1/1.20.1.json"), "{invalid");
+        assertTrue(GameInstallationRepairService.canRepair(fixture.verifier().inspect("fabric-profile"), target, fixture.versions()));
+        var invalidDigest = new com.ecl.launcher.VersionManager.VersionDownloadTarget("fabric-profile", "1.20.1",
+                "https://piston-meta.mojang.com/version.json", "");
+        assertFalse(GameInstallationRepairService.canRepair(fixture.verifier().inspect("fabric-profile"), invalidDigest, fixture.versions()));
     }
 
     private Fixture createInstallation() throws Exception {

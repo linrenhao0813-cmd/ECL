@@ -55,7 +55,7 @@ public final class DesktopShortcutService {
             Thread.currentThread().interrupt();
             throw new IOException("创建快捷方式时被中断", error);
         } catch (IOException error) {
-            return createBatchFallback(directory, name, target, argumentLine, error);
+            return createScriptFallback(directory, name, target, argumentLine, error);
         }
     }
 
@@ -106,16 +106,19 @@ public final class DesktopShortcutService {
         return bytes.length > MAX_POWERSHELL_OUTPUT_BYTES ? output + "…(output truncated)" : output;
     }
 
-    private Path createBatchFallback(Path directory, String name, Path target, String arguments,
+    private Path createScriptFallback(Path directory, String name, Path target, String arguments,
                                      IOException originalError) throws IOException {
-        Path batch = directory.resolve(name + ".bat");
+        Path script = directory.resolve(name + ".vbs");
         try {
-            String escapedTarget = escapeBatchCommand(target.toString());
-            String escapedArguments = escapeBatchCommand(arguments);
-            Files.writeString(batch, "@echo off\r\nsetlocal DisableDelayedExpansion\r\nstart \"\" \""
-                            + escapedTarget + "\" " + escapedArguments + "\r\n",
-                    StandardCharsets.UTF_8);
-            return batch;
+            String command = target + arguments;
+            if (command.indexOf('\r') >= 0 || command.indexOf('\n') >= 0) {
+                throw new IOException("快捷方式参数包含换行");
+            }
+            // ShellExecute preserves literal percent signs; WSH requires a little-endian Unicode BOM.
+            Files.writeString(script, "\ufeffCreateObject(\"Shell.Application\").ShellExecute \""
+                    + target.toString().replace("\"", "\"\"") + "\", \""
+                    + arguments.replace("\"", "\"\"") + "\", \"\", \"open\", 1\r\n", StandardCharsets.UTF_16LE);
+            return script;
         } catch (IOException fallbackError) {
             fallbackError.addSuppressed(originalError);
             throw fallbackError;
@@ -184,18 +187,4 @@ public final class DesktopShortcutService {
         return quoted.toString();
     }
 
-    /** Escape text that is written directly into a cmd batch command. */
-    static String escapeBatchCommand(String value) {
-        StringBuilder escaped = new StringBuilder(value.length() + 16);
-        for (int i = 0; i < value.length(); i++) {
-            char character = value.charAt(i);
-            switch (character) {
-                case '%' -> escaped.append("%%");
-                case '^', '&', '|', '<', '>', '(', ')' -> escaped.append('^').append(character);
-                case '\r', '\n' -> escaped.append(' ');
-                default -> escaped.append(character);
-            }
-        }
-        return escaped.toString();
-    }
 }

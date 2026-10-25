@@ -210,6 +210,36 @@ public class FileUtil {
         }
     }
 
+    /** Missing journals only permit cleanup of known staging directories and empty backups. */
+    public static void requireUnstartedTransaction(Path directory, java.util.Set<String> stagingDirectories) throws IOException {
+        try (var entries = Files.list(directory)) {
+            for (Path entry : entries.toList()) {
+                validateExistingAncestors(directory, entry);
+                String name = entry.getFileName().toString();
+                if (stagingDirectories.contains(name) && Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) continue;
+                if ("backups".equals(name) && Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
+                    try (var backups = Files.list(entry)) {
+                        if (backups.findAny().isEmpty()) continue;
+                    }
+                }
+                throw new IOException(Messages.get("transaction.missingJournal"));
+            }
+        }
+    }
+
+    /** An owned transaction may discard its staging files, but never unexplained rollback material. */
+    public static void requireNoTransactionBackups(Path directory) throws IOException {
+        Path backups = directory.resolve("backups");
+        if (!Files.exists(backups, LinkOption.NOFOLLOW_LINKS)) return;
+        validateExistingAncestors(directory, backups);
+        if (Files.isDirectory(backups, LinkOption.NOFOLLOW_LINKS)) {
+            try (var entries = Files.list(backups)) {
+                if (entries.findAny().isEmpty()) return;
+            }
+        }
+        throw new IOException(Messages.get("transaction.missingJournal"));
+    }
+
     private static void validatePathComponent(Path path) throws IOException {
         if (isSymlinkOrReparsePoint(path)) {
             throw new IOException("Managed path cannot contain a symbolic link or reparse point: "

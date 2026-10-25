@@ -12,6 +12,11 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 public interface ModUpdateService {
+    default CompletableFuture<ModInstallationResult> applyPreparedUpdate(
+            PreparedModUpdate prepared, com.ecl.operation.InstanceOperationSession session) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("Update sessions are not supported"));
+    }
+
     CompletableFuture<List<ModUpdate>> checkUpdates(
             ModInstanceContext instance,
             Collection<InstalledMod> installedMods,

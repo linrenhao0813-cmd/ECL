@@ -3,6 +3,7 @@ package com.ecl.launcher;
 import com.ecl.game.VersionMetadata;
 import com.ecl.game.VersionRepository;
 import com.ecl.launch.GameProcessMarker;
+import com.ecl.operation.InstanceOperationSession;
 import com.ecl.modrinth.instance.ModInstanceContext;
 import com.ecl.modrinth.service.InstanceOperationLock;
 import com.ecl.util.FileUtil;
@@ -128,13 +129,34 @@ public final class LoaderUpdateService {
 
     private Result updateBlocking(ModInstanceContext instance, UpdatePlan plan,
                                   ModLoaderInstaller.Listener listener) throws Exception {
+        return updateBlocking(instance, plan, listener, null);
+    }
+
+    public CompletableFuture<Result> update(ModInstanceContext instance, UpdatePlan plan,
+                                            ModLoaderInstaller.Listener listener, InstanceOperationSession session) {
+        Objects.requireNonNull(plan, "plan");
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return updateBlocking(instance, plan, listener, session);
+            } catch (Exception failure) {
+                throw new CompletionException(failure);
+            }
+        }, executor);
+    }
+
+    private Result updateBlocking(ModInstanceContext instance, UpdatePlan plan,
+                                  ModLoaderInstaller.Listener listener, InstanceOperationSession session) throws Exception {
         if (!instance.loader().supportsMods()) {
             throw new IOException(Messages.get("loaderUpdate.unsupported"));
         }
         ensureStopped(instance);
-        try (AutoCloseable ignored = operationLock.acquire(instance.instanceId());
-             InstanceOperationLease lease = InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
-            if (lease == null) throw new IOException(Messages.get("loaderUpdate.busy"));
+        try (AutoCloseable ignored = session == null ? operationLock.acquire(instance.instanceId())
+                : session.borrowMutation(instance.instanceId(), instance.gameDirectory());
+             InstanceOperationLease lease = session == null ? InstanceOperationLease.tryAcquire(instance.gameDirectory()) : null) {
+            if (lease == null && session == null) throw new IOException(Messages.get("loaderUpdate.busy"));
+            if (plan != null && !instance.profileId().equals(plan.profileId())) {
+                throw new IOException(Messages.get("loaderUpdate.planOtherInstance"));
+            }
             ensureStopped(instance);
             VersionMetadata current = new VersionRepository(versionsDirectory.toFile()).resolve(instance.profileId());
             if (!instance.minecraftVersion().equals(current.minecraftVersion())

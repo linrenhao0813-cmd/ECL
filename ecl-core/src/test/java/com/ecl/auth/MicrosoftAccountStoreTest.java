@@ -28,6 +28,7 @@ class MicrosoftAccountStoreTest {
 
     @BeforeEach
     void useTemporaryBaseDirectory() throws Exception {
+        org.slf4j.LoggerFactory.getILoggerFactory();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);

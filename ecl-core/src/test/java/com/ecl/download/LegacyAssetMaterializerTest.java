@@ -76,6 +76,23 @@ class LegacyAssetMaterializerTest {
                 LegacyAssetMaterializer.gameAssetsDirectory(index, assets.toFile(), game.toFile()));
     }
 
+    @Test
+    void rejectsSameSizedWrongObjectBeforeReplacingExistingViews() throws Exception {
+        Path assets = temp.resolve("assets");
+        AssetIndex index = writeIndex(assets, "sound.ogg", "good", "\"virtual\":true,\"map_to_resources\":true,");
+        String hash = FileUtil.sha1("good".getBytes(StandardCharsets.UTF_8));
+        Files.writeString(assets.resolve("objects/" + hash.substring(0, 2) + "/" + hash), "bad!");
+        Path virtual = assets.resolve("virtual/legacy/sound.ogg");
+        Path resources = temp.resolve("game/resources/sound.ogg");
+        Files.createDirectories(virtual.getParent());
+        Files.createDirectories(resources.getParent());
+        Files.writeString(virtual, "previous-virtual");
+        Files.writeString(resources, "previous-resources");
+        assertThrows(IOException.class, () -> LegacyAssetMaterializer.prepare(index, assets.toFile(), temp.resolve("game").toFile()));
+        assertEquals("previous-virtual", Files.readString(virtual));
+        assertEquals("previous-resources", Files.readString(resources));
+    }
+
     private AssetIndex writeIndex(Path assets, String name, String value, String flags) throws IOException {
         byte[] payload = value.getBytes(StandardCharsets.UTF_8);
         String hash = FileUtil.sha1(payload);

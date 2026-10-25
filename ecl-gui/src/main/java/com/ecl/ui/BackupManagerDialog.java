@@ -38,13 +38,19 @@ import java.util.concurrent.atomic.AtomicLong;
 /** Owns backup creation, restore and deletion UI for one instance. */
 final class BackupManagerDialog {
     private final LauncherUI ui;
+    private boolean closed;
+    private Path selectAfterRefresh;
+    private final AtomicLong listGeneration = new AtomicLong();
 
     BackupManagerDialog(LauncherUI ui) {
         this.ui = ui;
     }
 
     void show() {
-        String profileId = ui.getSelectedVersion();
+        show(ui.getSelectedVersion());
+    }
+
+    void show(String profileId) {
         if (profileId == null || profileId.isBlank()) {
             ui.setStatus(Messages.get("backup.openFailed"), Messages.get("backup.selectInstance"));
             return;
@@ -56,6 +62,7 @@ final class BackupManagerDialog {
         ui.applyWindowIcon(dialog);
 
         ListView<BackupEntry> backupList = new ListView<>();
+        backupList.setId("backup-list");
         backupList.setPrefHeight(270);
         backupList.setPlaceholder(ui.createBodyText(
                 Messages.get("backup.empty")));
@@ -94,12 +101,16 @@ final class BackupManagerDialog {
         ProgressBar operationProgress = new ProgressBar(0);
         operationProgress.setMaxWidth(Double.MAX_VALUE);
         Button createButton = button(Messages.get("backup.create"), "primary-button");
+        createButton.setId("backup-create");
         Button restoreButton = button(Messages.get("backup.restore"), "secondary-button");
+        restoreButton.setId("backup-restore");
         restoreButton.setDisable(true);
         Button deleteButton = button(Messages.get("backup.delete"), "secondary-button");
+        deleteButton.setId("backup-delete");
         deleteButton.setDisable(true);
         Button openDirectoryButton = button(Messages.get("backup.openDirectory"), "ghost-button");
         Button closeButton = button(Messages.get("backup.close"), "ghost-button");
+        closeButton.setId("backup-close");
         closeButton.setOnAction(event -> dialog.close());
         openDirectoryButton.setOnAction(event -> ui.openLocalFolder(
                 ui.worldBackupService.backupDirectory(profileId).toFile(), Messages.get("backup.directory")));
@@ -119,17 +130,23 @@ final class BackupManagerDialog {
             }
         };
         Runnable refreshList = () -> {
-            try {
-                BackupEntry selected = backupList.getSelectionModel().getSelectedItem();
-                backupList.getItems().setAll(ui.worldBackupService.listBackups(profileId));
-                if (selected != null) {
-                    backupList.getItems().stream()
-                            .filter(item -> item.archivePath().equals(selected.archivePath()))
-                            .findFirst().ifPresent(item -> backupList.getSelectionModel().select(item));
+            long request = listGeneration.incrementAndGet();
+            BackupEntry selected = backupList.getSelectionModel().getSelectedItem();
+            Path selection = selectAfterRefresh != null ? selectAfterRefresh : selected == null ? null : selected.archivePath();
+            Thread.ofVirtual().name("ecl-backup-list").start(() -> {
+                try {
+                    var entries = ui.worldBackupService.listBackups(profileId);
+                    onUi(() -> {
+                        if (request != listGeneration.get()) return;
+                        backupList.getItems().setAll(entries);
+                        if (selection != null) entries.stream()
+                                .filter(item -> item.archivePath().equals(selection))
+                                .findFirst().ifPresent(item -> backupList.getSelectionModel().select(item));
+                    });
+                } catch (IOException error) {
+                    onUi(() -> operationStatus.setText(Messages.format("backup.readFailed", cleanMessage(error))));
                 }
-            } catch (IOException error) {
-                operationStatus.setText(Messages.format("backup.readFailed", cleanMessage(error)));
-            }
+            });
         };
         backupList.getSelectionModel().selectedItemProperty().addListener(
                 (observable, oldValue, newValue) -> {
@@ -165,6 +182,18 @@ final class BackupManagerDialog {
             scene.getStylesheets().add(stylesheet.toExternalForm());
         }
         dialog.setScene(scene);
+        javafx.scene.Node focusOwner = ui.primaryStage.getScene().getFocusOwner();
+        dialog.setOnHidden(event -> {
+            closed = true;
+            listGeneration.incrementAndGet();
+            if (focusOwner != null) Platform.runLater(focusOwner::requestFocus);
+        });
+        scene.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, event -> {
+            if (event.getCode() == javafx.scene.input.KeyCode.ESCAPE) {
+                dialog.close();
+                event.consume();
+            }
+        });
         ui.applyThemeToScene(scene);
         refreshList.run();
         dialog.show();
@@ -176,11 +205,6 @@ final class BackupManagerDialog {
                               Label status, ProgressBar progress,
                               java.util.function.Consumer<Boolean> setBusy,
                               Runnable refreshList) {
-        Path instanceDirectory = ui.resolveVersionGameDir(profileId).toPath();
-        if (!Files.isDirectory(instanceDirectory)) {
-            status.setText(Messages.format("backup.missingDirectory", instanceDirectory));
-            return;
-        }
         EnumSet<BackupEntry.Content> content = EnumSet.of(BackupEntry.Content.SAVES);
         if (includeMods.isSelected()) content.add(BackupEntry.Content.MODS);
         if (includeShaders.isSelected()) content.add(BackupEntry.Content.SHADERPACKS);
@@ -190,21 +214,23 @@ final class BackupManagerDialog {
         status.setText(Messages.get("backup.creating"));
         progress.setProgress(-1);
         WorldBackupService.ProgressListener listener = progressListener(progress, status, Messages.get("backup.backingUp"));
-        ui.runAsync("ecl-world-backup-create", () -> {
+        Thread.ofVirtual().name("ecl-world-backup-create").start(() -> {
             try {
+                Path instanceDirectory = ui.resolveVersionGameDir(profileId).toPath();
+                if (!Files.isDirectory(instanceDirectory)) {
+                    throw new IOException(Messages.format("backup.missingDirectory", instanceDirectory));
+                }
                 BackupEntry created = ui.worldBackupService.createBackup(profileId,
                         resolveSourceVersion(profileId), instanceDirectory, content, listener);
-                Platform.runLater(() -> {
+                onUi(() -> {
+                    selectAfterRefresh = created.archivePath();
                     refreshList.run();
-                    backupList.getItems().stream()
-                            .filter(item -> item.archivePath().equals(created.archivePath()))
-                            .findFirst().ifPresent(item -> backupList.getSelectionModel().select(item));
                     status.setText(Messages.format("backup.created", created.archivePath().getFileName()));
                     ui.setStatus(Messages.get("backup.createComplete"), profileId + " · " + formatBytes(created.archiveSize()));
                     setBusy.accept(false);
                 });
             } catch (Exception error) {
-                Platform.runLater(() -> {
+                onUi(() -> {
                     status.setText(Messages.format("backup.createFailed", cleanMessage(error)));
                     setBusy.accept(false);
                 });
@@ -218,7 +244,7 @@ final class BackupManagerDialog {
                                Runnable refreshList) {
         BackupEntry selected = list.getSelectionModel().getSelectedItem();
         if (selected == null) return;
-        if (ui.gameLaunch.isGameProcessRunning()) {
+        if (ui.isVersionRunning(profileId)) {
             status.setText(Messages.get("backup.running"));
             return;
         }
@@ -232,21 +258,21 @@ final class BackupManagerDialog {
         setBusy.accept(true);
         status.setText(Messages.get("backup.verifying"));
         progress.setProgress(-1);
-        ui.runAsync("ecl-world-backup-restore", () -> {
+        Thread.ofVirtual().name("ecl-world-backup-restore").start(() -> {
             try {
-                if (ui.gameLaunch.isGameProcessRunning()) {
+                if (ui.isVersionRunning(profileId)) {
                     throw new IOException(Messages.get("backup.running"));
                 }
                 ui.worldBackupService.restore(selected,
                         ui.resolveVersionGameDir(profileId).toPath(),
                         progressListener(progress, status, Messages.get("backup.restoring")));
-                Platform.runLater(() -> {
+                onUi(() -> {
                     status.setText(Messages.format("backup.restored", selected.archivePath().getFileName()));
                     ui.setStatus(Messages.get("backup.restoreComplete"), Messages.format("backup.restoreDetail", profileId));
                     setBusy.accept(false);
                 });
             } catch (Exception error) {
-                Platform.runLater(() -> {
+                onUi(() -> {
                     status.setText(Messages.format("backup.restoreFailed", cleanMessage(error)));
                     setBusy.accept(false);
                 });
@@ -267,16 +293,16 @@ final class BackupManagerDialog {
         if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
         setBusy.accept(true);
         status.setText(Messages.get("backup.deleting"));
-        ui.runAsync("ecl-world-backup-delete", () -> {
+        Thread.ofVirtual().name("ecl-world-backup-delete").start(() -> {
             try {
                 ui.worldBackupService.deleteBackup(selected);
-                Platform.runLater(() -> {
+                onUi(() -> {
                     refreshList.run();
                     status.setText(Messages.get("backup.deleted"));
                     setBusy.accept(false);
                 });
             } catch (Exception error) {
-                Platform.runLater(() -> {
+                onUi(() -> {
                     status.setText(Messages.format("backup.deleteFailed", cleanMessage(error)));
                     setBusy.accept(false);
                 });
@@ -292,7 +318,7 @@ final class BackupManagerDialog {
             long previous = lastUpdate.get();
             if (completed < total && previous != 0 && now - previous < 80_000_000L) return;
             if (!lastUpdate.compareAndSet(previous, now) && completed < total) return;
-            Platform.runLater(() -> {
+            onUi(() -> {
                 progress.setProgress(total <= 0 ? -1
                         : Math.max(0, Math.min(1, completed / (double) total)));
                 String current = entry == null || entry.isBlank()
@@ -301,6 +327,12 @@ final class BackupManagerDialog {
                         + (total > 0 ? " / " + formatBytes(total) : "") + current);
             });
         };
+    }
+
+    private void onUi(Runnable action) {
+        Platform.runLater(() -> {
+            if (!closed) action.run();
+        });
     }
 
     private String resolveSourceVersion(String profileId) {

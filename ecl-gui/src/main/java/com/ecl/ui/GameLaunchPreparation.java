@@ -18,6 +18,7 @@ final class GameLaunchPreparation {
     private final LauncherUI ui;
     private final LaunchUiFacade facade;
     private volatile String preparingVersion;
+    private final java.util.concurrent.atomic.AtomicLong generation = new java.util.concurrent.atomic.AtomicLong();
 
     GameLaunchPreparation(LauncherUI ui, LaunchUiFacade facade) {
         this.ui = ui;
@@ -70,8 +71,14 @@ final class GameLaunchPreparation {
         });
         ui.updateRuntimeSummary();
         preparingVersion = selectedVersion;
-        CompletableFuture<Boolean> readiness =
-                ui.versionManager.ensureVersionDownloadedAsync(selectedVersion);
+        long request = generation.incrementAndGet();
+        CompletableFuture<Boolean> readiness;
+        try {
+            readiness = ui.versionManager.ensureVersionDownloadedAsync(selectedVersion);
+        } catch (RuntimeException error) {
+            preparationFailed(selectedVersion, error);
+            return;
+        }
         if (readiness.isDone() && !readiness.isCompletedExceptionally()) {
             if (Boolean.TRUE.equals(readiness.getNow(false))) launcher.accept(selectedVersion);
             else downloadAndLaunch(selectedVersion, launcher);
@@ -80,6 +87,7 @@ final class GameLaunchPreparation {
         ui.setControlsBusy(true);
         ui.setStatus("正在验证本地版本", selectedVersion + " 的旧安装正在后台执行完整性检查。");
         readiness.whenComplete((ready, error) -> Platform.runLater(() -> {
+            if (request != generation.get()) return;
             if (!Objects.equals(selectedVersion, facade.selectedVersion())) {
                 completePreparation(selectedVersion);
                 ui.setControlsBusy(false);
@@ -99,6 +107,7 @@ final class GameLaunchPreparation {
     }
 
     private void downloadAndLaunch(String version, Consumer<String> launcher) {
+        long request = generation.get();
         com.ecl.launcher.VersionManager.VersionDownloadTarget target;
         try { target = ui.versionManager.resolveDownloadTarget(version); }
         catch (IOException error) {
@@ -114,67 +123,82 @@ final class GameLaunchPreparation {
                     + "，但当前 Mojang 版本清单中没有该版本。请刷新版本列表后重试。");
             return;
         }
-        ui.downloadTaskCenter.submit("Minecraft " + downloadVersion, () -> {
-            LauncherUiFactory.runOnUi(() -> {
-                ui.setControlsBusy(true);
-                ui.downloadProgress.setProgress(0);
-                ui.startProgressAnimation(ui.downloadProgress);
-                ui.setStatus("正在准备下载", version.equals(downloadVersion)
-                        ? version + " 首次启动需要补齐客户端、依赖库和资源文件。"
-                        : version + " 将继承 " + downloadVersion + "，正在补齐基础客户端、依赖库和资源文件。");
-            });
-            return context -> {
-                AtomicReference<String> failure = new AtomicReference<>();
-                ui.downloader.setListener(new GameDownloader.DownloadListener() {
-                    @Override public void onStatus(String message) { context.updateStatus(message); Platform.runLater(() -> ui.setStatus("下载中", message)); }
-                    @Override public void onProgress(long downloaded, long total) {
-                        context.updateProgress(downloaded, total); Platform.runLater(() -> {
-                            ui.updateProgress(ui.downloadProgress, downloaded, total);
-                            ui.detailLabel.setText("当前进度: " + ui.formatBytes(downloaded)
-                                    + (total > 0 ? " / " + ui.formatBytes(total) : ""));
-                        });
-                    }
-                    @Override public void onError(String message) { failure.set(message); Platform.runLater(() -> {
-                        if (context.isCancelled()) return; ui.setStatus("下载失败", message);
-                        ui.stopProgressAnimation(ui.downloadProgress, true); ui.setControlsBusy(false);
-                    }); }
-                    @Override public void onComplete() { Platform.runLater(() -> {
-                        if (context.isCancelled()) return;
-                        ui.downloadProgress.setProgress(1); ui.stopProgressAnimation(ui.downloadProgress, true);
-                        if (!ui.versionManager.isVersionDownloaded(version)) { ui.setStatus("基础版本仍不完整",
-                                downloadVersion + " 下载完成，但 " + version + " 的继承客户端仍不可用，请检查版本配置。");
-                            completePreparation(version);
-                            ui.setControlsBusy(false); return; }
-                        ui.setStatus("下载完成", downloadVersion + " 已就绪，准备启动 " + version + "。");
-                        try { ui.gameRepository().applyDefaultIsolationSettingForNewInstance(version); }
-                        catch (IOException error) { LauncherUI.LOGGER.warn("Cannot persist default isolation for {}", version, error); }
-                        launcher.accept(version);
-                    }); }
+        try {
+            ui.downloadTaskCenter.submit("Minecraft " + downloadVersion, () -> {
+                LauncherUiFactory.runOnUi(() -> {
+                    if (request != generation.get()) return;
+                    ui.setControlsBusy(true);
+                    ui.downloadProgress.setProgress(0);
+                    ui.startProgressAnimation(ui.downloadProgress);
+                    ui.setStatus("正在准备下载", version.equals(downloadVersion)
+                            ? version + " 首次启动需要补齐客户端、依赖库和资源文件。"
+                            : version + " 将继承 " + downloadVersion + "，正在补齐基础客户端、依赖库和资源文件。");
                 });
-                context.registerCancellation(ui.downloader::cancelDownload);
-                Future<?> future = ui.downloader.downloadVersionAsync(
-                        downloadVersion, url, target.versionSha1());
-                try {
-                    future.get(10, TimeUnit.MINUTES);
-                } catch (TimeoutException timedOut) {
-                    future.cancel(true);
-                    throw new IOException(GuiMessages.get("launch.downloadTimeout"), timedOut);
-                } catch (InterruptedException interrupted) {
-                    future.cancel(true);
-                    Thread.currentThread().interrupt();
-                    throw interrupted;
-                }
-                if (failure.get() != null && !failure.get().isBlank()) throw new IOException(failure.get());
-                return null;
-            };
-        }, (ignored, error) -> Platform.runLater(() -> {
-            if (error == null) return;
-            completePreparation(version);
-            ui.stopProgressAnimation(ui.downloadProgress, true);
-            ui.setStatus(ui.isCancellation(error) ? com.ecl.util.Messages.get("download.status.cancelled")
-                    : com.ecl.util.Messages.get("download.status.failedTitle"), ui.cleanMessage(error));
-            ui.setControlsBusy(false);
-        }));
+                return context -> {
+                    AtomicReference<String> failure = new AtomicReference<>();
+                    ui.downloader.setListener(new GameDownloader.DownloadListener() {
+                        @Override public void onStatus(String message) { context.updateStatus(message); Platform.runLater(() -> {
+                            if (request == generation.get()) ui.setStatus("下载中", message);
+                        }); }
+                        @Override public void onProgress(long downloaded, long total) {
+                            context.updateProgress(downloaded, total); Platform.runLater(() -> {
+                                if (request != generation.get()) return;
+                                ui.updateProgress(ui.downloadProgress, downloaded, total);
+                                ui.detailLabel.setText("当前进度: " + ui.formatBytes(downloaded)
+                                        + (total > 0 ? " / " + ui.formatBytes(total) : ""));
+                            });
+                        }
+                        @Override public void onError(String message) { failure.set(message); Platform.runLater(() -> {
+                            if (context.isCancelled() || request != generation.get()) return; ui.setStatus("下载失败", message);
+                            ui.stopProgressAnimation(ui.downloadProgress, true); ui.setControlsBusy(false);
+                        }); }
+                        @Override public void onComplete() { Platform.runLater(() -> {
+                            if (context.isCancelled() || request != generation.get()) return;
+                            ui.downloadProgress.setProgress(1); ui.stopProgressAnimation(ui.downloadProgress, true);
+                            if (!ui.versionManager.isVersionDownloaded(version)) { ui.setStatus("基础版本仍不完整",
+                                    downloadVersion + " 下载完成，但 " + version + " 的继承客户端仍不可用，请检查版本配置。");
+                                completePreparation(version);
+                                ui.setControlsBusy(false); return; }
+                            ui.setStatus("下载完成", downloadVersion + " 已就绪，准备启动 " + version + "。");
+                            try { ui.gameRepository().applyDefaultIsolationSettingForNewInstance(version); }
+                            catch (IOException error) { LauncherUI.LOGGER.warn("Cannot persist default isolation for {}", version, error); }
+                            launcher.accept(version);
+                        }); }
+                    });
+                    context.registerCancellation(ui.downloader::cancelDownload);
+                    Future<?> future = ui.downloader.downloadVersionAsync(
+                            downloadVersion, url, target.versionSha1());
+                    try {
+                        future.get(10, TimeUnit.MINUTES);
+                    } catch (TimeoutException timedOut) {
+                        future.cancel(true);
+                        throw new IOException(GuiMessages.get("launch.downloadTimeout"), timedOut);
+                    } catch (InterruptedException interrupted) {
+                        future.cancel(true);
+                        Thread.currentThread().interrupt();
+                        throw interrupted;
+                    }
+                    if (failure.get() != null && !failure.get().isBlank()) throw new IOException(failure.get());
+                    return null;
+                };
+            }, (ignored, error) -> Platform.runLater(() -> {
+                if (error == null || request != generation.get()) return;
+                completePreparation(version);
+                ui.stopProgressAnimation(ui.downloadProgress, true);
+                ui.setStatus(ui.isCancellation(error) ? com.ecl.util.Messages.get("download.status.cancelled")
+                        : com.ecl.util.Messages.get("download.status.failedTitle"), ui.cleanMessage(error));
+                ui.setControlsBusy(false);
+            }));
+        } catch (RuntimeException rejected) {
+            preparationFailed(version, rejected);
+        }
+    }
+
+    private void preparationFailed(String version, Throwable error) {
+        completePreparation(version);
+        ui.stopProgressAnimation(ui.downloadProgress, true);
+        ui.setControlsBusy(false);
+        ui.setStatus(com.ecl.util.Messages.get("download.status.failedTitle"), ui.cleanMessage(error));
     }
 
     boolean isPreparingVersion(String profileId) {
@@ -182,6 +206,9 @@ final class GameLaunchPreparation {
     }
 
     void completePreparation(String profileId) {
-        if (profileId != null && profileId.equals(preparingVersion)) preparingVersion = null;
+        if (profileId != null && profileId.equals(preparingVersion)) {
+            preparingVersion = null;
+            generation.incrementAndGet();
+        }
     }
 }

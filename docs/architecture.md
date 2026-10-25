@@ -39,9 +39,9 @@
 | `auth` | 账户模型、离线/微软认证、皮肤 | `DefaultAccountService`、`MicrosoftAuth`、`MicrosoftOAuthClient`、`XboxLiveAuthClient`、`MinecraftServicesClient`、`MinecraftSkinService`、`MinecraftProfileSkinService`、`OfflineSkinStore`、`AuthAccount`、`AuthType` |
 | `auth.offline` | 离线皮肤注入（本地 Yggdrasil 兼容服务） | `AuthlibInjectorManager`、`OfflineSkinServer`、`OfflineSkinHttpHandler`、`OfflineSkinInjector`、`OfflineSkinTextureSigner`、`OfflineSkinServerLeases`、`OfflineSkinCharacterRegistry` |
 | `backup` | 世界备份创建/恢复/清理 | `WorldBackupService`、`WorldBackupRestorer`、`WorldBackupMetadata`、`BackupEntry` |
-| `config` | 设置持久化与迁移 | `SettingsManager`、`SettingKey`、`EncryptedSettingsStore`、`SettingsAutoSaveScheduler`、`SettingsMigration` |
+| `config` | 设置持久化与迁移 | `SettingsManager`（含旧明文凭据迁移）、`SettingKey`、`EncryptedSettingsStore`、`SettingsAutoSaveScheduler` |
 | `desktop` | Windows 快捷方式 | `DesktopShortcutService` |
-| `download` | 下载调度、游戏下载、校验与修复 | `DownloadTaskCenter`、`DownloadTaskExecutor`、`DownloadService`、`GameDownloader`、`GameDownloadBatchExecutor`、`GameAssetVerifier`、`GameInstallationVerifier`、`GameInstallationRepairService`、`LegacyGameInstallationVerifier`、`ServerJarDownloader`、`GameDownloadErrorClassifier` |
+| `download` | 下载调度、游戏下载、校验与修复 | `DownloadTaskCenter`、`DownloadTaskExecutor`、`DownloadService`、`GameDownloader`、`GameDownloadBatchExecutor`、`InstallHelpers`、`GameInstallationVerifier`、`GameInstallationRepairService`、`LegacyGameInstallationVerifier`、`ServerJarDownloader`、`GameDownloadErrorClassifier` |
 | `download.provider` | 官方源/镜像候选与选择 | `DownloadProvider`、`DownloadProviderRegistry`、`OfficialDownloadProvider`、`MirrorDownloadProvider` |
 | `exception` | 业务异常 | `AuthException` |
 | `game` | 版本元数据、实例路径策略与实例配置 | `DefaultGameRepository`、`VersionRepository`、`InstanceLaunchProfile(Store)`、`InstanceGameSettings(Store)`、`InstanceDisplayMetadata(Store)`、`DefaultIsolationType`、`VersionMetadata`、`Library`、`LibraryAnalyzer`、`WorldSaveService`、`MavenCoordinates` |
@@ -60,8 +60,6 @@
 | `operation` | 实例级互斥 | `InstanceOperationCoordinator`（`acquire` / `tryAcquire` / `acquireInterruptibly`） |
 | `server` | 本地服务端管理 | `LocalServerManager`、`LocalServerProfile`、`LocalServerFiles` |
 | `util` | 通用基础设施 | `HttpUtil`、`FileUtil`、`JsonUtil`、`GsonProvider`、`TextUtil`、`CryptoUtil`、`CryptoKeyStore`、`FileLockLease`、`InstanceOperationLease`、`ManagedLockPaths`、`NetworkUriPolicy`、`DownloadRateLimiter`、`DownloadConcurrencyGate`、`ResumableFileDownloader`、`JavaRuntimeUtil`、`JavaRuntimeDownloader`、`ZipUtil`、`BoundedCache`、`ThreadFactories`、`JvmArgumentPolicy`、`OperatingSystem`、`Messages` |
-
-> 说明：`ecl-core/src/main/java/com/ecl/` 下还存在 `diagnostic/`、`event/`、`pack/`、`performance/`、`runtime/` 五个**空目录**（无任何源码），构建不引用它们。
 
 除实例操作协调器外，跨进程互斥都基于文件锁：`FileLockLease`（`FileChannel.tryLock`，拿不到返回 `null`）；服务端目录锁在 `LocalServerManager` 内用 `tryLock` 重试最多 5 秒，超时转 `IOException`。这些锁都不会无限阻塞等待。OS 判定统一走 `util/OperatingSystem`（`isWindows`/`minecraftName`/`adoptiumName`/`javaExecutableName`），不再各自读取 `os.name`。
 
@@ -231,6 +229,13 @@ ETag / Last-Modified 后发送 Range；响应完整后再由批处理执行器�
 校验失败删除已完成的暂存文件，保留原目标。
 
 统一账户库要求 JSON 根节点为数组；非法根结构通过 `AuthException` 向调用方报错，禁止后续保存覆盖原内容。
+GUI 账户读取边界捕获该错误，展示保留原文件的提示并允许首页继续构造；写入与旧库迁移仍不能覆盖损坏账户库。
+
+升级从最终指纹检查、before 快照到 after 快照全程持有 `InstanceOperationSession`：协调器的专用虚拟线程持有原有线程绑定锁与跨进程 lease，异步调用显式 `borrow`，文件事务使用互斥的 `borrowMutation`。owner 关闭后禁止新借用，已有借用全部归还才释放锁；取消观察 Future 不会跳过内部任务收尾。加载器、模组和整合包按顺序借用，不能用全局文件锁重入或线程本地状态绕过竞争。
+
+恢复与整合包清单共用 `ManagedPackPathPolicy` 的纯词法校验，拒绝任意 `..` 段并在规范化后排除存档等用户目录；祖先重解析点检查独立执行。Prepared 整合包的文件、清单、版本元数据、依赖与归档摘要在内存中固定，提交前重新验证。`inspect` 与 `restore` 共用 pending/previous 收尾，先验证 payload，再选最新可恢复点。payload 与 manifest 强制落盘，新 active 读回校验后才删除 previous；Windows 目录 fsync 仅尽力执行，不承诺完整的断电原子性。
+
+自动修复复用 `GameInstallationRepairService.canRepair`，逐项下载有声明摘要的文件，读取与写入采用同一组注入根目录。裸 Maven 和 `hint:local` 依赖不由共享库修复流程推测下载。无效日志声明单独报告，其余检查继续；正式解析与启动仍拒绝不安全日志配置。发布锁可中断并有界等待，拿到锁后重新检查竞争者是否已发布正确文件。
 
 世界还原：获得实例生命周期锁并检查持久化游戏运行标记后，将压缩包解到 `.ecl/world-restore/content/`；写入并强制落盘 `APPLYING` 日志后才移动原目录至 `rollback/`。替换完成后写 `COMMITTED`，最后清理工作区；中断后回滚 `APPLYING`，`COMMITTED` 仅清理。启动游戏、再次备份或还原前执行恢复；日志损坏或缺失且仍有原始文件时拒绝继续，保留现场。
 版本来源为 `gradle.properties:version` → Gradle 资源展开 → `ecl-build.properties:launcher.version` → `ECLConfig.LAUNCHER_VERSION` → GUI / User-Agent / 打包。Release 工作流在构建前校验 tag 与该版本一致。
@@ -244,3 +249,5 @@ ETag / Last-Modified 后发送 Range；响应完整后再由批处理执行器�
 - 所有下载地址经 `NetworkUriPolicy`：强制 HTTPS、拒绝私网/环回解析结果、拒绝带凭据的 URL；HTTP 仅允许显式环回地址。
 - 运行时与 Java 运行时下载校验 SHA-256；游戏文件校验大小与 SHA-1；内容库只信任 `cdn.modrinth.com`、`cdn-raw.modrinth.com`。
 - 外发域名与用途见 README“网络请求与隐私”章节。
+
+模组及整合包事务缺失 journal 时，只清理已知暂存目录和空备份目录；存在备份或未知内容时拒绝恢复并保留现场。活动事务关闭也不会删除缺失日志的回滚备份（FileUtil.requireUnstartedTransaction / requireNoTransactionBackups）。

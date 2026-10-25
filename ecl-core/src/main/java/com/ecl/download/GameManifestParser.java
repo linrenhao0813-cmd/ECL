@@ -1,6 +1,5 @@
 package com.ecl.download;
 
-import com.ecl.ECLConfig;
 import com.ecl.game.MavenCoordinates;
 import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
@@ -21,7 +20,7 @@ final class GameManifestParser {
     private GameManifestParser() {
     }
 
-    static boolean hasUsableInheritedClient(JsonObject versionJson) {
+    static boolean hasUsableInheritedClient(JsonObject versionJson, File versions) {
         if (!versionJson.has("inheritsFrom")) return false;
         String current = versionJson.get("inheritsFrom").getAsString();
         java.util.Set<String> visited = new java.util.HashSet<>();
@@ -29,8 +28,8 @@ final class GameManifestParser {
             File jar;
             File jsonFile;
             try {
-                jar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), current);
-                jsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), current);
+                jar = FileUtil.safeVersionJar(versions, current);
+                jsonFile = FileUtil.safeVersionJson(versions, current);
             } catch (IOException e) {
                 return false;
             }
@@ -40,7 +39,7 @@ final class GameManifestParser {
                 JsonObject parentJson = HttpUtil.readJson(jsonFile);
                 if (parentJson.has("jar")) {
                     String jarId = parentJson.get("jar").getAsString();
-                    return FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), jarId).isFile();
+                    return FileUtil.safeVersionJar(versions, jarId).isFile();
                 }
                 current = parentJson.has("inheritsFrom")
                         ? parentJson.get("inheritsFrom").getAsString() : null;
@@ -51,7 +50,7 @@ final class GameManifestParser {
         return false;
     }
 
-    static List<String> getMissingLibraries(JsonObject versionJson) {
+    static List<String> getMissingLibraries(JsonObject versionJson, File librariesRoot) {
         List<String> missing = new ArrayList<>();
         if (versionJson == null || !versionJson.has("libraries")) return missing;
         JsonArray libraries = versionJson.getAsJsonArray("libraries");
@@ -65,7 +64,7 @@ final class GameManifestParser {
             if (downloads != null && downloads.has("artifact")) {
                 JsonObject artifact = downloads.getAsJsonObject("artifact");
                 String path = artifact.get("path").getAsString();
-                File target = safeLibraryTarget(path);
+                File target = safeLibraryTarget(librariesRoot, path);
                 if (target != null && !target.exists()) {
                     missing.add(lib.has("name") ? lib.get("name").getAsString() : path);
                 }
@@ -73,7 +72,7 @@ final class GameManifestParser {
                 String name = lib.has("name") ? lib.get("name").getAsString() : "";
                 String repository = lib.has("url") ? lib.get("url").getAsString() : "";
                 if (MavenCoordinates.isSimpleCoordinate(name) && !repository.isBlank()) {
-                    File target = safeLibraryTarget(MavenCoordinates.repositoryPath(name));
+                    File target = safeLibraryTarget(librariesRoot, MavenCoordinates.repositoryPath(name));
                     if (target != null && !target.exists()) {
                         missing.add(name);
                     }
@@ -113,9 +112,9 @@ final class GameManifestParser {
         }
     }
 
-    private static File safeLibraryTarget(String path) {
+    private static File safeLibraryTarget(File librariesRoot, String path) {
         try {
-            return FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
+            return FileUtil.safeResolveUnder(librariesRoot, path);
         } catch (IOException e) {
             return null;
         }

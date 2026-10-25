@@ -77,6 +77,7 @@ class LauncherUIView extends javafx.application.Application {
     MrpackInstaller mrpackInstaller;
     WorldBackupService worldBackupService;
     MicrosoftAccountStore microsoftAccountStore;
+    String accountReadError = "";
     MinecraftSkinService minecraftSkinService;
     Launcher gameLauncher;
     SettingsManager settingsManager;
@@ -424,7 +425,23 @@ class LauncherUIView extends javafx.application.Application {
     }
 
     void showBackupManagerDialog() {
-        new BackupManagerDialog((LauncherUI) this).show();
+        showBackupManagerDialog(getSelectedVersion());
+    }
+
+    void showBackupManagerDialog(String profileId) {
+        new BackupManagerDialog((LauncherUI) this).show(profileId);
+    }
+
+    java.util.List<MicrosoftAccountStore.Account> readMicrosoftAccounts() {
+        try {
+            var accounts = microsoftAccountStore.list();
+            accountReadError = "";
+            return accounts;
+        } catch (com.ecl.exception.AuthException error) {
+            accountReadError = GuiMessages.get("accounts.readFailed");
+            LOGGER.warn("Cannot read saved accounts; preserving original file", error);
+            return java.util.List.of();
+        }
     }
 
     String resolveBackupSourceVersion(String profileId) {

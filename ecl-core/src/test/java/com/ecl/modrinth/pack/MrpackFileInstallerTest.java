@@ -38,6 +38,30 @@ class MrpackFileInstallerTest {
     private AutoCloseable loopbackDownloads;
 
     @Test
+    void rejectsEscapingIndexedPathsAndOversizedDeclarationsBeforeNetwork() throws Exception {
+        for (String path : List.of("../outside.jar", "/outside.jar", "C:/outside.jar", "mods/../../outside.jar")) {
+            JsonObject index = indexWithFile(path, "https://cdn.modrinth.com/mod.jar", 1, "a".repeat(128));
+            assertThrows(IOException.class, () -> MrpackFileInstaller.installIndexedFiles(index,
+                    tempDir.resolve("instance"), message -> { }));
+        }
+        JsonObject huge = indexWithFile("mods/huge.jar", "https://cdn.modrinth.com/mod.jar",
+                2L * 1024 * 1024 * 1024 + 1, "a".repeat(128));
+        assertThrows(IOException.class, () -> MrpackFileInstaller.installIndexedFiles(huge,
+                tempDir.resolve("instance"), message -> { }));
+        assertFalse(Files.exists(tempDir.resolve("outside.jar")));
+    }
+
+    @Test
+    void rejectsExcessIndexedEntriesBeforeInspectingIndividualItems() {
+        JsonArray files = new JsonArray();
+        for (int i = 0; i <= 100_000; i++) files.add(new JsonObject());
+        JsonObject index = new JsonObject();
+        index.add("files", files);
+        assertThrows(IOException.class, () -> MrpackFileInstaller.installIndexedFiles(index,
+                tempDir.resolve("instance"), message -> { }));
+    }
+
+    @Test
     void defaultPolicyTrustsModrinthAndForgeCdnHosts() {
         assertTrue(MrpackFileInstaller.DEFAULT_TRUSTED_DOWNLOAD_HOSTS
                 .contains("cdn.modrinth.com"));
@@ -50,6 +74,7 @@ class MrpackFileInstallerTest {
     @BeforeEach
     void useTemporaryBaseDirectory() throws Exception {
         loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
+        org.slf4j.LoggerFactory.getILoggerFactory();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);

@@ -35,6 +35,47 @@ class InstanceMaintenanceWorkflowTest extends ApplicationTest {
     }
 
     @Test
+    void reportFormattingUsesLocaleIndependentKeysAndClosingDoesNotOpenAnotherModal() throws Exception {
+        var previous = java.util.Locale.getDefault();
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr-TR"));
+            var report = new com.ecl.download.GameInstallationVerifier.Report("locale", java.util.List.of(
+                    new com.ecl.download.GameInstallationVerifier.Check(
+                            com.ecl.download.GameInstallationVerifier.Category.LIBRARY, "library.jar",
+                            com.ecl.download.GameInstallationVerifier.Status.MISSING, "", false)), "fingerprint");
+            Class<?> inspectionType = java.util.Arrays.stream(InstanceCheckRepairWorkflow.class.getDeclaredClasses())
+                    .filter(type -> type.getSimpleName().equals("Inspection")).findFirst().orElseThrow();
+            var constructor = inspectionType.getDeclaredConstructors()[0];
+            constructor.setAccessible(true);
+            var root = Path.of(".").toAbsolutePath();
+            Object inspection = constructor.newInstance("locale", report, null, "", null, "", root, root, root, root);
+            var workflow = new InstanceCheckRepairWorkflow(launcher);
+            var format = InstanceCheckRepairWorkflow.class.getDeclaredMethod("formatReport", inspectionType);
+            format.setAccessible(true);
+            String text = (String) format.invoke(workflow, inspection);
+            assertTrue(text.contains(com.ecl.util.Messages.get("instanceRepair.category.library")));
+            assertTrue(text.contains(com.ecl.util.Messages.get("instanceRepair.status.missing")));
+            var show = InstanceCheckRepairWorkflow.class.getDeclaredMethod("showReport", inspectionType, Runnable.class);
+            show.setAccessible(true);
+            AtomicInteger refreshed = new AtomicInteger();
+            interact(() -> {
+                Platform.runLater(() -> Window.getWindows().stream()
+                        .filter(window -> window != launcher.primaryStage && window.isShowing())
+                        .toList().forEach(Window::hide));
+                try {
+                    show.invoke(workflow, inspection, (Runnable) refreshed::incrementAndGet);
+                } catch (ReflectiveOperationException error) {
+                    throw new AssertionError(error);
+                }
+                assertEquals(1, refreshed.get());
+                assertTrue(Window.getWindows().stream().noneMatch(window -> window != launcher.primaryStage && window.isShowing()));
+            });
+        } finally {
+            java.util.Locale.setDefault(previous);
+        }
+    }
+
+    @Test
     void rejectedRepairInspectionClearsBusyStateAndRefreshes() throws Exception {
         verifyCompletion(false, true);
     }

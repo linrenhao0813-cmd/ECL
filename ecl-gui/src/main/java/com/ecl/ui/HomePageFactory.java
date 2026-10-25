@@ -39,6 +39,12 @@ final class HomePageFactory {
         StackPane hero = createLaunchHero();
         VBox.setVgrow(hero, Priority.ALWAYS);
         pane.getChildren().add(hero);
+        if (!ui.accountReadError.isBlank()) {
+            Label error = label(ui.accountReadError, "status-detail");
+            error.setId("home-account-read-error");
+            error.setWrapText(true);
+            pane.getChildren().addFirst(error);
+        }
         return pane;
     }
 

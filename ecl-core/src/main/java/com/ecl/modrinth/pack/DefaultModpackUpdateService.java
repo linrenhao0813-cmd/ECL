@@ -117,7 +117,7 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
         return CompletableFuture.supplyAsync(() -> {
             Path work = null;
             try {
-                if (instanceRunning.test(update.instance().instanceId())) {
+                if (isRunning(update.instance())) {
                     throw new IOException("Instance is running and cannot be inspected for update");
                 }
                 work = Files.createTempDirectory(ECLConfig.getBaseDir().toPath(),
@@ -126,7 +126,7 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
                 MrpackInstaller.UpdatePreview preview = installer.prepareUpdate(archive.toFile(),
                         root.toFile(), update.instance().profileId(), update.instance().projectId(),
                         update.availableVersion().id(), work, listener);
-                if (instanceRunning.test(update.instance().instanceId())) {
+                if (isRunning(update.instance())) {
                     preview.close();
                     throw new IOException("Instance started while its modpack update was being prepared");
                 }
@@ -141,22 +141,25 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
     @Override
     public CompletableFuture<MrpackInstaller.InstallResult> applyPreparedUpdate(
             PreparedUpdate prepared, Path gameRoot, MrpackInstaller.Listener listener) {
+        return applyPreparedUpdate(prepared, gameRoot, listener, null);
+    }
+
+    @Override
+    public CompletableFuture<MrpackInstaller.InstallResult> applyPreparedUpdate(
+            PreparedUpdate prepared, Path gameRoot, MrpackInstaller.Listener listener,
+            com.ecl.operation.InstanceOperationSession session) {
         Objects.requireNonNull(prepared, "prepared");
         Path root = normalizeGameRoot(gameRoot);
         ModpackUpdate update = prepared.update();
         return CompletableFuture.supplyAsync(() -> {
             UUID instanceId = update.instance().instanceId();
-            if (instanceRunning.test(instanceId)) {
-                prepared.closeQuietly();
-                throw new java.util.concurrent.CompletionException(
-                        new IOException("Instance is running and cannot be updated"));
-            }
-            try (AutoCloseable ignored = operationLock.acquire(instanceId)) {
-                if (instanceRunning.test(instanceId)) {
+            try (AutoCloseable ignored = session == null ? operationLock.acquire(instanceId)
+                    : session.borrow(instanceId, update.instance().instanceDirectory())) {
+                if (isRunning(update.instance())) {
                     throw new IOException("Instance is running and cannot be updated");
                 }
                 return installer.applyPreparedUpdate(prepared.preview(), root.toFile(),
-                        () -> instanceRunning.test(instanceId), listener);
+                        () -> instanceRunning.test(instanceId), listener, session);
             } catch (Exception error) {
                 throw new java.util.concurrent.CompletionException(error);
             } finally {
@@ -172,13 +175,13 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
         Path root = normalizeGameRoot(gameRoot);
         return CompletableFuture.supplyAsync(() -> {
             UUID instanceId = update.instance().instanceId();
-            if (instanceRunning.test(instanceId)) {
+            if (isRunning(update.instance())) {
                 throw new java.util.concurrent.CompletionException(
                         new IOException("Instance is running and cannot be updated"));
             }
             Path temporary = null;
             try (AutoCloseable ignored = operationLock.acquire(instanceId)) {
-                if (instanceRunning.test(instanceId)) {
+                if (isRunning(update.instance())) {
                     throw new IOException("Instance is running and cannot be updated");
                 }
                 temporary = Files.createTempFile(ECLConfig.getBaseDir().toPath(),
@@ -214,7 +217,7 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
                     throw new IOException("Modpack update size does not match metadata");
                 }
                 hashVerifier.verify(temporary, file.hashes());
-                if (instanceRunning.test(instanceId)) {
+                if (isRunning(update.instance())) {
                     throw new IOException("Instance started while its modpack update was downloading");
                 }
                 return installer.update(temporary.toFile(), root.toFile(),
@@ -272,5 +275,13 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
         }
         hashVerifier.verify(target, file.hashes());
         return target;
+    }
+    private boolean isRunning(ModpackInstance instance) {
+        try {
+            return instanceRunning.test(instance.instanceId())
+                    || com.ecl.launch.GameProcessMarker.isRunning(instance.instanceDirectory());
+        } catch (IOException failure) {
+            throw new java.util.concurrent.CompletionException(failure);
+        }
     }
 }

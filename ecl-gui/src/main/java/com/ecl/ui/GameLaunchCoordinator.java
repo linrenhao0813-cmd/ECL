@@ -60,100 +60,106 @@ final class GameLaunchCoordinator {
         ui.clearLaunchFailure();
         ui.setStatus("正在启动游戏...", "准备认证、拼接类路径并拉起客户端进程。 ");
 
-        ui.runAsync("ecl-launch-game", () -> {
-            File launchDir = ui.resolveVersionGameDir(version);
-            File instanceRoot = ui.resolveVersionInstanceRoot(version);
-            InstanceOperationLease gameLock = null;
-            boolean monitorOwnsGameLock = false;
-            try {
-                ensureVersionGameDirs(version);
-                ui.worldBackupService.recoverInterruptedRestore(launchDir.toPath());
-                createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
-                if (GameProcessMarker.isRunning(launchDir.toPath())) {
-                    throw new IOException("实例中的游戏进程仍在运行: " + version);
-                }
-                gameLock = InstanceOperationLease.tryAcquire(launchDir.toPath());
-                if (gameLock == null) {
-                    throw new IOException("实例正在运行或被另一个启动器进程占用: " + version);
-                }
-                InstanceLaunchProfile launchProfile = ui.controller.instanceLaunchProfiles()
-                        .load(instanceRoot.toPath());
-                String instanceJavaPath = launchProfile.javaMode() == InstanceLaunchProfile.JavaMode.AUTO
-                        ? "" : launchProfile.javaPath();
-                if (!instanceJavaPath.isBlank()
-                        && !com.ecl.util.JavaRuntimeUtil.isUsableJavaPath(instanceJavaPath)) {
-                    throw new IOException("Instance Java path is not usable: " + instanceJavaPath);
-                }
-                int instanceMemoryMb = launchProfile.memoryMode() == InstanceLaunchProfile.MemoryMode.AUTO
-                        ? ECLConfig.calculateAutoMemoryMb() : launchProfile.maxMemoryMb();
-                AuthProvider auth = authFactory.create(authType, username);
-                OfflineSkin offlineSkin = auth.getType() == com.ecl.auth.AuthType.OFFLINE
-                        ? new OfflineSkinStore()
-                                .find(OfflineSkinStore.identityForOffline(auth.getUsername()))
-                                .orElse(null)
-                        : null;
-                LaunchOptions options = LaunchOptions.builder()
-                        .versionId(version)
-                        .auth(auth)
-                        .offlineSkin(offlineSkin)
-                        .gameDirectory(launchDir)
-                        .instanceDirectory(instanceRoot)
-                        .environment(ui.controller.launchEnvironment())
-                        .maxMemoryMb(instanceMemoryMb)
-                        .jvmArguments(launchProfile.customJvmArguments())
-                        .javaExecutablePath(instanceJavaPath)
-                        .gameResolution(ui.gameWidth, ui.gameHeight)
-                        .fullscreen(ui.gameFullscreen)
-                        .serverAddress(ui.quickServer)
-                        .processorCount(ui.processorCount)
-                        .build();
-                ui.controller.invalidateLaunchVersion(version);
-                GameProcess gameProcess = ui.gameLauncher.launch(options);
-                Process process = gameProcess.process();
+        try {
+            ui.runAsync("ecl-launch-game", () -> {
+                File launchDir = ui.resolveVersionGameDir(version);
+                File instanceRoot = ui.resolveVersionInstanceRoot(version);
+                InstanceOperationLease gameLock = null;
+                boolean monitorOwnsGameLock = false;
                 try {
-                    GameProcessMarker.record(launchDir.toPath(), process.toHandle());
-                } catch (IOException markerError) {
-                    gameProcess.close();
-                    throw new IOException("无法建立游戏进程运行标记，已停止本次启动", markerError);
-                }
-                long launchStartedAt = process.info().startInstant()
-                        .map(Instant::toEpochMilli)
-                        .orElseGet(System::currentTimeMillis);
-                ui.registerActiveGameProcess(process, version);
-                UUID runningInstanceId = registerRunningModInstance(version);
-                boolean minimizeThisLaunch = ui.closeAfterLaunch;
-
-                runOnUiIfActive(() -> {
-                    ui.setStatus("游戏已启动", version + " 正在运行，实例目录: " + launchDir.getAbsolutePath());
-                    ui.updateRuntimeSummary();
-                    ui.setControlsBusy(false);
-                    if (minimizeThisLaunch) {
-                        ui.primaryStage.setIconified(true);
+                    ensureVersionGameDirs(version);
+                    ui.worldBackupService.recoverInterruptedRestore(launchDir.toPath());
+                    createAutomaticBackupBeforeLaunch(version, launchDir.toPath());
+                    if (GameProcessMarker.isRunning(launchDir.toPath())) {
+                        throw new IOException("实例中的游戏进程仍在运行: " + version);
                     }
-                });
-                processMonitor.monitor(gameProcess, version, launchDir, launchStartedAt,
-                        runningInstanceId, minimizeThisLaunch, gameLock);
-                monitorOwnsGameLock = true;
-            } catch (Exception e) {
-                CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
-                runOnUiIfActive(() -> {
-                    ui.setStatus("启动失败", report.getTitle());
-                    ui.markLaunchFailure(report.getTitle());
-                    showGameErrorDialog(report, launchDir);
-                    ui.setControlsBusy(false);
-                });
-            } finally {
-                preparation.completePreparation(version);
-                if (!monitorOwnsGameLock && gameLock != null) {
+                    gameLock = InstanceOperationLease.tryAcquire(launchDir.toPath());
+                    if (gameLock == null) {
+                        throw new IOException("实例正在运行或被另一个启动器进程占用: " + version);
+                    }
+                    InstanceLaunchProfile launchProfile = ui.controller.instanceLaunchProfiles()
+                            .load(instanceRoot.toPath());
+                    String instanceJavaPath = launchProfile.javaMode() == InstanceLaunchProfile.JavaMode.AUTO
+                            ? "" : launchProfile.javaPath();
+                    if (!instanceJavaPath.isBlank()
+                            && !com.ecl.util.JavaRuntimeUtil.isUsableJavaPath(instanceJavaPath)) {
+                        throw new IOException("Instance Java path is not usable: " + instanceJavaPath);
+                    }
+                    int instanceMemoryMb = launchProfile.memoryMode() == InstanceLaunchProfile.MemoryMode.AUTO
+                            ? ECLConfig.calculateAutoMemoryMb() : launchProfile.maxMemoryMb();
+                    AuthProvider auth = authFactory.create(authType, username);
+                    OfflineSkin offlineSkin = auth.getType() == com.ecl.auth.AuthType.OFFLINE
+                            ? new OfflineSkinStore()
+                                    .find(OfflineSkinStore.identityForOffline(auth.getUsername()))
+                                    .orElse(null)
+                            : null;
+                    LaunchOptions options = LaunchOptions.builder()
+                            .versionId(version)
+                            .auth(auth)
+                            .offlineSkin(offlineSkin)
+                            .gameDirectory(launchDir)
+                            .instanceDirectory(instanceRoot)
+                            .environment(ui.controller.launchEnvironment())
+                            .maxMemoryMb(instanceMemoryMb)
+                            .jvmArguments(launchProfile.customJvmArguments())
+                            .javaExecutablePath(instanceJavaPath)
+                            .gameResolution(ui.gameWidth, ui.gameHeight)
+                            .fullscreen(ui.gameFullscreen)
+                            .serverAddress(ui.quickServer)
+                            .processorCount(ui.processorCount)
+                            .build();
+                    ui.controller.invalidateLaunchVersion(version);
+                    GameProcess gameProcess = ui.gameLauncher.launch(options);
+                    Process process = gameProcess.process();
                     try {
-                        gameLock.close();
-                    } catch (IOException lockError) {
-                        LauncherUI.LOGGER.warn("Failed to release game launch lock for {}", version,
-                                lockError);
+                        GameProcessMarker.record(launchDir.toPath(), process.toHandle());
+                    } catch (IOException markerError) {
+                        gameProcess.close();
+                        throw new IOException("无法建立游戏进程运行标记，已停止本次启动", markerError);
+                    }
+                    long launchStartedAt = process.info().startInstant()
+                            .map(Instant::toEpochMilli)
+                            .orElseGet(System::currentTimeMillis);
+                    ui.registerActiveGameProcess(process, version);
+                    UUID runningInstanceId = registerRunningModInstance(version);
+                    boolean minimizeThisLaunch = ui.closeAfterLaunch;
+
+                    runOnUiIfActive(() -> {
+                        ui.setStatus("游戏已启动", version + " 正在运行，实例目录: " + launchDir.getAbsolutePath());
+                        ui.updateRuntimeSummary();
+                        ui.setControlsBusy(false);
+                        if (minimizeThisLaunch) {
+                            ui.primaryStage.setIconified(true);
+                        }
+                    });
+                    processMonitor.monitor(gameProcess, version, launchDir, launchStartedAt,
+                            runningInstanceId, minimizeThisLaunch, gameLock);
+                    monitorOwnsGameLock = true;
+                } catch (Exception e) {
+                    CrashAnalyzer.Report report = CrashAnalyzer.analyzeLaunchException(version, e, launchDir);
+                    runOnUiIfActive(() -> {
+                        ui.setStatus("启动失败", report.getTitle());
+                        ui.markLaunchFailure(report.getTitle());
+                        showGameErrorDialog(report, launchDir);
+                        ui.setControlsBusy(false);
+                    });
+                } finally {
+                    preparation.completePreparation(version);
+                    if (!monitorOwnsGameLock && gameLock != null) {
+                        try {
+                            gameLock.close();
+                        } catch (IOException lockError) {
+                            LauncherUI.LOGGER.warn("Failed to release game launch lock for {}", version,
+                                    lockError);
+                        }
                     }
                 }
-            }
-        });
+            });
+        } catch (RuntimeException rejected) {
+            preparation.completePreparation(version);
+            ui.setControlsBusy(false);
+            ui.setStatus("启动失败", ui.cleanMessage(rejected));
+        }
     }
 
     boolean isPreparingVersion(String profileId) {

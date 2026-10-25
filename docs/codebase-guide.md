@@ -47,6 +47,8 @@ Gradle 依赖方向为 `ecl-boot` → `ecl-gui` → `ecl-core`（`ecl-boot` 同�
 | 实例显示 | `game/InstanceDisplayMetadataStore.java` | `<数据目录>/instances/display.json` |
 | 实例路径 | `game/DefaultGameRepository.java` | 实例根目录、运行目录与隔离策略 |
 | 实例互斥 | `operation/InstanceOperationCoordinator.java` | 进程内串行；跨进程锁见 `util/InstanceOperationLease`、`ManagedLockPaths` |
+| 异步升级所有权 | `operation/InstanceOperationSession.java` | owner、引用借用与互斥写借用；最后一个借用归还后释放生命周期锁 |
+| 托管路径范围 | `util/ManagedPackPathPolicy.java` | 纯词法规范化，拒绝路径别名与用户数据目录，不以 CWD 做根目录 |
 | 模组依赖解析 | `modrinth/service/DefaultModDependencyResolver.java` | 区分必需、可选、冲突与内嵌依赖，按依赖先于引用者的顺序生成安装计划 |
 | 本地 Mod 扫描 | `modrinth/service/DefaultLocalModScanner.java` | 锁定实例、扫描文件、在线识别、整理记录并保存 |
 | 扫描缓存 | `modrinth/service/LocalModScanCache.java` | 读取缓存 JSON，原子替换缓存文件 |
@@ -64,7 +66,10 @@ Gradle 依赖方向为 `ecl-boot` → `ecl-gui` → `ecl-core`（`ecl-boot` 同�
 
 `ecl-core/src/main/java/com/ecl/` 下还有 `config/`（设置键与持久化）、`desktop/`（快捷方式）、
 `i18n/`（本地化）、`util/`（HTTP、文件、锁、限速、Java 运行时等基础设施）、`exception/`（业务异常）。
-`diagnostic/`、`event/`、`pack/`、`performance/`、`runtime/` 是空目录，没有源码。
+
+`SettingsManager.migrateToEncrypted` 在同一同步方法内完成旧明文凭据迁移；`GameDownloader` 直接调用
+`InstallHelpers.needsDownload` 判断文件是否需要下载。`ModBrowserView` 的分类选项为私有 record，
+批量更新直接使用 `SequentialBatchRunner`，由执行器保存选择列表的不可变副本。
 
 ## 阅读关键流程
 
@@ -191,6 +196,9 @@ Mod 拖入事件在窗口框架建成后安装。
 `withInstanceLock` 获得生命周期锁后检查 `GameProcessMarker`，再调用 `WorldBackupRestorer.recover`。
 还原使用 `<运行目录>/.ecl/world-restore/journal.json` 的 `APPLYING` / `COMMITTED` 两阶段日志；异常退出后逆序回滚旧目录，成功提交则只清理工作区。GUI 启动游戏前调用 `recoverInterruptedRestore`，不依赖是否启用自动备份。
 升级恢复的 `Draft` 从 `begin` 至 `complete` 持有 `<数据目录>/upgrade-recovery/<profile ID>/operation.lock`；检查与回退也必须取得该锁，避免将正在升级的 `pending` 当成中断现场。
+`InstanceUpdateService.execute` 在实例会话内核对指纹、创建快照、顺序更新并完成 after 快照，内部服务通过 session 重载借用；`Draft.session` 和 `Draft.ownership` 为内存所有权，不写入磁盘。完成处理不再次调度到可关闭执行器，观察者取消不取消内部收尾。
+`MrpackInstaller.UpdatePreview.preparedSha512` 固定暂存树及归档的 SHA-512，应用前再次校验；`PackUpdateTransaction.hasIncompleteTransactions` 精确匹配实例与 UUID，完整 APPLIED 日志不阻塞预览。直接 restore 同样先处理 pending/previous。
+`BackupManagerDialog` 接受固定目标 profileId，列表与操作离开 FX；`InstanceLaunchProfileDialog` 的读取、Java 探测、加锁和保存也在后台执行。`ServerManagementPage` 展示真实 `StopOutcome`，停止等待不占共享页面执行器。`MainController` 的通用后台任务使用受管理虚拟线程，下载并行数仍由下载器限制。
 
 实例删除由 `InstanceDetailsPane.deleteInstanceFiles` 以配置游戏根目录的 `versions/` 为边界；保留共享数据与 ECL 元数据缓存。
 实例详情的 `refresh` 只更新概览和按钮，显示表单仅在 `setInstance` 时载入，维护完成不会覆盖草稿。
@@ -230,3 +238,5 @@ Mod 拖入事件在窗口框架建成后安装。
 GUI 文案由 `GuiMessages` 查询，缺键时尝试英文，仍缺失则显示 key，避免构建页面时抛异常。
 `util/LogDirectoryProperty.java` 是 Logback 的目录解析入口，直接复用 `ECLConfig.getBaseDir()`；设置页打开同一数据目录下的 `logs/`。
 快捷方式由 `LauncherDesktopIntegration.createInstanceShortcut` 在后台调用 `DesktopShortcutService`，结果通过 JavaFX 线程反馈；创建期间保留点击时捕获的实例 ID。
+
+FileUtil.requireUnstartedTransaction / requireNoTransactionBackups 是模组和整合包缺失日志时的保留边界；不得仅以 journal.json 不存在推断事务从未改动目标。校验器的 instancesRoot 指实际游戏根目录的 versions/，与版本元数据根目录分别注入，hint:local 按真实实例目录查找。

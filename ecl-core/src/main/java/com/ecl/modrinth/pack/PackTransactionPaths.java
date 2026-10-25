@@ -73,6 +73,7 @@ final class PackTransactionPaths {
         if (scope == Scope.LIBRARIES) {
             return PackManifest.resolve(librariesRoot, targetPath);
         }
+        com.ecl.util.ManagedPackPathPolicy.requireManagedRelativePath(targetPath);
         return PackManifest.resolve(instanceRoot, targetPath);
     }
 

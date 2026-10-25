@@ -49,6 +49,8 @@ class InstanceUpdateServiceTest {
 
     @BeforeEach
     void useTemporaryBaseDirectory() throws Exception {
+        // Initialize the process-wide file appender before replacing this test's data root.
+        org.slf4j.LoggerFactory.getILoggerFactory();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);
@@ -230,6 +232,45 @@ class InstanceUpdateServiceTest {
     }
 
     @Test
+    void cancellingBeforeSnapshotRunsCannotSkipInternalCleanup() throws Exception {
+        ModInstanceContext instance = packInstance(true);
+        FakePacks packs = new FakePacks();
+        InstanceUpdateService service = packService();
+        var preview = service.preview(instance, ReleaseChannel.ALL, null,
+                temp.resolve("versions"), temp.resolve("game"), packs).join();
+        var prepared = service.prepare(preview, Set.of(), packs, null).join();
+        List<Runnable> scheduled = new ArrayList<>();
+        var queuedService = new InstanceUpdateService(loaders(true),
+                ignored -> { throw new AssertionError("pack scanner"); }, new FakeUpdates(), ignored -> false,
+                scheduled::add, service.recoveryPoints());
+        var result = queuedService.execute(prepared, null, packs);
+        assertTrue(result.cancel(false));
+        scheduled.removeFirst().run();
+        try (var lease = com.ecl.util.InstanceOperationLease.tryAcquire(instance.gameDirectory())) {
+            assertNotNull(lease, "cancelling the observer must not strand snapshot ownership");
+        }
+        assertEquals(1, packs.appliedPrepared);
+        assertFalse(Files.exists(packs.preparedWorkingDirectory));
+    }
+
+    @Test
+    void acceptedPreparationDoesNotExpireWhileWaitingForFinalConfirmation() throws Exception {
+        ModInstanceContext instance = packInstance(true);
+        FakePacks packs = new FakePacks();
+        var service = packService();
+        var preview = service.preview(instance, ReleaseChannel.ALL, null,
+                temp.resolve("versions"), temp.resolve("game"), packs).join();
+        var prepared = service.prepare(preview, Set.of(), packs, null).join();
+        var old = new InstanceUpdateService.Preview(preview.instance(), Instant.EPOCH,
+                preview.metadataRoot(), preview.gameRoot(), preview.fingerprint(), preview.loaderPlan(),
+                preview.modUpdates(), preview.installedMods(), preview.protectedProjects(), preview.skippedMods(),
+                preview.packInstance(), preview.packUpdate());
+        assertThrows(CompletionException.class, () -> service.prepare(old, Set.of(), packs, null).join());
+        var accepted = new InstanceUpdateService.PreparedExecution(old, prepared.modUpdates(), prepared.packUpdate());
+        assertEquals("new", service.execute(accepted, null, packs).join().packVersion());
+    }
+
+    @Test
     void packUpgradePreservesWarningsInProgressAndResult() throws Exception {
         ModInstanceContext instance = packInstance(true);
         FakePacks packs = new FakePacks();
@@ -349,7 +390,7 @@ class InstanceUpdateServiceTest {
                         work, update.instance().profileId(), update.instance().projectId(),
                         update.availableVersion().id(), update.instance().minecraftVersion(),
                         update.availableVersion().versionNumber(), "fabric", "1.0", "", archive,
-                        stagedFiles, stagedVersions, stagedLibraries, "", Map.of(), List.of(), 0);
+                        stagedFiles, stagedVersions, stagedLibraries, "", Map.of(), List.of(), 0, Map.of());
                 return CompletableFuture.completedFuture(new PreparedUpdate(update, preview));
             } catch (IOException failure) {
                 return CompletableFuture.failedFuture(failure);
@@ -362,6 +403,17 @@ class InstanceUpdateServiceTest {
             return CompletableFuture.completedFuture(new MrpackInstaller.InstallResult(
                     prepared.update().instance().profileId(), "Example Pack",
                     prepared.preview().packVersion(), "1.21.1", "fabric", root, 0));
+        }
+
+        @Override public CompletableFuture<MrpackInstaller.InstallResult> applyPreparedUpdate(
+                PreparedUpdate prepared, Path root, MrpackInstaller.Listener listener,
+                com.ecl.operation.InstanceOperationSession session) {
+            try (var borrow = session.borrow(prepared.update().instance().instanceId(),
+                    prepared.update().instance().instanceDirectory())) {
+                return applyPreparedUpdate(prepared, root, listener);
+            } catch (IOException failure) {
+                return CompletableFuture.failedFuture(failure);
+            }
         }
     }
 

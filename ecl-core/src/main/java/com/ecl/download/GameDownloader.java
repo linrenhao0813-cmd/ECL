@@ -9,6 +9,8 @@ import com.ecl.util.FileUtil;
 import com.ecl.util.HttpUtil;
 import com.ecl.util.ManagedLockPaths;
 import com.ecl.util.NetworkUriPolicy;
+import com.ecl.util.JsonUtil;
+import com.ecl.util.Messages;
 import com.ecl.util.RuleEvaluator;
 import com.ecl.util.ThreadFactories;
 import com.google.gson.JsonArray;
@@ -43,10 +45,12 @@ public class GameDownloader implements DownloadService {
         void onComplete();
     }
 
+    private final File versionsDirectory;
+    private final File librariesDirectory;
+    private final File assetsDirectory;
     private final ExecutorService versionDownloadExecutor;
     private final ExecutorService fileDownloadExecutor;
     private final GameDownloadBatchExecutor batchExecutor;
-    private final GameAssetVerifier assetVerifier;
     private final AtomicReference<Future<?>> activeDownload = new AtomicReference<>();
     private volatile DownloadListener configuredListener;
     private volatile boolean verifyExistingFiles = true;
@@ -56,6 +60,13 @@ public class GameDownloader implements DownloadService {
     }
 
     public GameDownloader(int downloadThreads) {
+        this(downloadThreads, ECLConfig.getVersionsDir(), ECLConfig.getLibrariesDir(), ECLConfig.getAssetsDir());
+    }
+
+    public GameDownloader(int downloadThreads, File versionsDirectory, File librariesDirectory, File assetsDirectory) {
+        this.versionsDirectory = versionsDirectory;
+        this.librariesDirectory = librariesDirectory;
+        this.assetsDirectory = assetsDirectory;
         int workerCount = ECLConfig.clampDownloadConcurrency(downloadThreads);
         versionDownloadExecutor = Executors.newSingleThreadExecutor(
                 ThreadFactories.daemon("ecl-version-download"));
@@ -63,7 +74,6 @@ public class GameDownloader implements DownloadService {
                 workerCount,
                 ThreadFactories.daemon("ecl-file-download"));
         batchExecutor = new GameDownloadBatchExecutor(fileDownloadExecutor, workerCount);
-        assetVerifier = new GameAssetVerifier(() -> verifyExistingFiles);
     }
 
     public void setListener(DownloadListener listener) {
@@ -122,11 +132,11 @@ public class GameDownloader implements DownloadService {
         try {
             if (runListener != null) runListener.onStatus("正在下载版本信息...");
 
-            File versionDir = FileUtil.safeVersionDirectory(ECLConfig.getVersionsDir(), versionId);
+            File versionDir = FileUtil.safeVersionDirectory(versionsDirectory, versionId);
             Files.createDirectories(versionDir.toPath());
             try (FileLockLease versionLock = FileLockLease.tryAcquire(
                     ManagedLockPaths.versionDownload(
-                            ECLConfig.getVersionsDir().toPath(), versionId))) {
+                            versionsDirectory.toPath(), versionId))) {
                 if (versionLock == null) {
                     throw new IOException("Version download or migration is already in progress: "
                             + versionId);
@@ -135,7 +145,7 @@ public class GameDownloader implements DownloadService {
                         ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER));
 
                 JsonObject versionJson = readVersionMetadata(versionUrl, versionSha1);
-                File versionJsonFile = FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), versionId);
+                File versionJsonFile = FileUtil.safeVersionJson(versionsDirectory, versionId);
                 HttpUtil.writeJson(versionJsonFile, versionJson);
                 checkCancelled();
 
@@ -149,9 +159,9 @@ public class GameDownloader implements DownloadService {
                 if (runListener != null) runListener.onStatus("正在下载资源文件...");
                 downloadAssets(versionJson, runListener);
                 checkCancelled();
-                ClientLoggingConfig logging = new VersionRepository(ECLConfig.getVersionsDir())
+                ClientLoggingConfig logging = new VersionRepository(versionsDirectory)
                         .resolve(versionId).clientLogging();
-                if (logging != null) logging.ensureDownloaded(ECLConfig.getAssetsDir());
+                if (logging != null) logging.ensureDownloaded(assetsDirectory);
                 checkCancelled();
                 Files.writeString(versionDir.toPath().resolve(
                         ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER), "complete",
@@ -182,7 +192,7 @@ public class GameDownloader implements DownloadService {
         JsonObject client = downloads != null && downloads.has("client")
                 ? downloads.getAsJsonObject("client") : null;
         if (client == null) {
-            if (!GameManifestParser.hasUsableInheritedClient(versionJson)) {
+            if (!GameManifestParser.hasUsableInheritedClient(versionJson, versionsDirectory)) {
                 throw new IOException("版本缺少 client 下载信息，且继承版本客户端不可用: "
                         + versionId);
             }
@@ -196,12 +206,12 @@ public class GameDownloader implements DownloadService {
                 "Minecraft client");
         long clientSize = GameManifestParser.requiredPositiveSize(
                 client, "size", "Minecraft client");
-        File clientJar = FileUtil.safeVersionJar(ECLConfig.getVersionsDir(), versionId);
-        if (!assetVerifier.needsDownload(clientJar, clientSha1)) return;
+        File clientJar = FileUtil.safeVersionJar(versionsDirectory, versionId);
+        if (!InstallHelpers.needsDownload(clientJar, clientSha1, verifyExistingFiles)) return;
 
         batchExecutor.downloadSingleVerified(new GameDownloadBatchExecutor.DownloadTask(
                 clientUrl, clientJar, clientSha1, clientSize, "游戏主文件",
-                ECLConfig.getVersionsDir().toPath()), runListener, new HttpUtil.ProgressCallback() {
+                versionsDirectory.toPath()), runListener, new HttpUtil.ProgressCallback() {
                     @Override public void onStart(long total) {
                         if (runListener != null) runListener.onProgress(0, total);
                     }
@@ -258,7 +268,7 @@ public class GameDownloader implements DownloadService {
     private void downloadLibraries(JsonObject versionJson, DownloadListener runListener) throws IOException {
         JsonArray libraries = versionJson.getAsJsonArray("libraries");
         if (libraries == null) return;
-        List<String> missingLibraries = GameManifestParser.getMissingLibraries(versionJson);
+        List<String> missingLibraries = GameManifestParser.getMissingLibraries(versionJson, librariesDirectory);
         if (!missingLibraries.isEmpty() && runListener != null) {
             runListener.onStatus("检测到 " + missingLibraries.size() + " 个缺失的依赖库");
         }
@@ -322,11 +332,11 @@ public class GameDownloader implements DownloadService {
                 artifact.has("sha1") ? artifact.get("sha1").getAsString() : null,
                 sourceLabel + " " + path);
         long size = artifact.has("size") ? artifact.get("size").getAsLong() : -1L;
-        File target = FileUtil.safeResolveUnder(ECLConfig.getLibrariesDir(), path);
-        if (assetVerifier.needsDownload(target, sha1)) {
+        File target = FileUtil.safeResolveUnder(librariesDirectory, path);
+        if (InstallHelpers.needsDownload(target, sha1, verifyExistingFiles)) {
             tasks.add(new GameDownloadBatchExecutor.DownloadTask(
                     url, target, sha1, size, sourceLabel,
-                    ECLConfig.getLibrariesDir().toPath()));
+                    librariesDirectory.toPath()));
         }
     }
 
@@ -337,16 +347,16 @@ public class GameDownloader implements DownloadService {
         String assetId = GameManifestParser.requiredString(assetIndex, "id", "asset index id");
         FileUtil.requireSafeVersionId(assetId);
         String assetUrl = GameManifestParser.requiredString(assetIndex, "url", "asset index URL");
-        File assetDir = new File(ECLConfig.getAssetsDir(), "objects");
-        File indexFile = FileUtil.safeResolveUnder(ECLConfig.getAssetsDir(), "indexes/" + assetId + ".json");
+        File assetDir = new File(assetsDirectory, "objects");
+        File indexFile = FileUtil.safeResolveUnder(assetsDirectory, "indexes/" + assetId + ".json");
         String indexSha1 = InstallHelpers.requireSha1(
                 assetIndex.has("sha1") ? assetIndex.get("sha1").getAsString() : null,
                 "asset index " + assetId);
         long indexSize = GameManifestParser.requiredPositiveSize(assetIndex, "size", "asset index " + assetId);
-        if (assetVerifier.needsDownload(indexFile, indexSha1)) {
+        if (InstallHelpers.needsDownload(indexFile, indexSha1, verifyExistingFiles)) {
             batchExecutor.downloadSingleVerified(new GameDownloadBatchExecutor.DownloadTask(
                     assetUrl, indexFile, indexSha1, indexSize, "资源索引",
-                    ECLConfig.getAssetsDir().toPath()), runListener, null);
+                    assetsDirectory.toPath()), runListener, null);
         }
         JsonObject indexJson = HttpUtil.readJson(indexFile);
         JsonObject objects = indexJson.getAsJsonObject("objects");
@@ -360,7 +370,7 @@ public class GameDownloader implements DownloadService {
             String subPath = hash.substring(0, 2) + "/" + hash;
             long size = GameManifestParser.requiredPositiveSize(obj, "size", "asset object " + name);
             File target = FileUtil.safeResolveUnder(assetDir, subPath);
-            if (assetVerifier.needsDownload(target, hash)) {
+            if (InstallHelpers.needsDownload(target, hash, verifyExistingFiles)) {
                 tasks.add(new GameDownloadBatchExecutor.DownloadTask(
                         "https://resources.download.minecraft.net/" + subPath,
                         target, hash, size, "资源文件", assetDir.toPath()));
@@ -378,24 +388,121 @@ public class GameDownloader implements DownloadService {
                                          DownloadListener runListener) throws IOException {
         boolean virtual = LegacyAssetMaterializer.isVirtual(indexJson);
         if (!virtual) return;
-        Path objectsRoot = new File(ECLConfig.getAssetsDir(), "objects").toPath();
+        Path objectsRoot = new File(assetsDirectory, "objects").toPath();
         if (runListener != null) runListener.onStatus("正在生成旧版虚拟资源...");
-        Path virtualRoot = FileUtil.safeResolveUnder(ECLConfig.getAssetsDir(),
+        Path virtualRoot = FileUtil.safeResolveUnder(assetsDirectory,
                 "virtual/" + assetId).toPath();
-        FileUtil.validateExistingAncestors(ECLConfig.getAssetsDir().toPath(), virtualRoot);
+        FileUtil.validateExistingAncestors(assetsDirectory.toPath(), virtualRoot);
         LegacyAssetMaterializer.materialize(objects, objectsRoot, virtualRoot);
     }
 
     public List<String> getMissingLibraries(JsonObject versionJson) {
-        return GameManifestParser.getMissingLibraries(versionJson);
+        return GameManifestParser.getMissingLibraries(versionJson, librariesDirectory);
     }
 
     /** Download dependencies declared by a locally installed profile, including inherited libraries. */
     public void downloadLibrariesForVersion(String versionId, DownloadListener listener) throws IOException {
-        JsonObject versionJson = new com.ecl.game.VersionRepository(ECLConfig.getVersionsDir())
+        JsonObject versionJson = new com.ecl.game.VersionRepository(versionsDirectory)
                 .resolveRaw(versionId);
         if (listener != null) listener.onStatus("正在准备加载器依赖库...");
         downloadLibraries(versionJson, listener);
+    }
+
+    /** Repairs authenticated metadata without running the full installation pipeline. */
+    void repairMetadata(String versionId, String url, String sha1, Path versions) throws IOException {
+        Path file = FileUtil.safeVersionJson(versions.toFile(), versionId).toPath();
+        FileUtil.validateExistingAncestors(versions, file);
+        try (FileLockLease lease = FileLockLease.tryAcquire(ManagedLockPaths.versionDownload(versions, versionId))) {
+            if (lease == null) throw new IOException("Version download is already in progress: " + versionId);
+            JsonObject metadata = readVersionMetadata(url, sha1);
+            FileUtil.validateExistingAncestors(versions, file);
+            HttpUtil.writeJson(file.toFile(), metadata);
+        }
+    }
+
+    /** Downloads only declarations that the read-only verifier identified as repairable. */
+    void repairVerifiedFiles(String profileId, Path versions, Path libraries, Path assets, Path instancesRoot,
+                             DownloadListener listener) throws IOException {
+        GameInstallationVerifier verifier = new GameInstallationVerifier(versions, libraries, assets, instancesRoot);
+        GameInstallationVerifier.Report report = verifier.inspect(profileId);
+        JsonObject effective = new VersionRepository(versions.toFile()).resolveRaw(profileId);
+        JsonObject client = object(object(effective, "downloads"), "client");
+        String jarId = JsonUtil.getString(effective, "jar", profileId);
+        if (jarId.isBlank()) jarId = profileId;
+        repairArtifact(client, FileUtil.safeVersionJar(versions.toFile(), jarId).toPath(), versions, report, listener);
+        JsonArray declaredLibraries = effective.has("libraries") ? effective.getAsJsonArray("libraries") : new JsonArray();
+        for (JsonElement entry : declaredLibraries) {
+            if (!entry.isJsonObject()) continue;
+            JsonObject downloads = object(entry.getAsJsonObject(), "downloads");
+            repairLibraryArtifact(object(downloads, "artifact"), libraries, report, listener);
+            JsonObject classifiers = object(downloads, "classifiers");
+            if (classifiers != null) {
+                for (String classifier : classifiers.keySet()) {
+                    repairLibraryArtifact(object(classifiers, classifier), libraries, report, listener);
+                }
+            }
+        }
+        JsonObject index = object(effective, "assetIndex");
+        if (index != null) {
+            String indexId = JsonUtil.getString(index, "id", "");
+            FileUtil.requireSafeVersionId(indexId);
+            Path indexFile = FileUtil.safeResolveUnder(assets.toFile(), "indexes/" + indexId + ".json").toPath();
+            repairArtifact(index, indexFile, assets, report, listener);
+            report = verifier.inspect(profileId);
+            if (report.checks().stream().anyMatch(check -> check.category() == GameInstallationVerifier.Category.ASSET_INDEX
+                    && check.status() == GameInstallationVerifier.Status.VERIFIED)) {
+                JsonObject objects = object(HttpUtil.readJson(indexFile.toFile()), "objects");
+                if (objects != null) {
+                    for (String name : objects.keySet()) {
+                        JsonObject asset = object(objects, name);
+                        if (asset == null) continue;
+                        String hash = JsonUtil.getString(asset, "hash", "");
+                        if (!InstallHelpers.hasSha1(hash)) continue;
+                        String path = hash.substring(0, 2) + "/" + hash;
+                        JsonObject declaration = asset.deepCopy();
+                        declaration.addProperty("sha1", hash);
+                        declaration.addProperty("url", "https://resources.download.minecraft.net/" + path);
+                        repairArtifact(declaration, FileUtil.safeResolveUnder(assets.toFile(), "objects/" + path).toPath(),
+                                assets, report, listener);
+                    }
+                }
+            }
+        }
+        JsonObject logging = object(object(effective, "logging"), "client");
+        ClientLoggingConfig config;
+        try {
+            config = ClientLoggingConfig.parse(logging);
+        } catch (IOException | RuntimeException invalidLogging) {
+            return;
+        }
+        if (config != null && needsRepair(config.targetFile(assets.toFile()).toPath(), report)) {
+            config.ensureDownloaded(assets.toFile());
+        }
+    }
+
+    private void repairLibraryArtifact(JsonObject artifact, Path libraries,
+                                       GameInstallationVerifier.Report report, DownloadListener listener) throws IOException {
+        if (artifact == null) return;
+        String path = JsonUtil.getString(artifact, "path", "");
+        if (path.isBlank()) return;
+        repairArtifact(artifact, FileUtil.safeResolveUnder(libraries.toFile(), path).toPath(), libraries, report, listener);
+    }
+
+    private void repairArtifact(JsonObject artifact, Path file, Path root,
+                                 GameInstallationVerifier.Report report, DownloadListener listener) throws IOException {
+        if (artifact == null || !needsRepair(file, report)) return;
+        batchExecutor.downloadSingleVerified(new GameDownloadBatchExecutor.DownloadTask(
+                JsonUtil.getString(artifact, "url", ""), file.toFile(), JsonUtil.getString(artifact, "sha1", ""),
+                JsonUtil.getLong(artifact, "size", -1), Messages.get("instanceRepair.repair"), root), listener, null);
+    }
+
+    private static boolean needsRepair(Path file, GameInstallationVerifier.Report report) {
+        return report.issues().stream().anyMatch(check -> check.repairable()
+                && check.path().equals(file.toAbsolutePath().normalize().toString()));
+    }
+
+    private static JsonObject object(JsonObject parent, String key) {
+        return parent != null && parent.has(key) && parent.get(key).isJsonObject() ? parent.getAsJsonObject(key) : null;
     }
 
     static String nativeClassifierKey(JsonObject library, String osName, String archBits) {

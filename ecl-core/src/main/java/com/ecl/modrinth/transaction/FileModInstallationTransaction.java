@@ -1,6 +1,7 @@
 package com.ecl.modrinth.transaction;
 
 import com.ecl.launch.GameProcessMarker;
+import com.ecl.operation.InstanceOperationSession;
 
 import com.ecl.util.FileLockLease;
 import com.ecl.util.FileUtil;
@@ -37,10 +38,15 @@ public final class FileModInstallationTransaction implements AutoCloseable {
     private final List<Stage> stages = new ArrayList<>();
     private FileLockLease directoryLock;
     private InstanceOperationLease gameOperationLock;
+    private InstanceOperationSession.Borrow sessionBorrow;
     private boolean committed;
     private boolean closed;
 
     public FileModInstallationTransaction(Path gameDirectory) throws IOException {
+        this(gameDirectory, null);
+    }
+
+    public FileModInstallationTransaction(Path gameDirectory, InstanceOperationSession session) throws IOException {
         this.gameDirectory = Objects.requireNonNull(gameDirectory, "gameDirectory")
                 .toAbsolutePath().normalize();
         Path gameParent = this.gameDirectory.getParent();
@@ -60,14 +66,26 @@ public final class FileModInstallationTransaction implements AutoCloseable {
             throw new IOException("Unable to lock new mod transaction: " + temporaryDirectory);
         }
         try {
-            this.gameOperationLock = InstanceOperationLease.tryAcquire(this.gameDirectory);
-            if (gameOperationLock == null || GameProcessMarker.isRunning(this.gameDirectory)) {
+            if (session == null) {
+                this.gameOperationLock = InstanceOperationLease.tryAcquire(this.gameDirectory);
+            } else {
+                this.sessionBorrow = session.borrowMutation(session.instanceId(), this.gameDirectory);
+            }
+            if (gameOperationLock == null && sessionBorrow == null || GameProcessMarker.isRunning(this.gameDirectory)) {
                 throw new IOException("Instance is running or busy in another launcher process: "
                         + this.gameDirectory);
             }
             this.backupDirectory = temporaryDirectory.resolve("backups");
             Files.createDirectories(backupDirectory);
         } catch (IOException | RuntimeException failure) {
+            if (sessionBorrow != null) {
+                try {
+                    sessionBorrow.close();
+                } catch (IOException closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+                sessionBorrow = null;
+            }
             if (gameOperationLock != null) {
                 try {
                     gameOperationLock.close();
@@ -241,6 +259,9 @@ public final class FileModInstallationTransaction implements AutoCloseable {
             }
         }
         try {
+            if (!Files.isRegularFile(journalPath)) {
+                FileUtil.requireNoTransactionBackups(temporaryDirectory);
+            }
             cleanupDirectory(temporaryDirectory);
             releaseDirectoryLock();
         } catch (IOException e) {
@@ -287,6 +308,10 @@ public final class FileModInstallationTransaction implements AutoCloseable {
     }
 
     public static void recoverIncompleteTransactions(Path gameDirectory) throws IOException {
+        recoverIncompleteTransactions(gameDirectory, null);
+    }
+
+    public static void recoverIncompleteTransactions(Path gameDirectory, InstanceOperationSession session) throws IOException {
         Path gameRoot = gameDirectory.toAbsolutePath().normalize();
         Path gameParent = gameRoot.getParent();
         if (gameParent != null) {
@@ -295,6 +320,15 @@ public final class FileModInstallationTransaction implements AutoCloseable {
         Path transactionRoot = gameRoot.resolve(TRANSACTIONS_DIRECTORY);
         FileUtil.validateExistingAncestors(gameRoot, transactionRoot);
         if (!Files.isDirectory(transactionRoot)) {
+            return;
+        }
+        if (session != null) {
+            try (var borrowed = session.borrowMutation(session.instanceId(), gameRoot)) {
+                if (GameProcessMarker.isRunning(gameRoot)) {
+                    throw new IOException("Instance is running; cannot recover mod transactions: " + gameRoot);
+                }
+                recoverTransactionsLocked(gameRoot, transactionRoot);
+            }
             return;
         }
         try (InstanceOperationLease gameLock =
@@ -327,6 +361,7 @@ public final class FileModInstallationTransaction implements AutoCloseable {
     private static void recoverDirectory(Path gameRoot, Path directory) throws IOException {
         Path journalPath = directory.resolve(JOURNAL_FILE);
         if (!Files.isRegularFile(journalPath)) {
+            FileUtil.requireUnstartedTransaction(directory, java.util.Set.of("downloads"));
             cleanupDirectory(directory);
             return;
         }
@@ -425,6 +460,15 @@ public final class FileModInstallationTransaction implements AutoCloseable {
 
     private void releaseDirectoryLock() throws IOException {
         IOException failure = null;
+        if (sessionBorrow != null) {
+            try {
+                sessionBorrow.close();
+            } catch (IOException error) {
+                failure = error;
+            } finally {
+                sessionBorrow = null;
+            }
+        }
         if (gameOperationLock != null) {
             try {
                 gameOperationLock.close();

@@ -7,14 +7,15 @@ import java.util.Locale;
  *
  * <p>Values are recomputed on every call instead of being cached, so tests that substitute
  * {@code os.name} keep working. Supported platforms are Windows, macOS and Linux; unknown
- * platforms keep the historical Windows assumption because ECL ships as a Windows application.</p>
+ * platforms are rejected before selecting platform-specific downloads.</p>
  */
 public final class OperatingSystem {
     private OperatingSystem() {
     }
 
     public static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        String name = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        return name.contains("win") && !name.contains("darwin");
     }
 
     public static boolean isMac() {
@@ -43,7 +44,7 @@ public final class OperatingSystem {
         if (name.contains("linux")) {
             return "linux";
         }
-        return "windows";
+        throw new UnsupportedOperationException("Unsupported operating system: " + rawOsName);
     }
 
     /** OS identifier expected by the Adoptium API: {@code windows}, {@code mac} or {@code linux}. */

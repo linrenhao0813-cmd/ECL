@@ -106,13 +106,13 @@ class SettingsManagerTest {
     }
 
     @Test
-    void migratesTheTemporaryVersionCategoryKey() {
-        settings.addProperty("versionCategory", "SNAPSHOT");
-
-        manager.migrateSettingKey("versionCategory", "versionCategory2");
-
-        assertEquals("SNAPSHOT", manager.getString("versionCategory2", ""));
-        assertFalse(settings.has("versionCategory"));
+    void loadingDoesNotCreateAnUnusedVersionCategoryKey() throws Exception {
+        Path file = tempDir.resolve("legacy-category.json");
+        Files.writeString(file, "{\"versionCategory\":\"SNAPSHOT\"}");
+        SettingsManager loaded = new SettingsManager(file.toFile());
+        loaded.load();
+        assertEquals("absent", loaded.getString("versionCategory2", "absent"));
+        assertEquals("SNAPSHOT", loaded.getString("versionCategory", ""));
     }
 
     @Test
@@ -271,5 +271,21 @@ class SettingsManagerTest {
         manager.migrateToEncrypted("oldToken");
         assertEquals("secret-value", manager.getEncrypted("oldToken"));
         assertFalse(settings.has("oldToken"));
+    }
+
+    @Test
+    void migrateToEncryptedReturnsFalseForMissingValue() {
+        assertFalse(manager.migrateToEncrypted("missingToken"));
+        assertNull(manager.getEncrypted("missingToken"));
+    }
+
+    @Test
+    void migrateToEncryptedRemovesBlankValueWithoutReplacingEncryptedValue() {
+        manager.setEncrypted("oldToken", "saved-secret");
+        manager.setString("oldToken", " ");
+
+        assertTrue(manager.migrateToEncrypted("oldToken"));
+        assertFalse(settings.has("oldToken"));
+        assertEquals("saved-secret", manager.getEncrypted("oldToken"));
     }
 }

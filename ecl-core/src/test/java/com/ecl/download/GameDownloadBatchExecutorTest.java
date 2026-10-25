@@ -37,13 +37,12 @@ class GameDownloadBatchExecutorTest {
 
     @BeforeEach
     void useIsolatedBaseDirectory() throws Exception {
+        org.slf4j.LoggerFactory.getILoggerFactory();
         loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);
-        // Logback keeps <baseDir>/logs/ecl.log open for the whole JVM, so the data root must stay
-        // outside the JUnit temp directory that is deleted after each test.
-        baseDirField.set(null, GameDownloaderTest.isolatedDataRoot().toFile());
+        baseDirField.set(null, temp.resolve("data").toFile());
     }
 
     @AfterEach
@@ -141,7 +140,7 @@ class GameDownloadBatchExecutorTest {
             assertEquals(List.of("", "bytes=8-"), ranges);
             assertArrayEquals(payload, Files.readAllBytes(target));
             try (var files = Files.walk(temp)) {
-                assertEquals(List.of(target), files.filter(Files::isRegularFile).toList());
+                assertEquals(List.of(target), files.filter(Files::isRegularFile).filter(path -> !path.startsWith(temp.resolve("data"))).toList());
             }
         } finally {
             server.stop(0);
@@ -167,7 +166,7 @@ class GameDownloadBatchExecutorTest {
                     () -> new GameDownloadBatchExecutor(executor, 1).downloadSingleVerified(task, null, null));
             assertEquals("original", Files.readString(target));
             try (var files = Files.walk(temp)) {
-                assertEquals(List.of(target), files.filter(Files::isRegularFile).toList());
+                assertEquals(List.of(target), files.filter(Files::isRegularFile).filter(path -> !path.startsWith(temp.resolve("data"))).toList());
             }
         } finally {
             server.stop(0);
@@ -257,6 +256,137 @@ class GameDownloadBatchExecutorTest {
                 "a".repeat(40), "a".repeat(40), 11, 12));
 
         assertConflictingTarget(failure, target);
+    }
+
+    @Test
+    void windowsTargetCaseUsesOnePublicationIdentity() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(com.ecl.util.OperatingSystem.isWindows());
+        var upper = task("https://example.com/a", temp.resolve("Foo.jar"), "a".repeat(40), 12);
+        var lower = task("https://example.com/a", temp.resolve("foo.jar"), "a".repeat(40), 12);
+        assertEquals(1, GameDownloadBatchExecutor.deduplicateByTarget(List.of(upper, lower)).size());
+        Path root = temp.resolve("locks");
+        assertEquals(com.ecl.util.ManagedLockPaths.filePublication(root, upper.target().toPath()),
+                com.ecl.util.ManagedLockPaths.filePublication(root, lower.target().toPath()));
+    }
+
+    @Test
+    void mergesUnknownAndKnownSizeForIdenticalDigest() throws Exception {
+        Path target = temp.resolve("shared.jar");
+        var unknown = task("https://example.com/a", target, "a".repeat(40), -1);
+        var known = task("https://example.com/a", target, "a".repeat(40), 12);
+        var merged = GameDownloadBatchExecutor.deduplicateByTarget(List.of(unknown, known));
+        assertEquals(1, merged.size());
+        assertEquals(12, merged.getFirst().expectedSize());
+    }
+
+    @Test
+    void waitsForPublisherAndReusesItsVerifiedFile() throws Exception {
+        Path target = temp.resolve("shared.jar");
+        byte[] bytes = "published".getBytes(StandardCharsets.UTF_8);
+        Path lockPath = com.ecl.util.ManagedLockPaths.filePublication(
+                ECLConfig.getBaseDir().toPath().resolve(".ecl-download-locks"), target);
+        var lease = com.ecl.util.FileLockLease.tryAcquire(lockPath);
+        var started = new java.util.concurrent.CountDownLatch(1);
+        try {
+            var future = executor.submit(() -> {
+                started.countDown();
+                new GameDownloadBatchExecutor(executor, 1).downloadSingleVerified(
+                        task("http://127.0.0.1:1/unavailable", target, sha1(bytes), bytes.length), null, null);
+                return null;
+            });
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            Thread.sleep(150);
+            assertTrue(!future.isDone(), "a competing publisher must wait");
+            Files.write(target, bytes);
+            lease.close();
+            lease = null;
+            future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertArrayEquals(bytes, Files.readAllBytes(target));
+        } finally {
+            if (lease != null) lease.close();
+        }
+    }
+
+    @Test
+    void publicationWaitCanBeInterruptedAndPreservesExistingTarget() throws Exception {
+        Path target = Files.writeString(temp.resolve("shared.jar"), "old");
+        Path lockPath = com.ecl.util.ManagedLockPaths.filePublication(
+                ECLConfig.getBaseDir().toPath().resolve(".ecl-download-locks"), target);
+        try (var lease = com.ecl.util.FileLockLease.tryAcquire(lockPath)) {
+            var started = new java.util.concurrent.CountDownLatch(1);
+            var outcome = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            Thread worker = new Thread(() -> {
+                started.countDown();
+                try {
+                    new GameDownloadBatchExecutor(executor, 1).downloadSingleVerified(
+                            task("http://127.0.0.1:1/unavailable", target, "a".repeat(40), 3), null, null);
+                } catch (Throwable error) {
+                    outcome.set(error);
+                }
+            });
+            worker.start();
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            Thread.sleep(150);
+            assertTrue(worker.isAlive());
+            worker.interrupt();
+            worker.join(5000);
+            assertTrue(!worker.isAlive());
+            assertTrue(outcome.get() instanceof java.io.InterruptedIOException, String.valueOf(outcome.get()));
+            assertEquals("old", Files.readString(target));
+        }
+    }
+
+    @Test
+    void publicationWaitTimesOutWithoutChangingOldTarget() throws Exception {
+        Path target = Files.writeString(temp.resolve("shared.jar"), "old");
+        Path lockPath = com.ecl.util.ManagedLockPaths.filePublication(
+                ECLConfig.getBaseDir().toPath().resolve(".ecl-download-locks"), target);
+        try (var lease = com.ecl.util.FileLockLease.tryAcquire(lockPath)) {
+            var future = executor.submit(() -> assertThrows(IOException.class,
+                    () -> new GameDownloadBatchExecutor(executor, 1).downloadSingleVerified(
+                            task("http://127.0.0.1:1/unavailable", target, "a".repeat(40), 3), null, null)));
+            IOException failure = future.get(35, java.util.concurrent.TimeUnit.SECONDS);
+            assertTrue(failure.getMessage().contains("Timed out"), failure.getMessage());
+            assertEquals("old", Files.readString(target));
+        }
+    }
+
+    @Test
+    void revalidatesCompetitorsCorruptPublicationInsteadOfReusingIt() throws Exception {
+        Path target = temp.resolve("shared.jar");
+        byte[] bytes = "published".getBytes(StandardCharsets.UTF_8);
+        Path lockPath = com.ecl.util.ManagedLockPaths.filePublication(
+                ECLConfig.getBaseDir().toPath().resolve(".ecl-download-locks"), target);
+        var lease = com.ecl.util.FileLockLease.tryAcquire(lockPath);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicInteger requests = new AtomicInteger();
+        server.createContext("/valid", exchange -> {
+            requests.incrementAndGet();
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        try {
+            var started = new java.util.concurrent.CountDownLatch(1);
+            var future = executor.submit(() -> {
+                started.countDown();
+                new GameDownloadBatchExecutor(executor, 1).downloadSingleVerified(task(
+                        "http://127.0.0.1:" + server.getAddress().getPort() + "/valid", target, sha1(bytes), bytes.length), null, null);
+                return null;
+            });
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            Thread.sleep(150);
+            Files.writeString(target, "bad-bytes");
+            lease.close();
+            lease = null;
+            future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertArrayEquals(bytes, Files.readAllBytes(target));
+            assertEquals(1, requests.get());
+        } finally {
+            if (lease != null) lease.close();
+            server.stop(0);
+        }
     }
 
     private void downloadTogether(Path target, String firstSha1, String secondSha1)

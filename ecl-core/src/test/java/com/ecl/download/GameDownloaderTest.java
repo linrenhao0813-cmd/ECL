@@ -38,11 +38,12 @@ class GameDownloaderTest {
 
     @BeforeEach
     void useIsolatedBaseDirectory() throws Exception {
+        org.slf4j.LoggerFactory.getILoggerFactory();
         loopbackDownloads = TestNetworkPolicy.allowLoopbackArtifactDownloads();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);
-        baseDirField.set(null, isolatedDataRoot().toFile());
+        baseDirField.set(null, temp.resolve("data").toFile());
     }
 
     @AfterEach
@@ -52,18 +53,6 @@ class GameDownloaderTest {
         } finally {
             loopbackDownloads.close();
         }
-    }
-
-    /**
-     * Logback points its file appender at {@code <baseDir>/logs} and keeps the handle open for the
-     * whole JVM, so the data root must not live inside the JUnit temp directory that is deleted
-     * after every test.
-     */
-    static Path isolatedDataRoot() throws IOException {
-        Path root = Path.of(System.getProperty("java.io.tmpdir"), "ecl-download-test",
-                java.util.UUID.randomUUID().toString());
-        Files.createDirectories(root);
-        return root;
     }
 
     @Test
@@ -98,7 +87,8 @@ class GameDownloaderTest {
         });
         server.start();
         AtomicBoolean completed = new AtomicBoolean();
-        try (GameDownloader downloader = new GameDownloader(2)) {
+        try (GameDownloader downloader = new GameDownloader(2, temp.resolve("versions").toFile(),
+                temp.resolve("libraries").toFile(), temp.resolve("assets").toFile())) {
             downloader.setListener(new DownloadListenerAdapter() {
                 @Override
                 public void onComplete() {
@@ -110,12 +100,13 @@ class GameDownloaderTest {
 
             downloader.downloadVersionAsync("test-version", versionUrl).get();
 
-            Path installed = ECLConfig.getVersionsDir().toPath()
+            Path installed = temp.resolve("versions")
                     .resolve("test-version/test-version.jar");
             assertArrayEquals(client, Files.readAllBytes(installed));
             assertTrue(Files.isRegularFile(installed.resolveSibling(
                     ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER)));
             assertTrue(completed.get());
+            assertFalse(Files.exists(ECLConfig.getVersionsDir().toPath().resolve("test-version")));
         } finally {
             server.stop(0);
         }

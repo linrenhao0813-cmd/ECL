@@ -41,6 +41,7 @@ class MrpackInstallerTest {
 
     @BeforeEach
     void useTemporaryBaseDirectory() throws Exception {
+        org.slf4j.LoggerFactory.getILoggerFactory();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
         previousBaseDir = (File) baseDirField.get(null);
@@ -50,6 +51,44 @@ class MrpackInstallerTest {
     @AfterEach
     void restoreBaseDirectory() throws Exception {
         baseDirField.set(null, previousBaseDir);
+    }
+
+    @Test
+    void legacyUpdateRejectsPackContentsTargetingUserSaves() throws Exception {
+        Path initial = tempDir.resolve("user-data-initial.mrpack");
+        writePack(initial, "User Data", "1", "{\"minecraft\":\"1.21.4\"}", Map.of());
+        Path game = tempDir.resolve("user-data-game");
+        MrpackInstaller installer = new MrpackInstaller();
+        var installed = installer.install(initial.toFile(), game.toFile(), "User Data", "project", "v1", null);
+        Path save = installed.instanceDirectory().resolve("saves/world/level.dat");
+        Files.createDirectories(save.getParent());
+        Files.writeString(save, "user world");
+        Path updated = tempDir.resolve("user-data-updated.mrpack");
+        writePack(updated, "User Data", "2", "{\"minecraft\":\"1.21.4\"}", Map.of("saves/world/level.dat", "pack world"));
+        assertThrows(IOException.class, () -> installer.update(updated.toFile(), game.toFile(),
+                installed.profileId(), "project", "v2", null));
+        assertEquals("user world", Files.readString(save));
+    }
+
+    @Test
+    void preparedUpdateRejectsTamperedFileAndManifest() throws Exception {
+        Path initial = tempDir.resolve("tamper-initial.mrpack");
+        writePack(initial, "Tamper", "1", "{\"minecraft\":\"1.21.4\"}", Map.of("mods/a.jar", "old"));
+        Path game = tempDir.resolve("game-tamper");
+        MrpackInstaller installer = new MrpackInstaller();
+        var installed = installer.install(initial.toFile(), game.toFile(), "Tamper", "project", "v1", null);
+        Path update = tempDir.resolve("tamper-next.mrpack");
+        writePack(update, "Tamper", "2", "{\"minecraft\":\"1.21.4\"}", Map.of("mods/a.jar", "new"));
+        Path work = Files.createTempDirectory(ECLConfig.getBaseDir().toPath(), "ecl-modpack-preview-");
+        try (var prepared = installer.prepareUpdate(update.toFile(), game.toFile(), installed.profileId(),
+                "project", "v2", work, null)) {
+            Path staged = prepared.stagedFiles().resolve("mods/a.jar");
+            Files.writeString(staged, "tampered");
+            PackManifest.capture(prepared.stagedFiles(), prepared.packVersion())
+                    .write(prepared.stagedFiles().resolve(PackManifest.FILE_NAME));
+            assertThrows(IOException.class, () -> installer.applyPreparedUpdate(prepared, game.toFile(), () -> false, null));
+            assertEquals("old", Files.readString(installed.instanceDirectory().resolve("mods/a.jar")));
+        }
     }
 
     @Test
@@ -233,7 +272,7 @@ class MrpackInstallerTest {
                     new ModpackUpdateService.PreparedUpdate(update, prepared));
             var draft = recovery.begin(execution);
             assertEquals("user content", Files.readString(userFile));
-            installer.applyPreparedUpdate(prepared, gameRoot.toFile(), () -> false, null);
+            installer.applyPreparedUpdate(prepared, gameRoot.toFile(), () -> false, null, draft.session());
             assertEquals("pack content", Files.readString(userFile));
             recovery.complete(draft);
             assertTrue(recovery.restore(instance.profileId(), instance, versions, gameRoot, Set.of()).restored());
@@ -294,7 +333,7 @@ class MrpackInstallerTest {
     }
 
     @Test
-    void updateReportsMissingManifestAsWarning() throws Exception {
+    void legacyUpdateRejectsMissingOrCorruptManifest() throws Exception {
         Path initial = tempDir.resolve("missing-manifest-initial.mrpack");
         writePack(initial, "Missing Manifest", "1", "{\"minecraft\":\"1.21.4\"}", Map.of("mods/old.jar", "old"));
         Path gameRoot = tempDir.resolve("game-missing-manifest");
@@ -303,13 +342,12 @@ class MrpackInstallerTest {
         Files.delete(installed.instanceDirectory().resolve(PackManifest.FILE_NAME));
         Path updated = tempDir.resolve("missing-manifest-updated.mrpack");
         writePack(updated, "Missing Manifest", "2", "{\"minecraft\":\"1.21.4\"}", Map.of());
-        List<String> warnings = new ArrayList<>();
-        installer.update(updated.toFile(), gameRoot.toFile(), installed.profileId(), "project", "v2", new MrpackInstaller.Listener() {
-            @Override public void onStatus(String message) { }
-            @Override public void onWarning(String message) { warnings.add(message); }
-        });
-        assertTrue(warnings.stream().anyMatch(warning -> warning.contains("未找到旧整合包文件清单")));
-        assertTrue(Files.exists(installed.instanceDirectory().resolve("mods/old.jar")));
+        assertThrows(IOException.class, () -> installer.update(updated.toFile(), gameRoot.toFile(),
+                installed.profileId(), "project", "v2", null));
+        Files.writeString(installed.instanceDirectory().resolve(PackManifest.FILE_NAME), "broken json");
+        assertThrows(IOException.class, () -> installer.update(updated.toFile(), gameRoot.toFile(),
+                installed.profileId(), "project", "v2", null));
+        assertEquals("old", Files.readString(installed.instanceDirectory().resolve("mods/old.jar")));
     }
 
     @Test

@@ -33,6 +33,13 @@ final class AccountManagementPage extends VBox {
         current.getStyleClass().add("account-current");
         getChildren().addAll(ui.createSurface(GuiMessages.get("accounts.current"), null, current),
                 ui.createSurface(GuiMessages.get("accounts.title"), GuiMessages.get("accounts.subtitle"), createEditor()));
+        ui.readMicrosoftAccounts();
+        if (!ui.accountReadError.isBlank()) {
+            Label error = new Label(ui.accountReadError);
+            error.setId("account-read-error");
+            error.setWrapText(true);
+            getChildren().addFirst(error);
+        }
         ui.updateAuthFields();
     }
 
@@ -156,7 +163,7 @@ final class AccountManagementPage extends VBox {
         ui.settingsManager.remove(ECLConfig.KEY_MICROSOFT_PROFILE_UUID);
         ui.settingsManager.remove(ECLConfig.KEY_MICROSOFT_PROFILE_NAME);
         ui.microsoftAccountCombo.setValue(null);
-        ui.microsoftAccountCombo.getItems().setAll(ui.microsoftAccountStore.list());
+        ui.microsoftAccountCombo.getItems().setAll(ui.readMicrosoftAccounts());
         if (ui.microsoftAccountCombo.getItems().isEmpty()) {
             ui.authTypeCombo.setValue(LauncherUI.AUTH_OFFLINE);
         } else {

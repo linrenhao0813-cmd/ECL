@@ -35,6 +35,7 @@ public record ClientLoggingConfig(DownloadObject file, String argument, String r
     /** Fixed directory under the assets root, matching the official launcher layout. */
     public static final String LOG_CONFIG_DIRECTORY = "log_configs";
 
+    private static final long MAX_CONFIG_BYTES = 16L * 1024 * 1024;
     private static final Pattern SHA1 = Pattern.compile("(?i)[0-9a-f]{40}");
 
     public ClientLoggingConfig {
@@ -73,7 +74,7 @@ public record ClientLoggingConfig(DownloadObject file, String argument, String r
             throw new IOException("logging.client.file.sha1 不是合法的 SHA-1: " + id);
         }
         long size = JsonUtil.getLong(fileObject, "size", -1L);
-        if (size <= 0) {
+        if (size <= 0 || size > MAX_CONFIG_BYTES) {
             throw new IOException("logging.client.file.size 必须为正数: " + id);
         }
         String url = JsonUtil.getString(fileObject, "url", "");
@@ -148,6 +149,8 @@ public record ClientLoggingConfig(DownloadObject file, String argument, String r
             FileUtil.moveReplacing(temporary, targetPath);
             return target;
         } finally {
+            Files.deleteIfExists(temporary.resolveSibling(temporary.getFileName() + ".part.meta"));
+            Files.deleteIfExists(temporary.resolveSibling(temporary.getFileName() + ".part"));
             Files.deleteIfExists(temporary);
         }
     }

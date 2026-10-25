@@ -35,6 +35,7 @@ class GameInstallationRepairServiceTest {
 
     @BeforeEach
     void configureIsolatedData() throws Exception {
+        org.slf4j.LoggerFactory.getILoggerFactory();
         loopback = TestNetworkPolicy.allowLoopbackArtifactDownloads();
         baseDirField = ECLConfig.class.getDeclaredField("baseDir");
         baseDirField.setAccessible(true);
@@ -61,6 +62,12 @@ class GameInstallationRepairServiceTest {
         String indexSha1 = sha1(index);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+        var unexpectedRequests = new java.util.concurrent.atomic.AtomicInteger();
+        server.createContext("/", exchange -> {
+            unexpectedRequests.incrementAndGet();
+            exchange.sendResponseHeaders(404, -1);
+            exchange.close();
+        });
         server.createContext("/client.jar", exchange -> {
             exchange.sendResponseHeaders(200, client.length);
             exchange.getResponseBody().write(client);
@@ -84,6 +91,21 @@ class GameInstallationRepairServiceTest {
                 + "\"logging\":{\"client\":{\"argument\":\"-Dlog4j.configurationFile=${path}\",\"file\":{"
                 + "\"id\":\"client.xml\",\"sha1\":\"" + sha1(logging) + "\",\"size\":" + logging.length
                 + ",\"url\":\"" + origin + "/logging.xml\"}}}}";
+        var document = com.google.gson.JsonParser.parseString(metadata).getAsJsonObject();
+        document.getAsJsonArray("libraries").add(com.google.gson.JsonParser.parseString("""
+                {"name":"net.fabricmc:fabric-loader:1","url":"%s/"}
+                """.formatted(origin)));
+        byte[] dependency = "verified-library".getBytes(StandardCharsets.UTF_8);
+        server.createContext("/dependency.jar", exchange -> {
+            exchange.sendResponseHeaders(200, dependency.length);
+            exchange.getResponseBody().write(dependency);
+            exchange.close();
+        });
+        document.getAsJsonArray("libraries").add(com.google.gson.JsonParser.parseString("""
+                {"name":"org.example:library:1","downloads":{"artifact":{"path":"example/library.jar",
+                 "url":"%s/dependency.jar","sha1":"%s","size":%d}}}
+                """.formatted(origin, sha1(dependency), dependency.length)));
+        metadata = document.toString();
         byte[] metadataBytes = metadata.getBytes(StandardCharsets.UTF_8);
         String metadataSha1 = sha1(metadataBytes);
         server.createContext("/version.json", exchange -> {
@@ -92,7 +114,10 @@ class GameInstallationRepairServiceTest {
             exchange.close();
         });
         server.start();
-        Path versionDirectory = ECLConfig.getVersionsDir().toPath().resolve("repair-test");
+        Path versions = temp.resolve("custom-versions");
+        Path libraries = temp.resolve("custom-libraries");
+        Path assets = temp.resolve("custom-assets");
+        Path versionDirectory = versions.resolve("repair-test");
         Files.createDirectories(versionDirectory);
         Files.writeString(versionDirectory.resolve("repair-test.json"), metadata);
         Path gameRoot = temp.resolve("minecraft");
@@ -107,7 +132,7 @@ class GameInstallationRepairServiceTest {
         Files.writeString(save, "user save");
         Files.writeString(config, "user config");
         TestInstance instance = new TestInstance(UUID.randomUUID(), "repair-test", instanceRoot);
-        GameInstallationVerifier.Report before = GameInstallationVerifier.configured().inspect("repair-test");
+        GameInstallationVerifier.Report before = new GameInstallationVerifier(versions, libraries, assets).inspect("repair-test");
         GameInstallationRepairService service = new GameInstallationRepairService(
                 new InstanceOperationCoordinator(), ignored -> false);
         VersionManager.VersionDownloadTarget target = new VersionManager.VersionDownloadTarget(
@@ -119,23 +144,90 @@ class GameInstallationRepairServiceTest {
             try {
                 assertThrows(java.io.IOException.class, () -> service.repair(instance, before, target,
                         downloader, null, () -> false,
-                        ECLConfig.getVersionsDir().toPath(), ECLConfig.getLibrariesDir().toPath(),
-                        ECLConfig.getAssetsDir().toPath(), gameRoot));
+                        versions, libraries, assets, gameRoot));
             } finally {
                 GameProcessMarker.clear(otherInstance, ProcessHandle.current());
             }
             GameInstallationRepairService.Result result = service.repair(instance, before, target,
                     downloader, null, () -> false,
-                    ECLConfig.getVersionsDir().toPath(), ECLConfig.getLibrariesDir().toPath(),
-                    ECLConfig.getAssetsDir().toPath(), gameRoot);
+                    versions, libraries, assets, gameRoot);
 
-            assertTrue(result.after().complete());
+            assertEquals(1, result.unverifiable().size());
+            assertTrue(result.failed().isEmpty(), result.failed().toString());
+            assertEquals("verified-library", Files.readString(libraries.resolve("example/library.jar")));
+            assertTrue(!Files.exists(libraries.resolve("net/fabricmc/fabric-loader/1/fabric-loader-1.jar")));
+            assertTrue(!Files.exists(ECLConfig.getVersionsDir().toPath().resolve("repair-test")));
             assertEquals("patched logging config", Files.readString(
-                    ECLConfig.getAssetsDir().toPath().resolve("log_configs/client.xml")));
+                    assets.resolve("log_configs/client.xml")));
             assertTrue(result.repaired().size() >= 2);
             assertEquals("user mod", Files.readString(mod));
             assertEquals("user save", Files.readString(save));
             assertEquals("user config", Files.readString(config));
+            Path metadataFile = versionDirectory.resolve("repair-test.json");
+            Files.delete(metadataFile);
+            var missingMetadata = service.inspect("repair-test", versions, libraries, assets);
+            var wrongDigest = new VersionManager.VersionDownloadTarget(
+                    "repair-test", "repair-test", origin + "/version.json", "0".repeat(40));
+            var rejected = service.repair(instance, missingMetadata, wrongDigest, downloader, null, () -> false,
+                    versions, libraries, assets, gameRoot);
+            assertEquals(1, rejected.failed().size());
+            assertTrue(!Files.exists(metadataFile));
+            var restored = service.repair(instance, rejected.after(), target, downloader, null, () -> false,
+                    versions, libraries, assets, gameRoot);
+            assertTrue(restored.failed().isEmpty());
+            assertEquals(0, unexpectedRequests.get(), "repair must not fetch undeclared Maven files or .sha1 sidecars");
+            assertEquals(document, com.google.gson.JsonParser.parseString(Files.readString(metadataFile)));
+
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void failedRepairStillReturnsAfterReportAndKeepsCompletionMarker() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+        byte[] client = "valid-client".getBytes(StandardCharsets.UTF_8);
+        byte[] metadata = ("{\"downloads\":{\"client\":{\"url\":\"" + origin
+                + "/good.jar\",\"sha1\":\"" + sha1(client) + "\",\"size\":" + client.length + "}},\"libraries\":["
+                + "{\"name\":\"example:broken:1\",\"downloads\":{\"artifact\":{\"path\":\"broken.jar\",\"url\":\"" + origin
+                + "/broken.jar\",\"sha1\":\"" + "a".repeat(40) + "\",\"size\":3}}}]}")
+                .getBytes(StandardCharsets.UTF_8);
+        server.createContext("/good.jar", exchange -> {
+            exchange.sendResponseHeaders(200, client.length);
+            exchange.getResponseBody().write(client);
+            exchange.close();
+        });
+        server.createContext("/metadata", exchange -> {
+            exchange.sendResponseHeaders(200, metadata.length);
+            exchange.getResponseBody().write(metadata);
+            exchange.close();
+        });
+        server.createContext("/broken.jar", exchange -> {
+            exchange.sendResponseHeaders(404, -1);
+            exchange.close();
+        });
+        server.start();
+        Path versions = ECLConfig.getVersionsDir().toPath();
+        Path libraries = ECLConfig.getLibrariesDir().toPath();
+        Path assets = ECLConfig.getAssetsDir().toPath();
+        Path profile = versions.resolve("broken");
+        Files.createDirectories(profile);
+        Files.write(profile.resolve("broken.json"), metadata);
+        Path marker = Files.writeString(profile.resolve(ECLConfig.VERSION_DOWNLOAD_COMPLETE_MARKER), "complete");
+        TestInstance instance = new TestInstance(UUID.randomUUID(), "broken", profile);
+        var service = new GameInstallationRepairService(new InstanceOperationCoordinator(), ignored -> false);
+        var before = service.inspect("broken", versions, libraries, assets);
+        var target = new VersionManager.VersionDownloadTarget("broken", "broken", origin + "/metadata", sha1(metadata));
+        try (GameDownloader downloader = new GameDownloader(1)) {
+            var result = service.repair(instance, before, target, downloader, null, () -> false,
+                    versions, libraries, assets, temp.resolve("minecraft"));
+            assertTrue(result.after().checks().stream().anyMatch(c -> c.category() == GameInstallationVerifier.Category.LIBRARY
+                    && c.status() == GameInstallationVerifier.Status.MISSING));
+            assertEquals(1, result.failed().size());
+            assertTrue(result.repaired().stream().anyMatch(c -> c.category() == GameInstallationVerifier.Category.CLIENT));
+            assertEquals("valid-client", Files.readString(profile.resolve("broken.jar")));
+            assertEquals("complete", Files.readString(marker));
         } finally {
             server.stop(0);
         }

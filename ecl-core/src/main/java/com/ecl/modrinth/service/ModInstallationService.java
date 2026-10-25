@@ -1,6 +1,7 @@
 package com.ecl.modrinth.service;
 
 import com.ecl.launch.GameProcessMarker;
+import com.ecl.operation.InstanceOperationSession;
 
 import com.ecl.modrinth.api.ModConflictException;
 import com.ecl.modrinth.api.ModInstallationException;
@@ -62,34 +63,40 @@ public final class ModInstallationService {
             ModInstallationPlan plan,
             Consumer<ModDownloadProgress> progressListener
     ) {
+        return install(plan, progressListener, null);
+    }
+
+    public CompletableFuture<ModInstallationResult> install(
+            ModInstallationPlan plan, Consumer<ModDownloadProgress> progressListener, InstanceOperationSession session) {
         Objects.requireNonNull(plan, "plan");
         if (!plan.installable()) {
             return CompletableFuture.failedFuture(new ModConflictException(
                     "安装计划包含 " + plan.conflicts().size() + " 个未解决冲突"));
         }
         return CompletableFuture.supplyAsync(
-                () -> installBlocking(plan, progressListener), orchestrationExecutor);
+                () -> installBlocking(plan, progressListener, session), orchestrationExecutor);
     }
 
     private ModInstallationResult installBlocking(
             ModInstallationPlan plan,
-            Consumer<ModDownloadProgress> progressListener
+            Consumer<ModDownloadProgress> progressListener, InstanceOperationSession session
     ) {
         ModInstanceContext instance = plan.instance();
         if (instanceRunning.test(instance.instanceId())) {
             throw new ModInstallationException("实例正在运行，不能修改模组文件");
         }
-        try (AutoCloseable ignored = operationLock.acquire(instance.instanceId())) {
+        try (AutoCloseable ignored = session == null ? operationLock.acquire(instance.instanceId())
+                : session.borrow(instance.instanceId(), instance.gameDirectory())) {
             if (instanceRunning.test(instance.instanceId()) || GameProcessMarker.isRunning(instance.gameDirectory())) {
                 throw new ModInstallationException("实例正在运行，不能修改模组文件");
             }
             checkCancelled();
             prepareDirectoriesAndSpace(plan);
-            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory());
+            FileModInstallationTransaction.recoverIncompleteTransactions(instance.gameDirectory(), session);
             List<InstalledMod> existing = repository.findAll(instance);
 
             try (FileModInstallationTransaction transaction =
-                         new FileModInstallationTransaction(instance.gameDirectory())) {
+                         new FileModInstallationTransaction(instance.gameDirectory(), session)) {
                 Path downloadsDirectory = transaction.temporaryDirectory().resolve("downloads");
                 Files.createDirectories(downloadsDirectory);
                 List<ModDownloadRequest> requests = createRequests(plan.files(), downloadsDirectory);

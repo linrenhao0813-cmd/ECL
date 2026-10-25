@@ -72,6 +72,12 @@ public final class OfflineSkinStore {
                                          MinecraftSkinService.Variant variant) throws IOException {
         MinecraftSkinService.SkinImage skin = new MinecraftSkinService().inspect(png);
         Files.createDirectories(skinsDir);
+        JsonObject index;
+        try {
+            index = readIndexForWrite();
+        } catch (IOException failure) {
+            throw new AuthException("无法读取或保留皮肤索引文件", failure);
+        }
         String fileName = sha1Hex(identity.toLowerCase(Locale.ROOT)) + ".png";
         Path target = skinsDir.resolve(fileName);
         MinecraftSkinService.Variant selected =
@@ -86,7 +92,6 @@ public final class OfflineSkinStore {
             }
             FileUtil.moveReplacing(staged, target);
 
-            JsonObject index = readIndex();
             JsonObject entry = new JsonObject();
             entry.addProperty("file", DIR_NAME + "/" + fileName);
             entry.addProperty("variant", selected.name().toLowerCase(Locale.ROOT));
@@ -182,6 +187,28 @@ public final class OfflineSkinStore {
             LOGGER.warn("Cannot read offline skin index {}; treating it as empty", indexFile, failure);
             return new JsonObject();
         }
+    }
+
+    private JsonObject readIndexForWrite() throws IOException {
+        if (!Files.exists(indexFile)) {
+            return new JsonObject();
+        }
+        try (Reader reader = Files.newBufferedReader(indexFile, StandardCharsets.UTF_8)) {
+            JsonElement root = JsonParser.parseReader(reader);
+            if (root.isJsonObject()) {
+                return root.getAsJsonObject();
+            }
+        } catch (RuntimeException invalid) {
+            LOGGER.warn("Preserving malformed offline skin index before rebuilding it", invalid);
+        }
+        Path backup = Files.createTempFile(baseDir, "skins.json.corrupt-", ".json");
+        try {
+            Files.copy(indexFile, backup, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException failure) {
+            Files.deleteIfExists(backup);
+            throw failure;
+        }
+        return new JsonObject();
     }
 
     private static String normalizeIdentity(String identity) {

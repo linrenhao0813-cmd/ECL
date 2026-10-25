@@ -63,6 +63,64 @@ class ServerManagementPageTest extends ApplicationTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void stopWaitDoesNotOccupySharedExecutorAndTimeoutKeepsRunningState() throws Exception {
+        var processesField = LocalServerManager.class.getDeclaredField("PROCESSES");
+        processesField.setAccessible(true);
+        var processLockField = LocalServerManager.class.getDeclaredField("PROCESS_LOCK");
+        processLockField.setAccessible(true);
+        Object processLock = processLockField.get(null);
+        var processes = (java.util.Map<Path, Process>) processesField.get(null);
+        var executorField = MainController.class.getDeclaredField("backgroundExecutor");
+        executorField.setAccessible(true);
+        Object previousExecutor = executorField.get(ui.controller);
+        var single = java.util.concurrent.Executors.newSingleThreadExecutor();
+        executorField.set(ui.controller, single);
+        Path directory = manager.directory(profile.id());
+        try {
+            for (boolean exits : new boolean[] {false, true}) {
+                var waiting = new java.util.concurrent.CountDownLatch(1);
+                var release = new java.util.concurrent.CountDownLatch(1);
+                Process process = new Process() {
+                    private volatile boolean alive = true;
+                    @Override public java.io.OutputStream getOutputStream() { return new java.io.ByteArrayOutputStream(); }
+                    @Override public java.io.InputStream getInputStream() { return java.io.InputStream.nullInputStream(); }
+                    @Override public java.io.InputStream getErrorStream() { return java.io.InputStream.nullInputStream(); }
+                    @Override public int waitFor() { return 0; }
+                    @Override public int exitValue() { return 0; }
+                    @Override public void destroy() { alive = false; }
+                    @Override public boolean isAlive() { return alive; }
+                    @Override public boolean waitFor(long timeout, TimeUnit unit) throws InterruptedException {
+                        assertFalse(javafx.application.Platform.isFxApplicationThread());
+                        assertEquals(60, unit.toSeconds(timeout));
+                        waiting.countDown();
+                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("test did not release stop");
+                        alive = !exits;
+                        return exits;
+                    }
+                };
+                synchronized (processLock) { processes.put(directory, process); }
+                WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> WaitForAsyncUtils.asyncFx(() ->
+                        !page.lookup("#local-server-stop").isDisabled()).get());
+                interact(() -> ((Button) page.lookup("#local-server-stop")).fire());
+                assertTrue(waiting.await(5, TimeUnit.SECONDS));
+                assertTrue(single.submit(() -> true).get(2, TimeUnit.SECONDS), "stop must leave shared executor free");
+                interact(() -> assertTrue(page.lookup("#local-server-stop").isDisabled()));
+                release.countDown();
+                String expected = GuiMessages.get(exits ? "server.local.stopSent" : "server.local.stopTimedOut");
+                WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> WaitForAsyncUtils.asyncFx(() ->
+                        expected.equals(((javafx.scene.control.Label) page.lookup("#local-server-operation-status")).getText())).get());
+                assertEquals(!exits, manager.isRunning(profile.id()));
+                synchronized (processLock) { processes.remove(directory); }
+            }
+        } finally {
+            synchronized (processLock) { processes.remove(directory); }
+            executorField.set(ui.controller, previousExecutor);
+            single.shutdownNow();
+        }
+    }
+
+    @Test
     void reducedMotionKeepsServerStatusPollingActive() throws Exception {
         java.lang.reflect.Field timerField = ServerManagementPage.class.getDeclaredField("refreshTimer");
         timerField.setAccessible(true);

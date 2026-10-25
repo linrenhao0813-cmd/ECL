@@ -213,4 +213,11 @@ public final class DefaultModUpdateService implements ModUpdateService {
         Objects.requireNonNull(prepared, "prepared");
         return installationService.install(prepared.installationPlan(), null);
     }
+
+    @Override
+    public CompletableFuture<ModInstallationResult> applyPreparedUpdate(
+            PreparedModUpdate prepared, com.ecl.operation.InstanceOperationSession session) {
+        Objects.requireNonNull(prepared, "prepared");
+        return installationService.install(prepared.installationPlan(), null, session);
+    }
 }
