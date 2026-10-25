@@ -8,6 +8,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.layout.HBox;
@@ -66,5 +67,25 @@ final class ModUpdatesPane extends VBox {
         updateSelectedButton.setDisable(busy
                 || list.getSelectionModel().getSelectedItems().isEmpty());
         updateAllButton.setDisable(busy || viewModel.availableUpdates().isEmpty());
+    }
+
+    /** Renderer for available mod updates. */
+    private static final class ModUpdateCell extends ListCell<ModUpdate> {
+        @Override
+        protected void updateItem(ModUpdate update, boolean empty) {
+            super.updateItem(update, empty);
+            if (empty || update == null) {
+                setGraphic(null);
+                setText(null);
+                return;
+            }
+            Label title = new Label(update.installedMod().displayName());
+            title.getStyleClass().add("mod-item-title");
+            Label detail = new Label(update.installedMod().versionNumber() + "  →  "
+                    + update.availableVersion().versionNumber() + "  ·  "
+                    + update.availableVersion().versionType());
+            detail.getStyleClass().add("status-detail");
+            setGraphic(new VBox(3, title, detail));
+        }
     }
 }

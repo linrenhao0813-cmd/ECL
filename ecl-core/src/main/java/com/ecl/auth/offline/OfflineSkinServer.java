@@ -10,8 +10,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * A minimal authlib-injector compatible Yggdrasil server that serves locally imported offline
- * skins to the running game. The protocol, registry, signing, and lease responsibilities live in
- * dedicated package-private collaborators; this class preserves the established integration API.
+ * skins to the running game. Shared leases are owned here; protocol, registry and signing remain
+ * in dedicated package-private collaborators.
  */
 public final class OfflineSkinServer implements AutoCloseable {
     private final HttpServer server;
@@ -30,7 +30,7 @@ public final class OfflineSkinServer implements AutoCloseable {
 
     /** Acquire the process-wide server until the returned lease is closed. */
     static Lease acquire() throws IOException {
-        return new Lease(OfflineSkinServerLeases.acquire());
+        return new Lease(SharedLeases.acquire());
     }
 
     public String baseUrl() { return baseUrl; }
@@ -42,7 +42,7 @@ public final class OfflineSkinServer implements AutoCloseable {
     }
 
     @Override public void close() {
-        OfflineSkinServerLeases.clear(this);
+        SharedLeases.clear(this);
         stopServer();
     }
 
@@ -56,7 +56,7 @@ public final class OfflineSkinServer implements AutoCloseable {
         private Lease(OfflineSkinServer server) { this.server = server; }
         OfflineSkinServer server() { return server; }
         @Override public void close() {
-            if (released.compareAndSet(false, true)) OfflineSkinServerLeases.release(server);
+            if (released.compareAndSet(false, true)) SharedLeases.release(server);
         }
     }
 
@@ -76,5 +76,38 @@ public final class OfflineSkinServer implements AutoCloseable {
 
     static String queryParameter(String query, String name) {
         return OfflineSkinHttpHandler.queryParameter(query, name);
+    }
+
+    /** Serializes ownership of the process-wide shared offline skin server. */
+    private static final class SharedLeases {
+        private static OfflineSkinServer shared;
+        private static int users;
+
+        private SharedLeases() {
+        }
+
+        static synchronized OfflineSkinServer acquire() throws IOException {
+            if (shared == null || shared.isClosed()) {
+                shared = new OfflineSkinServer();
+                users = 0;
+            }
+            users++;
+            return shared;
+        }
+
+        static synchronized void release(OfflineSkinServer server) {
+            if (shared != server || users == 0) return;
+            if (--users == 0) {
+                shared = null;
+                server.stopServer();
+            }
+        }
+
+        static synchronized void clear(OfflineSkinServer server) {
+            if (shared == server) {
+                shared = null;
+                users = 0;
+            }
+        }
     }
 }

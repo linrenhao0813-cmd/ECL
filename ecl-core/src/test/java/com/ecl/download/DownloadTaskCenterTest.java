@@ -19,6 +19,40 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 class DownloadTaskCenterTest {
     @Test
+    void snapshotKeepsTaskStateAfterEntryChanges() {
+        var entry = new DownloadTaskEntry<String>("task", "title", context -> "done");
+        entry.detail = "halfway";
+        entry.progress = 0.5;
+        entry.downloadedBytes = 50;
+        entry.totalBytes = 100;
+        entry.speedBytesPerSecond = 25;
+        entry.attempts = 2;
+        entry.errorMessage = "previous failure";
+        entry.updatedAtMillis = entry.createdAtMillis + 10;
+        var snapshot = entry.snapshot();
+        entry.progress = 1;
+        entry.status = DownloadTaskCenter.Status.COMPLETED;
+
+        assertEquals(new DownloadTaskCenter.TaskSnapshot("task", "title", "halfway",
+                DownloadTaskCenter.Status.QUEUED, 0.5, 50, 100, 25, 2, "previous failure",
+                entry.createdAtMillis, entry.createdAtMillis + 10), snapshot);
+        for (var status : DownloadTaskCenter.Status.values()) {
+            entry.status = status;
+            assertEquals(status == DownloadTaskCenter.Status.COMPLETED
+                    || status == DownloadTaskCenter.Status.FAILED
+                    || status == DownloadTaskCenter.Status.CANCELLED, entry.isTerminal());
+        }
+    }
+
+    @Test
+    void taskFailureMessageUnwrapsAsyncErrorsAndHandlesBlankMessages() {
+        var failure = new java.util.concurrent.CompletionException(new ExecutionException(new IOException("offline")));
+        assertEquals("offline", DownloadTaskEntry.errorMessage(failure));
+        assertEquals("IOException", DownloadTaskEntry.errorMessage(new IOException(" ")));
+        assertEquals("IOException", DownloadTaskEntry.errorMessage(new IOException()));
+    }
+
+    @Test
     void completionHandlerFollowsRetriesAndBlocksOldAttempts() throws Exception {
         try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
             AtomicInteger attempts = new AtomicInteger();

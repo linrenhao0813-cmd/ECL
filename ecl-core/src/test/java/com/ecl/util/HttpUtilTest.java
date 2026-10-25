@@ -36,6 +36,37 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 class HttpUtilTest {
 
     @Test
+    void sourceNotificationsPreserveArgumentsAndAllowMissingObservers() {
+        var failure = new IOException("offline");
+        String candidate = "https://example.invalid/file";
+        var sourceEvents = new AtomicInteger();
+        var failureEvents = new AtomicInteger();
+        var callback = new HttpUtil.SourceCallback() {
+            @Override
+            public void onSource(String originalUrl, String candidateUrl, boolean mirror, String sourceName) {
+                assertEquals("original", originalUrl);
+                assertEquals(candidate, candidateUrl);
+                assertTrue(mirror);
+                assertEquals(DownloadSourceUtil.sourceName(candidate), sourceName);
+                sourceEvents.incrementAndGet();
+            }
+
+            @Override
+            public void onFailure(String candidateUrl, IOException error) {
+                assertEquals(candidate, candidateUrl);
+                assertSame(failure, error);
+                failureEvents.incrementAndGet();
+            }
+        };
+        ResumableFileDownloader.notifySource(null, "original", candidate, true);
+        ResumableFileDownloader.notifyFailure(null, candidate, failure);
+        ResumableFileDownloader.notifySource(callback, "original", candidate, true);
+        ResumableFileDownloader.notifyFailure(callback, candidate, failure);
+        assertEquals(1, sourceEvents.get());
+        assertEquals(1, failureEvents.get());
+    }
+
+    @Test
     void timesOutAStalledBodyAfterReceivingHeaders() {
         CountDownLatch release = new CountDownLatch(1);
         server.createContext("/stalled", exchange -> {
@@ -336,7 +367,7 @@ class HttpUtilTest {
 
         List<String> ordered = ResumableFileDownloader.prioritizeResumeSource(
                 List.of(official, mirror),
-                new PartialDownloadMetadata(mirror, "\"version-1\"", ""));
+                new ResumableFileDownloader.PartialDownloadMetadata(mirror, "\"version-1\"", ""));
 
         assertEquals(List.of(mirror, official), ordered);
     }

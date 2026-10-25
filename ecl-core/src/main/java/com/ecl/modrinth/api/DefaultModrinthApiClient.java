@@ -416,4 +416,15 @@ public final class DefaultModrinthApiClient implements ModrinthApiClient {
 
     private record CacheEntry(HttpUtil.Response response, Instant expiresAt) {
     }
+
+    @FunctionalInterface
+    interface ModrinthHttpTransport {
+        CompletableFuture<HttpUtil.Response> send(
+                String method,
+                URI uri,
+                String body,
+                Map<String, String> headers,
+                Duration timeout
+        );
+    }
 }

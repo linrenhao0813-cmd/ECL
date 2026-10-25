@@ -366,7 +366,7 @@ GUI 读取降级不会改写该文件；新增账户与迁移仍拒绝无效库�
 无可用校验标记或来源改变时从头下载；已完成但大小或 SHA-1 校验失败的暂存文件被删除。
 升级前版本遗留的 `<正式目标>.part` / `.part.meta` 没有稳定的来源关联，不迁移、不复用，也不自动删除；新重试仅使用 `.ecl-downloads/` 下的受校验断点。客户端日志配置使用随机临时文件，失败、取消或完成后清理其 `.part` / `.part.meta`，不会将它们作为下一次续传来源。
 
-| `.part.meta` JSON 键 | 来源（`PartialDownloadMetadata` record 组件） | 含义 |
+| `.part.meta` JSON 键 | 来源（`ResumableFileDownloader.PartialDownloadMetadata` record 组件） | 含义 |
 | --- | --- | --- |
 | `source` | `source` | 实际下载候选 URL，仅向相同来源请求续传 |
 | `etag` | `etag` | 响应 ETag，优先用作 If-Range 校验标记 |

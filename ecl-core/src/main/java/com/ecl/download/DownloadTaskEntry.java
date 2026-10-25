@@ -1,6 +1,8 @@
 package com.ecl.download;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 
@@ -40,5 +42,28 @@ final class DownloadTaskEntry<T> {
         this.operation = operation;
         this.familyCurrent = familyCurrent;
         this.operationFactory = () -> operation;
+    }
+
+    DownloadTaskCenter.TaskSnapshot snapshot() {
+        return new DownloadTaskCenter.TaskSnapshot(id, title, detail, status,
+                progress, downloadedBytes, totalBytes,
+                speedBytesPerSecond, attempts, errorMessage,
+                createdAtMillis, updatedAtMillis);
+    }
+
+    boolean isTerminal() {
+        return status == DownloadTaskCenter.Status.COMPLETED
+                || status == DownloadTaskCenter.Status.FAILED
+                || status == DownloadTaskCenter.Status.CANCELLED;
+    }
+
+    static String errorMessage(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null
+                && (current instanceof CompletionException || current instanceof ExecutionException)) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
     }
 }

@@ -114,7 +114,7 @@ public class HttpUtil {
             throws IOException {
         try (DownloadConcurrencyGate.Permit ignored = DownloadConcurrencyGate.acquire()) {
             ResumableFileDownloader.download(
-                    urlStr, target, null, adapt(callback), Long.MAX_VALUE);
+                    urlStr, target, null, callback, Long.MAX_VALUE);
         }
     }
 
@@ -127,8 +127,8 @@ public class HttpUtil {
             String urlStr, File target, ProgressCallback callback,
             SourceCallback sourceCallback) throws IOException {
         try (DownloadConcurrencyGate.Permit ignored = DownloadConcurrencyGate.acquire()) {
-            ResumableFileDownloader.download(urlStr, target, adapt(callback),
-                    adapt(sourceCallback), Long.MAX_VALUE);
+            ResumableFileDownloader.download(urlStr, target, callback,
+                    sourceCallback, Long.MAX_VALUE);
         }
     }
 
@@ -145,8 +145,8 @@ public class HttpUtil {
             SourceCallback sourceCallback, long maxBytes, Set<String> allowedHosts)
             throws IOException {
         try (DownloadConcurrencyGate.Permit ignored = DownloadConcurrencyGate.acquire()) {
-            ResumableFileDownloader.download(urlStr, target, adapt(callback),
-                    adapt(sourceCallback), maxBytes, DownloadRateLimiter.defaultLimiter(), allowedHosts);
+            ResumableFileDownloader.download(urlStr, target, callback,
+                    sourceCallback, maxBytes, DownloadRateLimiter.defaultLimiter(), allowedHosts);
         }
     }
 
@@ -164,46 +164,6 @@ public class HttpUtil {
 
     static String readStream(InputStream inputStream) throws IOException {
         return HttpRequestExecutor.readStream(inputStream);
-    }
-
-    private static DownloadProgressCallback adapt(ProgressCallback callback) {
-        if (callback == null) {
-            return null;
-        }
-        return new DownloadProgressCallback() {
-            @Override
-            public void onStart(long total) {
-                callback.onStart(total);
-            }
-
-            @Override
-            public void onProgress(long downloaded, long total) {
-                callback.onProgress(downloaded, total);
-            }
-
-            @Override
-            public void onComplete(File file) {
-                callback.onComplete(file);
-            }
-        };
-    }
-
-    private static DownloadSourceCallback adapt(SourceCallback callback) {
-        if (callback == null) {
-            return null;
-        }
-        return new DownloadSourceCallback() {
-            @Override
-            public void onSource(String originalUrl, String candidateUrl, boolean mirror,
-                                 String sourceName) {
-                callback.onSource(originalUrl, candidateUrl, mirror, sourceName);
-            }
-
-            @Override
-            public void onFailure(String candidateUrl, IOException error) {
-                callback.onFailure(candidateUrl, error);
-            }
-        };
     }
 
     public record Response(int statusCode, String body, String url,

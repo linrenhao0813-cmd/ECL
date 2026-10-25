@@ -250,7 +250,7 @@ class DefaultModrinthApiClientTest {
                 Duration.ofSeconds(30), maxAttempts, Duration.ofMillis(1));
         ObjectMapper mapper = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        ModrinthHttpTransport transport = (method, uri, body, headers, timeout) ->
+        DefaultModrinthApiClient.ModrinthHttpTransport transport = (method, uri, body, headers, timeout) ->
                 HttpUtil.requestAsync(method, uri.toString(), body == null ? null : "application/json",
                         body, headers, timeout);
         return new DefaultModrinthApiClient(configuration, mapper, transport, scheduler);

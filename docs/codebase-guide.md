@@ -1,6 +1,6 @@
 # 源码阅读指南
 
-> 最后同步：2026-10-22 · 对应版本 `1.0.2beta`（包含旧版资源、日志配置与依赖解析修复）。
+> 最后同步：2026-10-25 · 对应版本 `1.0.2beta`（包含同职责专用实现的文件合并）。
 > 新增或调整功能时，请同步更新本文件、“数据格式说明”（`docs/data-formats.md`）与 README 对应章节。
 
 ## 从入口开始
@@ -70,6 +70,19 @@ Gradle 依赖方向为 `ecl-boot` → `ecl-gui` → `ecl-core`（`ecl-boot` 同�
 `SettingsManager.migrateToEncrypted` 在同一同步方法内完成旧明文凭据迁移；`GameDownloader` 直接调用
 `InstallHelpers.needsDownload` 判断文件是否需要下载。`ModBrowserView` 的分类选项为私有 record，
 批量更新直接使用 `SequentialBatchRunner`，由执行器保存选择列表的不可变副本。
+
+## 同一职责的文件合并
+
+- `download/DownloadTaskEntry.java`：任务可变状态、只读快照、终态判断与异步错误消息；替代原 `DownloadTaskSnapshots`。调度和执行仍分别由 `DownloadTaskCenter`、`DownloadTaskExecutor` 负责。
+- `util/HttpUtil.java`：保留公开 `ProgressCallback` / `SourceCallback`，断点下载器直接使用；删除重复的内部回调接口和纯转发适配器。源通知辅助与传输实现一起维护。
+- `util/ResumableFileDownloader.java`：断点传输及专用嵌套 record `PartialDownloadMetadata`；磁盘 JSON 键不变。
+- GUI `ui/ContentTarget.java`：内容分类描述与 `create` 工厂；替代原 `ContentTargetFactory`，四类内容及实例目录解析规则不变。
+- `auth/offline/OfflineSkinServer.java`：共享服务生命周期和私有嵌套 `SharedLeases`，协议、签名及角色注册仍独立。
+- `util/HttpRequestExecutor.java`：请求执行和专用嵌套 `ResponseBodyInputStream`，维持正文空闲超时与关闭语义。
+- `modrinth/api/DefaultModrinthApiClient.java`：嵌套 `ModrinthHttpTransport` 只作为该客户端的传输注入点。
+- GUI `modrinth/ui/InstalledModsPane.java` / `ModUpdatesPane.java`：各自包含专用行渲染器，不合并两个列表或后台操作。
+
+单一调用者不自动代表可以合并：加密存储与设置自动保存、微软会话状态与认证流程、整合包路径校验与文件事务、元数据解析与扫描缓存继续独立，分别承担不同规则。
 
 ## 阅读关键流程
 

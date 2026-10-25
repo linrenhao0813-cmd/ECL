@@ -454,6 +454,10 @@ ECL 没有遥测、统计上报或崩溃上传：所有外发请求都由你主�
 
 ## 项目结构
 
+同一职责的专用实现就近维护：下载任务状态与快照位于 `DownloadTaskEntry`，下载直接复用 `HttpUtil.ProgressCallback` / `SourceCallback`，不再维护重复接口和转发适配器，断点元数据为 `ResumableFileDownloader.PartialDownloadMetadata`，内容分类定义与创建位于 `ContentTarget`。调度、线程执行、HTTP 传输、持久化和界面操作仍按职责分开。
+
+离线皮肤服务的共享租约、HTTP 正文超时流、Modrinth HTTP 传输契约及模组列表的专用行渲染器均作为所属类型的嵌套实现维护。
+
 文档索引：
 
 - [源码阅读指南](docs/codebase-guide.md)：从入口到各业务模块的阅读顺序与关键流程。

@@ -37,7 +37,7 @@
 | --- | --- | --- |
 | （根） | 全局常量、目录解析与内存策略 | `ECLConfig`（`KEY_*` `SettingKey`、`getBaseDir`、`calculateAutoMemoryMb`） |
 | `auth` | 账户模型、离线/微软认证、皮肤 | `DefaultAccountService`、`MicrosoftAuth`、`MicrosoftOAuthClient`、`XboxLiveAuthClient`、`MinecraftServicesClient`、`MinecraftSkinService`、`MinecraftProfileSkinService`、`OfflineSkinStore`、`AuthAccount`、`AuthType` |
-| `auth.offline` | 离线皮肤注入（本地 Yggdrasil 兼容服务） | `AuthlibInjectorManager`、`OfflineSkinServer`、`OfflineSkinHttpHandler`、`OfflineSkinInjector`、`OfflineSkinTextureSigner`、`OfflineSkinServerLeases`、`OfflineSkinCharacterRegistry` |
+| `auth.offline` | 离线皮肤注入（本地 Yggdrasil 兼容服务） | `AuthlibInjectorManager`、`OfflineSkinServer`、`OfflineSkinHttpHandler`、`OfflineSkinInjector`、`OfflineSkinTextureSigner`、`OfflineSkinCharacterRegistry` |
 | `backup` | 世界备份创建/恢复/清理 | `WorldBackupService`、`WorldBackupRestorer`、`WorldBackupMetadata`、`BackupEntry` |
 | `config` | 设置持久化与迁移 | `SettingsManager`（含旧明文凭据迁移）、`SettingKey`、`EncryptedSettingsStore`、`SettingsAutoSaveScheduler` |
 | `desktop` | Windows 快捷方式 | `DesktopShortcutService` |
@@ -48,7 +48,7 @@
 | `i18n` | 本地化接口与实现 | `I18n`、`ResourceBundleI18n` |
 | `launch` | 启动参数构建、进程与运行标记 | `DefaultLauncher`、`Launcher`、`LaunchCommandBuilder`、`LaunchOptions`、`LaunchEnvironment`、`NativeLibraryExtractor`、`GameProcess`、`GameProcessMarker`、`ProcessOutputPump`、`BoundedLogBuffer`、`ServerAddress` |
 | `launcher` | 版本管理、加载器安装、服务端安装、崩溃分析 | `VersionManager`、`VersionManifestStore`、`VersionCatalogService`、`VersionProfileResolver`、`LocalVersionProfileScanner`、`ModLoaderInstaller`、`LoaderMetadataClient`、`LoaderUpdateService`、`LoaderProfileWriter`、`ServerInstaller`、`CrashAnalyzer`、`InstallerProcessRunner`、`VersionDownloadTargetResolver` |
-| `modrinth.api` | Modrinth HTTP 客户端与缓存 | `DefaultModrinthApiClient`、`ModrinthApiClient`、`ModrinthApiConfiguration`、`ModrinthHttpTransport`、`ModrinthResponseMapper`、`ModSearchIndex`；DTO 在 `api/dto/` |
+| `modrinth.api` | Modrinth HTTP 客户端与缓存 | `DefaultModrinthApiClient`、`ModrinthApiClient`、`ModrinthApiConfiguration`、`ModrinthResponseMapper`、`ModSearchIndex`；DTO 在 `api/dto/` |
 | `modrinth.download` | 内容文件选择、哈希校验、下载 | `ModrinthDownloader`、`ModFileDownloadService`、`ModrinthFileSelector`、`HashVerifier`、`DownloadUriResolver`、`ModrinthDependencyGuard` |
 | `modrinth.instance` | 实例上下文抽象 | `ModInstanceContext`、`VersionProfileModInstanceContext`、`ModLoader` |
 | `modrinth.model` | 内容与模组模型 | `ModProject`、`ModVersion`、`ModFile`、`InstalledMod`、`ModUpdate`、`ContentProject`、`ContentVersion`、`ReleaseChannel` |
@@ -73,12 +73,14 @@
 | 应用外壳 | `LauncherUI`（继承 `LauncherUIView`）、`LauncherWindowLayout`、`LauncherWindowChrome`、`LauncherThemeManager`、`LauncherNavigationRail`、`LauncherInstanceBar`、`LauncherStatusBar`、`LauncherPageRouter` | 固定五区窗口、页面切换动画、语言与主题 |
 | 服务与后台任务 | `MainController` | 创建并持有全部 `ecl-core` 服务、线程池、任务名 MDC；`close()` 按序释放 |
 | UI 外观工具 | `LauncherUiFactory`、`ForestIcons`、`LauncherProgressController`、`RuntimeSummaryPresenter` | 控件构造、图标、进度脉冲 |
-| 页面工厂 | `LauncherPageFactory`、`HomePageFactory`、`ContentLibraryPageFactory`、`ContentTargetFactory`、`LauncherContentBrowser` | 按导航构建页面；`ContentTargetFactory` 目前生成 **4 个**内容分类（模组/光影包/材质包/整合包），服务端下载从“游戏实例 → 服务端”进入 |
+| 页面工厂 | `LauncherPageFactory`、`HomePageFactory`、`ContentLibraryPageFactory`、`LauncherContentBrowser` | 按导航构建页面；`ContentTarget.create` 目前生成 **4 个**内容分类（模组/光影包/材质包/整合包），服务端下载从“游戏实例 → 服务端”进入 |
 | 功能页 | `InstalledInstancesPage`、`InstanceDetailsPane`、`InstanceInstallPage`、`WorldSavesPage`、`WorldSaveExplorer`、`ServerManagementPage`、`ServerBrowserView`、`AccountManagementPage`、`SettingsDialog`、`GlobalGameSettingsPane`、`BackupManagerDialog`、`LoaderInstallDialog`、`CrashDiagnosticDialog`、`FirstRunWizard`、`InstanceLaunchProfileDialog` | 具体页面与弹窗 |
 | 工作流 | `GameLaunchCoordinator` + `GameLaunchPreparation` + `GameProcessMonitor`、`InstanceInstallWorkflow`、`ServerInstallWorkflow`、`InstanceUpdateWorkflow`、`InstanceCheckRepairWorkflow`、`InstanceUpgradeRecoveryWorkflow`、`LauncherLoaderWorkflow`、`LauncherAuthController`、`MicrosoftAccountCoordinator`、`SkinCoordinator`、`LauncherLaunchForm`、`ContentDownloadWorkflow`、`ContentSearchController`、`com.ecl.modrinth.ui.ModInstallWorkflow`、`com.ecl.modrinth.ui.viewmodel.ModBrowserUpdateCoordinator` | 把 UI 事件翻译成服务调用，负责忙状态与完成回调 |
 | 状态与适配 | `InstanceSelectionState`、`InstanceDisplayMetadataCache`、`LauncherPathService`、`VersionActions`、`InstanceVersionCatalog`、`LaunchUiFacade` / `LauncherUiFacadeAdapter`、`SettingsPageGuard`、`DownloadSection`、`ContentTarget`、`ModDropImportHandler`、`LauncherExecutableResolver`、`LauncherDesktopIntegration` | 启动目标状态、路径解析、未保存修改守卫 |
 | 内容库 UI | `com.ecl.modrinth.ui`: `ModBrowserView`、`ModDetailsPane`、`InstalledModsPane`、`ModUpdatesPane`、`MinimalMarkdown`、`RemoteImageLoader`、`ChineseDescriptionService`；`viewmodel`: `ModBrowserViewModel`、`ModBrowserSearchController`、`ModBrowserOperationState`、`InstalledModController`、`ModDependencyBrowserLoader` | 模组浏览、安装、更新与描述渲染 |
 | 服务器 UI | `com.ecl.server`: `ServerStatusService`、`ServerDirectoryService`、`ServerCatalog(Filter)`、`ServerBrowserActions`、`ServerListCell`、`ServerStatusProbeController`、`ServerCategory` | 公开目录与在线状态探测 |
+
+同一职责的专用辅助实现归属其类型：`DownloadTaskEntry` 同时生成任务快照、判断终态和提取错误消息；下载直接复用 `HttpUtil.ProgressCallback` / `SourceCallback`，`ResumableFileDownloader` 负责空值安全通知；`ResumableFileDownloader.PartialDownloadMetadata` 只服务于断点传输；`ContentTarget.create` 与分类描述共同维护。`OfflineSkinServer.SharedLeases` 保留独立的类监视器，避免把共享租约锁混入实例注册锁；`HttpRequestExecutor.ResponseBodyInputStream` 保留正文超时调度器；`DefaultModrinthApiClient.ModrinthHttpTransport` 保留可注入传输契约；`InstalledModsPane.InstalledModCell` 和 `ModUpdatesPane.ModUpdateCell` 只渲染各自列表。合并不跨越调度、执行、传输、存储或 UI 工作流边界。
 
 ## 关键流程
 

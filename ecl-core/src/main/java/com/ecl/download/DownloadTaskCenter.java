@@ -146,7 +146,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
     private boolean pruneRetainedLocked() {
         int finished = 0;
         for (DownloadTaskEntry<?> entry : entries.values()) {
-            if (DownloadTaskSnapshots.isTerminal(entry.status)) {
+            if (entry.isTerminal()) {
                 finished++;
             }
         }
@@ -157,7 +157,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
         var iterator = entries.entrySet().iterator();
         while (iterator.hasNext() && finished > MAX_RETAINED_FINISHED_TASKS) {
             DownloadTaskEntry<?> entry = iterator.next().getValue();
-            if (!DownloadTaskSnapshots.isTerminal(entry.status)) {
+            if (!entry.isTerminal()) {
                 continue;
             }
             iterator.remove();
@@ -171,7 +171,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
         synchronized (lock) {
             List<TaskSnapshot> result = new ArrayList<>(entries.size());
             for (DownloadTaskEntry<?> entry : entries.values()) {
-                result.add(DownloadTaskSnapshots.snapshot(entry));
+                result.add(entry.snapshot());
             }
             return Collections.unmodifiableList(result);
         }
@@ -207,7 +207,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
         synchronized (lock) {
             DownloadTaskEntry<?> requested = entries.get(taskId);
             entry = requested == null ? null : requested.familyCurrent.get();
-            if (entry == null || DownloadTaskSnapshots.isTerminal(entry.status)
+            if (entry == null || entry.isTerminal()
                     || entry.status == Status.CANCELLING) {
                 return false;
             }
@@ -331,7 +331,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
             if (terminalStatus == Status.COMPLETED) {
                 entry.progress = 1;
             } else if (terminalStatus == Status.FAILED) {
-                entry.errorMessage = DownloadTaskSnapshots.errorMessage(error);
+                entry.errorMessage = DownloadTaskEntry.errorMessage(error);
             }
             entry.updatedAtMillis = System.currentTimeMillis();
             runningCount--;
@@ -499,7 +499,7 @@ public final class DownloadTaskCenter implements AutoCloseable {
     private TaskSnapshot snapshotFor(String taskId) {
         synchronized (lock) {
             DownloadTaskEntry<?> entry = entries.get(taskId);
-            return entry == null ? null : DownloadTaskSnapshots.snapshot(entry);
+            return entry == null ? null : entry.snapshot();
         }
     }
 }

@@ -31,6 +31,13 @@
 
 ## 重新生成
 
+2026-10-25 同职责文件合并后，使用 `downloads` 模式重新生成并查看
+`ecl-gui/build/visual-qa/file-consolidation-downloads.png`：游戏实例与模组、光影包、材质包、整合包五个分类入口显示正常。
+四类内容的兼容条件与实例目录映射另由 `ContentTargetTest` 校验；离线快照不作为在线下载验收。
+
+同日扩大合并范围后，使用 `modrinth-en` 模式重新生成并查看
+`ecl-gui/build/visual-qa/file-consolidation-modrinth-en.png`，核对模组浏览页和 Installed / Updates 标签入口；该空列表快照不证明实际模组行或在线更新结果。
+
 在仓库根目录执行：
 
 ```powershell

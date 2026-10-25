@@ -33,19 +33,19 @@ final class ResumableFileDownloader {
     private ResumableFileDownloader() {
     }
 
-    static void download(String url, File target, DownloadProgressCallback progress,
-                         DownloadSourceCallback source, long maxBytes) throws IOException {
+    static void download(String url, File target, HttpUtil.ProgressCallback progress,
+                         HttpUtil.SourceCallback source, long maxBytes) throws IOException {
         download(url, target, progress, source, maxBytes, DownloadRateLimiter.defaultLimiter(), null);
     }
 
-    static void download(String url, File target, DownloadProgressCallback progress,
-                         DownloadSourceCallback source, long maxBytes,
+    static void download(String url, File target, HttpUtil.ProgressCallback progress,
+                         HttpUtil.SourceCallback source, long maxBytes,
                          DownloadRateLimiter limiter) throws IOException {
         download(url, target, progress, source, maxBytes, limiter, null);
     }
 
-    static void download(String url, File target, DownloadProgressCallback progress,
-                         DownloadSourceCallback source, long maxBytes,
+    static void download(String url, File target, HttpUtil.ProgressCallback progress,
+                         HttpUtil.SourceCallback source, long maxBytes,
                          DownloadRateLimiter limiter, Set<String> allowedHosts) throws IOException {
         if (maxBytes < 0) {
             throw new IllegalArgumentException("Download byte limit must not be negative");
@@ -66,7 +66,7 @@ final class ResumableFileDownloader {
         for (String candidate : candidates) {
             DownloadRateLimiter.checkInterrupted();
             boolean mirror = DownloadSourceUtil.isMirror(url, candidate);
-            DownloadSourceCallbacks.notifySource(source, url, candidate, mirror);
+            notifySource(source, url, candidate, mirror);
             try {
                 downloadCandidate(candidate, mirror, target, partial, metadataFile,
                         progress, maxBytes, rateLimiter, allowedHosts);
@@ -74,11 +74,11 @@ final class ResumableFileDownloader {
             } catch (DownloadLimitExceededException failure) {
                 Files.deleteIfExists(partial.toPath());
                 Files.deleteIfExists(metadataFile.toPath());
-                DownloadSourceCallbacks.notifyFailure(source, candidate, failure);
+                notifyFailure(source, candidate, failure);
                 throw failure;
             } catch (IOException failure) {
                 lastError = failure;
-                DownloadSourceCallbacks.notifyFailure(source, candidate, failure);
+                notifyFailure(source, candidate, failure);
                 if (Thread.currentThread().isInterrupted()) {
                     throw failure;
                 }
@@ -106,7 +106,7 @@ final class ResumableFileDownloader {
 
     private static void downloadCandidate(
             String candidate, boolean mirror, File target, File partial, File metadataFile,
-            DownloadProgressCallback progress, long maxBytes, DownloadRateLimiter limiter,
+            HttpUtil.ProgressCallback progress, long maxBytes, DownloadRateLimiter limiter,
             Set<String> allowedHosts)
             throws IOException, InterruptedException {
         PartialDownloadMetadata metadata = readMetadata(metadataFile);
@@ -193,7 +193,7 @@ final class ResumableFileDownloader {
 
     private static boolean handleUnsatisfiedRange(HttpResponse<InputStream> response, ResumeState state,
                                                   File target, File partial, File metadataFile,
-                                                  DownloadProgressCallback progress, long maxBytes,
+                                                  HttpUtil.ProgressCallback progress, long maxBytes,
                                                   String candidate) throws IOException {
         long totalSize = unsatisfiedRangeTotal(response);
         response.body().close();
@@ -244,7 +244,7 @@ final class ResumableFileDownloader {
 
     private static boolean writeResponse(HttpResponse<InputStream> response, String candidate,
                                          boolean mirror, File target, File partial, File metadataFile,
-                                         DownloadProgressCallback progress, long maxBytes,
+                                         HttpUtil.ProgressCallback progress, long maxBytes,
                                          DownloadRateLimiter limiter, ResumeState state)
             throws IOException {
         long responseLength = response.headers().firstValueAsLong("Content-Length").orElse(-1);
@@ -385,7 +385,7 @@ final class ResumableFileDownloader {
 
     private static void copyToFile(
             InputStream input, OutputStream output, long initialBytes, long contentLength,
-            DownloadProgressCallback progress, long maxBytes, DownloadRateLimiter limiter)
+            HttpUtil.ProgressCallback progress, long maxBytes, DownloadRateLimiter limiter)
             throws IOException {
         byte[] buffer = new byte[64 * 1024];
         long totalRead = initialBytes;
@@ -433,6 +433,39 @@ final class ResumableFileDownloader {
     private static final class DownloadLimitExceededException extends IOException {
         private DownloadLimitExceededException(String message) {
             super(message);
+        }
+    }
+
+    /** Validator metadata persisted next to a partial download. */
+    record PartialDownloadMetadata(String source, String etag, String lastModified) {
+        String validator() {
+            return etag == null || etag.isBlank()
+                    ? lastModified == null ? "" : lastModified
+                    : etag;
+        }
+
+        boolean matches(HttpResponse<?> response) {
+            if (etag != null && !etag.isBlank()) {
+                return etag.equals(response.headers().firstValue("ETag").orElse(""));
+            }
+            return lastModified != null && !lastModified.isBlank()
+                    && lastModified.equals(response.headers()
+                    .firstValue("Last-Modified").orElse(""));
+        }
+    }
+
+    static void notifySource(HttpUtil.SourceCallback callback, String originalUrl,
+                             String candidateUrl, boolean mirror) {
+        if (callback != null) {
+            callback.onSource(originalUrl, candidateUrl, mirror,
+                    DownloadSourceUtil.sourceName(candidateUrl));
+        }
+    }
+
+    static void notifyFailure(HttpUtil.SourceCallback callback, String candidateUrl,
+                              IOException error) {
+        if (callback != null) {
+            callback.onFailure(candidateUrl, error);
         }
     }
 }
