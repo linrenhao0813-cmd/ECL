@@ -260,3 +260,17 @@ GUI 文案由 `GuiMessages` 查询，缺键时尝试英文，仍缺失则显示 
 快捷方式由 `LauncherDesktopIntegration.createInstanceShortcut` 在后台调用 `DesktopShortcutService`，结果通过 JavaFX 线程反馈；创建期间保留点击时捕获的实例 ID。
 
 FileUtil.requireUnstartedTransaction / requireNoTransactionBackups 是模组和整合包缺失日志时的保留边界；不得仅以 journal.json 不存在推断事务从未改动目标。校验器的 instancesRoot 指实际游戏根目录的 versions/，与版本元数据根目录分别注入，hint:local 按真实实例目录查找。
+
+## 2026-10-26 整改定位
+
+- `operation/InstanceOperationCoordinator`：可中断的会话排队、30 秒等待期限、超时/中断清理 owner。
+- `backup/WorldBackupMetadata` / `WorldBackupRestorer`：元数据 16 MiB 上限、内容根与路径/重复项/总大小校验、公共安全路径解析；`util/ZipUtil` 在完成时报告真实归档字节数。
+- `util/CryptoKeyStore`：非 Windows 强制安全提供器；旧包装只迁移到提供器格式，不再生成弱包装。
+- `config/SettingsManager.set`：复用 `setAll` 的原生 JSON 类型写入，读取兼容历史字符串。
+- `modrinth/pack/MrpackInstaller` / `DefaultModpackUpdateService`：启动和预览前清理残留，失败日志与准备进度警告；`MrpackPathPolicy` 复用 FileUtil 的祖先检查。
+- `auth/offline/OfflineSkinHttpHandler`：非法 JSON 或非字符串名字返回 400，不记录请求体。
+- `ecl-gui` 的 `ServerManagementPage`：按服务端 ID 跟踪停止等待，持续刷新日志；`InstanceUpdateWorkflow` 取消复用终态收尾；`RemoteImageLoader` 图标并发降为 2。
+- 新增测试 `WorldBackupMetadataTest`、`InstanceOperationLeaseTest`；其他回归扩展到现有协调器、加密、ZIP、下载任务、设置、皮肤和服务端 GUI 测试。逐项依据见 [整改记录](review-remediation-2026-10-26.md)。
+
+实例显示设置的 GUI 缓存通过 `InstanceDisplayMetadataStore.update` 保存单实例；该方法与全表 `save` 共用 `display.json.lock`，锁内重读合并，避免两个启动器的旧缓存互相覆盖。`InstanceDisplayMetadataStoreTest` 覆盖锁忙保留原文件和不同窗口条目的合并/删除。
+压缩限制描述共用 `ZipUtil.ExtractionLimits`；MRPACK 与原生库继续各用原有预算。

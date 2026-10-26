@@ -89,6 +89,28 @@ class GameDownloaderTest {
         AtomicBoolean completed = new AtomicBoolean();
         try (GameDownloader downloader = new GameDownloader(2, temp.resolve("versions").toFile(),
                 temp.resolve("libraries").toFile(), temp.resolve("assets").toFile())) {
+            var firstStarted = new java.util.concurrent.CountDownLatch(1);
+            downloader.setListener(new DownloadListenerAdapter() {
+                @Override
+                public void onComplete() {
+                    throw new AssertionError("cancelled download must not complete");
+                }
+
+                @Override
+                public void onStatus(String message) {
+                    firstStarted.countDown();
+                    try {
+                        new java.util.concurrent.CountDownLatch(1).await(5, java.util.concurrent.TimeUnit.SECONDS);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new java.util.concurrent.CancellationException("first download cancelled");
+                    }
+                }
+            });
+            Future<?> first = downloader.downloadVersionAsync("cancelled", "unused-before-cancellation");
+            assertTrue(firstStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(downloader.cancelDownload());
+            assertTrue(first.isCancelled());
             downloader.setListener(new DownloadListenerAdapter() {
                 @Override
                 public void onComplete() {

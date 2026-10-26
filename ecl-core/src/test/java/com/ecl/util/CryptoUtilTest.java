@@ -127,6 +127,23 @@ class CryptoUtilTest {
     }
 
     @Test
+    void nonWindowsLegacyKeyRequiresProviderAndPreservesOriginal() throws Exception {
+        String originalOs = System.getProperty("os.name");
+        Path keyFile = temp.resolve("secret.key");
+        byte[] original = new byte[32];
+        Files.write(keyFile, original);
+        try {
+            System.setProperty("os.name", "Linux");
+            CryptoKeyStore.setProtectionProvider(null);
+            assertThrows(IllegalStateException.class, () -> CryptoUtil.encrypt("secret"));
+            org.junit.jupiter.api.Assertions.assertArrayEquals(original, Files.readAllBytes(keyFile));
+        } finally {
+            System.setProperty("os.name", originalOs);
+            CryptoKeyStore.setProtectionProvider(null);
+        }
+    }
+
+    @Test
     void localWrappingKeyIncludesStableMachineIdentity() throws Exception {
         byte[] salt = new byte[16];
         System.setProperty("ecl.crypto.machineId", "machine-a");
@@ -156,6 +173,7 @@ class CryptoUtilTest {
         String originalOsName = System.getProperty("os.name");
         try {
             System.setProperty("os.name", "Linux");
+            installTestProtectionProvider();
             System.setProperty("ecl.crypto.machineId", "migration-machine");
             Path keyFile = temp.resolve("secret.key");
             byte[] accountKey = new byte[32];
@@ -173,11 +191,13 @@ class CryptoUtilTest {
 
             String encrypted = CryptoUtil.encrypt("migrated-secret");
 
+            CryptoUtil.resetKeyCache();
             assertEquals("migrated-secret", CryptoUtil.decrypt(encrypted));
             byte[] migrated = Files.readAllBytes(keyFile);
-            assertTrue(new String(migrated, 0, "ECL-LOCAL-3\n".length(),
-                    StandardCharsets.US_ASCII).startsWith("ECL-LOCAL-3"));
+            assertTrue(new String(migrated, 0, "ECL-PROVIDER-1\n".length(),
+                    StandardCharsets.US_ASCII).startsWith("ECL-PROVIDER-1"));
         } finally {
+            CryptoKeyStore.setProtectionProvider(null);
             if (originalOsName == null) {
                 System.clearProperty("os.name");
             } else {
@@ -191,6 +211,7 @@ class CryptoUtilTest {
         String originalOsName = System.getProperty("os.name");
         try {
             System.setProperty("os.name", "Linux");
+            installTestProtectionProvider();
             System.setProperty("ecl.crypto.machineId", "migration-machine");
             Path keyFile = temp.resolve("secret.key");
             byte[] accountKey = new byte[32];
@@ -210,9 +231,10 @@ class CryptoUtilTest {
 
             assertEquals("migrated-secret", CryptoUtil.decrypt(encrypted));
             byte[] migrated = Files.readAllBytes(keyFile);
-            assertTrue(new String(migrated, 0, "ECL-LOCAL-3\n".length(),
-                    StandardCharsets.US_ASCII).startsWith("ECL-LOCAL-3"));
+            assertTrue(new String(migrated, 0, "ECL-PROVIDER-1\n".length(),
+                    StandardCharsets.US_ASCII).startsWith("ECL-PROVIDER-1"));
         } finally {
+            CryptoKeyStore.setProtectionProvider(null);
             if (originalOsName == null) {
                 System.clearProperty("os.name");
             } else {
@@ -220,4 +242,29 @@ class CryptoUtilTest {
             }
         }
     }
+    private static void installTestProtectionProvider() throws Exception {
+        var generator = javax.crypto.KeyGenerator.getInstance("AES");
+        generator.init(256);
+        var secret = generator.generateKey();
+        CryptoKeyStore.setProtectionProvider(new KeyProtectionProvider() {
+            @Override
+            public byte[] protect(byte[] key) throws java.security.GeneralSecurityException {
+                byte[] iv = new byte[12];
+                SecureRandom.getInstanceStrong().nextBytes(iv);
+                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+                cipher.init(Cipher.ENCRYPT_MODE, secret, new GCMParameterSpec(128, iv));
+                byte[] wrapped = cipher.doFinal(key);
+                return ByteBuffer.allocate(iv.length + wrapped.length).put(iv).put(wrapped).array();
+            }
+
+            @Override
+            public byte[] unprotect(byte[] protectedKey) throws java.security.GeneralSecurityException {
+                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+                cipher.init(Cipher.DECRYPT_MODE, secret,
+                        new GCMParameterSpec(128, java.util.Arrays.copyOf(protectedKey, 12)));
+                return cipher.doFinal(protectedKey, 12, protectedKey.length - 12);
+            }
+        });
+    }
+
 }

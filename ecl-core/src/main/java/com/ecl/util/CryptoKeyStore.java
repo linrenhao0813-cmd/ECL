@@ -26,12 +26,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /** Loads and stores the AES key used to protect sensitive launcher data. */
 final class CryptoKeyStore {
-    private static final Logger LOGGER = LoggerFactory.getLogger(CryptoKeyStore.class);
     private static final String ALGORITHM = "AES/GCM/NoPadding";
     private static final int GCM_IV_LENGTH = 12;
     private static final int GCM_TAG_LENGTH = 128;
@@ -53,6 +50,9 @@ final class CryptoKeyStore {
     }
 
     static SecretKey loadOrCreate(boolean create) throws IOException, NoSuchAlgorithmException {
+        if (!isWindows() && protectionProvider == null) {
+            throw new IOException("No secure account key protection provider is configured");
+        }
         SecretKey key = cachedKey;
         if (key != null) {
             return key;
@@ -86,10 +86,9 @@ final class CryptoKeyStore {
                     }
                     key = new SecretKeySpec(encoded, KEY_ALGORITHM);
                     boolean legacyProtection = !startsWith(stored, DPAPI_HEADER)
-                            && !startsWith(stored, LOCAL_HEADER)
                             && !startsWith(stored, PROVIDER_HEADER);
                     if (legacyProtection) {
-                        writeKeyFile(keyPath, encodeMigrationKey(encoded));
+                        writeKeyFile(keyPath, encodeStoredKey(encoded));
                     }
                 } else {
                     if (Files.exists(keyPath, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
@@ -208,21 +207,6 @@ final class CryptoKeyStore {
         }
     }
 
-    /**
-     * Keep old non-Windows installations readable when no keyring provider has been wired yet.
-     * New keys never use this path; the fallback is explicitly weak, logged, and protected with
-     * owner-only file permissions so it can be replaced by a user/OS-secret provider later.
-     */
-    private static byte[] encodeMigrationKey(byte[] key)
-            throws IOException, NoSuchAlgorithmException {
-        if (!isWindows() && protectionProvider == null) {
-            LOGGER.warn("Migrating a legacy account key with the weak local wrapper; configure "
-                    + "a KeyProtectionProvider to use an OS/user secret");
-            return encodeLocalKey(key);
-        }
-        return encodeStoredKey(key);
-    }
-
     private static byte[] decodeStoredKey(byte[] stored)
             throws IOException, NoSuchAlgorithmException {
         if (startsWith(stored, DPAPI_HEADER)) {
@@ -258,29 +242,6 @@ final class CryptoKeyStore {
             return decodeLegacyLocalKey(stored, LOCAL_HEADER_V1, legacyLocalWrappingKey());
         }
         return stored.clone();
-    }
-
-    private static byte[] encodeLocalKey(byte[] key)
-            throws IOException, NoSuchAlgorithmException {
-        try {
-            byte[] salt = new byte[LOCAL_KDF_SALT_LENGTH];
-            byte[] iv = new byte[GCM_IV_LENGTH];
-            SecureRandom.getInstanceStrong().nextBytes(salt);
-            SecureRandom.getInstanceStrong().nextBytes(iv);
-            Cipher cipher = Cipher.getInstance(ALGORITHM);
-            cipher.init(Cipher.ENCRYPT_MODE, localWrappingKey(salt),
-                    new GCMParameterSpec(GCM_TAG_LENGTH, iv));
-            byte[] wrapped = cipher.doFinal(key);
-            ByteBuffer buffer = ByteBuffer.allocate(
-                    LOCAL_HEADER.length + salt.length + iv.length + wrapped.length);
-            buffer.put(LOCAL_HEADER);
-            buffer.put(salt);
-            buffer.put(iv);
-            buffer.put(wrapped);
-            return buffer.array();
-        } catch (GeneralSecurityException failure) {
-            throw new IOException("Unable to protect account key with the local fallback", failure);
-        }
     }
 
     private static byte[] decodeLocalKey(byte[] stored) throws IOException {

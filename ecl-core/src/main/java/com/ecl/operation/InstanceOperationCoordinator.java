@@ -7,8 +7,10 @@ import com.ecl.util.FileUtil;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -33,7 +35,8 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
     /**
      * A dedicated virtual owner preserves legacy thread-bound locking while callers borrow
      * explicitly. {@code wait} selects between queueing behind an in-process owner and reporting
-     * immediately; the inter-process lease is always tried once so a busy instance never blocks.
+     * immediately. Queueing honors interruption and has a 30-second deadline; the inter-process
+     * lease is always tried once.
      */
     private InstanceOperationSession startSession(UUID id, Path gameDirectory, boolean wait)
             throws IOException {
@@ -43,9 +46,9 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
         CompletableFuture<InstanceOperationSession> ready = new CompletableFuture<>();
         CompletableFuture<Void> released = new CompletableFuture<>();
         CountDownLatch finish = new CountDownLatch(1);
-        Thread.ofVirtual().name("ecl-instance-owner").start(() -> {
+        Thread owner = Thread.ofVirtual().name("ecl-instance-owner").start(() -> {
             boolean handedOff = false;
-            try (AutoCloseable local = wait ? acquire(id) : tryAcquire(id)) {
+            try (AutoCloseable local = wait ? acquireInterruptibly(id) : tryAcquire(id)) {
                 if (local == null) {
                     ready.complete(null);
                     return;
@@ -71,8 +74,17 @@ public final class InstanceOperationCoordinator implements InstanceOperationLock
             }
         });
         try {
-            return ready.join();
-        } catch (CompletionException failure) {
+            return ready.get(30, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            finish.countDown();
+            owner.interrupt();
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for instance operation session", interrupted);
+        } catch (TimeoutException timeout) {
+            finish.countDown();
+            owner.interrupt();
+            throw new IOException("Instance is busy; timed out waiting for operation session", timeout);
+        } catch (ExecutionException failure) {
             Throwable cause = failure.getCause() == null ? failure : failure.getCause();
             if (cause instanceof IOException io) throw io;
             throw new IOException("Cannot acquire instance operation session", cause);

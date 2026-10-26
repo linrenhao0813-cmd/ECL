@@ -504,6 +504,30 @@ class MrpackInstallerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void stalePreviewCleanupReportsFailuresAndRetries() throws Exception {
+        Path base = Files.createDirectories(ECLConfig.getBaseDir().toPath());
+        Path stale = Files.createDirectory(base.resolve(MrpackInstaller.PREVIEW_DIRECTORY_PREFIX + "readonly"));
+        Path lockedFile = Files.writeString(stale.resolve("leftover"), "keep");
+        Files.setAttribute(lockedFile, "dos:readonly", true);
+        Files.setLastModifiedTime(stale, java.nio.file.attribute.FileTime.fromMillis(0));
+        List<String> warnings = new ArrayList<>();
+        MrpackInstaller.Listener listener = new MrpackInstaller.Listener() {
+            @Override public void onStatus(String message) { }
+            @Override public void onWarning(String message) { warnings.add(message); }
+        };
+        try {
+            assertEquals(0, MrpackInstaller.cleanStalePreviews(java.time.Duration.ofHours(1), listener));
+            assertTrue(Files.exists(lockedFile));
+            assertFalse(warnings.isEmpty());
+        } finally {
+            Files.setAttribute(lockedFile, "dos:readonly", false);
+        }
+        assertEquals(1, MrpackInstaller.cleanStalePreviews(java.time.Duration.ofHours(1), listener));
+        assertFalse(Files.exists(stale));
+    }
+
+    @Test
     void stalePreviewCleanupRemovesOnlyOldPreviewDirectories() throws Exception {
         Path base = ECLConfig.getBaseDir().toPath();
         Files.createDirectories(base);

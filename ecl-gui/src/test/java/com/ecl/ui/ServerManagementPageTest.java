@@ -94,7 +94,7 @@ class ServerManagementPageTest extends ApplicationTest {
                         assertFalse(javafx.application.Platform.isFxApplicationThread());
                         assertEquals(60, unit.toSeconds(timeout));
                         waiting.countDown();
-                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("test did not release stop");
+                        if (!release.await(15, TimeUnit.SECONDS)) throw new AssertionError("test did not release stop");
                         alive = !exits;
                         return exits;
                     }
@@ -105,7 +105,16 @@ class ServerManagementPageTest extends ApplicationTest {
                 interact(() -> ((Button) page.lookup("#local-server-stop")).fire());
                 assertTrue(waiting.await(5, TimeUnit.SECONDS));
                 assertTrue(single.submit(() -> true).get(2, TimeUnit.SECONDS), "stop must leave shared executor free");
-                interact(() -> assertTrue(page.lookup("#local-server-stop").isDisabled()));
+                interact(() -> {
+                    assertTrue(page.lookup("#local-server-stop").isDisabled());
+                    assertFalse(page.lookup("#local-server-list").isDisabled(), "stop must leave browsing available");
+                    assertEquals(GuiMessages.get("server.local.stopping"),
+                            ((javafx.scene.control.Label) page.lookup("#local-server-operation-status")).getText());
+                });
+                String log = "saving-world-" + exits;
+                Files.writeString(directory.resolve("console.log"), log);
+                WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> WaitForAsyncUtils.asyncFx(() ->
+                        ((javafx.scene.control.TextArea) page.lookup("#local-server-console")).getText().contains(log)).get());
                 release.countDown();
                 String expected = GuiMessages.get(exits ? "server.local.stopSent" : "server.local.stopTimedOut");
                 WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, () -> WaitForAsyncUtils.asyncFx(() ->

@@ -472,14 +472,7 @@ final class InstanceUpdateWorkflow {
 
     private void cancelPreflight() {
         if (!updating || !cancellable) return;
-        generation.incrementAndGet();
-        updating = false;
-        cancellable = false;
-        setCancelVisible(false);
-        progress.setVisible(false);
-        ui.setControlsBusy(false);
-        status.setText(GuiMessages.get("instanceUpdate.preview.cancelled"));
-        updateButton();
+        finishCancelled(generation.incrementAndGet());
     }
 
     private boolean isCurrent(long taskGeneration) {

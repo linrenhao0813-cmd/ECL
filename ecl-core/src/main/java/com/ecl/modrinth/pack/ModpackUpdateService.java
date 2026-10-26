@@ -47,8 +47,9 @@ public interface ModpackUpdateService {
         public void closeQuietly() {
             try {
                 close();
-            } catch (IOException ignored) {
-                // A stale temp directory can be removed on the next startup.
+            } catch (IOException failure) {
+                org.slf4j.LoggerFactory.getLogger(ModpackUpdateService.class)
+                        .warn("Unable to clean prepared modpack preview; cleanup will retry on startup or next preview", failure);
             }
         }
     }

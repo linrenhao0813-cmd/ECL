@@ -28,6 +28,7 @@ import java.util.zip.ZipFile;
 
 /** Installs a Modrinth .mrpack as an isolated, launchable ECL profile. */
 public final class MrpackInstaller {
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(MrpackInstaller.class);
     public interface Listener extends ModLoaderInstaller.Listener {
         default void onWarning(String message) {
             onStatus(message);
@@ -125,6 +126,10 @@ public final class MrpackInstaller {
      * @return the number of removed directories; {@code 0} when none were stale
      */
     public static int cleanStalePreviews(java.time.Duration maxAge) {
+        return cleanStalePreviews(maxAge, null);
+    }
+
+    static int cleanStalePreviews(java.time.Duration maxAge, Listener listener) {
         java.time.Duration age = maxAge == null || maxAge.isNegative() ? STALE_PREVIEW_AGE : maxAge;
         Path base = ECLConfig.getBaseDir().toPath().toAbsolutePath().normalize();
         Path versions = ECLConfig.getVersionsDir().toPath().toAbsolutePath().normalize();
@@ -147,15 +152,23 @@ public final class MrpackInstaller {
                     }
                     if (MrpackPathPolicy.deleteRecursively(child)) {
                         removed++;
+                    } else {
+                        reportCleanupFailure(child, listener, null);
                     }
                 } catch (IOException | RuntimeException unsafeOrBusy) {
-                    // A live preview or an unreadable entry is not our cleanup's problem.
+                    reportCleanupFailure(child, listener, unsafeOrBusy);
                 }
             }
         } catch (IOException | RuntimeException unavailable) {
+            reportCleanupFailure(base, listener, unavailable);
             return removed;
         }
         return removed;
+    }
+
+    private static void reportCleanupFailure(Path path, Listener listener, Throwable error) {
+        LOGGER.warn("Unable to clean stale modpack preview {}", path, error);
+        if (listener != null) listener.onWarning(Messages.format("modpack.cleanupFailed", path.getFileName()));
     }
 
     public MrpackInstaller() {

@@ -2,16 +2,13 @@ package com.ecl.modrinth.pack;
 
 import com.ecl.ECLConfig;
 import com.ecl.util.TextUtil;
-import com.sun.jna.platform.win32.Kernel32;
-import com.sun.jna.platform.win32.WinBase;
-import com.sun.jna.platform.win32.WinNT;
+import com.ecl.util.FileUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.InvalidPathException;
 import java.util.UUID;
@@ -120,57 +117,8 @@ final class MrpackPathPolicy {
         return result;
     }
 
-    /**
-     * Checks every existing component without following links. This is deliberately performed
-     * before callers create parent directories, so an archive cannot turn a pre-existing link
-     * into an escape to an arbitrary tree. DOS reparse points include junctions on Windows.
-     */
     static void validateExistingAncestors(Path root, Path candidate) throws IOException {
-        Path normalizedRoot = root.toAbsolutePath().normalize();
-        Path normalizedCandidate = candidate.toAbsolutePath().normalize();
-        if (!normalizedCandidate.startsWith(normalizedRoot)) {
-            throw new IOException("整合包路径越界");
-        }
-        if (Files.exists(normalizedRoot, LinkOption.NOFOLLOW_LINKS)) {
-            checkPathComponent(normalizedRoot, "整合包根目录");
-        }
-        Path current = normalizedRoot;
-        Path relative = normalizedRoot.relativize(normalizedCandidate);
-        for (Path component : relative) {
-            current = current.resolve(component);
-            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
-                checkPathComponent(current, "整合包路径");
-            }
-        }
-        if (Files.exists(normalizedRoot, LinkOption.NOFOLLOW_LINKS)
-                && Files.exists(normalizedCandidate, LinkOption.NOFOLLOW_LINKS)) {
-            try {
-                if (!normalizedCandidate.toRealPath().startsWith(normalizedRoot.toRealPath())) {
-                    throw new IOException("整合包路径解析后越界");
-                }
-            } catch (IOException error) {
-                throw new IOException("无法验证整合包路径", error);
-            }
-        }
-    }
-
-    private static void checkPathComponent(Path path, String label) throws IOException {
-        if (Files.isSymbolicLink(path)) {
-            throw new IOException(label + "不能是符号链接: " + path.getFileName());
-        }
-        if (isWindows()) {
-            int attributes = Kernel32.INSTANCE.GetFileAttributes(path.toString());
-            if (attributes == WinBase.INVALID_FILE_ATTRIBUTES) {
-                throw new IOException("无法读取 Windows 文件属性: " + path);
-            }
-            if ((attributes & WinNT.FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-                throw new IOException(label + "不能是 Windows reparse point: " + path.getFileName());
-            }
-        }
-    }
-
-    private static boolean isWindows() {
-        return com.ecl.util.OperatingSystem.isWindows();
+        FileUtil.validateExistingAncestors(root, candidate);
     }
 
     private static boolean isWindowsReservedName(String value) {

@@ -45,7 +45,7 @@ public final class RemoteImageLoader {
     private static final int MAX_DISK_CACHE_ENTRIES = 512;
     private static final Set<String> MODRINTH_ICON_HOSTS = Set.of("cdn.modrinth.com");
     private static final ExecutorService EXECUTOR =
-            Executors.newFixedThreadPool(8, ThreadFactories.daemon("ecl-remote-image"));
+            Executors.newFixedThreadPool(2, ThreadFactories.daemon("ecl-remote-image"));
     private static final BoundedCache<String, CompletableFuture<Image>> CACHE =
             new BoundedCache<>(MAX_MEMORY_CACHE_ENTRIES);
     private static final Image LOADING = placeholder(Color.web("#E5E7EB"), Color.web("#9CA3AF"));

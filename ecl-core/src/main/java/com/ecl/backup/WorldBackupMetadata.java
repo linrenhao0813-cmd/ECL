@@ -1,13 +1,14 @@
 package com.ecl.backup;
 
 import com.ecl.util.GsonProvider;
+import com.ecl.util.FileUtil;
 import com.ecl.util.TextUtil;
 import com.ecl.util.ZipUtil;
 import com.google.gson.JsonParseException;
 
 import java.io.IOException;
-import java.io.Reader;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -21,6 +22,7 @@ import java.util.Objects;
 /** Owns backup metadata, archive naming, and managed-path validation. */
 final class WorldBackupMetadata {
     static final int METADATA_VERSION = 1;
+    private static final long MAX_METADATA_BYTES = 16L * 1024 * 1024;
 
     private final Path backupRoot;
 
@@ -55,6 +57,7 @@ final class WorldBackupMetadata {
     BackupEntry readEntry(Path archivePath, String expectedProfileId) throws IOException {
         Path archive = validateManagedArchive(archivePath, expectedProfileId);
         Path metadataPath = metadataPath(archive);
+        FileUtil.validateExistingAncestors(backupRoot, metadataPath);
         if (!Files.isRegularFile(metadataPath)) {
             throw new IOException("Backup metadata is missing: " + metadataPath.getFileName());
         }
@@ -62,9 +65,14 @@ final class WorldBackupMetadata {
             throw new IOException("Backup metadata cannot be a symbolic link: "
                     + metadataPath.getFileName());
         }
+        if (Files.size(metadataPath) > MAX_METADATA_BYTES) {
+            throw new IOException("Backup metadata is too large");
+        }
         BackupMetadata metadata;
-        try (Reader reader = Files.newBufferedReader(metadataPath)) {
-            metadata = GsonProvider.compact().fromJson(reader, BackupMetadata.class);
+        try (var input = Files.newInputStream(metadataPath)) {
+            byte[] bytes = input.readNBytes((int) MAX_METADATA_BYTES + 1);
+            if (bytes.length > MAX_METADATA_BYTES) throw new IOException("Backup metadata is too large");
+            metadata = GsonProvider.compact().fromJson(new String(bytes, StandardCharsets.UTF_8), BackupMetadata.class);
         } catch (JsonParseException error) {
             throw new IOException("Backup metadata is invalid: " + metadataPath.getFileName(), error);
         }
@@ -91,9 +99,22 @@ final class WorldBackupMetadata {
         if (!included.contains(BackupEntry.Content.SAVES)) {
             throw new IOException("Backup metadata does not include saves");
         }
+        if (metadata.files() != null && metadata.files().stream().anyMatch(Objects::isNull)) {
+            throw new IOException("Backup metadata contains a null file entry");
+        }
         List<BackupEntry.FileEntry> files = metadata.files() == null
                 ? List.of() : List.copyOf(metadata.files());
-        long computedSize = files.stream().mapToLong(BackupEntry.FileEntry::size).sum();
+        long computedSize = 0;
+        var paths = new java.util.HashSet<Path>();
+        for (BackupEntry.FileEntry file : files) {
+            Path resolved = FileUtil.safeArchiveEntry(backupRoot, file.path());
+            String rootName = firstArchiveSegment(backupRoot.relativize(resolved).toString());
+            if (included.stream().noneMatch(content -> content.directoryName().equals(rootName))
+                    || !paths.add(resolved) || file.size() > Long.MAX_VALUE - computedSize) {
+                throw new IOException("Backup metadata contains invalid or duplicate file: " + file.path());
+            }
+            computedSize += file.size();
+        }
         if (computedSize != metadata.uncompressedSize()) {
             throw new IOException("Backup metadata size is inconsistent");
         }
@@ -141,7 +162,7 @@ final class WorldBackupMetadata {
             throw new IOException("Backup file list or sizes do not match metadata");
         }
         for (BackupEntry.Content content : backup.includedContent()) {
-            Path root = safeChild(stagedContent, content.directoryName());
+            Path root = FileUtil.safeArchiveEntry(stagedContent, content.directoryName());
             if (!Files.isDirectory(root)) {
                 throw new IOException("Backup is missing content root: " + content.directoryName());
             }
@@ -152,6 +173,7 @@ final class WorldBackupMetadata {
         Path directory = backupDirectory(requireProfileId(profileId));
         Path archive = Objects.requireNonNull(archivePath, "archivePath")
                 .toAbsolutePath().normalize();
+        FileUtil.validateExistingAncestors(backupRoot, archive);
         if (!archive.startsWith(directory) || !archive.getParent().equals(directory)
                 || !archive.getFileName().toString().endsWith(".zip")) {
             throw new IOException("Backup archive is outside the managed directory: " + archive);
@@ -197,15 +219,6 @@ final class WorldBackupMetadata {
             throw new IOException("Backup entry has no content root: " + path);
         }
         return root;
-    }
-
-    private Path safeChild(Path root, String child) throws IOException {
-        Path normalizedRoot = root.toAbsolutePath().normalize();
-        Path result = normalizedRoot.resolve(child).normalize();
-        if (!result.startsWith(normalizedRoot) || result.equals(normalizedRoot)) {
-            throw new IOException("Path escapes restore root: " + child);
-        }
-        return result;
     }
 
     record BackupMetadata(int schemaVersion, String profileId, String sourceVersion,

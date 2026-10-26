@@ -35,17 +35,10 @@ final class InstanceDisplayMetadataCache {
 
     /** Persists one entry and keeps the cache in sync. */
     void put(InstanceDisplayMetadata entry) {
-        Map<String, InstanceDisplayMetadata> updated = new LinkedHashMap<>(entries);
-        if (entry.isMeaningful()) {
-            updated.put(entry.profileId(), entry);
-        } else {
-            updated.remove(entry.profileId());
-        }
         try {
-            controller.instanceDisplayMetadata().save(updated);
+            entries = new LinkedHashMap<>(controller.instanceDisplayMetadata().update(entry));
         } catch (IOException error) {
             throw new IllegalStateException("无法保存实例显示设置", error);
         }
-        entries = updated;
     }
 }

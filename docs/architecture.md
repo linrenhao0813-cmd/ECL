@@ -263,3 +263,13 @@ GUI 账户读取边界捕获该错误，展示保留原文件的提示并允许�
 - 外发域名与用途见 README“网络请求与隐私”章节。
 
 模组及整合包事务缺失 journal 时，只清理已知暂存目录和空备份目录；存在备份或未知内容时拒绝恢复并保留现场。活动事务关闭也不会删除缺失日志的回滚备份（FileUtil.requireUnstartedTransaction / requireNoTransactionBackups）。
+
+### 2026-10-26 并发与读取边界整改
+
+`InstanceOperationCoordinator.acquireSession` 的专用 owner 使用 `acquireInterruptibly`，调用方通过最多 30 秒的 `ready.get` 等待；超时或中断时同时释放 finish 信号并中断 owner，避免已经取得但未交付的 session 遗留锁。已交付 session 的借用和延迟释放语义保持不变。
+世界备份元数据读取先限制文件大小并校验清单，恢复工作区和清单路径统一复用 `FileUtil.safeArchiveEntry`；MRPACK 的祖先路径校验也复用 `FileUtil.validateExistingAncestors`。
+非 Windows 账户密钥无安全提供器时直接失败，旧本地包装仅用于有提供器时迁移；不再写入弱包装。
+服务端停止仍由专用虚拟线程等待进程退出，GUI 用按服务端 ID 记录的 `stoppingServers` 禁止重复 stop，持续轮询日志、允许浏览列表；60 秒超时继续报告进程存活，不强杀。升级预检查取消复用 `finishCancelled` 的统一 UI 收尾。
+
+实例显示设置的 GUI 缓存通过 `InstanceDisplayMetadataStore.update` 保存单实例；该方法与全表 `save` 共用 `display.json.lock`，锁内重读合并，避免两个启动器的旧缓存互相覆盖。`InstanceDisplayMetadataStoreTest` 覆盖锁忙保留原文件和不同窗口条目的合并/删除。
+压缩限制描述共用 `ZipUtil.ExtractionLimits`；MRPACK 与原生库继续各用原有预算。

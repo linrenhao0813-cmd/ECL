@@ -86,10 +86,18 @@ final class OfflineSkinHttpHandler implements HttpHandler {
         JsonArray response = new JsonArray();
         try {
             for (var name : JsonParser.parseString(new String(body, StandardCharsets.UTF_8)).getAsJsonArray()) {
+                if (!name.isJsonPrimitive() || !name.getAsJsonPrimitive().isString()) {
+                    throw new IllegalArgumentException("Profile names must be strings");
+                }
                 var character = registry.byName(name.getAsString());
                 if (character != null) response.add(OfflineSkinYggdrasilResponses.simpleProfile(character));
             }
-        } catch (RuntimeException ignored) { }
+        } catch (RuntimeException malformed) {
+            org.slf4j.LoggerFactory.getLogger(OfflineSkinHttpHandler.class)
+                    .debug("Rejected malformed local skin profile request");
+            respond(exchange, 400, "Invalid profile request".getBytes(StandardCharsets.UTF_8), "text/plain");
+            return;
+        }
         respondJson(exchange, 200, response);
     }
 

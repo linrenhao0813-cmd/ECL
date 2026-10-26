@@ -17,6 +17,49 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class InstanceOperationCoordinatorTest {
     @Test
+    void sessionWaitTimesOutAndCanBeAcquiredAfterOriginalOwnerReleases(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+        InstanceOperationCoordinator coordinator = new InstanceOperationCoordinator();
+        UUID id = UUID.randomUUID();
+        try (AutoCloseable held = coordinator.acquire(id)) {
+            var failure = org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(35),
+                    () -> assertThrows(java.io.IOException.class, () -> coordinator.acquireSession(id, directory)));
+            assertTrue(failure.getMessage().contains("busy"));
+        }
+        try (var session = coordinator.acquireSession(id, directory)) {
+            assertNotNull(session);
+        }
+    }
+
+    @Test
+    void cancelledSessionWaiterExitsWithoutLeakingOwnership(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+        InstanceOperationCoordinator coordinator = new InstanceOperationCoordinator();
+        UUID id = UUID.randomUUID();
+        CountDownLatch entered = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean();
+        Thread waiter;
+        try (AutoCloseable held = coordinator.acquire(id)) {
+            waiter = Thread.ofVirtual().start(() -> {
+                entered.countDown();
+                try (var session = coordinator.acquireSession(id, directory)) {
+                    throw new AssertionError("cancelled waiter acquired a session");
+                } catch (java.io.IOException expected) {
+                    interrupted.set(Thread.currentThread().isInterrupted());
+                }
+            });
+            assertTrue(entered.await(1, TimeUnit.SECONDS));
+            waiter.interrupt();
+            waiter.join(2_000);
+            assertFalse(waiter.isAlive(), "session acquisition must honor caller interruption");
+            assertTrue(interrupted.get());
+        }
+        try (var session = coordinator.acquireSession(id, directory)) {
+            assertNotNull(session);
+        }
+    }
+
+    @Test
     void sessionRetainsExclusiveOwnershipAcrossThreadsUntilLastBorrow(
             @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
         InstanceOperationCoordinator coordinator = new InstanceOperationCoordinator();

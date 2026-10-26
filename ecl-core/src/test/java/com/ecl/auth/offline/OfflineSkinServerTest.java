@@ -58,6 +58,15 @@ class OfflineSkinServerTest {
     }
 
     @Test
+    void malformedProfileRequestsReturnBadRequest() throws Exception {
+        for (String body : List.of("{", "{}", "[null]", "[123]", "[\"Steve\",{}]")) {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/profiles/minecraft"))
+                    .POST(HttpRequest.BodyPublishers.ofString(body)).build();
+            assertEquals(400, client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode());
+        }
+    }
+
+    @Test
     void servesMetadataWithSignaturePublicKey() throws Exception {
         HttpResponse<String> response = get("/");
         assertEquals(200, response.statusCode());
@@ -212,14 +221,14 @@ class OfflineSkinServerTest {
     }
 
     @Test
-    void malformedProfileBatchReturnsEmptyList() throws Exception {
+    void malformedProfileBatchReturnsBadRequest() throws Exception {
         HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/profiles/minecraft"))
                 .POST(HttpRequest.BodyPublishers.ofString("not-json"))
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-        assertEquals(200, response.statusCode());
-        assertEquals(0, JsonParser.parseString(response.body()).getAsJsonArray().size());
+        assertEquals(400, response.statusCode());
+        assertEquals("Invalid profile request", response.body());
     }
 
     @Test

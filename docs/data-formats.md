@@ -15,7 +15,7 @@
 
 `SettingsManager.save` 使用同目录 `settings.json.lock` 的 `FileLockLease` 覆盖重读、合并和原子发布；只应用当前对象修改或删除的键。`savedSettings` / `dirtyKeys` 是内存基线与待保存集合，不是 JSON 键。成功后缓存与基线同步到合并结果；失败保留待保存内容，回滚为原值则撤销对应待保存键。损坏文件归档也在该锁内重新读取；锁忙时不归档、不假装加载成功，可稍后重试。锁文件释放后保留，不含设置值。
 
-**存储细节：**`SettingsManager.set(SettingKey<T>)` 实际调用 `setString(key.key(), value.toString())`，因此整数和布尔值也以 JSON 字符串形式保存（例如 `"downloadMaxConcurrent": "8"`、`"backupOnLaunch": "true"`）；读取时按 `SettingKey.type()` 解析，解析失败回退默认值。历史 `versionCategory` / `versionCategory2` 已无消费者；加载设置不再生成新的 `versionCategory2` 键。敏感值使用 `_enc_` 前缀键保存 AES-GCM 密文（`_enc_microsoftRefreshToken` 等），明文键在启动时迁移后删除（`MainController.migrateLegacySecrets`），密钥文件为 `<数据目录>/.secret.key`（Windows 下由 DPAPI 保护，`CryptoKeyStore`）。
+**存储细节：**`SettingsManager.set(SettingKey<T>)` 复用 `setAll` 按值类型保存原生 JSON 字符串、数字、布尔值（例如 `"downloadMaxConcurrent": 8`、`"backupOnLaunch": true`）；读取继续兼容历史字符串表示，按 `SettingKey.type()` 解析，失败回退默认值。历史 `versionCategory` / `versionCategory2` 已无消费者；加载设置不再生成新的 `versionCategory2` 键。敏感值使用 `_enc_` 前缀键保存 AES-GCM 密文（`_enc_microsoftRefreshToken` 等），明文键在启动时迁移后删除（`MainController.migrateLegacySecrets`），密钥文件为 `<数据目录>/.secret.key`（Windows 下由 DPAPI 保护，`CryptoKeyStore`）。
 
 | 键 | 类型 | 默认值 | 来源（`ECLConfig`） | 说明 |
 | --- | --- | --- | --- | --- |
@@ -408,3 +408,12 @@ GUI 读取降级不会改写该文件；新增账户与迁移仍拒绝无效库�
 `ecl-core/src/main/resources/logback.xml` 通过 `LogDirectoryProperty.getPropertyValue()` 获取 `ECLConfig.getBaseDir()` 下的 `logs/`，写入 `ecl.log`，并按 `ecl.<日期>.<序号>.log.gz` 滚动（单文件 5 MB、保留 7 天）。通常为 `%APPDATA%\.ecl\logs`；`APPDATA` 缺失或为空时与数据目录一起回退到 `${user.home}/.ecl/logs`。旧版用户主目录下的历史日志不自动迁移或删除。
 
 模组与整合包事务的 journal.json 缺失且 backups/ 仍有内容时会保留现场并报错，未知事务内容也不会在显式恢复中删除。不要直接清理这些目录；它们可能包含唯一的升级前文件。
+
+## 备份元数据与账户密钥读取约束
+
+世界备份的同名 JSON 对应 `WorldBackupMetadata.BackupMetadata`：`schemaVersion` 必须为 `1`，`profileId` 必须匹配当前实例，`createdAt` 必须为 Instant；`includedContent` 必须包含 `saves`，其他值仅允许 `BackupEntry.Content.directoryName()`。整个文件最多 16 MiB。
+`files` 中每项对应 `BackupEntry.FileEntry(path, size)`：路径必须位于声明的内容根内，不允许越界、盘符、冒号、符号链接或 reparse point，归一化后不能重复；`size` 非负，总和不溢出且必须等于 `uncompressedSize`。恢复仍要求 ZIP 安全解压结果与清单完全一致，校验前不移动原存档。
+
+`.secret.key` 的 Windows 格式仍为 `ECL-DPAPI-1`；非 Windows 新建及迁移使用 `ECL-PROVIDER-1`。历史裸密钥及 `ECL-LOCAL-1/2/3` 只在已配置 `KeyProtectionProvider` 时读取并迁移，不再写出机器信息派生的本地包装；提供器缺失或迁移失败时原文件保留。密钥格式常量和迁移判断见 `CryptoKeyStore`，无新增账户字段。
+
+`instances/display.json.lock` 为 `InstanceDisplayMetadataStore` 的跨进程写入锁，不存业务字段。`update(InstanceDisplayMetadata)` 在锁内重读 `display.json`，只修改或移除该条 `profileId`，保留其他实例条目；GUI 显示缓存使用此入口。锁忙时失败，缓存与用户输入不发布为成功。全表 `save` 也受同一锁保护。

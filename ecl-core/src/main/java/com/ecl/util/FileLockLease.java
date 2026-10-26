@@ -8,7 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
-/** An exclusive cross-process lock whose marker file is removed when the lease closes. */
+/** An exclusive OS lock with a stable rendezvous file retained after the lease closes. */
 public final class FileLockLease implements AutoCloseable {
     private final FileChannel channel;
     private final FileLock lock;

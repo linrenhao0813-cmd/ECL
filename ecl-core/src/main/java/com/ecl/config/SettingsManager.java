@@ -303,7 +303,7 @@ public class SettingsManager {
         if (value == null) {
             remove(key.key());
         } else {
-            setString(key.key(), value.toString());
+            setAll(Map.of(key.key(), value));
         }
     }
 

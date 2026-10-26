@@ -180,7 +180,7 @@ class NativeLibraryExtractorTest {
 
     private static NativeLibraryExtractor.ExtractionBudget budget(long total, long single, int entries) {
         return new NativeLibraryExtractor.ExtractionBudget(
-                new NativeLibraryExtractor.ExtractionLimits(total, single, entries));
+                new com.ecl.util.ZipUtil.ExtractionLimits(total, single, entries, Double.POSITIVE_INFINITY));
     }
 
     private Path writeJar(String name, Map<String, byte[]> entries) throws IOException {

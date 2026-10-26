@@ -117,6 +117,7 @@ public final class DefaultModpackUpdateService implements ModpackUpdateService {
         return CompletableFuture.supplyAsync(() -> {
             Path work = null;
             try {
+                MrpackInstaller.cleanStalePreviews(MrpackInstaller.STALE_PREVIEW_AGE, listener);
                 if (isRunning(update.instance())) {
                     throw new IOException("Instance is running and cannot be inspected for update");
                 }

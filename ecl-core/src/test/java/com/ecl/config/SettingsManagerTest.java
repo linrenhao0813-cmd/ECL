@@ -24,6 +24,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SettingsManagerTest {
     @Test
+    void typedSettingsPersistNativeJsonValuesAndReadLegacyStrings() throws Exception {
+        Path file = tempDir.resolve("typed.json");
+        Files.writeString(file, "{\"number\":\"12\",\"enabled\":\"true\"}");
+        SettingsManager manager = new SettingsManager(file.toFile());
+        var number = new SettingKey<Integer>("number", Integer.class, 0);
+        var enabled = new SettingKey<Boolean>("enabled", Boolean.class, false);
+        assertEquals(12, manager.get(number));
+        assertTrue(manager.get(enabled));
+        manager.set(number, 13);
+        manager.set(enabled, false);
+        assertTrue(manager.save());
+        var json = com.google.gson.JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+        assertTrue(json.getAsJsonPrimitive("number").isNumber());
+        assertTrue(json.getAsJsonPrimitive("enabled").isBoolean());
+    }
+
+    @Test
     void mergesIndependentChangesAndExplicitDeletesAcrossManagers() throws Exception {
         Path file = tempDir.resolve("shared-settings.json");
         Files.writeString(file, "{\"deleted\":\"old\",\"same\":\"old\"}");

@@ -242,6 +242,22 @@ class ModDependencyResolverTest {
     }
 
     @Test
+    void installedFileCacheIsRebuiltForEveryResolution() throws Exception {
+        Files.createDirectories(instance.modsDirectory());
+        Path file = Files.writeString(instance.modsDirectory().resolve("dependency.jar"), "x");
+        ModVersion root = version("root-v1", "root", depProject("dependency", DependencyType.REQUIRED));
+        api.projectVersions.put("dependency", List.of(version("dependency-v1", "dependency")));
+        InstalledMod dependency = installed("dependency", "root", true);
+        DefaultModDependencyResolver resolver = new DefaultModDependencyResolver(
+                api, new DefaultModVersionSelector(), ignored -> List.of(dependency), 16, 32);
+        assertEquals(List.of("root"), resolver.resolve(instance, root).join().installOrder().stream()
+                .map(mod -> mod.version().projectId()).toList());
+        Files.delete(file);
+        assertEquals(List.of("dependency", "root"), resolver.resolve(instance, root).join().installOrder().stream()
+                .map(mod -> mod.version().projectId()).toList());
+    }
+
+    @Test
     void skipsRequiredDependencyDownloadWhenItsFileExistsInModsDirectory() throws Exception {
         Files.createDirectories(instance.modsDirectory());
         Files.writeString(instance.modsDirectory().resolve("dependency.jar"), "x");

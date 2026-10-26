@@ -188,13 +188,7 @@ final class WorldBackupRestorer {
     }
 
     private static Path safeChild(Path root, String child) throws IOException {
-        Path normalizedRoot = root.toAbsolutePath().normalize();
-        Path result = normalizedRoot.resolve(child).normalize();
-        if (!result.startsWith(normalizedRoot) || result.equals(normalizedRoot)) {
-            throw new IOException("Path escapes restore root: " + child);
-        }
-        FileUtil.validateExistingAncestors(normalizedRoot, result);
-        return result;
+        return FileUtil.safeArchiveEntry(root, child);
     }
 
     private record RestoreState(String name, boolean originalExists) { }

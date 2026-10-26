@@ -19,6 +19,31 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 class DownloadTaskCenterTest {
     @Test
+    void cancellationRacingCompletionAlwaysSettlesAndAllowsNextTask() throws Exception {
+        try (DownloadTaskCenter center = new DownloadTaskCenter(1)) {
+            for (int i = 0; i < 100; i++) {
+                CountDownLatch started = new CountDownLatch(1);
+                CountDownLatch finish = new CountDownLatch(1);
+                var task = center.submit("race", context -> {
+                    started.countDown();
+                    finish.await(5, TimeUnit.SECONDS);
+                    return "done";
+                });
+                assertTrue(started.await(5, TimeUnit.SECONDS));
+                Thread canceller = Thread.ofVirtual().start(task::cancel);
+                finish.countDown();
+                canceller.join(2_000);
+                assertFalse(canceller.isAlive());
+                assertEquals("next", center.submit("next", context -> "next").completion().get(5, TimeUnit.SECONDS));
+                assertTrue(task.completion().isDone());
+                var status = task.snapshot().status();
+                assertTrue(status == DownloadTaskCenter.Status.CANCELLED || status == DownloadTaskCenter.Status.COMPLETED);
+                assertEquals(status == DownloadTaskCenter.Status.CANCELLED, task.completion().isCancelled());
+            }
+        }
+    }
+
+    @Test
     void snapshotKeepsTaskStateAfterEntryChanges() {
         var entry = new DownloadTaskEntry<String>("task", "title", context -> "done");
         entry.detail = "halfway";

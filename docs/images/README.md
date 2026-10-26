@@ -64,3 +64,16 @@
 - 在线模式会多等待网络结果；普通离线快照只能验证布局与夹具状态，不能替代真实下载或启动验收。
 - `content-server` 是旧模式名称，现在退回整合包分类；服务端安装入口为“游戏实例 → 服务端”。
 - 新 PNG 是由实际 JavaFX 页面重新渲染生成的，示例实例与路径均属于隔离预览夹具。
+
+## 2026-10-26 整改快照
+
+本轮重新运行 `captureLauncherUi` 并逐张查看下列 1440×736 隔离快照，输出保留在生成目录，不提交 PNG：
+
+| 模式 | 输出 | 核对内容 |
+| --- | --- | --- |
+| `forest` | `ecl-gui/build/visual-qa/repair-forest.png` | 首页实例选择、启动与升级入口 |
+| `local-servers` | `ecl-gui/build/visual-qa/repair-local-servers.png` | 简体中文服务端表单首屏 |
+| `local-servers-en` | `ecl-gui/build/visual-qa/repair-local-servers-en.png` | 英文服务端表单首屏 |
+| `local-servers-zh-tw` | `ecl-gui/build/visual-qa/repair-local-servers-zh-tw.png` | 繁体中文服务端表单首屏 |
+
+本地服务端页面下部仍按既有滚动布局展示。这些静态快照不覆盖等待 stop 时的动态状态；持续日志刷新、禁止重复 stop、继续浏览列表及成功/超时结果由 `ServerManagementPageTest` 验证。快照命令出现既有的 JavaFX unnamed module 配置警告，均正常生成图片并成功退出。

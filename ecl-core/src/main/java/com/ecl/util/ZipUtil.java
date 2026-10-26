@@ -113,7 +113,7 @@ public final class ZipUtil {
                                 zip.write(buffer, 0, read);
                                 written += read;
                                 completed[0] += read;
-                                progress.onProgress(completed[0], totalBytes, name);
+                                progress.onProgress(completed[0], Math.max(totalBytes, completed[0] + 1), name);
                             }
                         }
                         zip.closeEntry();
@@ -126,7 +126,7 @@ public final class ZipUtil {
             Files.deleteIfExists(normalizedArchive);
             throw error;
         }
-        progress.onProgress(totalBytes, totalBytes, "");
+        progress.onProgress(completed[0], completed[0], "");
         return List.copyOf(files);
     }
 

@@ -4,6 +4,7 @@ import com.ecl.game.DownloadObject;
 import com.ecl.game.Library;
 import com.ecl.game.VersionMetadata;
 import com.ecl.util.FileUtil;
+import com.ecl.util.ZipUtil;
 import com.ecl.util.RuleEvaluator;
 
 import java.io.File;
@@ -89,8 +90,8 @@ public final class NativeLibraryExtractor {
         }
 
         clearDirectory(nativesDir);
-        ExtractionBudget extractionBudget = new ExtractionBudget(new ExtractionLimits(
-                MAX_EXTRACTED_TOTAL_BYTES, MAX_EXTRACTED_SINGLE_BYTES, MAX_EXTRACTED_ENTRIES));
+        ExtractionBudget extractionBudget = new ExtractionBudget(new ZipUtil.ExtractionLimits(
+                MAX_EXTRACTED_TOTAL_BYTES, MAX_EXTRACTED_SINGLE_BYTES, MAX_EXTRACTED_ENTRIES, Double.POSITIVE_INFINITY));
         for (File nativeFile : nativeFiles) {
             if (nativeFile.isFile()) {
                 extractJar(nativeFile, nativesDir.toFile(), extractionBudget);
@@ -294,21 +295,12 @@ public final class NativeLibraryExtractor {
         }
     }
 
-    record ExtractionLimits(long maxTotalBytes, long maxSingleBytes, int maxEntries) {
-        ExtractionLimits {
-            if (maxTotalBytes <= 0 || maxSingleBytes <= 0 || maxEntries <= 0
-                    || maxSingleBytes > maxTotalBytes) {
-                throw new IllegalArgumentException("Invalid native extraction limits");
-            }
-        }
-    }
-
     static final class ExtractionBudget {
-        private final ExtractionLimits limits;
+        private final ZipUtil.ExtractionLimits limits;
         private long totalBytes;
         private int entryCount;
 
-        ExtractionBudget(ExtractionLimits limits) {
+        ExtractionBudget(ZipUtil.ExtractionLimits limits) {
             this.limits = limits;
         }
     }

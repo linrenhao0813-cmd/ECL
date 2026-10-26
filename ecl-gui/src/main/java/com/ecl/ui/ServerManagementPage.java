@@ -57,6 +57,7 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
     private boolean busy;
     private boolean refreshPending;
     private boolean closed;
+    private final java.util.Set<String> stoppingServers = new java.util.HashSet<>();
 
     ServerManagementPage(LauncherUI ui) {
         this(ui, ui.controller.localServers());
@@ -253,7 +254,8 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
                     }
                     running = active;
                     controllable = control;
-                    processStatus.setText(GuiMessages.get(active
+                    processStatus.setText(GuiMessages.get(active && stoppingServers.contains(id)
+                            ? "server.local.stopping" : active
                             ? control ? "server.local.running" : "server.local.detached"
                             : "server.local.stopped"));
                     directory.setText(path);
@@ -292,7 +294,7 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
         importJar.setDisable(busy);
         save.setDisable(unavailable || running || !hasChanges());
         start.setDisable(unavailable || running || hasChanges() || !selected.eulaAccepted());
-        stop.setDisable(unavailable || !running || !controllable);
+        stop.setDisable(unavailable || !running || !controllable || stoppingServers.contains(selectedId()));
         send.setDisable(unavailable || !running || !controllable);
         command.setDisable(unavailable || !running || !controllable);
     }
@@ -395,20 +397,27 @@ final class ServerManagementPage extends VBox implements AutoCloseable {
             return;
         }
         String id = selected.id();
-        busy = true;
+        stoppingServers.add(id);
+        status.setText(GuiMessages.get("server.local.stopping"));
         updateButtons();
         Thread.ofVirtual().name("ecl-server-stop").start(() -> {
             try {
                 LocalServerManager.StopOutcome outcome = manager.stop(id);
                 onUi(() -> {
-                    busy = false;
-                    status.setText(GuiMessages.get(outcome == LocalServerManager.StopOutcome.STOPPED
-                            ? "server.local.stopSent" : "server.local.stopTimedOut"));
+                    stoppingServers.remove(id);
+                    if (Objects.equals(id, selectedId())) {
+                        status.setText(GuiMessages.get(outcome == LocalServerManager.StopOutcome.STOPPED
+                                ? "server.local.stopSent" : "server.local.stopTimedOut"));
+                    }
                     updateButtons();
                     refreshState();
                 });
             } catch (Exception error) {
-                fail(error);
+                onUi(() -> {
+                    stoppingServers.remove(id);
+                    if (Objects.equals(id, selectedId())) showError(error);
+                    updateButtons();
+                });
             }
         });
     }

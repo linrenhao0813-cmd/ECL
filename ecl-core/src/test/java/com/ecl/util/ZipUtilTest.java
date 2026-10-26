@@ -19,6 +19,30 @@ class ZipUtilTest {
     Path temp;
 
     @Test
+    void completionReportsActualBytesWhenSourceGrowsAfterScan() throws Exception {
+        Path source = Files.createDirectories(temp.resolve("source"));
+        Path file = Files.writeString(source.resolve("data"), "a".repeat(200_000));
+        long[] last = new long[2];
+        boolean[] changed = {false};
+        var archived = ZipUtil.zipDirectories(java.util.Map.of("saves", source), temp.resolve("backup.zip"),
+                (done, total, entry) -> {
+                    last[0] = done;
+                    last[1] = total;
+                    if (!changed[0]) {
+                        changed[0] = true;
+                        try {
+                            Files.writeString(file, "b".repeat(100_000), java.nio.file.StandardOpenOption.APPEND);
+                        } catch (IOException failure) {
+                            throw new java.io.UncheckedIOException(failure);
+                        }
+                    }
+                });
+        org.junit.jupiter.api.Assertions.assertEquals(300_000, archived.getFirst().size());
+        org.junit.jupiter.api.Assertions.assertEquals(300_000, last[0]);
+        org.junit.jupiter.api.Assertions.assertEquals(last[0], last[1]);
+    }
+
+    @Test
     void rejectsHighCompressionRatioBeforeExtraction() throws Exception {
         Path archive = temp.resolve("bomb.zip");
         try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {

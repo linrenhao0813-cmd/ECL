@@ -23,6 +23,35 @@ class InstanceDisplayMetadataStoreTest {
     }
 
     @Test
+    void individualUpdatesPreserveOtherWindowsChangesAndRemovals() throws Exception {
+        var first = store();
+        var second = store();
+        first.load();
+        second.load();
+        first.update(InstanceDisplayMetadata.empty("first").withFavorite(true));
+        var current = second.update(InstanceDisplayMetadata.empty("second").withDisplayName("Second"));
+        assertEquals(2, current.size());
+        first.update(InstanceDisplayMetadata.empty("first"));
+        assertEquals(Map.of("second", current.get("second")), store().load());
+        try (var lease = com.ecl.util.FileLockLease.tryAcquire(first.file().resolveSibling("display.json.lock"))) {
+            assertThrows(IOException.class, () -> second.update(InstanceDisplayMetadata.empty("second")));
+        }
+        assertEquals("Second", second.load().get("second").displayName());
+    }
+
+    @Test
+    void competingWriterCannotReplaceDisplayMetadata() throws Exception {
+        InstanceDisplayMetadataStore store = store();
+        store.save(Map.of("first", InstanceDisplayMetadata.empty("first").withFavorite(true)));
+        String original = Files.readString(store.file());
+        try (var lease = com.ecl.util.FileLockLease.tryAcquire(store.file().resolveSibling("display.json.lock"))) {
+            assertThrows(IOException.class,
+                    () -> store().save(Map.of("second", InstanceDisplayMetadata.empty("second").withFavorite(true))));
+        }
+        assertEquals(original, Files.readString(store.file()));
+    }
+
+    @Test
     void missingFileLoadsAsEmpty() throws IOException {
         assertTrue(store().load().isEmpty());
     }

@@ -2,6 +2,7 @@ package com.ecl.game;
 
 import com.ecl.ECLConfig;
 import com.ecl.util.HttpUtil;
+import com.ecl.util.FileLockLease;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -70,6 +71,30 @@ public final class InstanceDisplayMetadataStore {
 
     /** Writes the entries, dropping ones that no longer override anything. */
     public synchronized void save(Map<String, InstanceDisplayMetadata> entries) throws IOException {
+        try (var lock = acquireWriteLock()) {
+            saveLocked(entries);
+        }
+    }
+
+    /** Re-reads under the write lock and changes only the selected profile. */
+    public synchronized Map<String, InstanceDisplayMetadata> update(InstanceDisplayMetadata entry) throws IOException {
+        Objects.requireNonNull(entry, "entry");
+        try (var lock = acquireWriteLock()) {
+            Map<String, InstanceDisplayMetadata> current = load();
+            if (entry.isMeaningful()) current.put(entry.profileId(), entry);
+            else current.remove(entry.profileId());
+            saveLocked(current);
+            return Map.copyOf(current);
+        }
+    }
+
+    private FileLockLease acquireWriteLock() throws IOException {
+        FileLockLease lock = FileLockLease.tryAcquire(file.resolveSibling(file.getFileName() + ".lock"));
+        if (lock == null) throw new IOException("Instance display metadata is busy in another process");
+        return lock;
+    }
+
+    private void saveLocked(Map<String, InstanceDisplayMetadata> entries) throws IOException {
         JsonObject instances = new JsonObject();
         if (entries != null) {
             for (InstanceDisplayMetadata entry : entries.values()) {
