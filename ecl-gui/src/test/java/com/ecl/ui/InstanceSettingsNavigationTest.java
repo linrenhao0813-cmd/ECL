@@ -33,10 +33,18 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
     private String second;
     private String previousTarget;
     private final List<Path> metadata = new ArrayList<>();
+    private boolean deferInstanceScan;
+    private Runnable pendingInstanceScan;
 
     @Override
     public void start(Stage primaryStage) {
-        launcher = new LauncherUI();
+        launcher = new LauncherUI() {
+            @Override
+            void runAsync(String name, Runnable action) {
+                if (deferInstanceScan && "ecl-local-instances".equals(name)) pendingInstanceScan = action;
+                else super.runAsync(name, action);
+            }
+        };
         stage = new Stage();
         launcher.start(stage);
         previousTarget = launcher.settingsManager.get(ECLConfig.KEY_SELECTED_VERSION);
@@ -58,18 +66,22 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
     }
 
     @Test
-    void settingsOmitsInstanceSubmenuAndInstancesNavigationOpensTheEditor() throws Exception {
+    void instancesOnlyManagesModsAndSettingsSeparatesGlobalAndInstanceScopes() throws Exception {
         prepareInstances(false);
         interact(() -> {
+            assertNull(stage.getScene().lookup("#instance-launch-settings"));
+            assertNull(stage.getScene().lookup("#instance-display-save"));
+            assertNotNull(stage.getScene().lookup("#instance-mod-management"));
             launcher.setActiveView(AppView.SETTINGS);
+            TabPane scopes = (TabPane) stage.getScene().lookup("#settings-scope-tabs");
+            assertNotNull(scopes);
+            assertEquals(2, scopes.getTabs().size());
             TabPane settingsTabs = (TabPane) stage.getScene().lookup("#settings-tabs");
             assertEquals(5, settingsTabs.getTabs().size());
-            assertTrue(settingsTabs.getTabs().stream().noneMatch(tab -> "settings-instance-tab".equals(tab.getId())));
-            assertNull(stage.getScene().lookup("#installed-instance-list"));
-            launcher.setActiveView(AppView.HOME);
-            assertNull(stage.getScene().lookup("#home-instance-settings"));
-            launcher.setActiveView(AppView.VERSIONS);
-            assertEquals(AppView.VERSIONS, launcher.activeView);
+            scopes.getSelectionModel().select(1);
+            stage.getScene().getRoot().applyCss();
+            stage.getScene().getRoot().layout();
+            assertEquals(AppView.SETTINGS, launcher.activeView);
         });
         awaitSelection(first);
         interact(() -> {
@@ -98,6 +110,9 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
         interact(() -> {
             selectDetailTab(0);
             control("instance-display-name", TextField.class).setText("Unsaved name");
+            TabPane scopes = control("settings-scope-tabs", TabPane.class);
+            scopes.getSelectionModel().select(0);
+            assertEquals(1, scopes.getSelectionModel().getSelectedIndex());
             list().getSelectionModel().select(second);
             assertEquals(first, list().getSelectionModel().getSelectedItem());
             assertEquals("Unsaved name", control("instance-display-name", TextField.class).getText());
@@ -108,8 +123,122 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
             selectDetailTab(0);
             assertEquals("Unsaved name", control("instance-display-name", TextField.class).getText());
             launcher.setActiveView(AppView.HOME);
-            assertEquals(AppView.VERSIONS, launcher.activeView);
+            assertEquals(AppView.SETTINGS, launcher.activeView);
         });
+    }
+
+    @Test
+    void globalDraftBlocksSwitchingToInstanceSettings() {
+        interact(() -> {
+            launcher.setActiveView(AppView.SETTINGS);
+            TabPane tabs = control("settings-tabs", TabPane.class);
+            tabs.getSelectionModel().select(1);
+            control("settings-download-concurrency", TextField.class).setText("invalid");
+            TabPane scopes = control("settings-scope-tabs", TabPane.class);
+            scopes.getSelectionModel().select(1);
+            assertEquals(0, scopes.getSelectionModel().getSelectedIndex());
+            launcher.pageFactory.setSettingsChoiceProvider(tab -> SettingsPageGuard.Choice.SAVE);
+            scopes.getSelectionModel().select(1);
+            assertEquals(0, scopes.getSelectionModel().getSelectedIndex());
+            launcher.pageFactory.setSettingsChoiceProvider(tab -> SettingsPageGuard.Choice.DISCARD);
+            scopes.getSelectionModel().select(1);
+            assertEquals(1, scopes.getSelectionModel().getSelectedIndex());
+        });
+    }
+
+    @Test
+    void modManagementHasOnlyInstalledAndUpdatesAndFollowsTheLaunchTarget() throws Exception {
+        first = createInstance();
+        second = createInstance();
+        Files.writeString(metadata.getFirst(), """
+                {"id":"%s","eclMinecraftVersion":"1.21.4","eclModLoader":"fabric"}
+                """.formatted(first));
+        interact(() -> {
+            launcher.gameDir = gameRoot.toFile();
+            launcher.versionManager.invalidateLocalVersionProfiles();
+            launcher.setLaunchTarget(first);
+            launcher.modSearchQuery = "remember-this-query";
+            launcher.setActiveView(AppView.VERSIONS);
+            TabPane mods = control("mod-management-tabs", TabPane.class);
+            assertNotNull(mods);
+            assertEquals(2, mods.getTabs().size());
+            assertEquals(com.ecl.util.Messages.get("modBrowser.installed"), mods.getTabs().getFirst().getText());
+            assertNull(stage.getScene().lookup("#instance-launch-settings"));
+            launcher.setLaunchTarget(second);
+            assertEquals("remember-this-query", launcher.modSearchQuery);
+            assertNull(stage.getScene().lookup("#mod-management-tabs"));
+            assertNotNull(stage.getScene().lookup("#instance-mod-management"));
+            launcher.setLaunchTarget(null);
+            assertNotNull(stage.getScene().lookup("#instance-mod-management"));
+            assertNull(stage.getScene().lookup("#mod-management-tabs"));
+        });
+    }
+
+    @Test
+    void downloadManageEntryOpensInstanceSettingsForTheTarget() throws Exception {
+        prepareInstances(false);
+        interact(() -> {
+            launcher.setActiveView(AppView.DOWNLOADS);
+            control("content-manage-instance", Button.class).fire();
+            assertEquals(AppView.SETTINGS, launcher.activeView);
+            assertEquals(1, control("settings-scope-tabs", TabPane.class).getSelectionModel().getSelectedIndex());
+        });
+        awaitSelection(first);
+    }
+
+    @Test
+    void discardingInstanceDraftOnScopeSwitchReloadsSavedValues() throws Exception {
+        prepareInstances(true);
+        interact(() -> {
+            String saved = control("instance-display-name", TextField.class).getText();
+            control("instance-display-name", TextField.class).setText("discard this draft");
+            launcher.pageFactory.setSettingsChoiceProvider(tab -> SettingsPageGuard.Choice.DISCARD);
+            TabPane scopes = control("settings-scope-tabs", TabPane.class);
+            scopes.getSelectionModel().select(0);
+            scopes.getSelectionModel().select(1);
+            stage.getScene().getRoot().applyCss();
+            stage.getScene().getRoot().layout();
+            assertEquals(saved, control("instance-display-name", TextField.class).getText());
+            launcher.pageFactory.setSettingsChoiceProvider(tab -> SettingsPageGuard.Choice.CANCEL);
+            launcher.setActiveView(AppView.HOME);
+            assertEquals(AppView.HOME, launcher.activeView);
+        });
+    }
+
+    @Test
+    void enteringInstanceSettingsAfterChangingGlobalGameRootReloadsTheList() throws Exception {
+        prepareInstances(true);
+        Path emptyRoot = Files.createDirectory(gameRoot.resolve("another-root"));
+        interact(() -> {
+            TabPane scopes = control("settings-scope-tabs", TabPane.class);
+            scopes.getSelectionModel().select(0);
+            launcher.gameDir = emptyRoot.toFile();
+            scopes.getSelectionModel().select(1);
+        });
+        WaitForAsyncUtils.waitFor(10, TimeUnit.SECONDS, () -> WaitForAsyncUtils.asyncFx(() ->
+                list() != null && !list().isDisabled() && list().getItems().isEmpty()).get());
+        interact(() -> assertNull(launcher.instanceSelection.viewedInstance()));
+    }
+
+    @Test
+    void delayedScanUsesTheRootCapturedBeforeGlobalSettingsChangeAndChangeBack() throws Exception {
+        prepareInstances(true);
+        Path emptyRoot = Files.createDirectory(gameRoot.resolve("temporary-root"));
+        interact(() -> {
+            deferInstanceScan = true;
+            control("instance-list-refresh", Button.class).fire();
+            assertNotNull(pendingInstanceScan);
+            TabPane scopes = control("settings-scope-tabs", TabPane.class);
+            scopes.getSelectionModel().select(0);
+            launcher.gameDir = emptyRoot.toFile();
+            pendingInstanceScan.run();
+            pendingInstanceScan = null;
+            deferInstanceScan = false;
+            launcher.gameDir = gameRoot.toFile();
+            scopes.getSelectionModel().select(1);
+        });
+        awaitSelection(first);
+        interact(() -> assertTrue(list().getItems().containsAll(List.of(first, second))));
     }
 
     @Test
@@ -130,7 +259,7 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
         interact(() -> {
             control("instance-display-name", TextField.class).setText("Unsaved name");
             launcher.setActiveView(AppView.HOME);
-            assertEquals(AppView.VERSIONS, launcher.activeView);
+            assertEquals(AppView.SETTINGS, launcher.activeView);
             launcher.pageFactory.setSettingsChoiceProvider(tab -> SettingsPageGuard.Choice.DISCARD);
             list().getSelectionModel().select(second);
             assertEquals(second, list().getSelectionModel().getSelectedItem());
@@ -139,7 +268,7 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
             control("instance-display-name", TextField.class).setText("Another draft");
             launcher.pageFactory.setSettingsChoiceProvider(tab -> SettingsPageGuard.Choice.CANCEL);
             launcher.setActiveView(AppView.HOME);
-            assertEquals(AppView.VERSIONS, launcher.activeView);
+            assertEquals(AppView.SETTINGS, launcher.activeView);
             launcher.pageFactory.setSettingsChoiceProvider(tab -> SettingsPageGuard.Choice.DISCARD);
             launcher.setActiveView(AppView.HOME);
             assertEquals(AppView.HOME, launcher.activeView);
@@ -157,7 +286,7 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
             if (settings) launcher.pageFactory.openInstanceSettings(first);
             else launcher.setActiveView(AppView.VERSIONS);
         });
-        awaitSelection(first);
+        if (settings) awaitSelection(first);
     }
 
     private String createInstance() throws Exception {

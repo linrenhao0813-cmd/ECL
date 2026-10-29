@@ -231,8 +231,9 @@ class LauncherUiHeadlessTest extends ApplicationTest {
             launcher.setActiveView(AppView.VERSIONS);
             assertEquals(AppView.VERSIONS, launcher.activeView);
             assertNull(scene.lookup("#instance-install-new"));
-            assertNotNull(scene.lookup("#installed-instance-list"));
-            assertNotNull(scene.lookup("#instance-list-refresh"));
+            assertNotNull(scene.lookup("#instance-mod-management"));
+            assertNull(scene.lookup("#instance-list-refresh"));
+            assertNull(scene.lookup("#instance-launch-settings"));
 
             launcher.setActiveView(AppView.DOWNLOADS);
             javafx.scene.layout.VBox detail =
@@ -351,6 +352,10 @@ class LauncherUiHeadlessTest extends ApplicationTest {
                 launcher.versionCombo.getItems().add("visual-instance-for-launch-state");
                 launcher.updateRuntimeSummary();
                 assertEquals(Messages.get("home.chooseInstance"), launcher.launchBtn.getText());
+                launcher.launchBtn.fire();
+                assertEquals(AppView.HOME, launcher.activeView);
+                assertTrue(launcher.versionCombo.isShowing());
+                launcher.versionCombo.hide();
 
                 launcher.setLaunchTarget("visual-instance-for-launch-state");
                 launcher.updateRuntimeSummary();
@@ -454,12 +459,12 @@ class LauncherUiHeadlessTest extends ApplicationTest {
     }
 
     @Test
-    void localVersionsHaveTheirOwnMenuInsteadOfOpeningDownloads() {
+    void instancesMenuOpensModManagement() {
         interact(() -> {
             launcher.setActiveView(AppView.VERSIONS);
 
             assertEquals(AppView.VERSIONS, launcher.activeView);
-            assertNotNull(stage.getScene().lookup("#installed-instance-list"));
+            assertNotNull(stage.getScene().lookup("#instance-mod-management"));
         });
     }
 

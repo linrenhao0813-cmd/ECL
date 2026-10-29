@@ -273,3 +273,14 @@ GUI 账户读取边界捕获该错误，展示保留原文件的提示并允许�
 
 实例显示设置的 GUI 缓存通过 `InstanceDisplayMetadataStore.update` 保存单实例；该方法与全表 `save` 共用 `display.json.lock`，锁内重读合并，避免两个启动器的旧缓存互相覆盖。`InstanceDisplayMetadataStoreTest` 覆盖锁忙保留原文件和不同窗口条目的合并/删除。
 压缩限制描述共用 `ZipUtil.ExtractionLimits`；MRPACK 与原生库继续各用原有预算。
+
+## 实例与设置导航（2026-10-29）
+
+`LauncherPageRouter` 的 `VERSIONS` 路由仅调用 `LauncherPageFactory.createInstanceModsPage`，
+复用 `ModBrowserView` 的 managementOnly 模式，只显示已安装与更新，不自动搜索新模组；顶部启动目标变化时重建并关闭旧模组视图。
+`createSettingsPage` 以 `settings-scope-tabs` 区分全局设置和实例设置；全局五类表单沿用 `settings-tabs`，
+实例范围复用 `InstalledInstancesPage` 与 `InstanceDetailsPane`，保留查看目标与启动目标独立的语义。
+`SettingsPageGuard.onDeparture` 委托两个范围各自的草稿检查，覆盖范围切换、离页、语言切换与重建；
+实例列表切换和刷新继续使用本地守卫。放弃显示修改会重新加载当前实例的已保存值。
+`InstalledInstancesPage.refreshForConfiguredRoot` 在进入实例范围时检查游戏根目录变化，刷新代次和目录校验阻止旧列表回填。
+持久化格式及实例维护服务不变。

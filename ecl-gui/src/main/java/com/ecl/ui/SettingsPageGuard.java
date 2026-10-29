@@ -20,6 +20,7 @@ final class SettingsPageGuard {
     private final Map<Tab, Runnable> discardActions = new IdentityHashMap<>();
     private final Map<Tab, BooleanSupplier> saveActions = new IdentityHashMap<>();
     private final Map<Tab, BooleanSupplier> dirtyChecks = new IdentityHashMap<>();
+    private final Map<Tab, BooleanSupplier> departureChecks = new IdentityHashMap<>();
     private boolean reverting;
 
     SettingsPageGuard(TabPane tabs, Function<Tab, Choice> choiceProvider) {
@@ -57,6 +58,10 @@ final class SettingsPageGuard {
         dirtyChecks.put(tab, check);
     }
 
+    void onDeparture(Tab tab, BooleanSupplier check) {
+        departureChecks.put(tab, check);
+    }
+
     boolean confirmDeparture() {
         Tab current = tabs.getSelectionModel().getSelectedItem();
         if (current != null && !resolveChanges(current)) {
@@ -79,6 +84,9 @@ final class SettingsPageGuard {
     }
 
     private boolean resolveChanges(Tab tab) {
+        if (!departureChecks.getOrDefault(tab, () -> true).getAsBoolean()) {
+            return false;
+        }
         if (!dirty.contains(tab) && !dirtyChecks.getOrDefault(tab, () -> false).getAsBoolean()) {
             return true;
         }

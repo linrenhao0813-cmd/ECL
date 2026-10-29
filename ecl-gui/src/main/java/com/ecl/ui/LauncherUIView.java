@@ -180,6 +180,7 @@ class LauncherUIView extends javafx.application.Application {
     final LauncherWindowLayout windowLayout = new LauncherWindowLayout((LauncherUI) this);
     Animation contentTransition;
     private ModBrowserView activeModBrowserView;
+    private boolean activeModManagementOnly;
     ServerBrowserView activeServerBrowserView;
     ServerManagementPage activeServerManagementPage;
     AppView activeView = AppView.HOME;
@@ -254,7 +255,10 @@ class LauncherUIView extends javafx.application.Application {
         contentTargets = createContentTargets();
         instanceSelection.setLaunchTarget(settingsManager.get(ECLConfig.KEY_SELECTED_VERSION));
         instanceSelection.launchTargetProperty().addListener(
-                (observable, previous, value) -> persistLaunchTarget(value));
+                (observable, previous, value) -> {
+                    persistLaunchTarget(value);
+                    if (activeView == AppView.VERSIONS && workspacePane != null) renderActiveView();
+                });
     }
 
     /** Keeps the persisted launch target in sync with the shared instance state. */
@@ -452,6 +456,10 @@ class LauncherUIView extends javafx.application.Application {
     }
 
     Node createModLibraryContent() {
+        return createModLibraryContent(false);
+    }
+
+    Node createModLibraryContent(boolean managementOnly) {
         String selectedVersion = getSelectedVersion();
         if (selectedVersion == null || selectedVersion.isBlank()) {
             Button choose = createActionButton(Messages.get("content.chooseInstance"), "primary-button",
@@ -468,7 +476,7 @@ class LauncherUIView extends javafx.application.Application {
             return createSurface(Messages.get("content.openFailed"), selectedVersion,
                     createBodyText(Messages.format("content.openFailed.detail", error.getMessage())));
         }
-        if (!Files.isRegularFile(selectedMetadata)) {
+        if (!managementOnly && !Files.isRegularFile(selectedMetadata)) {
             try {
                 String minecraftVersion = versionManager.resolveMinecraftVersionId(selectedVersion);
                 return createContentLibraryLoaderPrompt(selectedVersion, minecraftVersion);
@@ -483,14 +491,20 @@ class LauncherUIView extends javafx.application.Application {
                     getConfiguredGameRootDir().toPath(),
                     resolveVersionGameDir(selectedVersion).toPath());
             if (!instance.loader().supportsMods()) {
+                if (managementOnly) {
+                    return createSurface(Messages.get("content.mods.title"), selectedVersion,
+                            createBodyText(Messages.get("instances.mods.unsupported")));
+                }
                 return createLoaderSelectionPage(selectedVersion, instance.minecraftVersion());
             }
             activeModBrowserView = new ModBrowserView(
                     controller,
                     instance,
-                    message -> Platform.runLater(() -> setStatus("模组中心", message)));
+                    message -> Platform.runLater(() -> setStatus(Messages.get("content.mods.title"), message)),
+                    managementOnly);
+            activeModManagementOnly = managementOnly;
             activeModBrowserView.setMaxWidth(Double.MAX_VALUE);
-            activeModBrowserView.restoreSearch(modSearchQuery);
+            if (!managementOnly) activeModBrowserView.restoreSearch(modSearchQuery);
             return activeModBrowserView;
         } catch (Exception e) {
             LOGGER.warn("Cannot open mod browser for version {}", selectedVersion, e);
@@ -514,7 +528,7 @@ class LauncherUIView extends javafx.application.Application {
     void closeActiveModBrowserView() {
         if (activeModBrowserView != null) {
             // Keep the query so returning to the mod category restores the previous search.
-            modSearchQuery = activeModBrowserView.searchQuery();
+            if (!activeModManagementOnly) modSearchQuery = activeModBrowserView.searchQuery();
             activeModBrowserView.close();
             activeModBrowserView = null;
         }

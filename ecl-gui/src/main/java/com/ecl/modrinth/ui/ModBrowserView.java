@@ -70,6 +70,11 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
             ModInstanceContext initialInstance,
             Consumer<String> statusConsumer
     ) {
+        this(controller, initialInstance, statusConsumer, false);
+    }
+
+    public ModBrowserView(MainController controller, ModInstanceContext initialInstance,
+                          Consumer<String> statusConsumer, boolean managementOnly) {
         this.controller = controller;
         this.statusConsumer = statusConsumer == null ? ignored -> { } : statusConsumer;
         this.externalActions = new ModExternalActions(this.statusConsumer);
@@ -89,12 +94,12 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
                 version -> installWorkflow.prepare(version, Messages.get("modBrowser.prepareFailed")));
         controller.registerModInstance(initialInstance);
         viewModel.setInstance(initialInstance);
-        buildView(initialInstance);
+        buildView(initialInstance, managementOnly);
         bindState();
-        viewModel.search(false);
+        if (!managementOnly) viewModel.search(false);
     }
 
-    private void buildView(ModInstanceContext context) {
+    private void buildView(ModInstanceContext context, boolean managementOnly) {
         getStyleClass().addAll("mod-browser", "surface");
         setSpacing(12);
         setPadding(new Insets(16));
@@ -107,15 +112,16 @@ public final class ModBrowserView extends VBox implements AutoCloseable {
         Label scope = new Label(Messages.get("modBrowser.scope"));
         scope.getStyleClass().add("status-detail");
         scope.setWrapText(true);
-        VBox heading = new VBox(4, eyebrow, instanceLabel, scope);
+        VBox heading = managementOnly ? new VBox(4, instanceLabel) : new VBox(4, eyebrow, instanceLabel, scope);
 
-        Tab browserTab = new Tab(Messages.get("modBrowser.browse"), createBrowserPane());
         installedTab = new Tab(Messages.get("modBrowser.installed"), createInstalledPane());
         updatesTab = new Tab(Messages.get("modBrowser.updates"), createUpdatesPane());
-        browserTab.setClosable(false);
         installedTab.setClosable(false);
         updatesTab.setClosable(false);
-        TabPane tabs = new TabPane(browserTab, installedTab, updatesTab);
+        TabPane tabs = new TabPane();
+        if (!managementOnly) tabs.getTabs().add(new Tab(Messages.get("modBrowser.browse"), createBrowserPane()));
+        tabs.getTabs().addAll(installedTab, updatesTab);
+        tabs.setId("mod-management-tabs");
         tabs.getStyleClass().add("mod-tabs");
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabs.getSelectionModel().selectedItemProperty().addListener((observable, oldTab, newTab) -> {

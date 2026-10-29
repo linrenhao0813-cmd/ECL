@@ -37,6 +37,8 @@ final class InstalledInstancesPage extends VBox {
     private java.util.function.BooleanSupplier confirmChange = () -> true;
     private java.util.function.BooleanSupplier activeCheck = () -> true;
     private boolean restoringSelection;
+    private java.io.File listedGameRoot;
+    private long refreshGeneration;
 
     InstalledInstancesPage(LauncherUI ui) {
         this.ui = ui;
@@ -131,7 +133,15 @@ final class InstalledInstancesPage extends VBox {
     }
 
     void discardChanges() {
-        details.refresh();
+        details.setInstance(details.instanceId());
+    }
+
+    void refreshForConfiguredRoot() {
+        if (!Objects.equals(listedGameRoot, ui.getConfiguredGameRootDir())) {
+            instances.getItems().clear();
+            details.setInstance(null);
+            refreshInstances();
+        }
     }
 
     /** Stacks the list above the details on narrow windows. */
@@ -249,12 +259,24 @@ final class InstalledInstancesPage extends VBox {
         }
         String preferred = ui.getSelectedVersion();
         String viewed = ui.instanceSelection.viewedInstance();
+        java.io.File root = ui.getConfiguredGameRootDir();
+        com.ecl.game.DefaultGameRepository repository = ui.gameRepository();
+        listedGameRoot = root;
+        long generation = ++refreshGeneration;
         setBusy(true);
         status.setText(Messages.get("local.instances.loading"));
         ui.runAsync("ecl-local-instances", () -> {
             ui.versionManager.invalidateLocalVersionProfiles();
-            List<String> installed = ui.gameRepository().installedInstanceDirectories();
-            Platform.runLater(() -> applyInstances(installed, preferred, viewed));
+            List<String> installed = repository.installedInstanceDirectories();
+            Platform.runLater(() -> {
+                if (generation != refreshGeneration) return;
+                if (!root.equals(ui.getConfiguredGameRootDir())) {
+                    listedGameRoot = null;
+                    setBusy(false);
+                    return;
+                }
+                applyInstances(installed, preferred, viewed);
+            });
         });
     }
 

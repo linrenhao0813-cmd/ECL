@@ -202,7 +202,10 @@ final class LauncherLaunchForm {
     private void handleLaunchAction() {
         switch (launchState()) {
             case INSTALL -> ui.openDownloadSection(DownloadSection.INSTANCES);
-            case CHOOSE -> ui.setActiveView(AppView.VERSIONS);
+            case CHOOSE -> {
+                ui.versionCombo.requestFocus();
+                ui.versionCombo.show();
+            }
             case RELOGIN -> ui.openAccountSettings();
             case FAILED, READY -> {
                 ui.clearLaunchFailure();

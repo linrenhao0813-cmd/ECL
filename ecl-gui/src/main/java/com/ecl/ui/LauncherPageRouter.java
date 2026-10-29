@@ -65,11 +65,7 @@ final class LauncherPageRouter {
         ui.workspacePane.getChildren().clear();
         switch (ui.activeView) {
             case HOME -> addMainContent(ui.homePageFactory.getOrCreate(), null);
-            case VERSIONS -> {
-                InstalledInstancesPage page = ui.pageFactory.createInstalledInstancesPage();
-                ui.compactLayoutConsumer = page::setCompact;
-                addMainContent(page, null);
-            }
+            case VERSIONS -> addMainContent(ui.pageFactory.createInstanceModsPage(), null);
             case SAVES -> addMainContent(ui.pageFactory.createWorldSavesPage(), null);
             case DOWNLOADS -> addMainContent(
                     ui.contentLibraryPageFactory.createPage(ui.downloadSection), null);

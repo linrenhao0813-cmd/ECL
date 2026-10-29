@@ -47,7 +47,8 @@ final class ContentLibraryPageFactory {
         Region targetSpacer = new Region();
         HBox.setHgrow(targetSpacer, Priority.ALWAYS);
         Button manageTarget = ui.createLinkButton(
-                Messages.get("instanceBar.manage"), () -> ui.setActiveView(AppView.VERSIONS));
+                Messages.get("instanceBar.manage"), () -> ui.pageFactory.openInstanceSettings(ui.getSelectedVersion()));
+        manageTarget.setId("content-manage-instance");
         targetStrip.getChildren().addAll(targetCaption, targetLabel, targetSpacer, manageTarget);
 
         StackPane content = new StackPane();

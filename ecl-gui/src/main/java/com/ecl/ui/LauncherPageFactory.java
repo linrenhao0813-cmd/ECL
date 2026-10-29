@@ -33,6 +33,7 @@ final class LauncherPageFactory {
     private final LauncherUI ui;
     private SettingsPageGuard settingsGuard;
     private String requestedInstance;
+    private boolean instanceSettingsRequested;
     private Function<Tab, SettingsPageGuard.Choice> settingsChoiceProvider = this::showSettingsChoice;
 
     LauncherPageFactory(LauncherUI ui) {
@@ -118,7 +119,6 @@ final class LauncherPageFactory {
         tabs.getStyleClass().add("mod-tabs");
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         SettingsPageGuard guard = new SettingsPageGuard(tabs, tab -> settingsChoiceProvider.apply(tab));
-        settingsGuard = guard;
         general.setContent(buildGeneralSettingsTab(general, guard));
         downloads.setContent(buildDownloadSettingsTab(downloads, guard));
         defaults.setContent(buildDefaultSettingsTab(defaults, guard));
@@ -131,34 +131,59 @@ final class LauncherPageFactory {
         tabs.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) -> {
             ui.accountSettingsSelected = tabs.getSelectionModel().getSelectedItem() == accounts;
         });
-        page.getChildren().addAll(pageHeading, tabs);
-        return page;
-    }
-
-    InstalledInstancesPage createInstalledInstancesPage() {
-        if (requestedInstance != null) {
-            ui.instanceSelection.setViewedInstance(requestedInstance);
-            requestedInstance = null;
+        Tab global = new Tab(Messages.get("settings.scope.global"), tabs);
+        global.setId("settings-global-tab");
+        Tab instance = new Tab(Messages.get("settings.scope.instance"));
+        instance.setId("settings-instance-tab");
+        TabPane scopes = new TabPane(global, instance);
+        scopes.setId("settings-scope-tabs");
+        scopes.getStyleClass().add("mod-tabs");
+        scopes.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        SettingsPageGuard scopeGuard = new SettingsPageGuard(scopes, tab -> settingsChoiceProvider.apply(tab));
+        settingsGuard = scopeGuard;
+        if (requestedInstance != null) ui.instanceSelection.setViewedInstance(requestedInstance);
+        InstalledInstancesPage instances = new InstalledInstancesPage(ui);
+        instance.setContent(instances);
+        SettingsPageGuard instanceGuard = instances.createGuard(tab -> settingsChoiceProvider.apply(tab));
+        instances.guardChanges(instanceGuard::confirmDeparture, () -> settingsGuard == scopeGuard);
+        scopeGuard.onDeparture(global, guard::confirmDeparture);
+        scopeGuard.onDeparture(instance, instanceGuard::confirmDeparture);
+        ui.compactLayoutConsumer = instances::setCompact;
+        scopes.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) -> {
+            if (scopes.getSelectionModel().getSelectedItem() == instance) instances.refreshForConfiguredRoot();
+        });
+        requestedInstance = null;
+        if (instanceSettingsRequested) {
+            instanceSettingsRequested = false;
+            scopes.getSelectionModel().select(instance);
         }
-        InstalledInstancesPage page = new InstalledInstancesPage(ui);
-        SettingsPageGuard guard = page.createGuard(tab -> settingsChoiceProvider.apply(tab));
-        settingsGuard = guard;
-        page.guardChanges(guard::confirmDeparture, () -> settingsGuard == guard);
+        page.getChildren().addAll(pageHeading, scopes);
         return page;
     }
 
     void openInstanceSettings(String instanceId) {
-        if (instanceId == null || instanceId.isBlank()) {
-            ui.setActiveView(AppView.VERSIONS);
-            return;
-        }
         if (!confirmSettingsDeparture()) return;
         requestedInstance = instanceId;
-        if (ui.activeView == AppView.VERSIONS) {
+        instanceSettingsRequested = true;
+        if (ui.activeView == AppView.SETTINGS) {
             ui.renderActiveView();
         } else {
-            ui.setActiveView(AppView.VERSIONS);
+            ui.setActiveView(AppView.SETTINGS);
         }
+    }
+
+    VBox createInstanceModsPage() {
+        VBox page = ui.createMainPage();
+        page.setId("instance-mod-management");
+        Label title = new Label(Messages.get("instances.mods.title"));
+        title.getStyleClass().add("page-title");
+        Label subtitle = new Label(Messages.get("instances.mods.subtitle"));
+        subtitle.getStyleClass().add("page-subtitle");
+        subtitle.setWrapText(true);
+        VBox heading = new VBox(6, title, subtitle);
+        heading.getStyleClass().add("content-library-heading");
+        page.getChildren().addAll(heading, ui.createModLibraryContent(true));
+        return page;
     }
 
     /** Confirms a destructive page departure before navigation or rebuilding the workspace. */

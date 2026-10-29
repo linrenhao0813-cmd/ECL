@@ -378,6 +378,16 @@ public final class LauncherUiSnapshot {
 
         private Scene prepareSettingsPageCapture(Stage primaryStage, String mode) throws Exception {
             applySnapshotTheme();
+            if (mode.contains("instances")) {
+                String vanilla = createVisualProfile("visual-local-vanilla", "", "1.21.8");
+                createVisualProfile("visual-local-fabric", "fabric", "1.21.7");
+                pageFactory.openInstanceSettings(vanilla);
+                if (mode.contains("compact")) {
+                    primaryStage.setWidth(1180);
+                    primaryStage.setHeight(720);
+                }
+                return primaryStage.getScene();
+            }
             showAppView("SETTINGS");
             javafx.scene.control.TabPane tabs = (javafx.scene.control.TabPane)
                     primaryStage.getScene().lookup("#settings-tabs");
@@ -406,6 +416,7 @@ public final class LauncherUiSnapshot {
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(vanilla));
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(fabric));
             if (mode.contains("config")) throw new IllegalArgumentException("Instance launch settings were removed");
+            setLaunchTarget(fabric);
             showAppView("VERSIONS");
             if (mode.contains("compact")) {
                 stage.setWidth(1180);

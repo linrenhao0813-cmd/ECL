@@ -77,3 +77,18 @@
 | `local-servers-zh-tw` | `ecl-gui/build/visual-qa/repair-local-servers-zh-tw.png` | 繁体中文服务端表单首屏 |
 
 本地服务端页面下部仍按既有滚动布局展示。这些静态快照不覆盖等待 stop 时的动态状态；持续日志刷新、禁止重复 stop、继续浏览列表及成功/超时结果由 `ServerManagementPageTest` 验证。快照命令出现既有的 JavaFX unnamed module 配置警告，均正常生成图片并成功退出。
+
+## 2026-10-29 实例与设置导航调整
+
+以下隔离快照已重新生成并逐张查看，图片保留在 `ecl-gui/build/visual-qa/`，不提交 PNG：
+
+| 模式 | 输出文件 | 核对内容 |
+| --- | --- | --- |
+| `local-versions` | `navigation-mod-management.png` | 实例菜单仅显示已安装模组和更新；新模组搜索仍在下载页 |
+| `settings-page` | `navigation-global-settings.png` | 全局/实例范围标签，全局保留原五类设置 |
+| `settings-page-instances` | `navigation-instance-settings.png` | 实例列表、概览及启动设置/检查修复/恢复升级/更多操作/打开目录 |
+| `settings-page-instances-compact-en` | `navigation-instance-settings-en.png` | 英文范围标签、1180×720 紧凑实例列表；详情位于下方滚动区域 |
+
+`settings-page-instances` 是本轮新增的实例设置预览模式；`local-versions` 现在预览实例菜单的模组管理。
+快照使用复用的隔离夹具，可能展示其他预览模式留下的实例。草稿保护、范围切换、启动目标切换及
+全局游戏目录在异步扫描期间变更后改回的场景由 headless 回归验证；空模组列表截图不证明在线更新或真实游戏启动结果。
