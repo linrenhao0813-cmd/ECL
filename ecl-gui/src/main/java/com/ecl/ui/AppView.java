@@ -7,7 +7,6 @@ enum AppView {
     HOME("/icons/ui/home.png", "⌂", "nav.home"),
     VERSIONS("/icons/ui/stone-block.png", "□", "nav.versions"),
     DOWNLOADS("/icons/ui/modrinth.png", "D", "nav.downloads"),
-    SAVES("/icons/ui/grass-block.png", "S", "nav.saves"),
     SERVERS("/icons/ui/signal.png", "◈", "nav.servers"),
     SETTINGS("/icons/ui/gear.png", "⚙", "nav.settings");
 

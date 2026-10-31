@@ -66,7 +66,6 @@ final class LauncherPageRouter {
         switch (ui.activeView) {
             case HOME -> addMainContent(ui.homePageFactory.getOrCreate(), null);
             case VERSIONS -> addMainContent(ui.pageFactory.createInstanceModsPage(), null);
-            case SAVES -> addMainContent(ui.pageFactory.createWorldSavesPage(), null);
             case DOWNLOADS -> addMainContent(
                     ui.contentLibraryPageFactory.createPage(ui.downloadSection), null);
             case SERVERS -> addMainContent(ui.pageFactory.createServersPage(), null);

@@ -34,6 +34,7 @@ final class LauncherPageFactory {
     private SettingsPageGuard settingsGuard;
     private String requestedInstance;
     private boolean instanceSettingsRequested;
+    private int instanceContentTab;
     private Function<Tab, SettingsPageGuard.Choice> settingsChoiceProvider = this::showSettingsChoice;
 
     LauncherPageFactory(LauncherUI ui) {
@@ -175,14 +176,40 @@ final class LauncherPageFactory {
     VBox createInstanceModsPage() {
         VBox page = ui.createMainPage();
         page.setId("instance-mod-management");
-        Label title = new Label(Messages.get("instances.mods.title"));
+        Label title = new Label(GuiMessages.get("instanceContent.title"));
         title.getStyleClass().add("page-title");
-        Label subtitle = new Label(Messages.get("instances.mods.subtitle"));
+        Label subtitle = new Label(GuiMessages.get("instanceContent.subtitle"));
         subtitle.getStyleClass().add("page-subtitle");
         subtitle.setWrapText(true);
         VBox heading = new VBox(6, title, subtitle);
         heading.getStyleClass().add("content-library-heading");
-        page.getChildren().addAll(heading, ui.createModLibraryContent(true));
+        TabPane tabs = new TabPane();
+        tabs.setId("instance-content-tabs");
+        tabs.getStyleClass().add("mod-tabs");
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        for (String key : List.of("mods", "saves", "shaders", "resources", "modpack")) {
+            Tab tab = new Tab(GuiMessages.get("instanceContent." + key));
+            tab.setId("instance-content-" + key);
+            tabs.getTabs().add(tab);
+        }
+        Runnable render = () -> {
+            ui.closeActiveModBrowserView();
+            tabs.getTabs().forEach(tab -> tab.setContent(null));
+            int index = tabs.getSelectionModel().getSelectedIndex();
+            instanceContentTab = index;
+            tabs.getSelectionModel().getSelectedItem().setContent(switch (index) {
+                case 1 -> createWorldSavesPage();
+                case 2 -> new InstancePackFilesPane(ui, "shaderpacks");
+                case 3 -> new InstancePackFilesPane(ui, "resourcepacks");
+                case 4 -> new InstanceModpackPane(ui);
+                default -> ui.createModLibraryContent(true);
+            });
+        };
+        tabs.getSelectionModel().select(instanceContentTab);
+        tabs.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) -> render.run());
+        render.run();
+        VBox.setVgrow(tabs, javafx.scene.layout.Priority.ALWAYS);
+        page.getChildren().addAll(heading, tabs);
         return page;
     }
 

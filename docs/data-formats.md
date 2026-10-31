@@ -417,3 +417,9 @@ GUI 读取降级不会改写该文件；新增账户与迁移仍拒绝无效库�
 `.secret.key` 的 Windows 格式仍为 `ECL-DPAPI-1`；非 Windows 新建及迁移使用 `ECL-PROVIDER-1`。历史裸密钥及 `ECL-LOCAL-1/2/3` 只在已配置 `KeyProtectionProvider` 时读取并迁移，不再写出机器信息派生的本地包装；提供器缺失或迁移失败时原文件保留。密钥格式常量和迁移判断见 `CryptoKeyStore`，无新增账户字段。
 
 `instances/display.json.lock` 为 `InstanceDisplayMetadataStore` 的跨进程写入锁，不存业务字段。`update(InstanceDisplayMetadata)` 在锁内重读 `display.json`，只修改或移除该条 `profileId`，保留其他实例条目；GUI 显示缓存使用此入口。锁忙时失败，缓存与用户输入不发布为成功。全表 `save` 也受同一锁保护。
+
+## 实例工作区的本地包与整合包信息（2026-10-31）
+
+本次不新增 JSON 字段或持久化设置。光影包和材质包分别使用实例实际运行目录的 `shaderpacks/*.zip` 与 `resourcepacks/*.zip`；目录名由 `InstancePackService` 构造函数白名单约束。导入过程中的 `.ecl-import-*.tmp` 为临时副本，正常成功或失败后删除，同名 ZIP 不替换。解压后的包目录不在当前列表范围内。
+
+整合包设置只读取版本 JSON 的 `eclModpackName`、`eclModpackVersion`、`eclModpackSource`、`eclModpackProjectId`（写入方为 `MrpackProfileWriter`，读取方为 `InstanceModpackPane`），不编辑这些键，也不自动改写游戏的 `options.txt` 或光影配置。当前实例内容标签仅保存在内存中。

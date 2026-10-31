@@ -2440,3 +2440,61 @@
     -fx-padding: 6 10;
     -fx-background-radius: 8;
 }
+
+/* Instance management: quiet surfaces, grouped actions and a single primary action. */
+.management-action-group,
+.pack-management-header {
+    -fx-background-color: -ecl-surface;
+    -fx-background-radius: 12;
+    -fx-border-color: -ecl-border;
+    -fx-border-radius: 12;
+    -fx-padding: 16;
+}
+.management-group-label {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+}
+.installed-mod-toolbar .button,
+.pack-file-actions .button {
+    -fx-min-height: 34;
+    -fx-padding: 7 12;
+    -fx-font-size: 12px;
+    -fx-background-radius: 8;
+}
+.installed-mod-toolbar .danger-button,
+.pack-file-actions .danger-button {
+    -fx-background-color: rgba(224, 108, 117, 0.10);
+    -fx-text-fill: #e6a0a6;
+}
+.installed-mod-toolbar .danger-button:hover,
+.pack-file-actions .danger-button:hover {
+    -fx-background-color: rgba(224, 108, 117, 0.20);
+    -fx-text-fill: #ffc0c5;
+}
+.pack-management-header {
+    -fx-padding: 18 20;
+}
+.management-count-badge {
+    -fx-background-color: -ecl-surface-muted;
+    -fx-background-radius: 12;
+    -fx-padding: 4 10;
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 11px;
+}
+.pack-directory-path {
+    -fx-text-fill: -ecl-secondary;
+    -fx-font-size: 11px;
+    -fx-padding: 0 0 2 0;
+}
+.pack-file-list .list-cell:empty {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+}
+.pack-file-list .list-cell:filled {
+    -fx-padding: 14 16;
+}
+
+.management-action-group {
+    -fx-min-height: 120;
+}

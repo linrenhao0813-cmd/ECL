@@ -84,6 +84,21 @@ final class InstanceUpdateWorkflow {
                 || ui.isVersionRunning(selected));
     }
 
+    VBox createStatusMirror() {
+        Label message = new Label();
+        message.textProperty().bind(status.textProperty());
+        message.setWrapText(true);
+        ProgressBar activity = new ProgressBar();
+        activity.progressProperty().bind(progress.progressProperty());
+        activity.visibleProperty().bind(progress.visibleProperty());
+        activity.managedProperty().bind(activity.visibleProperty());
+        Button cancel = ui.createActionButton(GuiMessages.get("instanceUpdate.preview.cancelCheck"),
+                "ghost-button", this::cancelPreflight);
+        cancel.visibleProperty().bind(cancelButton.visibleProperty());
+        cancel.managedProperty().bind(cancel.visibleProperty());
+        return new VBox(8, message, activity, cancel);
+    }
+
     private boolean isPackProfile(String profileId) {
         try {
             var profile = HttpUtil.readJson(FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), profileId));

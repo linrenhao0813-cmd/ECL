@@ -52,7 +52,8 @@ public final class LauncherUiSnapshot {
         scene.getRoot().layout();
         String mode = System.getProperty("ecl.snapshot.mode");
         if ((mode != null && mode.startsWith("settings-dialog-bottom"))
-                || "settings".equalsIgnoreCase(mode) || "loader-choice".equalsIgnoreCase(mode)) {
+                || "settings".equalsIgnoreCase(mode) || "loader-choice".equalsIgnoreCase(mode)
+                || (mode != null && mode.startsWith("local-versions") && mode.contains("actions"))) {
             ScrollPane scrollPane = findScrollPane(scene.getRoot());
             if (scrollPane != null) {
                 scrollPane.setVvalue(1.0);
@@ -416,8 +417,32 @@ public final class LauncherUiSnapshot {
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(vanilla));
             Files.createDirectories(gameDir.toPath().resolve("versions").resolve(fabric));
             if (mode.contains("config")) throw new IllegalArgumentException("Instance launch settings were removed");
+            if (mode.contains("modpack")) {
+                var profile = versionManager.loadVersionJson(fabric);
+                profile.addProperty("eclModpackName", "Visual Exploration Pack");
+                profile.addProperty("eclModpackVersion", "1.2.0");
+                profile.addProperty("eclModpackSource", "modrinth");
+                profile.addProperty("eclModpackProjectId", "visual-pack");
+                Files.writeString(com.ecl.util.FileUtil.safeVersionJson(ECLConfig.getVersionsDir(), fabric).toPath(),
+                        profile.toString());
+            }
+            if (mode.contains("shaders") || mode.contains("resources")) {
+                Path packs = resolveVersionGameDir(fabric).toPath().resolve(mode.contains("shaders") ? "shaderpacks" : "resourcepacks");
+                Files.createDirectories(packs);
+                try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(packs.resolve("Visual Preview.zip")))) {
+                    zip.putNextEntry(new java.util.zip.ZipEntry("preview.txt"));
+                    zip.write("Visual QA fixture".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                }
+            }
             setLaunchTarget(fabric);
+            // Supersede the startup scan so it cannot restore a previous preview target.
+            versionActions.restoreVersionComboItems(fabric);
             showAppView("VERSIONS");
+            if (mode.contains("shaders") || mode.contains("resources") || mode.contains("modpack")) {
+                var tabs = (javafx.scene.control.TabPane) stage.getScene().lookup("#instance-content-tabs");
+                tabs.getSelectionModel().select(mode.contains("shaders") ? 2 : mode.contains("resources") ? 3 : 4);
+            }
             if (mode.contains("compact")) {
                 stage.setWidth(1180);
                 stage.setHeight(720);
@@ -433,7 +458,8 @@ public final class LauncherUiSnapshot {
                 createVisualSave(gameDir.toPath().resolve("saves").resolve(name));
             }
             createVisualSave(gameDir.toPath().resolve("versions/visual-save-fabric/saves/Modded Valley"));
-            showAppView("SAVES");
+            showAppView("VERSIONS");
+            ((javafx.scene.control.TabPane) stage.getScene().lookup("#instance-content-tabs")).getSelectionModel().select(1);
             if (mode.contains("compact")) {
                 stage.setWidth(1180);
                 stage.setHeight(720);

@@ -93,7 +93,6 @@ final class LauncherNavigationRail {
         button.setGraphic(ForestIcons.create(switch (view) {
             case HOME -> "home";
             case VERSIONS -> "instances";
-            case SAVES -> "saves";
             case DOWNLOADS -> "download";
             case SERVERS -> "servers";
             case SETTINGS -> "settings";
@@ -109,7 +108,6 @@ final class LauncherNavigationRail {
         return switch (view) {
             case HOME -> Messages.get("nav.short.home");
             case VERSIONS -> GuiMessages.get("forest.instances");
-            case SAVES -> Messages.get("nav.short.saves");
             case DOWNLOADS -> Messages.get("nav.short.downloads");
             case SERVERS -> Messages.get("nav.short.servers");
             case SETTINGS -> Messages.get("nav.short.settings");

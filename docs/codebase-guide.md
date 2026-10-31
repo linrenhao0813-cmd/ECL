@@ -285,3 +285,9 @@ FileUtil.requireUnstartedTransaction / requireNoTransactionBackups 是模组和�
 实例列表切换和刷新继续使用本地守卫。放弃显示修改会重新加载当前实例的已保存值。
 `InstalledInstancesPage.refreshForConfiguredRoot` 在进入实例范围时检查游戏根目录变化，刷新代次和目录校验阻止旧列表回填。
 持久化格式及实例维护服务不变。
+
+## 实例内容工作区（2026-10-31）
+
+`LauncherPageFactory.createInstanceModsPage` 构建统一实例工作区，按需装载模组、存档、光影包、材质包和整合包设置五个标签；`LauncherNavigationRail` 不再提供独立存档菜单。顶部启动目标变化时重建当前标签，分类选择只保留在会话内。`WorldSavesPage` 继续浏览所有实例的存档与备份。
+
+`InstancePackFilesPane` 通过 `InstancePackService` 列出、导入和移除实际运行目录中的 ZIP 文件；核心服务持有 `InstanceOperationLease`，检查 `GameProcessMarker`，复用 `FileUtil` 拒绝越界及 reparse point，临时文件验证 ZIP 后以不覆盖方式发布。`InstanceModpackPane` 读取现有版本元数据，复用共享 `InstanceUpdateWorkflow` 与 `InstanceUpgradeRecoveryWorkflow`，不新增整合包元数据编辑流程。

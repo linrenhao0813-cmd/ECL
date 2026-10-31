@@ -72,6 +72,25 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
             assertNull(stage.getScene().lookup("#instance-launch-settings"));
             assertNull(stage.getScene().lookup("#instance-display-save"));
             assertNotNull(stage.getScene().lookup("#instance-mod-management"));
+            TabPane contentTabs = (TabPane) stage.getScene().lookup("#instance-content-tabs");
+            assertNotNull(contentTabs);
+            assertEquals(5, contentTabs.getTabs().size());
+            contentTabs.getSelectionModel().select(1);
+            stage.getScene().getRoot().applyCss();
+            stage.getScene().getRoot().layout();
+            assertNotNull(stage.getScene().lookup("#world-save-explorer"));
+            contentTabs.getSelectionModel().select(2);
+            stage.getScene().getRoot().applyCss();
+            stage.getScene().getRoot().layout();
+            assertNotNull(stage.getScene().lookup("#instance-pack-files"));
+            contentTabs.getSelectionModel().select(3);
+            stage.getScene().getRoot().applyCss();
+            stage.getScene().getRoot().layout();
+            assertNotNull(stage.getScene().lookup("#pack-resourcepacks-import"));
+            contentTabs.getSelectionModel().select(4);
+            stage.getScene().getRoot().applyCss();
+            stage.getScene().getRoot().layout();
+            assertNotNull(stage.getScene().lookup("#instance-modpack-settings"));
             launcher.setActiveView(AppView.SETTINGS);
             TabPane scopes = (TabPane) stage.getScene().lookup("#settings-scope-tabs");
             assertNotNull(scopes);
@@ -102,6 +121,31 @@ class InstanceSettingsNavigationTest extends ApplicationTest {
             stage.getScene().getRoot().layout();
             assertTrue(list().getHeight() >= 160, "compact instance list must keep room for its rows");
         });
+    }
+
+    @Test
+    void switchingLaunchTargetKeepsThePackTabAndReloadsItsDirectory() throws Exception {
+        prepareInstances(false);
+        WaitForAsyncUtils.asyncFx(() -> {
+            launcher.gameRepository().setIsolated(first);
+            launcher.gameRepository().setIsolated(second);
+            return null;
+        }).get();
+        Path one = Path.of(WaitForAsyncUtils.asyncFx(() -> launcher.resolveVersionGameDir(first).toString()).get());
+        Files.createDirectories(one.resolve("shaderpacks"));
+        Files.writeString(one.resolve("shaderpacks/first.zip"), "list fixture");
+        interact(() -> control("instance-content-tabs", TabPane.class).getSelectionModel().select(2));
+        WaitForAsyncUtils.waitFor(10, TimeUnit.SECONDS, () -> WaitForAsyncUtils.asyncFx(() ->
+                ((ListView<?>) stage.getScene().lookup("#instance-pack-files .list-view")).getItems().size() == 1).get());
+        interact(() -> {
+            launcher.setLaunchTarget(second);
+            assertEquals(2, control("instance-content-tabs", TabPane.class).getSelectionModel().getSelectedIndex());
+            launcher.setActiveView(AppView.HOME);
+            launcher.setActiveView(AppView.VERSIONS);
+            assertEquals(2, control("instance-content-tabs", TabPane.class).getSelectionModel().getSelectedIndex());
+        });
+        WaitForAsyncUtils.waitFor(10, TimeUnit.SECONDS, () -> WaitForAsyncUtils.asyncFx(() ->
+                ((ListView<?>) stage.getScene().lookup("#instance-pack-files .list-view")).getItems().isEmpty()).get());
     }
 
     @Test

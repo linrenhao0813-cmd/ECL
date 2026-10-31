@@ -92,3 +92,36 @@
 `settings-page-instances` 是本轮新增的实例设置预览模式；`local-versions` 现在预览实例菜单的模组管理。
 快照使用复用的隔离夹具，可能展示其他预览模式留下的实例。草稿保护、范围切换、启动目标切换及
 全局游戏目录在异步扫描期间变更后改回的场景由 headless 回归验证；空模组列表截图不证明在线更新或真实游戏启动结果。
+
+## 2026-10-31 合并实例与存档菜单
+
+重新运行 `captureLauncherUi` 并逐张查看以下实际 JavaFX 截图，均位于 `ecl-gui/build/visual-qa/`，不提交生成图片：
+
+| 模式 | 文件 | 核对内容 |
+| --- | --- | --- |
+| `local-versions` | `instance-content-local-versions.png` | 左侧五个菜单、实例内五个分类、模组管理子标签 |
+| `local-versions-shaders` | `instance-content-local-versions-shaders.png` | 当前实例光影 ZIP 列表、导入／移除／打开目录 |
+| `local-versions-resources` | `instance-content-local-versions-resources.png` | 当前实例材质 ZIP 列表与目录 |
+| `local-versions-modpack` | `instance-content-local-versions-modpack.png` | 示例包名称／版本／来源／项目 ID、升级与恢复及配置目录入口 |
+| `saves-details` | `instance-content-saves-details.png` | 存档位于实例分类内，跨实例浏览、详情与备份管理仍保留 |
+
+新增 `local-versions-shaders`、`local-versions-resources`、`local-versions-modpack` 为本轮预览模式；`saves` 系列现在打开实例工作区并选中存档标签。
+快照启动时重新提交指定实例的列表扫描，防止早先启动扫描把目标切回复用目录中的旧实例。
+`Visual Preview.zip` 与 `Visual Exploration Pack` 仅为隔离预览夹具，不代表真实游戏兼容性或在线升级验收。
+
+验证：`InstancePackServiceTest`（2 项）、`InstanceSettingsNavigationTest`（12 项）、`InstanceUpdateWorkflowTest`（3 项）通过；各 Java 模块的 Checkstyle 和 SpotBugs 通过。
+全量 `check` 执行中 GUI 共 162 项测试，有 13 项失败：`LauncherUiHeadlessTest.contentPageRestoresTheCategoryItWasLeftOn` 出现关闭后异步回调的 `RejectedExecutionException`；
+工作开始时已存在的 `LauncherUiSnapshotTest` 有 12 项模式解析测试失败（5 个分类／语言后缀、4 个空首页组合、皮肤入口、旧服务端模式、online 后缀）。本轮未扩展修复这些既有快照模式与下载异步生命周期流程，不能将全量检查报告为通过。
+
+## 2026-10-31 实例管理操作区视觉整理
+
+按用户标注的三处区域调整布局与样式，并重新运行 `captureLauncherUi`、逐张查看：
+
+| 模式 | 输出（`ecl-gui/build/visual-qa/`） | 核对内容 |
+| --- | --- | --- |
+| `local-versions-actions` | `polished-local-versions-actions.png` | 滚到模组列表底部，文件管理／所选模组／模组更新三组卡片、柔和危险色、紧凑按钮 |
+| `local-versions-shaders` | `polished-local-versions-shaders.png` | 光影包标题与数量、卡片式操作区、主次按钮、辅助目录信息、空白区域无网格线 |
+| `local-versions-resources` | `polished-local-versions-resources.png` | 材质包使用同一操作区与列表样式 |
+
+`local-versions-actions` 为本次新增的底部操作区预览后缀。完整目录保留在路径悬停提示与可访问文本中；文件操作与确认流程保持原有实现。
+本轮定向运行 `InstanceSettingsNavigationTest`、`ModBrowserViewTest` 及 GUI Checkstyle；不将布局截图视为真实游戏、在线更新或全部测试通过的证据。
