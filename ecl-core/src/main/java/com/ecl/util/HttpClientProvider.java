@@ -1,10 +1,14 @@
 package com.ecl.util;
 
 import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.ProxySelector;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -48,7 +52,20 @@ final class HttpClientProvider {
                 String host = uri.getHost();
                 int port = uri.getPort();
                 if (host != null && !host.isBlank() && port > 0 && port <= 65535) {
-                    return Optional.of(ProxySelector.of(new InetSocketAddress(host, port)));
+                    ProxySelector remoteProxy = ProxySelector.of(new InetSocketAddress(host, port));
+                    return Optional.of(new ProxySelector() {
+                        @Override
+                        public List<Proxy> select(URI target) {
+                            // A launcher-local service must be reached on this machine, not on the proxy's loopback.
+                            return NetworkUriPolicy.isLoopbackHostLiteral(target.getHost())
+                                    ? List.of(Proxy.NO_PROXY) : remoteProxy.select(target);
+                        }
+
+                        @Override
+                        public void connectFailed(URI target, SocketAddress address, IOException failure) {
+                            remoteProxy.connectFailed(target, address, failure);
+                        }
+                    });
                 }
             } catch (IllegalArgumentException ignored) {
                 // Try the next standard proxy variable.

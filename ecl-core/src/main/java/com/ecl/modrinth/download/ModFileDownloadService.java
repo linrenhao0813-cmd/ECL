@@ -97,6 +97,15 @@ public final class ModFileDownloadService {
             long overallTotal,
             Consumer<ModDownloadProgress> listener
     ) {
+        // Reject unverifiable metadata before a resolver or DNS lookup can do network work.
+        if (!HashVerifier.hasUsableExpectedHash(request.expectedHashes())) {
+            throw new java.util.concurrent.CompletionException(
+                    new IOException("模组文件缺少可验证的 SHA-512 或 SHA-1: " + request.fileName()));
+        }
+        if (request.expectedSize() <= 0 || request.expectedSize() > MAX_MOD_FILE_BYTES) {
+            throw new java.util.concurrent.CompletionException(
+                    new IOException("模组文件大小声明无效: " + request.fileName()));
+        }
         URI downloadUri;
         try {
             downloadUri = uriResolver.resolve(request.uri());
@@ -113,14 +122,6 @@ public final class ModFileDownloadService {
         } catch (IOException unsafe) {
             throw new java.util.concurrent.CompletionException(
                     new IOException("拒绝不安全的模组下载地址: " + request.fileName(), unsafe));
-        }
-        if (!HashVerifier.hasUsableExpectedHash(request.expectedHashes())) {
-            throw new java.util.concurrent.CompletionException(
-                    new IOException("模组文件缺少可验证的 SHA-512 或 SHA-1: " + request.fileName()));
-        }
-        if (request.expectedSize() <= 0 || request.expectedSize() > MAX_MOD_FILE_BYTES) {
-            throw new java.util.concurrent.CompletionException(
-                    new IOException("模组文件大小声明无效: " + request.fileName()));
         }
         RuntimeException failure = null;
         for (int attempt = 1; attempt <= 2; attempt++) {

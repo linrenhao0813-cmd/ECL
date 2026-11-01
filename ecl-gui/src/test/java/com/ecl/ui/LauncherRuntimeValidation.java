@@ -56,6 +56,13 @@ public final class LauncherRuntimeValidation {
         }
         Files.createDirectories(root);
         LauncherRuntimeValidation validation = new LauncherRuntimeValidation(root);
+        validation.results.put("startedAt", Instant.now().toString());
+        validation.results.put("launcherVersion", ECLConfig.LAUNCHER_VERSION);
+        validation.results.put("harnessRevision", System.getProperty("ecl.validation.harnessRevision", "unknown"));
+        validation.results.put("harnessDirty", System.getProperty("ecl.validation.harnessDirty", "unknown"));
+        validation.results.put("candidateRevision", System.getProperty("ecl.validation.candidateRevision", "unknown"));
+        validation.results.put("osName", System.getProperty("os.name"));
+        validation.results.put("javaVersion", System.getProperty("java.version"));
         try {
             validation.run();
             validation.results.put("result", "PASS");

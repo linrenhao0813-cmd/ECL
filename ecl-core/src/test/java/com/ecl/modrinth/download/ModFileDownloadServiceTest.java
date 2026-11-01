@@ -157,6 +157,29 @@ class ModFileDownloadServiceTest {
         }
     }
 
+    @Test
+    void rejectsUnverifiedMetadataBeforeCallingTheUrlResolver(@TempDir Path tempDirectory) throws Exception {
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            List<ModDownloadRequest> invalid = List.of(
+                    new ModDownloadRequest(URI.create("https://example.invalid/no-hash.jar"), "no-hash.jar",
+                            tempDirectory.resolve("no-hash.jar"), Map.of(), 1),
+                    new ModDownloadRequest(URI.create("https://example.invalid/no-size.jar"), "no-size.jar",
+                            tempDirectory.resolve("no-size.jar"), Map.of("sha512", "0".repeat(128)), 0));
+            ModFileDownloadService service = new ModFileDownloadService(executor, new HashVerifier(), uri -> {
+                throw new AssertionError("Unverified metadata must be rejected before URL resolution");
+            });
+            for (ModDownloadRequest request : invalid) {
+                ExecutionException failure = assertThrows(ExecutionException.class,
+                        () -> service.downloadAll(List.of(request), null).get(5, TimeUnit.SECONDS));
+                assertTrue(failure.getCause() instanceof IOException);
+                assertFalse(Files.exists(request.temporaryFile()));
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private static void respond(com.sun.net.httpserver.HttpExchange exchange, byte[] body)
             throws IOException {
         exchange.sendResponseHeaders(200, body.length);
