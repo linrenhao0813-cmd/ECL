@@ -56,7 +56,7 @@ jobs:
       # The repository otherwise pins every action by SHA; this one still uses a
       # major version tag because the matching SHA could not be verified offline.
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: ${{ github.event.inputs.tag || github.ref_name }}
